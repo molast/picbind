@@ -125,6 +125,9 @@ cargo new image_wasm --lib
 
 -- 使用
 
+icon 库
+https://remixicon.cn/icon/gallery-fill
+
 ```ts
 // 定义wasm 的入口
 "use client";
