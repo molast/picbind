@@ -77,7 +77,7 @@ const en: LocaleType = {
     ItemCount: (count: number) => `A total of ${count} history records`,
   },
   Photo: {
-    Title: 'AI Photo Toolbox',
+    Title: 'Photo Toolbox',
     Landing: {
       Or: 'or',
       NowSupport: 'Now supporting',

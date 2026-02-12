@@ -75,7 +75,7 @@ const zh = {
     ItemCount: (count: number) => `总共${count}条历史记录`,
   },
   Photo: {
-    Title: 'AI图片工具箱',
+    Title: '图片工具箱',
     Landing: {
       Or: '或',
       NowSupport: '现已支持',

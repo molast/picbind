@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "wasm:build": "cd ../wasm/image_wasm && wasm-pack build --target web --out-dir ../../web/public/wasm",
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
+    "wasm:build": "cd ../wasm/image_wasm && wasm-pack build --target web --out-dir ../../web/public/wasm",
     "lint": "next lint"
   },
   "dependencies": {

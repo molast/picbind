@@ -2,7 +2,6 @@
 
 import zh from "./zh";
 import en from "./en";
-import ja from "./ja";
 import SystemManager from "@/utils/System";
 
 
@@ -12,7 +11,6 @@ export type { LocaleType, PartialLocaleType } from "./zh";
 const ALL_LANGS = {
   zh,
   en,
-  ja,
 };
 
 export type Lang = keyof typeof ALL_LANGS;
@@ -27,10 +25,6 @@ export const ALL_LANG_OPTIONS = [
   {
     label: 'English',
     value: 'en',
-  },
-  {
-    label: '日本語',
-    value: 'ja',
   },
 ]
 
@@ -74,7 +68,6 @@ export function getLang(): Lang {
     let urlLang = new URLSearchParams(window.location.search).get('lang');
     if (urlLang === 'zh-CN') urlLang = 'zh'
     if (urlLang === 'en-US') urlLang = 'en'
-    if (urlLang === 'ja-JP') urlLang = 'ja'
     if (AllLangs.includes((urlLang ?? "") as Lang)) {
       return urlLang as Lang;
     }
