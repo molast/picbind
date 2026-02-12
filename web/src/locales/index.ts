@@ -1,7 +1,6 @@
 // 'use client'
 
 import zh from "./zh";
-import en from "./en";
 import SystemManager from "@/utils/System";
 
 
@@ -10,7 +9,6 @@ export type { LocaleType, PartialLocaleType } from "./zh";
 
 const ALL_LANGS = {
   zh,
-  en,
 };
 
 export type Lang = keyof typeof ALL_LANGS;
@@ -22,16 +20,12 @@ export const ALL_LANG_OPTIONS = [
     label: '中文',
     value: 'zh',
   },
-  {
-    label: 'English',
-    value: 'en',
-  },
 ]
 
 const LANG_KEY = "ai-translator-lang-v2";
-const DEFAULT_LANG = "en";
+const DEFAULT_LANG = "zh";
 
-const fallbackLang = en;
+const fallbackLang = zh;
 const targetLang = ALL_LANGS[getLang()] as LocaleType;
 
 // if target lang missing some fields, it will use fallback lang string
@@ -67,7 +61,6 @@ export function getLang(): Lang {
   if (typeof (window) !== 'undefined') {
     let urlLang = new URLSearchParams(window.location.search).get('lang');
     if (urlLang === 'zh-CN') urlLang = 'zh'
-    if (urlLang === 'en-US') urlLang = 'en'
     if (AllLangs.includes((urlLang ?? "") as Lang)) {
       return urlLang as Lang;
     }

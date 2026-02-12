@@ -1,4 +1,10 @@
-import { RiImageEditLine } from "react-icons/ri";
+import {
+  RiGalleryFill,
+  RiImageAiFill,
+  RiImageEditFill,
+  RiImageEditLine,
+  RiLandscapeLine,
+} from "react-icons/ri";
 
 import RemoveBgIcon from "../icons/remove-bg.svg";
 import RemoveObjIcon from "../icons/remove-obj.svg";
@@ -18,52 +24,56 @@ import ReadTextIcon from "../icons/read-text.svg";
 import CreateVideoIcon from "../icons/create-video.svg";
 import CharacterIcon from "../icons/character.svg";
 import StitchingIcon from "../icons/stitching.svg";
-import TranslateTextIcon from "../icons/translte-text.svg"
-import EraseTextIcon from "../icons/erase-text.svg"
+import TranslateTextIcon from "../icons/translte-text.svg";
+import EraseTextIcon from "../icons/erase-text.svg";
 
 export const ToolIcon = ({ icon }: { icon: string }) => {
   switch (icon) {
-    case 'remove-bg':
-      return <RemoveBgIcon />
-    case 'remove-obj':
-      return <RemoveObjIcon />
-    case 'replace-bg':
-      return <ReplaceBgIcon />
-    case 'vectorize':
-      return <VectorizeIcon />
-    case 'upscale':
-      return <UpscaleIcon />
-    case 'super-upscale':
-      return <SuperUpscaleIcon />
-    case 'colorize':
-      return <ColorizeIcon />
-    case 'swap-face':
-      return <SwapFaceIcon />
-    case 'uncrop':
-      return <UncropIcon />
-    case 'inpaint-img':
-      return <InpaintIcon />
-    case 'recreate-img':
-      return <RecreateImgIcon />
-    case 'sketch-img':
-      return <SketchImgIcon />
-    case 'crop-img':
-      return <CropImgIcon />
-    case 'filter-img':
-      return <FilterImgIcon />
-    case 'read-text':
-      return <ReadTextIcon />
-    case 'create-video':
-      return <CreateVideoIcon />
-    case 'character':
-      return <CharacterIcon />
-    case 'stitching':
-      return <StitchingIcon />
-    case 'translate-text':
-      return <TranslateTextIcon />
-    case 'erase-text':
-      return <EraseTextIcon />
+    case "remove-bg":
+      return <RemoveBgIcon />;
+    case "remove-obj":
+      return <RemoveObjIcon />;
+    case "replace-bg":
+      return <ReplaceBgIcon />;
+    case "vectorize":
+      return <VectorizeIcon />;
+    case "upscale":
+      return <UpscaleIcon />;
+    case "super-upscale":
+      return <SuperUpscaleIcon />;
+    case "colorize":
+      return <ColorizeIcon />;
+    case "swap-face":
+      return <SwapFaceIcon />;
+    case "uncrop":
+      return <UncropIcon />;
+    case "inpaint-img":
+      return <InpaintIcon />;
+    case "recreate-img":
+      return <RecreateImgIcon />;
+    case "sketch-img":
+      return <SketchImgIcon />;
+    case "crop-img":
+      return <CropImgIcon />;
+    case "filter-img":
+      return <FilterImgIcon />;
+    case "read-text":
+      return <ReadTextIcon />;
+    case "create-video":
+      return <CreateVideoIcon />;
+    case "character":
+      return <CharacterIcon />;
+    case "stitching":
+      return <StitchingIcon />;
+    case "translate-text":
+      return <TranslateTextIcon />;
+    case "erase-text":
+      return <EraseTextIcon />;
+    case "image-compress":
+      return <RiGalleryFill className="w-6 h-6" />;
+    case "image-transfer":
+      return <RiLandscapeLine className="w-6 h-6" />;
     default:
-      return <RiImageEditLine className='w-8 h-8' />
+      return <RiImageEditLine className="w-8 h-8" />;
   }
-}
+};

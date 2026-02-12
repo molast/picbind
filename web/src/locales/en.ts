@@ -2,8 +2,8 @@ import { LocaleType } from "./index";
 
 const en: LocaleType = {
   Symbol: "en",
-  Title: 'AI Photo Toolbox - 302.AI',
-  Desc: 'The Photo Generation Tool Powered By 302.AI',
+  Title: 'Photo Toolbox',
+  Desc: 'The Photo Generation Tool Powered By molast.com',
   System: {
     Title: 'System',
     Wait: 'Wait',
@@ -64,7 +64,7 @@ const en: LocaleType = {
     Title: 'About',
     Desc: 'AI Photo Toolbox',
     Loading: 'Loading...',
-    CreateInfo: (user: string) => `This tool was created by 302.AI user ${user}, 302.AI is a platform for AI generation and sharing, you can create your own AI tools with one click`,
+    CreateInfo: (user: string) => `This tool was created by molast user ${user}, molast is a platform for AI generation and sharing, you can create your own AI tools with one click`,
     TotalInfo: (all: number, use: number) => `The total limit for this tool is <${all}PTC>, used <${use}PTC>`,
     DayInfo: (all: number, use: number) => `The daily limit for this tool is <${all}PTC>, used <${use}PTC>`,
     RecordInfo: 'All generation records of this tool are stored locally and will not be uploaded. The user who generated this tool cannot see your generation records',
