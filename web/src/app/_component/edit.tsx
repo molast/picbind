@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import ToolCard from "@/components/tool-card";
 import ImageTransfer from "@/components/image-transfer";
+import ImageCompress from "@/components/image-compress";
 import UploadButton from "@/components/upload-button";
 import { HistoryModal } from "@/components/history-modal";
 import { SideSheet } from "@/components/side-sheet";
@@ -286,26 +287,38 @@ function PhotoshowEdit({ tool, setTool, file, setFile }: PropsData) {
         </div>
 
         <div className="w-full grow flex items-center">
-          {src && (
-            <ImageTransfer
+          {["image-compress"].includes(tool.name) && file ? (
+            <ImageCompress
               expand={expand}
               file={file}
               tool={tool}
-              readRef={readRef}
-              onGenerateImage={handleOngenerateImage}
-              onGenerateVideo={handleOngenerateVideo}
-              onGenerateText={handleOngenerateText}
-              src={src}
-              setSrc={setSrc}
               status={status}
               setStatus={setStatus}
               result={result}
               setResult={setResult}
-              videoSrc={videoSrc}
-              setVideoSrc={setVideoSrc}
-              textContent={textContent}
-              setTextContent={setTextContent}
             />
+          ) : (
+            src && (
+              <ImageTransfer
+                expand={expand}
+                file={file}
+                tool={tool}
+                readRef={readRef}
+                onGenerateImage={handleOngenerateImage}
+                onGenerateVideo={handleOngenerateVideo}
+                onGenerateText={handleOngenerateText}
+                src={src}
+                setSrc={setSrc}
+                status={status}
+                setStatus={setStatus}
+                result={result}
+                setResult={setResult}
+                videoSrc={videoSrc}
+                setVideoSrc={setVideoSrc}
+                textContent={textContent}
+                setTextContent={setTextContent}
+              />
+            )
           )}
         </div>
       </div>
