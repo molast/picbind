@@ -7,3 +7,10 @@
 
  ✓ Starting...
  ✓ Ready in 3.6s
+ ○ Compiling / ...
+ ✓ Compiled / in 3.9s (1661 modules)
+ GET / 200 in 4588ms
+ ✓ Compiled in 494ms (824 modules)
+ GET / 200 in 47ms
+ ✓ Compiled /favicon.ico in 306ms (867 modules)
+ GET /favicon.ico 200 in 410ms
