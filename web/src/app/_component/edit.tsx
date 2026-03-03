@@ -44,6 +44,9 @@ function PhotoshowEdit({ tool, setTool, file, setFile }: PropsData) {
   const [videoSrc, setVideoSrc] = React.useState("");
   const [textContent, setTextContent] = React.useState("");
   const [expand, setExpand] = React.useState(false);
+  const [compressArchiveItems, setCompressArchiveItems] = React.useState<
+    Array<{ name: string; url: string }>
+  >([]);
   const readRef = React.useRef(null);
 
   React.useEffect(() => {
@@ -65,6 +68,12 @@ function PhotoshowEdit({ tool, setTool, file, setFile }: PropsData) {
       setFile(null);
     }
   }, [status, setFile]);
+
+  React.useEffect(() => {
+    if (tool.name !== "image-compress") {
+      setCompressArchiveItems([]);
+    }
+  }, [tool.name]);
 
   // Create Image
   const handleOngenerateImage = async (src: string, action: any) => {
@@ -238,10 +247,21 @@ function PhotoshowEdit({ tool, setTool, file, setFile }: PropsData) {
           <div className="flex space-x-4 items-center">
             {!["read-text", "create-video"].includes(tool.name) && (
               <Button
-                disabled={!result && !src}
+                disabled={
+                  tool.name === "image-compress"
+                    ? !compressArchiveItems.length
+                    : !result && !src
+                }
                 variant="default"
                 size={"sm"}
-                onClick={() => SystemManager.downloadImage(result || src)}
+                onClick={() =>
+                  tool.name === "image-compress"
+                    ? SystemManager.downloadZip(
+                        compressArchiveItems,
+                        `compressed-images-${SystemManager.getNowformatTime()}.zip`,
+                      )
+                    : SystemManager.downloadImage(result || src)
+                }
               >
                 <RiDownload2Fill />
                 <span>{Locale.System.Download}</span>
@@ -296,6 +316,7 @@ function PhotoshowEdit({ tool, setTool, file, setFile }: PropsData) {
               setStatus={setStatus}
               result={result}
               setResult={setResult}
+              onArchiveChange={setCompressArchiveItems}
             />
           ) : (
             src && (

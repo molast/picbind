@@ -1,14 +1,15 @@
 // 'use client'
 
 import zh from "./zh";
+import en from "./en";
 import SystemManager from "@/utils/System";
-
 
 import type { LocaleType } from "./zh";
 export type { LocaleType, PartialLocaleType } from "./zh";
 
 const ALL_LANGS = {
   zh,
+  en,
 };
 
 export type Lang = keyof typeof ALL_LANGS;
@@ -17,10 +18,14 @@ export const AllLangs = Object.keys(ALL_LANGS) as Lang[];
 
 export const ALL_LANG_OPTIONS = [
   {
-    label: '中文',
-    value: 'zh',
+    label: "中文",
+    value: "zh",
   },
-]
+  {
+    label: "English",
+    value: "en",
+  },
+];
 
 const LANG_KEY = "ai-translator-lang-v2";
 const DEFAULT_LANG = "zh";
@@ -44,9 +49,8 @@ function getItem(key: string) {
 function setItem(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
-  } catch { }
+  } catch {}
 }
-
 
 function getLanguage() {
   try {
@@ -57,22 +61,19 @@ function getLanguage() {
 }
 
 export function getLang(): Lang {
-  // url
-  if (typeof (window) !== 'undefined') {
-    let urlLang = new URLSearchParams(window.location.search).get('lang');
-    if (urlLang === 'zh-CN') urlLang = 'zh'
+  if (typeof window !== "undefined") {
+    let urlLang = new URLSearchParams(window.location.search).get("lang");
+    if (urlLang === "zh-CN") urlLang = "zh";
     if (AllLangs.includes((urlLang ?? "") as Lang)) {
       return urlLang as Lang;
     }
   }
 
-  // local
   const savedLang = getItem(LANG_KEY);
   if (AllLangs.includes((savedLang ?? "") as Lang)) {
     return savedLang as Lang;
   }
 
-  // browser
   const lang = getLanguage();
   for (const option of AllLangs) {
     if (lang.includes(option)) {
@@ -90,8 +91,8 @@ export function changeLang(lang: Lang | string) {
 
 export function setLang(lang: Lang) {
   setItem(LANG_KEY, lang);
-  // location.reload();
 }
+
 export function getISOLang() {
   const isoLangString: Record<string, string> = {
     cn: "zh-Hans",

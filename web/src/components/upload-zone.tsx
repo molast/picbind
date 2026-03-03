@@ -5,8 +5,9 @@ import DropZone from "./drop-zone";
 import { Button } from "./ui/button";
 import { twMerge } from "tailwind-merge";
 import { compressWithWasm } from "@/utils/wasm";
+import Locale from "@/locales";
 
-type ZoneItem = {
+export type CompressListItem = {
   id: string;
   file: File;
   previewUrl: string;
@@ -17,6 +18,20 @@ type ZoneItem = {
   status: "waiting" | "processing" | "done" | "error";
 };
 
+type ExternalItem = {
+  file: File | null;
+  compressedUrl?: string;
+  compressedSize?: number | null;
+  percent?: number;
+  status?: CompressListItem["status"];
+};
+
+interface UploadZoneProps {
+  externalItem?: ExternalItem;
+  onSelectItem?: (item: CompressListItem | null) => void;
+  onItemsChange?: (items: CompressListItem[]) => void;
+}
+
 const MAX_FILES = 20;
 const ALLOWED_FILES = ["image/png", "image/jpeg", "image/webp"];
 
@@ -24,12 +39,26 @@ const formatSize = (size: number) => {
   if (size > 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
-  return `${Math.round(size / 1024)} KB`;
+  if (size > 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${size} B`;
 };
 
-export default function UploadZone() {
-  const [items, setItems] = React.useState<ZoneItem[]>([]);
+const createItem = (file: File): CompressListItem => ({
+  id: crypto.randomUUID(),
+  file,
+  previewUrl: URL.createObjectURL(file),
+  originSize: file.size,
+  status: "waiting",
+});
+
+export default function UploadZone({ externalItem, onSelectItem, onItemsChange }: UploadZoneProps) {
+  const compressLocale = Locale.Photo.Compress;
+  const [items, setItems] = React.useState<CompressListItem[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
+  const itemsRef = React.useRef<CompressListItem[]>([]);
 
   const handleFiles = React.useCallback((files: FileList | File[]) => {
     const list = Array.from(files).filter((file) =>
@@ -40,15 +69,80 @@ export default function UploadZone() {
 
     setItems((prev) => {
       const remain = MAX_FILES - prev.length;
-      const next = list.slice(0, remain).map((file) => ({
-        id: crypto.randomUUID(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        originSize: file.size,
-        status: "waiting" as const,
-      }));
+      const next = list.slice(0, remain).map(createItem);
+      if (next[0] && !selectedId) {
+        setSelectedId(next[0].id);
+      }
       return [...prev, ...next];
     });
+  }, [selectedId]);
+
+  React.useEffect(() => {
+    itemsRef.current = items;
+    if (!selectedId && items[0]) {
+      setSelectedId(items[0].id);
+      return;
+    }
+
+    const current = items.find((it) => it.id === selectedId) ?? null;
+    onSelectItem?.(current);
+    onItemsChange?.(items);
+  }, [items, onItemsChange, onSelectItem, selectedId]);
+
+  React.useEffect(() => {
+    if (!externalItem?.file) return;
+
+    const externalFile = externalItem.file;
+    const externalId = `external-${externalFile.name}-${externalFile.size}-${externalFile.lastModified}`;
+    const nextPreviewUrl = URL.createObjectURL(externalFile);
+
+    setItems((prev) => {
+      const currentExternal = prev.find((it) => it.id.startsWith("external-"));
+      if (currentExternal?.previewUrl) {
+        URL.revokeObjectURL(currentExternal.previewUrl);
+      }
+
+      const rest = prev.filter((it) => !it.id.startsWith("external-"));
+      return [
+        {
+          id: externalId,
+          file: externalFile,
+          previewUrl: nextPreviewUrl,
+          originSize: externalFile.size,
+          compressedUrl: externalItem.compressedUrl,
+          compressedSize: externalItem.compressedSize ?? undefined,
+          percent: externalItem.percent,
+          status: externalItem.status ?? "waiting",
+        },
+        ...rest,
+      ];
+    });
+
+    setSelectedId((prev) => {
+      if (!prev || prev.startsWith("external-")) {
+        return externalId;
+      }
+      return prev;
+    });
+  }, [
+    externalItem?.compressedSize,
+    externalItem?.compressedUrl,
+    externalItem?.file,
+    externalItem?.percent,
+    externalItem?.status,
+  ]);
+
+  React.useEffect(() => {
+    return () => {
+      itemsRef.current.forEach((it) => {
+        if (it.previewUrl) {
+          URL.revokeObjectURL(it.previewUrl);
+        }
+        if (it.compressedUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(it.compressedUrl);
+        }
+      });
+    };
   }, []);
 
   const handleClickUpload = () => {
@@ -85,7 +179,7 @@ export default function UploadZone() {
               : it,
           ),
         );
-      } catch (e) {
+      } catch (_error) {
         setItems((prev) =>
           prev.map((it) =>
             it.id === item.id ? { ...it, status: "error" } : it,
@@ -106,10 +200,10 @@ export default function UploadZone() {
           onClick={handleClickUpload}
         >
           <p className="text-sm font-medium text-emerald-50">
-            拖拽多张图片到这里，或点击选择
+            {compressLocale.dropzoneTitle}
           </p>
           <p className="mt-1 text-xs text-emerald-100/80">
-            最多 {MAX_FILES} 张，每张不超过 5MB
+            {compressLocale.dropzoneLimit(MAX_FILES)}
           </p>
         </div>
       </DropZone>
@@ -126,23 +220,26 @@ export default function UploadZone() {
       <div className="w-full rounded-xl bg-slate-950/90 text-slate-50 text-xs overflow-hidden border border-white/10">
         <div className="px-4 py-2 flex items-center justify-between bg-slate-900/90">
           <div className="flex flex-col">
-            <span className="font-semibold">
-              已选中 {items.length} 张图片
-            </span>
+            <span className="font-semibold">{compressLocale.selectedCount(items.length)}</span>
             <span className="text-[11px] text-slate-300">
-              支持批量压缩，完成后可逐张下载
+              {compressLocale.batchHint}
             </span>
           </div>
         </div>
 
         <div className="max-h-56 overflow-auto">
           {items.map((it) => (
-            <div
+            <button
               key={it.id}
-              className="px-4 py-2 flex items-center justify-between border-t border-slate-800"
+              type="button"
+              onClick={() => setSelectedId(it.id)}
+              className={twMerge(
+                "w-full px-4 py-2 flex items-center justify-between border-t border-slate-800 text-left transition-colors",
+                selectedId === it.id ? "bg-white/10" : "hover:bg-white/5",
+              )}
             >
               <div className="flex items-center space-x-2">
-                <div className="h-8 w-8 rounded overflow-hidden bg-slate-700">
+                <div className="h-8 w-8 rounded overflow-hidden bg-slate-700 ring-1 ring-white/10">
                   <img
                     src={it.previewUrl}
                     alt={it.file.name}
@@ -150,66 +247,79 @@ export default function UploadZone() {
                   />
                 </div>
                 <div className="flex flex-col">
-                  <span className="max-w-[120px] truncate text-[11px]">
+                  <span className="max-w-[160px] truncate text-[11px]">
                     {it.file.name}
                   </span>
                   <span className="text-[10px] text-slate-400">
                     {formatSize(it.originSize)}
-                    {it.compressedSize
-                      ? ` → ${formatSize(it.compressedSize)}`
-                      : ""}
+                    {it.compressedSize ? ` -> ${formatSize(it.compressedSize)}` : ""}
                   </span>
                 </div>
               </div>
               <div className="flex flex-col items-end text-[10px] space-y-1">
                 {it.status === "processing" && (
-                  <span className="text-emerald-300">压缩中…</span>
+                  <span className="text-emerald-300">{compressLocale.compressing}</span>
                 )}
                 {it.status === "done" && (
                   <>
                     <span className="text-emerald-400">
-                      节省 {it.percent}% 文件体积
+                      {compressLocale.savedShort(it.percent ?? 0)}
                     </span>
-                    {it.compressedUrl && (
-                      <a
-                        href={it.compressedUrl}
-                        download={it.file.name.replace(/\.(png|webp)$/i, ".jpg")}
-                        className="text-emerald-300 hover:text-emerald-200 underline"
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedId(it.id);
+                        }}
+                        className="text-slate-300 hover:text-white underline"
                       >
-                        下载
-                      </a>
-                    )}
+                        {compressLocale.compareAction}
+                      </button>
+                      {it.compressedUrl && (
+                        <a
+                          href={it.compressedUrl}
+                          download={it.file.name.replace(/\.(png|webp)$/i, ".jpg")}
+                          onClick={(event) => event.stopPropagation()}
+                          className="text-emerald-300 hover:text-emerald-200 underline"
+                        >
+                          {compressLocale.downloadAction}
+                        </a>
+                      )}
+                    </div>
                   </>
                 )}
                 {it.status === "error" && (
-                  <span className="text-red-400">压缩失败</span>
+                  <span className="text-red-400">{compressLocale.failed}</span>
+                )}
+                {it.status === "waiting" && (
+                  <span className="text-slate-400">{compressLocale.waiting}</span>
                 )}
               </div>
-            </div>
+            </button>
           ))}
 
           {!items.length && (
             <div className="px-4 py-6 text-center text-slate-500 text-[11px]">
-              暂无批量图片，先在上方区域拖拽或点击上传。
+              {compressLocale.emptyList}
             </div>
           )}
         </div>
 
         <div className="px-4 py-2 border-t border-slate-800 flex justify-between items-center">
           <span className="text-[11px] text-slate-400">
-            批量压缩会使用与左侧相同的 WASM 压缩算法。
+            {compressLocale.batchFooter}
           </span>
           <Button
             size="sm"
             className="text-xs"
-            disabled={!items.length}
+            disabled={!items.some((it) => it.status === "waiting")}
             onClick={handleBatchCompress}
           >
-            一键批量压缩
+            {compressLocale.batchAction}
           </Button>
         </div>
       </div>
     </div>
   );
 }
-
