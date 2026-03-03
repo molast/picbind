@@ -1,6 +1,5 @@
-import { Navbar } from "@/components/nav";
-import { Footer } from "@/components/footer";
-import "./globals.css";
+﻿import "./globals.css";
+import { LayoutShell } from "@/components/layout-shell";
 
 export default function RootLayout({
   children,
@@ -10,13 +9,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div id="root-layout" className="min-h-screen flex flex-col">
-          <Navbar />
-          <div id="layout-main" className="flex grow py-12">
-            {children}
-          </div>
-          <Footer />
-        </div>
+        <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
   );

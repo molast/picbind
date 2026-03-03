@@ -12,6 +12,7 @@ export type CompressListItem = {
   file: File;
   previewUrl: string;
   compressedUrl?: string;
+  compressedFileName?: string;
   originSize: number;
   compressedSize?: number;
   percent?: number;
@@ -21,6 +22,7 @@ export type CompressListItem = {
 type ExternalItem = {
   file: File | null;
   compressedUrl?: string;
+  compressedFileName?: string;
   compressedSize?: number | null;
   percent?: number;
   status?: CompressListItem["status"];
@@ -110,6 +112,7 @@ export default function UploadZone({ externalItem, onSelectItem, onItemsChange }
           previewUrl: nextPreviewUrl,
           originSize: externalFile.size,
           compressedUrl: externalItem.compressedUrl,
+          compressedFileName: externalItem.compressedFileName,
           compressedSize: externalItem.compressedSize ?? undefined,
           percent: externalItem.percent,
           status: externalItem.status ?? "waiting",
@@ -159,9 +162,9 @@ export default function UploadZone({ externalItem, onSelectItem, onItemsChange }
     for (const item of items) {
       if (item.status !== "waiting") continue;
       try {
-        const blob = await compressWithWasm(item.file, 80);
-        const url = URL.createObjectURL(blob);
-        const size = blob.size;
+        const compressed = await compressWithWasm(item.file, 80);
+        const url = URL.createObjectURL(compressed.blob);
+        const size = compressed.blob.size;
         const percent = Math.max(
           0,
           Math.round(((item.originSize - size) / item.originSize) * 100),
@@ -172,6 +175,7 @@ export default function UploadZone({ externalItem, onSelectItem, onItemsChange }
               ? {
                   ...it,
                   compressedUrl: url,
+                  compressedFileName: compressed.fileName,
                   compressedSize: size,
                   percent,
                   status: "done",
@@ -279,7 +283,7 @@ export default function UploadZone({ externalItem, onSelectItem, onItemsChange }
                       {it.compressedUrl && (
                         <a
                           href={it.compressedUrl}
-                          download={it.file.name.replace(/\.(png|webp)$/i, ".jpg")}
+                          download={it.compressedFileName || it.file.name}
                           onClick={(event) => event.stopPropagation()}
                           className="text-emerald-300 hover:text-emerald-200 underline"
                         >

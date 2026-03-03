@@ -64,3 +64,16 @@
  ✓ Compiled in 700ms (1691 modules)
  ✓ Compiled in 550ms (1691 modules)
  ✓ Compiled in 447ms (1691 modules)
+ GET / 200 in 549ms
+ GET / 200 in 37ms
+ GET /favicon.ico 200 in 13ms
+ ✓ Compiled in 689ms (1661 modules)
+ ✓ Compiled in 643ms (1661 modules)
+ ✓ Compiled in 1103ms (1661 modules)
+ ✓ Compiled in 789ms (1647 modules)
+ ✓ Compiled in 296ms (1647 modules)
+ GET / 200 in 554ms
+ GET / 200 in 36ms
+ ✓ Compiled /favicon.ico in 309ms (867 modules)
+ GET /favicon.ico 200 in 360ms
+[?25h

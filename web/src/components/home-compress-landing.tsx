@@ -1,0 +1,599 @@
+﻿"use client";
+
+import React from "react";
+import Link from "next/link";
+import { getLang, setLang as persistLang, type Lang } from "@/locales";
+import { useStore } from "@/stores";
+import SystemManager from "@/utils/System";
+import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm-worker";
+
+const MAX_FILES = 20;
+const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+type HomeItemStatus = "queued" | "processing" | "done" | "error";
+
+type HomeItem = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  outputUrl?: string;
+  outputName?: string;
+  outputExt?: string;
+  outputSize?: number;
+  percent?: number;
+  progress: number;
+  status: HomeItemStatus;
+};
+
+const formatSize = (size: number) => {
+  if (size >= 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${size} B`;
+};
+
+const extToBadge = (ext?: string) => (ext || "img").toUpperCase();
+
+function createItem(file: File): HomeItem {
+  return {
+    id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    file,
+    previewUrl: URL.createObjectURL(file),
+    progress: 0,
+    status: "queued",
+  };
+}
+
+export default function HomeCompressLanding() {
+  const { setToken } = useStore();
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const itemsRef = React.useRef<HomeItem[]>([]);
+  const timersRef = React.useRef<Record<string, number>>({});
+  const isUnmountedRef = React.useRef(false);
+  const [items, setItems] = React.useState<HomeItem[]>([]);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [isCompressing, setIsCompressing] = React.useState(false);
+  const [lang, setLang] = React.useState<Lang>("zh");
+  const [showFormatOptions, setShowFormatOptions] = React.useState(false);
+  const [selectedFormats, setSelectedFormats] = React.useState<string[]>([]);
+  const isZh = lang === "zh";
+
+  const copy = React.useMemo(
+    () => ({
+      menu: isZh ? "图片工具箱" : "Image Toolbox",
+      heroKicker: isZh ? "智能图片压缩" : "Smart Image Compression",
+      heroTitle: isZh ? "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF" : "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
+      heroDesc: isZh
+        ? "像 TinyPNG 一样直接开始处理图片，首页完成上传、压缩、下载，尽量减少跳转和流失。"
+        : "Start compressing like TinyPNG: upload, optimize and download from one focused homepage without extra steps.",
+      dropTitle: isZh ? "将图片拖到这里开始压缩" : "Drop your images here!",
+      dropDesc: isZh ? "最多 20 张图片，单张不超过 5 MB" : "Up to 20 images, max 5 MB each.",
+      dropAction: isZh ? "选择图片" : "Select images",
+      autoLabel: isZh ? "上传后自动开始压缩" : "Convert my images automatically",
+      selectAll: isZh ? "全选" : "SELECT ALL",
+      processingTitle: isZh
+        ? "图片正在优化中，请稍等片刻，我们会尽快给出这一批图片更合适的压缩结果。"
+        : "Your images are being processed now. Give us a moment to finish a cleaner, lighter result set.",
+      completedTitle: (savedPercent: number, done: number, totalSaved: string) =>
+        isZh
+          ? `这次压缩共节省 ${savedPercent}% · 已优化 ${done} 张图片 · 共减少 ${totalSaved}`
+          : `Compression finished. Saved ${savedPercent}% across ${done} image${done === 1 ? "" : "s"} with ${totalSaved} reduced in total.`,
+      optimizing: isZh ? "压缩中..." : "Optimizing...",
+      queued: isZh ? "排队中" : "Queued",
+      failed: isZh ? "压缩失败" : "Failed",
+      download: isZh ? "下载" : "Download",
+      downloadZip: isZh ? "打包下载 ZIP" : "Download ZIP",
+      origin: isZh ? "原始大小" : "Original",
+      output: isZh ? "压缩后" : "Compressed",
+      saved: isZh ? "节省" : "Saved",
+      features: isZh
+        ? ["更轻的图片结果", "自动选择更优输出格式", "AVIF 压缩即将加入"]
+        : ["Lighter image delivery", "Smarter output format selection", "AVIF compression coming soon"],
+      sectionEyebrow: isZh ? "更快的图片交付" : "Faster image delivery",
+      sectionTitle: isZh ? "为网页、运营素材和内容站点准备的轻量压缩入口" : "A lightweight compression entry for websites, campaigns and content teams",
+      sectionDesc: isZh
+        ? "上传后立即开始处理，自动给出更轻的 PNG、JPEG 或 WebP 结果。AVIF 也会加入后续压缩方案，页面能力会继续往前补齐。"
+        : "Start processing immediately after upload and get lighter PNG, JPEG or WebP outputs. AVIF is also planned for the next compression pass so the format lineup keeps improving.",
+      cards: isZh
+        ? [
+            {
+              title: "更轻的页面资源",
+              desc: "优先压缩常见网页图片，减少首屏加载压力和带宽消耗。",
+            },
+            {
+              title: "自动挑选更优结果",
+              desc: "按图片内容尝试更合适的输出格式，后续会继续把 AVIF 方案补进来。",
+            },
+            {
+              title: "适合批量整理素材",
+              desc: "单张下载和 ZIP 打包都保留，适合一次处理多张图片后集中交付。",
+            },
+          ]
+        : [
+            {
+              title: "Lighter page assets",
+              desc: "Compress common web images to reduce initial load pressure and bandwidth usage.",
+            },
+            {
+              title: "Smarter output selection",
+              desc: "Choose a more suitable output format per image, with AVIF support planned next.",
+            },
+            {
+              title: "Ready for batch asset cleanup",
+              desc: "Keep both single-file download and ZIP export for grouped delivery after bulk compression.",
+            },
+          ],
+    }),
+    [isZh],
+  );
+
+  React.useEffect(() => {
+    setLang(getLang());
+    const apiKeyFromEnv = process.env.NEXT_PUBLIC_API_KEY;
+    if (apiKeyFromEnv) {
+      setToken(apiKeyFromEnv);
+    }
+  }, [setToken]);
+
+  React.useEffect(() => {
+    document.title = isZh ? "图片压缩" : "Image Compression";
+  }, [isZh]);
+
+  React.useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  React.useEffect(() => {
+    isUnmountedRef.current = false;
+    return () => {
+      isUnmountedRef.current = true;
+      Object.values(timersRef.current).forEach((timer) => window.clearInterval(timer));
+      terminateCompressionWorker();
+      itemsRef.current.forEach((item) => {
+        URL.revokeObjectURL(item.previewUrl);
+        if (item.outputUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(item.outputUrl);
+        }
+      });
+    };
+  }, []);
+
+  const enqueueFiles = React.useCallback((fileList: FileList | File[]) => {
+    const nextFiles = Array.from(fileList).filter((file) => ALLOWED_TYPES.has(file.type));
+    if (!nextFiles.length) {
+      return;
+    }
+
+    setItems((prev) => {
+      const remain = MAX_FILES - prev.length;
+      if (remain <= 0) {
+        return prev;
+      }
+      return [...prev, ...nextFiles.slice(0, remain).map(createItem)];
+    });
+  }, []);
+
+  const startFakeProgress = React.useCallback((id: string) => {
+    window.clearInterval(timersRef.current[id]);
+    timersRef.current[id] = window.setInterval(() => {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== id || item.status !== "processing") {
+            return item;
+          }
+          const nextProgress = Math.min(item.progress + Math.random() * 12 + 4, 92);
+          return { ...item, progress: nextProgress };
+        }),
+      );
+    }, 180);
+  }, []);
+
+  const stopFakeProgress = React.useCallback((id: string) => {
+    if (timersRef.current[id]) {
+      window.clearInterval(timersRef.current[id]);
+      delete timersRef.current[id];
+    }
+  }, []);
+
+  const processQueue = React.useCallback(async () => {
+    if (isCompressing) {
+      return;
+    }
+
+    setIsCompressing(true);
+    try {
+      while (!isUnmountedRef.current) {
+        const current = itemsRef.current.find((item) => item.status === "queued");
+        if (!current) {
+          break;
+        }
+
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === current.id
+              ? { ...item, status: "processing", progress: Math.max(item.progress, 8) }
+              : item,
+          ),
+        );
+        startFakeProgress(current.id);
+
+        try {
+          const compressed = await compressWithWasmWorker(current.file, 80);
+          if (isUnmountedRef.current) {
+            break;
+          }
+
+          stopFakeProgress(current.id);
+          const outputUrl = URL.createObjectURL(compressed.blob);
+          const outputSize = compressed.blob.size;
+          const percent = Math.max(
+            0,
+            Math.round(((current.file.size - outputSize) / current.file.size) * 100),
+          );
+
+          setItems((prev) =>
+            prev.map((item) =>
+              item.id === current.id
+                ? {
+                    ...item,
+                    status: "done",
+                    outputUrl,
+                    outputName: compressed.fileName,
+                    outputExt: compressed.ext,
+                    outputSize,
+                    percent,
+                    progress: 100,
+                  }
+                : item,
+            ),
+          );
+        } catch (_error) {
+          stopFakeProgress(current.id);
+          setItems((prev) =>
+            prev.map((item) =>
+              item.id === current.id
+                ? { ...item, status: "error", progress: 100 }
+                : item,
+            ),
+          );
+        }
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setIsCompressing(false);
+      }
+    }
+  }, [isCompressing, startFakeProgress, stopFakeProgress]);
+
+  React.useEffect(() => {
+    if (!isCompressing && items.some((item) => item.status === "queued")) {
+      processQueue();
+    }
+  }, [isCompressing, items, processQueue]);
+
+  const completedItems = items.filter((item) => item.status === "done");
+  const completedCount = completedItems.length;
+  const totalOriginalSize = completedItems.reduce((sum, item) => sum + item.file.size, 0);
+  const totalCompressedSize = completedItems.reduce((sum, item) => sum + (item.outputSize || 0), 0);
+  const totalSavedBytes = Math.max(0, totalOriginalSize - totalCompressedSize);
+  const totalSavedPercent = totalOriginalSize > 0 ? Math.max(0, Math.round((totalSavedBytes / totalOriginalSize) * 100)) : 0;
+  const hasPendingItems = items.some((item) => item.status === "queued" || item.status === "processing");
+  const zipItems = completedItems
+    .filter((item) => item.outputUrl && item.outputName)
+    .map((item) => ({ name: item.outputName!, url: item.outputUrl! }));
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    enqueueFiles(event.dataTransfer.files);
+  };
+
+  const handleSwitchLang = (nextLang: Lang) => {
+    if (nextLang === lang) {
+      return;
+    }
+    setLang(nextLang);
+    persistLang(nextLang);
+  };
+
+  const formatOptions = React.useMemo(
+    () => [
+      { key: "avif", label: "AVIF" },
+      { key: "jpeg", label: "JPEG" },
+      { key: "png", label: "PNG" },
+      { key: "webp", label: "WEBP" },
+    ],
+    [],
+  );
+
+  const handleToggleFormat = (formatKey: string) => {
+    setSelectedFormats((prev) =>
+      prev.includes(formatKey)
+        ? prev.filter((item) => item !== formatKey)
+        : [...prev, formatKey],
+    );
+  };
+
+  const handleSelectAllFormats = () => {
+    setSelectedFormats((prev) =>
+      prev.length === formatOptions.length ? [] : formatOptions.map((item) => item.key),
+    );
+  };
+
+  return (
+    <main className="w-full bg-[#ececec] text-slate-800">
+      <section className="relative overflow-hidden bg-[#78956b]">
+        <div className="absolute inset-0 bg-[url('/images/bamboo.avif')] bg-cover bg-left-center bg-no-repeat" />
+        <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/bamboo-panda.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
+
+        <div className="relative mx-auto flex h-[720px] max-w-[1440px] flex-col overflow-hidden px-6 pb-20 pt-5 lg:h-[700px] lg:px-10">
+          <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 bg-white/92 px-4 py-3 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
+            <div />
+            <nav className="flex items-center justify-center text-sm font-medium text-slate-600">
+              <Link href="/toolbox" className="select-none text-[15px] text-slate-700 underline underline-offset-[6px] decoration-1 transition hover:text-slate-900 focus:outline-none focus-visible:outline-none">
+                {copy.menu}
+              </Link>
+            </nav>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => handleSwitchLang("zh")}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${lang === "zh" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              >
+                中文
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSwitchLang("en")}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${lang === "en" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              >
+                EN
+              </button>
+            </div>
+          </header>
+
+          <div className="relative z-10 flex flex-1 justify-center pt-20 lg:pt-24">
+            <div className="grid w-full items-start gap-10 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="max-w-xl text-white drop-shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
+                <p className="text-sm font-semibold uppercase tracking-[0.36em] text-white/80">{copy.heroKicker}</p>
+                <h1 className="mt-5 font-sans text-4xl font-semibold leading-tight md:text-6xl">
+                  {copy.heroTitle}
+                </h1>
+                <p className="mt-5 max-w-lg text-base leading-7 text-white/90 md:text-lg">
+                  {copy.heroDesc}
+                </p>
+                <div className="mt-8 flex flex-wrap gap-3 text-sm text-white/95">
+                  {copy.features.map((feature) => (
+                    <span key={feature} className="rounded-full border border-white/20 bg-white/12 px-4 py-2 backdrop-blur-sm">
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-full max-w-[640px] justify-self-center lg:translate-x-[-2%]">
+                <div
+                  onDragEnter={() => setIsDragging(true)}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  className={`rounded-[30px] bg-[rgba(108,119,95,0.78)] p-4 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    className="flex w-full flex-col items-center rounded-[26px] border-[3px] border-dashed border-white/75 px-6 py-10 text-center text-white transition hover:bg-white/5"
+                  >
+                    <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-[22px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-4xl shadow-[0_16px_24px_rgba(7,33,79,0.4)]">
+                      ⬇
+                    </div>
+                    <h2 className="text-[28px] font-semibold leading-none md:text-[30px]">{copy.dropTitle}</h2>
+                    <p className="mt-4 text-[14px] font-medium text-white/85 md:text-[15px]">{copy.dropDesc}</p>
+                    <span className="mt-8 rounded-full bg-white px-7 py-2 text-[14px] font-semibold text-slate-700">
+                      {copy.dropAction}
+                    </span>
+                  </button>
+                  <div className="mt-4 overflow-hidden rounded-[24px] bg-[rgba(246,246,243,0.96)]">
+                    <div className="flex items-center gap-3 px-5 py-4 text-[13px] text-slate-600 md:text-[14px]">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setShowFormatOptions((prev) => !prev);
+                        }}
+                        aria-pressed={showFormatOptions}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${
+                          showFormatOptions ? "bg-lime-500" : "bg-slate-300"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                            showFormatOptions ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                      <span className="font-medium">{copy.autoLabel}</span>
+                    </div>
+                    <div
+                      className={`overflow-hidden bg-[#edf0e4] transition-all duration-200 ${
+                        showFormatOptions ? "max-h-24 border-t border-[#e2e6d8]" : "max-h-0 border-t-0"
+                      }`}
+                    >
+                      <div
+                        className={`flex min-h-[60px] flex-wrap items-center gap-2 px-4 py-3 transition-opacity duration-150 md:flex-nowrap ${
+                          showFormatOptions ? "opacity-100" : "pointer-events-none opacity-0"
+                        }`}
+                      >
+                        {formatOptions.map((format) => {
+                          const active = selectedFormats.includes(format.key);
+                          return (
+                            <button
+                              key={format.key}
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleToggleFormat(format.key);
+                              }}
+                              className={`inline-flex h-8 min-w-[82px] items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold tracking-[0.02em] transition md:min-w-[88px] md:text-[11px] ${
+                                active
+                                  ? "border-lime-500 bg-white text-lime-600 shadow-sm"
+                                  : "border-slate-300 bg-[#f7f7f2] text-slate-700"
+                              }`}
+                            >
+                              {active && <span className="mr-2 text-lime-500">✓</span>}
+                              <span>{format.label}</span>
+                            </button>
+                          );
+                        })}
+                        <span className="hidden h-8 w-px bg-slate-300 md:block" />
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleSelectAllFormats();
+                          }}
+                          className="inline-flex h-8 min-w-[92px] items-center justify-center rounded-full border border-slate-300 bg-[#f7f7f2] px-2.5 text-[10px] font-semibold tracking-[0.02em] text-slate-700 transition hover:bg-white md:min-w-[104px] md:text-[11px]"
+                        >
+                          {copy.selectAll}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(event) => {
+          enqueueFiles(event.target.files ?? []);
+          event.target.value = "";
+        }}
+      />
+
+      {items.length > 0 && (
+        <section className="relative z-10 mx-auto -mt-8 w-full max-w-[1100px] px-4 pb-20 md:-mt-12">
+          <div className="overflow-hidden rounded-[14px] bg-[#4a4f5d] text-white shadow-[0_22px_50px_rgba(40,42,52,0.25)]">
+            <div className="flex flex-col gap-5 px-6 py-5 md:flex-row md:items-start md:justify-between">
+              <div className="max-w-3xl">
+                <h3 className="text-2xl font-semibold text-lime-300">
+                  {hasPendingItems
+                    ? copy.processingTitle
+                    : copy.completedTitle(totalSavedPercent, completedCount, formatSize(totalSavedBytes))}
+                </h3>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!zipItems.length}
+                  onClick={() =>
+                    SystemManager.downloadZip(
+                      zipItems,
+                      `compressed-images-${SystemManager.getNowformatTime()}.zip`,
+                    )
+                  }
+                  className="rounded-xl bg-lime-300 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
+                >
+                  {copy.downloadZip}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-[#f3f3f3] text-slate-700">
+              {items.map((item) => (
+                <div key={item.id} className="flex items-center gap-4 border-t border-slate-200 px-5 py-3 first:border-t-0">
+                  <div className="h-14 w-14 overflow-hidden rounded-xl bg-slate-200 ring-1 ring-slate-200">
+                    <img src={item.previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-slate-800">{item.file.name}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                      <span>{copy.origin} {formatSize(item.file.size)}</span>
+                      <span>{copy.output} {item.outputSize ? formatSize(item.outputSize) : "-"}</span>
+                      {item.status === "done" && <span>{copy.saved} {item.percent ?? 0}%</span>}
+                    </div>
+                    {item.status !== "done" && (
+                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${item.status === "error" ? "bg-red-400" : "bg-sky-500"}`}
+                          style={{ width: `${item.progress}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-[110px] text-right text-sm font-semibold">
+                    {item.status === "done" && <span className="text-slate-700">-{item.percent ?? 0}%</span>}
+                    {item.status === "processing" && <span className="text-slate-500">{copy.optimizing}</span>}
+                    {item.status === "queued" && <span className="text-slate-500">{copy.queued}</span>}
+                    {item.status === "error" && <span className="text-red-500">{copy.failed}</span>}
+                    {item.status === "done" && item.outputSize && (
+                      <div className="mt-1 text-xs font-medium text-slate-500">{formatSize(item.outputSize)}</div>
+                    )}
+                  </div>
+                  <div className="min-w-[110px] text-right">
+                    {item.status === "done" && item.outputUrl ? (
+                      <a
+                        href={item.outputUrl}
+                        download={item.outputName || item.file.name}
+                        className="inline-flex items-center gap-2 rounded-lg bg-[#e7f4ff] px-3 py-2 text-xs font-semibold text-[#1b73d0]"
+                      >
+                        <span>{copy.download}</span>
+                        <span className="rounded bg-white px-2 py-0.5 text-[10px] text-[#2665c6]">
+                          {extToBadge(item.outputExt)}
+                        </span>
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-400">-</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="relative overflow-hidden bg-[#f1f1f1] py-24">
+        <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(241,241,241,0))]" />
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
+          <div className="mx-auto max-w-[980px] text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.sectionEyebrow}</p>
+            <h2 className="mt-5 font-sans text-4xl font-semibold leading-tight text-slate-700 md:text-6xl">
+              {copy.sectionTitle}
+            </h2>
+            <p className="mx-auto mt-6 max-w-[920px] text-lg leading-8 text-slate-500 md:text-[22px] md:leading-10">
+              {copy.sectionDesc}
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {copy.cards.map((card) => (
+              <article
+                key={card.title}
+                className="rounded-[28px] border border-slate-200 bg-white px-7 py-8 shadow-[0_16px_45px_rgba(148,163,184,0.12)]"
+              >
+                <div className="h-2 w-14 rounded-full bg-[linear-gradient(90deg,#0ea5e9,#22c55e)]" />
+                <h3 className="mt-6 text-2xl font-semibold text-slate-700">{card.title}</h3>
+                <p className="mt-4 text-base leading-8 text-slate-500">{card.desc}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}

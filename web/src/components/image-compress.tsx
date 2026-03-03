@@ -44,6 +44,7 @@ function ImageCompress({
   const [errorInfo, setErrorInfo] = React.useState<any>(null);
   const [compressing, setCompressing] = React.useState(false);
   const [compressedSize, setCompressedSize] = React.useState<number | null>(null);
+  const [compressedFileName, setCompressedFileName] = React.useState<string | null>(null);
   const [compareItem, setCompareItem] = React.useState<CompressListItem | null>(null);
   const [items, setItems] = React.useState<CompressListItem[]>([]);
 
@@ -51,6 +52,7 @@ function ImageCompress({
     if (!file) {
       setResult("");
       setCompressedSize(null);
+      setCompressedFileName(null);
       return;
     }
 
@@ -62,15 +64,17 @@ function ImageCompress({
         setStatus("Pending");
         setErrorInfo(null);
 
-        const compressedBlob = await compressWithWasm(file, 80);
-        compressedObjectUrl = URL.createObjectURL(compressedBlob);
-        setCompressedSize(compressedBlob.size);
+        const compressed = await compressWithWasm(file, 80);
+        compressedObjectUrl = URL.createObjectURL(compressed.blob);
+        setCompressedSize(compressed.blob.size);
+        setCompressedFileName(compressed.fileName);
         setResult(compressedObjectUrl);
         setStatus("Done");
       } catch (err) {
         console.error(err);
         setErrorInfo(err);
         setCompressedSize(null);
+        setCompressedFileName(null);
         setStatus("Error");
       } finally {
         setCompressing(false);
@@ -105,7 +109,7 @@ function ImageCompress({
     const archiveItems = items
       .filter((it) => it.status === "done" && it.compressedUrl)
       .map((it) => ({
-        name: it.file.name.replace(/\.(png|webp)$/i, ".jpg"),
+        name: it.compressedFileName || it.file.name,
         url: it.compressedUrl as string,
       }));
     onArchiveChange?.(archiveItems);
@@ -214,6 +218,7 @@ function ImageCompress({
             externalItem={{
               file,
               compressedUrl: result || undefined,
+              compressedFileName: compressedFileName || undefined,
               compressedSize,
               percent:
                 compressedSize !== null && file?.size

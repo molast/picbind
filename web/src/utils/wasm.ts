@@ -2,12 +2,10 @@
 
 let cachedMod: any = null;
 
-// 初始化 wasm 模块（使用 wasm-pack 生成的默认 init 函数）
 export async function initWasm() {
   if (!cachedMod) {
     try {
       const mod: any = await import("@wasm/image_wasm");
-      // 不传参数，交给 wasm-pack 生成的 init 自己去加载 image_wasm_bg.wasm
       await mod.default();
       cachedMod = mod;
     } catch (err) {
@@ -19,18 +17,28 @@ export async function initWasm() {
   return cachedMod;
 }
 
-// 用 wasm 压缩单张图片
+export function buildCompressedFileName(fileName: string, ext: string) {
+  const baseName = fileName.replace(/\.[^.]+$/, "") || "compressed-image";
+  return `${baseName}.${ext}`;
+}
+
 export async function compressWithWasm(file: File, quality = 80) {
   const mod = await initWasm();
   if (!mod || typeof mod.compress_image !== "function") {
-    throw new Error("WASM 模块未正确加载");
+    throw new Error("WASM module failed to load correctly");
   }
 
   const buffer = await file.arrayBuffer();
   const input = new Uint8Array(buffer);
+  const output = mod.compress_image(input, quality);
+  const bytes = output.bytes as Uint8Array;
+  const mime = output.mime as string;
+  const ext = output.ext as string;
 
-  const output = mod.compress_image(input, quality) as Uint8Array;
-
-  return new Blob([output], { type: "image/jpeg" });
+  return {
+    blob: new Blob([bytes], { type: mime }),
+    mime,
+    ext,
+    fileName: buildCompressedFileName(file.name, ext),
+  };
 }
-
