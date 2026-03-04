@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import React from "react";
-import Link from "next/link";
 import { getLang, setLang as persistLang, type Lang } from "@/locales";
 import { useStore } from "@/stores";
 import SystemManager from "@/utils/System";
@@ -149,7 +148,6 @@ export default function HomeCompressLanding() {
 
   const copy = React.useMemo(
     () => ({
-      menu: isZh ? "图片工具箱" : "Image Toolbox",
       heroKicker: isZh ? "智能图片压缩" : "Smart Image Compression",
       heroTitle: isZh ? "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF" : "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
       heroDesc: isZh
@@ -502,14 +500,8 @@ export default function HomeCompressLanding() {
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
 
         <div className="relative mx-auto flex h-[720px] max-w-[1440px] flex-col overflow-hidden px-6 pb-20 pt-5 lg:h-[700px] lg:px-10">
-          <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 bg-white/92 px-4 py-3 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
-            <div />
-            <nav className="flex items-center justify-center text-sm font-medium text-slate-600">
-              <Link href="/toolbox" className="select-none text-[15px] text-slate-700 underline underline-offset-[6px] decoration-1 transition hover:text-slate-900 focus:outline-none focus-visible:outline-none">
-                {copy.menu}
-              </Link>
-            </nav>
-            <div className="flex items-center justify-end gap-2">
+          <header className="flex items-center justify-end bg-white/92 px-4 py-3 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleSwitchLang("zh")}

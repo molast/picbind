@@ -1,9 +1,11 @@
-import ImageManager from "./Image";
-
 type ZipItem = {
   name: string;
   blob: Blob;
 };
+
+function toBlobPart(bytes: Uint8Array) {
+  return new Uint8Array(bytes);
+}
 
 export default class SystemManager {
   static mergeData = (target: any, source: any) => {
@@ -61,11 +63,11 @@ export default class SystemManager {
   };
 
   static downloadImage = async (url: string, name?: string) => {
-    const file = await ImageManager.imageToFile(url);
+    const file = await fetch(url).then((response) => response.blob());
     const currentTime = SystemManager.getNowformatTime();
     const metaType = file?.type.split("/")[1] || url.split(".")[1];
     const resultName = name || `result-${currentTime}.${metaType.split("+")[0]}`;
-    const localUrl = URL.createObjectURL(file as File);
+    const localUrl = URL.createObjectURL(file);
     const link = document.createElement("a");
     link.href = localUrl;
     link.download = resultName;
@@ -195,7 +197,10 @@ export default class SystemManager {
     endView.setUint32(pointer, offset, true); pointer += 4;
     endView.setUint16(pointer, 0, true);
 
-    return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+    return new Blob(
+      [...localParts.map(toBlobPart), ...centralParts.map(toBlobPart), toBlobPart(end)],
+      { type: "application/zip" },
+    );
   }
 
   private static getDosTime() {
