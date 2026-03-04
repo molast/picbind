@@ -1,5 +1,4 @@
-use image::codecs::webp::WebPEncoder;
-use image::{ColorType, DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat};
 use imagequant::{Attributes as ImageQuant, RGBA as QuantRgba};
 use lodepng::{Encoder as LodePngEncoder, RGBA};
 use mozjpeg_rs::{Encoder as MozJpegEncoder, Subsampling};
@@ -150,18 +149,6 @@ fn encode_quantized_png_from_image(img: &DynamicImage, quality: u8) -> Result<Ve
         .map_err(|e| JsValue::from_str(&format!("PNG encode failed: {}", e)))
 }
 
-fn encode_webp_lossless_from_image(img: &DynamicImage) -> Result<Vec<u8>, JsValue> {
-    let rgba = img.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    let mut output = Vec::new();
-
-    WebPEncoder::new_lossless(&mut output)
-        .encode(&rgba, width, height, ColorType::Rgba8.into())
-        .map_err(|e| JsValue::from_str(&format!("WebP encode failed: {}", e)))?;
-
-    Ok(output)
-}
-
 fn encode_candidate_for_format(
     img: &DynamicImage,
     target_format: &str,
@@ -201,11 +188,7 @@ fn encode_candidate_for_format(
             mime: "image/png",
             ext: "png",
         }),
-        "webp" => encode_webp_lossless_from_image(img).map(|bytes| Candidate {
-            bytes,
-            mime: "image/webp",
-            ext: "webp",
-        }),
+        "webp" => Err(JsValue::from_str("WebP compression is handled outside WASM")),
         "avif" => Err(JsValue::from_str(
             "AVIF compression is not supported yet",
         )),
@@ -248,44 +231,6 @@ fn compress_png(input: &[u8], quality: u8) -> Result<CompressionResult, JsValue>
         });
     }
 
-    if let Ok(bytes) = encode_webp_lossless_from_image(&img) {
-        candidates.push(Candidate {
-            bytes,
-            mime: "image/webp",
-            ext: "webp",
-        });
-    }
-
-    if is_opaque(&img) {
-        for candidate_quality in quality_candidates(quality).into_iter().filter(|q| *q >= 35) {
-            if let Ok(bytes) = encode_jpeg_from_image(&img, candidate_quality) {
-                candidates.push(Candidate {
-                    bytes,
-                    mime: "image/jpeg",
-                    ext: "jpg",
-                });
-            }
-        }
-    }
-
-    Ok(best_candidate(original_candidate(input, format), candidates).into_result())
-}
-
-fn compress_webp(input: &[u8], quality: u8) -> Result<CompressionResult, JsValue> {
-    let format = ImageFormat::WebP;
-    let img = image::load_from_memory_with_format(input, format)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    let mut candidates = Vec::new();
-
-    if let Ok(bytes) = encode_webp_lossless_from_image(&img) {
-        candidates.push(Candidate {
-            bytes,
-            mime: "image/webp",
-            ext: "webp",
-        });
-    }
-
     if is_opaque(&img) {
         for candidate_quality in quality_candidates(quality).into_iter().filter(|q| *q >= 35) {
             if let Ok(bytes) = encode_jpeg_from_image(&img, candidate_quality) {
@@ -308,7 +253,7 @@ pub fn compress_image(input: &[u8], quality: u8) -> Result<CompressionResult, Js
     match format {
         ImageFormat::Jpeg => compress_jpeg(input, quality),
         ImageFormat::Png => compress_png(input, quality),
-        ImageFormat::WebP => compress_webp(input, quality),
+        ImageFormat::WebP => Ok(original_candidate(input, format).into_result()),
         _ => Ok(original_candidate(input, format).into_result()),
     }
 }

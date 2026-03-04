@@ -1,6 +1,7 @@
 ﻿"use client";
 
-import { buildCompressedFileName, compressWithWasm, type OutputFormat } from "@/utils/wasm";
+import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import { compressWithWasm } from "@/utils/wasm";
 
 type WorkerSuccessMessage = {
   id: string;
