@@ -6,23 +6,31 @@ import { getLang, setLang as persistLang, type Lang } from "@/locales";
 import { useStore } from "@/stores";
 import SystemManager from "@/utils/System";
 import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm-worker";
+import type { OutputFormat } from "@/utils/wasm";
 
 const MAX_FILES = 20;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
-type HomeItemStatus = "queued" | "processing" | "done" | "error";
+type VariantStatus = "queued" | "processing" | "done" | "error";
 
-type HomeItem = {
+type OutputVariant = {
   id: string;
-  file: File;
-  previewUrl: string;
+  format: OutputFormat;
   outputUrl?: string;
   outputName?: string;
   outputExt?: string;
   outputSize?: number;
   percent?: number;
   progress: number;
-  status: HomeItemStatus;
+  status: VariantStatus;
+  errorMessage?: string;
+};
+
+type HomeItem = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  variants: OutputVariant[];
 };
 
 const formatSize = (size: number) => {
@@ -37,14 +45,92 @@ const formatSize = (size: number) => {
 
 const extToBadge = (ext?: string) => (ext || "img").toUpperCase();
 
-function createItem(file: File): HomeItem {
+function normalizeSourceFormat(file: File): OutputFormat {
+  if (file.type === "image/png") {
+    return "png";
+  }
+  if (file.type === "image/webp") {
+    return "webp";
+  }
+  return "jpeg";
+}
+
+function createVariant(format: OutputFormat): OutputVariant {
+  return {
+    id: `${format}-${crypto.randomUUID()}`,
+    format,
+    progress: 0,
+    status: "queued",
+  };
+}
+
+function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
+  const wantedFormats = Array.from(
+    new Set<OutputFormat>([normalizeSourceFormat(item.file), ...selectedFormats]),
+  );
+  const existingFormats = new Set(item.variants.map((variant) => variant.format));
+  const missingVariants = wantedFormats
+    .filter((format) => !existingFormats.has(format))
+    .map(createVariant);
+
+  if (!missingVariants.length) {
+    return item;
+  }
+
+  return {
+    ...item,
+    variants: [...item.variants, ...missingVariants],
+  };
+}
+
+function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
     file,
     previewUrl: URL.createObjectURL(file),
-    progress: 0,
-    status: "queued",
+    variants: ensureVariants(
+      {
+        id: "",
+        file,
+        previewUrl: "",
+        variants: [],
+      },
+      selectedFormats,
+    ).variants,
   };
+}
+
+function getActiveVariant(item: HomeItem) {
+  return (
+    item.variants.find((variant) => variant.status === "processing") ||
+    item.variants.find((variant) => variant.status === "queued")
+  );
+}
+
+function getBestDoneVariant(item: HomeItem) {
+  return item.variants
+    .filter((variant) => variant.status === "done" && typeof variant.outputSize === "number")
+    .sort((left, right) => (left.outputSize || 0) - (right.outputSize || 0))[0];
+}
+
+function getDoneVariants(item: HomeItem) {
+  return item.variants.filter(
+    (variant) => variant.status === "done" && typeof variant.outputSize === "number",
+  );
+}
+
+function isTransparencyBlocked(errorMessage?: string) {
+  return Boolean(errorMessage && /transparen/i.test(errorMessage));
+}
+
+function formatDeltaPercent(percent?: number) {
+  if (typeof percent !== "number") {
+    return "0%";
+  }
+  if (percent > 0) {
+    return `+${percent}%`;
+  }
+  return `${percent}%`;
 }
 
 export default function HomeCompressLanding() {
@@ -58,7 +144,7 @@ export default function HomeCompressLanding() {
   const [isCompressing, setIsCompressing] = React.useState(false);
   const [lang, setLang] = React.useState<Lang>("zh");
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
-  const [selectedFormats, setSelectedFormats] = React.useState<string[]>([]);
+  const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
   const isZh = lang === "zh";
 
   const copy = React.useMemo(
@@ -89,6 +175,12 @@ export default function HomeCompressLanding() {
       origin: isZh ? "原始大小" : "Original",
       output: isZh ? "压缩后" : "Compressed",
       saved: isZh ? "节省" : "Saved",
+      sourceFormat: isZh ? "原格式" : "Source",
+      targetFormat: isZh ? "目标格式" : "Target",
+      transparencyBlocked: isZh
+        ? "原图包含透明图层，不能直接转换为 JPEG"
+        : "The source image contains transparency, so JPEG output is blocked.",
+      unsupportedFormat: isZh ? "当前格式暂不支持" : "This format is not supported yet",
       features: isZh
         ? ["更轻的图片结果", "自动选择更优输出格式", "AVIF 压缩即将加入"]
         : ["Lighter image delivery", "Smarter output format selection", "AVIF compression coming soon"],
@@ -149,14 +241,17 @@ export default function HomeCompressLanding() {
   React.useEffect(() => {
     isUnmountedRef.current = false;
     return () => {
+      const timerMap = timersRef.current;
       isUnmountedRef.current = true;
-      Object.values(timersRef.current).forEach((timer) => window.clearInterval(timer));
+      Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
       terminateCompressionWorker();
       itemsRef.current.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
-        if (item.outputUrl?.startsWith("blob:")) {
-          URL.revokeObjectURL(item.outputUrl);
-        }
+        item.variants.forEach((variant) => {
+          if (variant.outputUrl?.startsWith("blob:")) {
+            URL.revokeObjectURL(variant.outputUrl);
+          }
+        });
       });
     };
   }, []);
@@ -172,29 +267,49 @@ export default function HomeCompressLanding() {
       if (remain <= 0) {
         return prev;
       }
-      return [...prev, ...nextFiles.slice(0, remain).map(createItem)];
+      return [
+        ...prev,
+        ...nextFiles.slice(0, remain).map((file) => createItem(file, selectedFormats)),
+      ];
     });
-  }, []);
+  }, [selectedFormats]);
 
-  const startFakeProgress = React.useCallback((id: string) => {
-    window.clearInterval(timersRef.current[id]);
-    timersRef.current[id] = window.setInterval(() => {
+  React.useEffect(() => {
+    if (!items.length) {
+      return;
+    }
+
+    setItems((prev) => prev.map((item) => ensureVariants(item, selectedFormats)));
+  }, [items.length, selectedFormats]);
+
+  const startFakeProgress = React.useCallback((itemId: string, variantId: string) => {
+    const timerKey = `${itemId}:${variantId}`;
+    window.clearInterval(timersRef.current[timerKey]);
+    timersRef.current[timerKey] = window.setInterval(() => {
       setItems((prev) =>
-        prev.map((item) => {
-          if (item.id !== id || item.status !== "processing") {
-            return item;
-          }
-          const nextProgress = Math.min(item.progress + Math.random() * 12 + 4, 92);
-          return { ...item, progress: nextProgress };
-        }),
+        prev.map((item) =>
+          item.id !== itemId
+            ? item
+            : {
+                ...item,
+                variants: item.variants.map((variant) => {
+                  if (variant.id !== variantId || variant.status !== "processing") {
+                    return variant;
+                  }
+                  const nextProgress = Math.min(variant.progress + Math.random() * 12 + 4, 92);
+                  return { ...variant, progress: nextProgress };
+                }),
+              },
+        ),
       );
     }, 180);
   }, []);
 
-  const stopFakeProgress = React.useCallback((id: string) => {
-    if (timersRef.current[id]) {
-      window.clearInterval(timersRef.current[id]);
-      delete timersRef.current[id];
+  const stopFakeProgress = React.useCallback((itemId: string, variantId: string) => {
+    const timerKey = `${itemId}:${variantId}`;
+    if (timersRef.current[timerKey]) {
+      window.clearInterval(timersRef.current[timerKey]);
+      delete timersRef.current[timerKey];
     }
   }, []);
 
@@ -206,56 +321,100 @@ export default function HomeCompressLanding() {
     setIsCompressing(true);
     try {
       while (!isUnmountedRef.current) {
-        const current = itemsRef.current.find((item) => item.status === "queued");
-        if (!current) {
+        const currentItem = itemsRef.current.find((item) =>
+          item.variants.some((variant) => variant.status === "queued"),
+        );
+        const currentVariant = currentItem?.variants.find(
+          (variant) => variant.status === "queued",
+        );
+
+        if (!currentItem || !currentVariant) {
           break;
         }
 
         setItems((prev) =>
           prev.map((item) =>
-            item.id === current.id
-              ? { ...item, status: "processing", progress: Math.max(item.progress, 8) }
+            item.id === currentItem.id
+              ? {
+                  ...item,
+                  variants: item.variants.map((variant) =>
+                    variant.id === currentVariant.id
+                      ? {
+                          ...variant,
+                          status: "processing",
+                          progress: Math.max(variant.progress, 8),
+                          errorMessage: undefined,
+                        }
+                      : variant,
+                  ),
+                }
               : item,
           ),
         );
-        startFakeProgress(current.id);
+        startFakeProgress(currentItem.id, currentVariant.id);
 
         try {
-          const compressed = await compressWithWasmWorker(current.file, 80);
+          const compressed = await compressWithWasmWorker(
+            currentItem.file,
+            80,
+            currentVariant.format,
+          );
           if (isUnmountedRef.current) {
             break;
           }
 
-          stopFakeProgress(current.id);
+          stopFakeProgress(currentItem.id, currentVariant.id);
           const outputUrl = URL.createObjectURL(compressed.blob);
           const outputSize = compressed.blob.size;
-          const percent = Math.max(
-            0,
-            Math.round(((current.file.size - outputSize) / current.file.size) * 100),
+          const percent = Math.round(
+            ((outputSize - currentItem.file.size) / currentItem.file.size) * 100,
           );
 
           setItems((prev) =>
             prev.map((item) =>
-              item.id === current.id
+              item.id === currentItem.id
                 ? {
                     ...item,
-                    status: "done",
-                    outputUrl,
-                    outputName: compressed.fileName,
-                    outputExt: compressed.ext,
-                    outputSize,
-                    percent,
-                    progress: 100,
+                    variants: item.variants.map((variant) =>
+                      variant.id === currentVariant.id
+                        ? {
+                            ...variant,
+                            status: "done",
+                            outputUrl,
+                            outputName: compressed.fileName,
+                            outputExt: compressed.ext,
+                            outputSize,
+                            percent,
+                            progress: 100,
+                            errorMessage: undefined,
+                          }
+                        : variant,
+                    ),
                   }
                 : item,
             ),
           );
-        } catch (_error) {
-          stopFakeProgress(current.id);
+        } catch (error) {
+          stopFakeProgress(currentItem.id, currentVariant.id);
           setItems((prev) =>
             prev.map((item) =>
-              item.id === current.id
-                ? { ...item, status: "error", progress: 100 }
+              item.id === currentItem.id
+                ? {
+                    ...item,
+                    variants: item.variants.map((variant) =>
+                      variant.id === currentVariant.id
+                        ? {
+                            ...variant,
+                            status: "error",
+                            progress: 100,
+                            errorMessage:
+                              error instanceof Error
+                                ? error.message
+                                : "Unknown compression error",
+                          }
+                        : variant,
+                    ),
+                  }
                 : item,
             ),
           );
@@ -269,21 +428,33 @@ export default function HomeCompressLanding() {
   }, [isCompressing, startFakeProgress, stopFakeProgress]);
 
   React.useEffect(() => {
-    if (!isCompressing && items.some((item) => item.status === "queued")) {
+    if (
+      !isCompressing &&
+      items.some((item) => item.variants.some((variant) => variant.status === "queued"))
+    ) {
       processQueue();
     }
   }, [isCompressing, items, processQueue]);
 
-  const completedItems = items.filter((item) => item.status === "done");
+  const completedItems = items.filter((item) =>
+    item.variants.some((variant) => variant.status === "done"),
+  );
   const completedCount = completedItems.length;
   const totalOriginalSize = completedItems.reduce((sum, item) => sum + item.file.size, 0);
-  const totalCompressedSize = completedItems.reduce((sum, item) => sum + (item.outputSize || 0), 0);
+  const totalCompressedSize = completedItems.reduce(
+    (sum, item) => sum + (getBestDoneVariant(item)?.outputSize || item.file.size),
+    0,
+  );
   const totalSavedBytes = Math.max(0, totalOriginalSize - totalCompressedSize);
   const totalSavedPercent = totalOriginalSize > 0 ? Math.max(0, Math.round((totalSavedBytes / totalOriginalSize) * 100)) : 0;
-  const hasPendingItems = items.some((item) => item.status === "queued" || item.status === "processing");
-  const zipItems = completedItems
-    .filter((item) => item.outputUrl && item.outputName)
-    .map((item) => ({ name: item.outputName!, url: item.outputUrl! }));
+  const hasPendingItems = items.some((item) =>
+    item.variants.some((variant) => variant.status === "queued" || variant.status === "processing"),
+  );
+  const zipItems = completedItems.flatMap((item) =>
+    item.variants
+      .filter((variant) => variant.status === "done" && variant.outputUrl && variant.outputName)
+      .map((variant) => ({ name: variant.outputName!, url: variant.outputUrl! })),
+  );
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -300,7 +471,7 @@ export default function HomeCompressLanding() {
   };
 
   const formatOptions = React.useMemo(
-    () => [
+    (): Array<{ key: OutputFormat; label: string }> => [
       { key: "avif", label: "AVIF" },
       { key: "jpeg", label: "JPEG" },
       { key: "png", label: "PNG" },
@@ -309,7 +480,7 @@ export default function HomeCompressLanding() {
     [],
   );
 
-  const handleToggleFormat = (formatKey: string) => {
+  const handleToggleFormat = (formatKey: OutputFormat) => {
     setSelectedFormats((prev) =>
       prev.includes(formatKey)
         ? prev.filter((item) => item !== formatKey)
@@ -514,54 +685,132 @@ export default function HomeCompressLanding() {
             </div>
 
             <div className="bg-[#f3f3f3] text-slate-700">
-              {items.map((item) => (
-                <div key={item.id} className="flex items-center gap-4 border-t border-slate-200 px-5 py-3 first:border-t-0">
-                  <div className="h-14 w-14 overflow-hidden rounded-xl bg-slate-200 ring-1 ring-slate-200">
+              {items.map((item) => {
+                const bestVariant = getBestDoneVariant(item);
+                const doneVariants = getDoneVariants(item);
+                const rankedVariants = [...item.variants].sort((left, right) => {
+                  const leftPercent = left.status === "done" ? left.percent ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
+                  const rightPercent = right.status === "done" ? right.percent ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
+                  return leftPercent - rightPercent;
+                });
+
+                return (
+                <div key={item.id} className="flex items-start gap-4 border-t border-[#d9d9d9] px-5 py-4 first:border-t-0">
+                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-200 ring-1 ring-slate-200">
                     <img src={item.previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-800">{item.file.name}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-                      <span>{copy.origin} {formatSize(item.file.size)}</span>
-                      <span>{copy.output} {item.outputSize ? formatSize(item.outputSize) : "-"}</span>
-                      {item.status === "done" && <span>{copy.saved} {item.percent ?? 0}%</span>}
+                    <div className="truncate text-[19px] font-semibold leading-none text-[#4a4f5d]">
+                      {item.file.name}
                     </div>
-                    {item.status !== "done" && (
-                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${item.status === "error" ? "bg-red-400" : "bg-sky-500"}`}
-                          style={{ width: `${item.progress}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-[110px] text-right text-sm font-semibold">
-                    {item.status === "done" && <span className="text-slate-700">-{item.percent ?? 0}%</span>}
-                    {item.status === "processing" && <span className="text-slate-500">{copy.optimizing}</span>}
-                    {item.status === "queued" && <span className="text-slate-500">{copy.queued}</span>}
-                    {item.status === "error" && <span className="text-red-500">{copy.failed}</span>}
-                    {item.status === "done" && item.outputSize && (
-                      <div className="mt-1 text-xs font-medium text-slate-500">{formatSize(item.outputSize)}</div>
-                    )}
-                  </div>
-                  <div className="min-w-[110px] text-right">
-                    {item.status === "done" && item.outputUrl ? (
-                      <a
-                        href={item.outputUrl}
-                        download={item.outputName || item.file.name}
-                        className="inline-flex items-center gap-2 rounded-lg bg-[#e7f4ff] px-3 py-2 text-xs font-semibold text-[#1b73d0]"
-                      >
-                        <span>{copy.download}</span>
-                        <span className="rounded bg-white px-2 py-0.5 text-[10px] text-[#2665c6]">
-                          {extToBadge(item.outputExt)}
-                        </span>
-                      </a>
-                    ) : (
-                      <span className="text-xs text-slate-400">-</span>
-                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-slate-500">
+                      <span className="inline-flex rounded-md bg-[#e9f4ef] px-3 py-0.5 text-[16px] font-semibold uppercase leading-none text-[#0d9b90]">
+                        {normalizeSourceFormat(item.file).toUpperCase()}
+                      </span>
+                      <span>{formatSize(item.file.size)}</span>
+                    </div>
+                    <div className="mt-1.5 flex flex-row-reverse flex-wrap gap-2.5">
+                      {rankedVariants.map((variant) => {
+                        const toneClass =
+                          variant.status === "done"
+                            ? "border-transparent bg-[#e8ecf1] text-[#4b5160]"
+                            : variant.status === "error"
+                              ? "border-[#ffd9d4] bg-[#fff1ef] text-[#d14332]"
+                              : variant.status === "processing"
+                                ? "border-transparent bg-[#eef1f4] text-sky-600"
+                                : "border-transparent bg-[#f0f2f4] text-slate-600";
+
+                        const accentClass =
+                          variant.format === "jpeg"
+                            ? "text-[#0d9b90]"
+                            : variant.format === "png"
+                              ? "text-[#2a7de1]"
+                              : variant.format === "webp"
+                                ? "text-[#6d4fe0]"
+                                : "text-slate-600";
+
+                        const detail =
+                          variant.status === "done"
+                            ? `${formatSize(variant.outputSize || 0)}`
+                            : variant.status === "processing"
+                              ? `${copy.optimizing} ${Math.round(variant.progress)}%`
+                              : variant.status === "queued"
+                                ? copy.queued
+                                : isTransparencyBlocked(variant.errorMessage)
+                                  ? copy.transparencyBlocked
+                                  : variant.errorMessage || copy.unsupportedFormat;
+
+                        return (
+                          <div
+                            key={variant.id}
+                            className="relative flex items-center gap-2.5"
+                          >
+                            {variant.status === "done" && bestVariant?.id === variant.id && doneVariants.length > 1 && (
+                              <span className="absolute -right-2 -top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#82c341] text-[12px] font-bold text-white shadow-sm">
+                                ✓
+                              </span>
+                            )}
+                            {variant.status === "done" ? (
+                              <>
+                                <div className="min-w-[54px] text-right">
+                                  <div className="text-[15px] font-semibold leading-none text-[#4a4f5d]">
+                                    {formatDeltaPercent(variant.percent)}
+                                  </div>
+                                  <div className="mt-1 text-[10px] leading-none text-[#6c7380]">
+                                    {detail}
+                                  </div>
+                                </div>
+                                {variant.outputUrl && (
+                                  <a
+                                    href={variant.outputUrl}
+                                    download={variant.outputName || item.file.name}
+                                    className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dfe5ea] px-2.5 py-1.5 text-[11px] font-semibold ${accentClass}`}
+                                  >
+                                    <span className="text-[11px]">⬇</span>
+                                    <span>{extToBadge(variant.outputExt)}</span>
+                                  </a>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <div className={`rounded-[14px] px-2.5 py-1.5 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}>
+                                  {variant.format}
+                                </div>
+                                <div className="max-w-[96px] text-[10px] leading-3.5">
+                                  {detail}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div
+                      className={`mt-3 overflow-hidden rounded-full ${
+                        item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
+                          ? "h-[4px] bg-[#d7e6c7]"
+                          : "h-px bg-[#d4d5d8]"
+                      }`}
+                    >
+                      <div
+                        className={`transition-all duration-300 ${
+                          item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
+                            ? "h-[4px] bg-[#8cc63f]"
+                            : "h-px bg-[#8b909b]"
+                        }`}
+                        style={{
+                          width: `${
+                            item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
+                              ? Math.max(getActiveVariant(item)?.progress ?? 0, 6)
+                              : 100
+                          }%`,
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>

@@ -126,3 +126,10 @@
  GET /favicon.ico 200 in 6ms
  GET / 200 in 66ms
  GET /favicon.ico 200 in 3ms
+ HEAD / 200 in 54ms
+ GET / 200 in 68ms
+ GET /favicon.ico 200 in 8ms
+ GET / 200 in 50ms
+ GET /favicon.ico 200 in 3ms
+ GET / 200 in 72ms
+ GET /favicon.ico 200 in 3ms

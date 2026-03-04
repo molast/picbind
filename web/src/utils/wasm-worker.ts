@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { buildCompressedFileName, compressWithWasm } from "@/utils/wasm";
+import { buildCompressedFileName, compressWithWasm, type OutputFormat } from "@/utils/wasm";
 
 type WorkerSuccessMessage = {
   id: string;
@@ -76,10 +76,14 @@ function getWorker() {
   return workerInstance;
 }
 
-export async function compressWithWasmWorker(file: File, quality = 80) {
+export async function compressWithWasmWorker(
+  file: File,
+  quality = 80,
+  targetFormat?: OutputFormat,
+) {
   const worker = getWorker();
   if (!worker) {
-    return compressWithWasm(file, quality);
+    return compressWithWasm(file, quality, targetFormat);
   }
 
   return new Promise<{
@@ -92,7 +96,7 @@ export async function compressWithWasmWorker(file: File, quality = 80) {
     pendingTasks.set(id, { resolve, reject });
 
     try {
-      worker.postMessage({ id, file, quality });
+      worker.postMessage({ id, file, quality, targetFormat });
     } catch (error) {
       pendingTasks.delete(id);
       reject(error);

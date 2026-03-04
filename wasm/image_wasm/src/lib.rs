@@ -162,6 +162,57 @@ fn encode_webp_lossless_from_image(img: &DynamicImage) -> Result<Vec<u8>, JsValu
     Ok(output)
 }
 
+fn encode_candidate_for_format(
+    img: &DynamicImage,
+    target_format: &str,
+    quality: u8,
+) -> Result<Candidate, JsValue> {
+    match target_format {
+        "jpeg" | "jpg" => {
+            if !is_opaque(img) {
+                return Err(JsValue::from_str(
+                    "JPEG target is unavailable because the source image contains transparency",
+                ));
+            }
+
+            let mut best_bytes: Option<Vec<u8>> = None;
+            for candidate_quality in quality_candidates(quality).into_iter().filter(|q| *q >= 35) {
+                if let Ok(bytes) = encode_jpeg_from_image(img, candidate_quality) {
+                    let should_replace = best_bytes
+                        .as_ref()
+                        .map(|current| bytes.len() < current.len())
+                        .unwrap_or(true);
+                    if should_replace {
+                        best_bytes = Some(bytes);
+                    }
+                }
+            }
+
+            best_bytes
+                .map(|bytes| Candidate {
+                    bytes,
+                    mime: "image/jpeg",
+                    ext: "jpg",
+                })
+                .ok_or_else(|| JsValue::from_str("JPEG encode failed"))
+        }
+        "png" => encode_quantized_png_from_image(img, quality).map(|bytes| Candidate {
+            bytes,
+            mime: "image/png",
+            ext: "png",
+        }),
+        "webp" => encode_webp_lossless_from_image(img).map(|bytes| Candidate {
+            bytes,
+            mime: "image/webp",
+            ext: "webp",
+        }),
+        "avif" => Err(JsValue::from_str(
+            "AVIF compression is not supported yet",
+        )),
+        _ => Err(JsValue::from_str("Unsupported target format")),
+    }
+}
+
 fn compress_jpeg(input: &[u8], quality: u8) -> Result<CompressionResult, JsValue> {
     let format = ImageFormat::Jpeg;
     let img = image::load_from_memory_with_format(input, format)
@@ -260,4 +311,18 @@ pub fn compress_image(input: &[u8], quality: u8) -> Result<CompressionResult, Js
         ImageFormat::WebP => compress_webp(input, quality),
         _ => Ok(original_candidate(input, format).into_result()),
     }
+}
+
+#[wasm_bindgen]
+pub fn compress_image_to_format(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+) -> Result<CompressionResult, JsValue> {
+    let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let img = image::load_from_memory_with_format(input, format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let candidate = encode_candidate_for_format(&img, &target_format.to_ascii_lowercase(), quality)?;
+    Ok(candidate.into_result())
 }
