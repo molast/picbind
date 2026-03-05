@@ -6,6 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
+    "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
+    "dev:fresh": "npm run clean && npm run dev",
+    "build:fresh": "npm run clean && npm run build",
     "wasm:build": "cd ../wasm/image_wasm && wasm-pack build --target web --out-dir ../../web/public/wasm",
     "lint": "next lint"
   },

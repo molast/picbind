@@ -687,22 +687,25 @@ export default function HomeCompressLanding() {
                 });
 
                 return (
-                <div key={item.id} className="flex items-start gap-4 border-t border-[#d9d9d9] px-5 py-4 first:border-t-0">
-                  <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-200 ring-1 ring-slate-200">
+                <div key={item.id} className="flex min-h-[84px] items-center gap-2.5 border-t border-[#d9d9d9] px-5 py-2.5 first:border-t-0">
+                  <div className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-slate-200 ring-1 ring-slate-200">
                     <img src={item.previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[19px] font-semibold leading-none text-[#4a4f5d]">
-                      {item.file.name}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-slate-500">
-                      <span className="inline-flex rounded-md bg-[#e9f4ef] px-3 py-0.5 text-[16px] font-semibold uppercase leading-none text-[#0d9b90]">
-                        {normalizeSourceFormat(item.file).toUpperCase()}
-                      </span>
-                      <span>{formatSize(item.file.size)}</span>
-                    </div>
-                    <div className="mt-1.5 flex flex-row-reverse flex-wrap gap-2.5">
-                      {rankedVariants.map((variant) => {
+                    <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between md:gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-[15px] font-semibold leading-none text-[#4a4f5d]">
+                          {item.file.name}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
+                          <span className="inline-flex rounded-md bg-[#e9f4ef] px-2 py-0.5 text-[12px] font-semibold uppercase leading-none text-[#0d9b90]">
+                            {normalizeSourceFormat(item.file).toUpperCase()}
+                          </span>
+                          <span>{formatSize(item.file.size)}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-row-reverse flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
+                        {rankedVariants.map((variant) => {
                         const toneClass =
                           variant.status === "done"
                             ? "border-transparent bg-[#e8ecf1] text-[#4b5160]"
@@ -732,53 +735,54 @@ export default function HomeCompressLanding() {
                                   ? copy.transparencyBlocked
                                   : variant.errorMessage || copy.unsupportedFormat;
 
-                        return (
-                          <div
-                            key={variant.id}
-                            className="relative flex items-center gap-2.5"
-                          >
-                            {variant.status === "done" && bestVariant?.id === variant.id && doneVariants.length > 1 && (
-                              <span className="absolute -right-2 -top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#82c341] text-[12px] font-bold text-white shadow-sm">
-                                ✓
-                              </span>
-                            )}
-                            {variant.status === "done" ? (
-                              <>
-                                <div className="min-w-[54px] text-right">
-                                  <div className="text-[15px] font-semibold leading-none text-[#4a4f5d]">
-                                    {formatDeltaPercent(variant.percent)}
+                          return (
+                            <div
+                              key={variant.id}
+                              className="relative flex items-center gap-2"
+                            >
+                              {variant.status === "done" && bestVariant?.id === variant.id && doneVariants.length > 1 && (
+                                <span className="absolute -right-2 -top-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#82c341] text-[12px] font-bold text-white shadow-sm">
+                                  ✓
+                                </span>
+                              )}
+                              {variant.status === "done" ? (
+                                <>
+                                  <div className="min-w-[52px] text-right">
+                                    <div className="text-[14px] font-semibold leading-none text-[#4a4f5d]">
+                                      {formatDeltaPercent(variant.percent)}
+                                    </div>
+                                    <div className="mt-0.5 text-[10px] leading-none text-[#6c7380]">
+                                      {detail}
+                                    </div>
                                   </div>
-                                  <div className="mt-1 text-[10px] leading-none text-[#6c7380]">
+                                  {variant.outputUrl && (
+                                    <a
+                                      href={variant.outputUrl}
+                                      download={variant.outputName || item.file.name}
+                                      className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dfe5ea] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
+                                    >
+                                      <span className="text-[11px]">⬇</span>
+                                      <span>{extToBadge(variant.outputExt)}</span>
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <div className={`rounded-[14px] px-2.5 py-1 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}>
+                                    {variant.format}
+                                  </div>
+                                  <div className="max-w-[96px] text-[10px] leading-3.5">
                                     {detail}
                                   </div>
-                                </div>
-                                {variant.outputUrl && (
-                                  <a
-                                    href={variant.outputUrl}
-                                    download={variant.outputName || item.file.name}
-                                    className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dfe5ea] px-2.5 py-1.5 text-[11px] font-semibold ${accentClass}`}
-                                  >
-                                    <span className="text-[11px]">⬇</span>
-                                    <span>{extToBadge(variant.outputExt)}</span>
-                                  </a>
-                                )}
-                              </>
-                            ) : (
-                              <>
-                                <div className={`rounded-[14px] px-2.5 py-1.5 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}>
-                                  {variant.format}
-                                </div>
-                                <div className="max-w-[96px] text-[10px] leading-3.5">
-                                  {detail}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        );
-                      })}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div
-                      className={`mt-3 overflow-hidden rounded-full ${
+                      className={`mt-1.5 overflow-hidden rounded-full ${
                         item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
                           ? "h-[4px] bg-[#d7e6c7]"
                           : "h-px bg-[#d4d5d8]"

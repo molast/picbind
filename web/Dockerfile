@@ -1,6 +1,7 @@
 FROM node:20.14-alpine AS build
 
 WORKDIR /app
+ENV NEXT_OUTPUT_MODE=standalone
 
 COPY package.json package-lock.json ./
 
