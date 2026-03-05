@@ -1,11 +1,11 @@
-FROM registry.cn-hangzhou.aliyuncs.com/library/node:20-alpine AS deps
+FROM docker.m.daocloud.io/library/node:20-alpine AS deps
 
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM registry.cn-hangzhou.aliyuncs.com/library/node:20-alpine AS builder
+FROM docker.m.daocloud.io/library/node:20-alpine AS builder
 
 WORKDIR /app
 ENV NEXT_OUTPUT_MODE=standalone
@@ -16,7 +16,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm run build
 
-FROM registry.cn-hangzhou.aliyuncs.com/library/node:20-alpine AS runner
+FROM docker.m.daocloud.io/library/node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
