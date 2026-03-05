@@ -820,7 +820,7 @@ export default function HomeCompressLanding() {
         <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
           <div className="mx-auto max-w-[980px] text-center">
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.sectionEyebrow}</p>
-            <h2 className="mt-5 font-sans text-4xl font-semibold leading-tight text-slate-700 md:text-6xl">
+            <h2 className="mt-5 font-sans text-3xl font-semibold leading-tight text-slate-700 md:text-5xl">
               {copy.sectionTitle}
             </h2>
             <p className="mx-auto mt-6 max-w-[920px] text-lg leading-8 text-slate-500 md:text-[22px] md:leading-10">

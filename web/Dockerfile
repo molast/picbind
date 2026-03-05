@@ -1,36 +1,29 @@
-FROM node:20.14-alpine AS build
+FROM node:20-alpine AS deps
+
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 ENV NEXT_OUTPUT_MODE=standalone
-
-COPY package.json package-lock.json ./
-
-# Install necessary packages for build
-RUN apk add --no-cache \
-  g++ \
-  make \
-  python3
-
-RUN npm install
-
-COPY . .
-
-RUN npm run build
-
-# -------- Production Image Setup --------
-FROM node:20.14-alpine AS production
-
 ENV NODE_ENV=production
+RUN corepack enable
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm run build
+
+FROM node:20-alpine AS runner
 
 WORKDIR /app
+ENV NODE_ENV=production
 
-COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/public ./public
-COPY --from=build /app/.next/static ./.next/static
-
-RUN npm install --only=production
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/.next/standalone ./
 
 EXPOSE 3000
-
 CMD ["node", "server.js"]
