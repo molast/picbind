@@ -25,5 +25,5 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 
-EXPOSE 3000
+EXPOSE 1997
 CMD ["node", "server.js"]

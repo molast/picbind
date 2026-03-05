@@ -6,6 +6,8 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+    environment:
+      - PORT=1997
     ports:
-      - "3000:3000"
+      - "1997:1997"
     restart: unless-stopped
