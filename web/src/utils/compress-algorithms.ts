@@ -229,9 +229,5 @@ export async function compressImageWithAlgorithms(
     return compressWithWebpCodec(file, quality);
   }
 
-  if (targetFormat === "avif") {
-    throw new Error("AVIF compression is not supported yet");
-  }
-
   return compressWithWasmCodec(file, quality, targetFormat);
 }

@@ -180,13 +180,13 @@ export default function HomeCompressLanding() {
         : "The source image contains transparency, so JPEG output is blocked.",
       unsupportedFormat: isZh ? "当前格式暂不支持" : "This format is not supported yet",
       features: isZh
-        ? ["更轻的图片结果", "自动选择更优输出格式", "AVIF 压缩即将加入"]
-        : ["Lighter image delivery", "Smarter output format selection", "AVIF compression coming soon"],
+        ? ["更轻的图片结果", "自动选择更优输出格式", "支持 AVIF 压缩"]
+        : ["Lighter image delivery", "Smarter output format selection", "AVIF compression supported"],
       sectionEyebrow: isZh ? "更快的图片交付" : "Faster image delivery",
       sectionTitle: isZh ? "为网页、运营素材和内容站点准备的轻量压缩入口" : "A lightweight compression entry for websites, campaigns and content teams",
       sectionDesc: isZh
-        ? "上传后立即开始处理，自动给出更轻的 PNG、JPEG 或 WebP 结果。AVIF 也会加入后续压缩方案，页面能力会继续往前补齐。"
-        : "Start processing immediately after upload and get lighter PNG, JPEG or WebP outputs. AVIF is also planned for the next compression pass so the format lineup keeps improving.",
+        ? "上传后立即开始处理，自动给出更轻的 PNG、JPEG、WebP 或 AVIF 结果。"
+        : "Start processing immediately after upload and get lighter PNG, JPEG, WebP or AVIF outputs.",
       cards: isZh
         ? [
             {
@@ -195,7 +195,7 @@ export default function HomeCompressLanding() {
             },
             {
               title: "自动挑选更优结果",
-              desc: "按图片内容尝试更合适的输出格式，后续会继续把 AVIF 方案补进来。",
+              desc: "按图片内容尝试更合适的输出格式，支持 PNG、JPEG、WebP 和 AVIF。",
             },
             {
               title: "适合批量整理素材",
@@ -209,7 +209,7 @@ export default function HomeCompressLanding() {
             },
             {
               title: "Smarter output selection",
-              desc: "Choose a more suitable output format per image, with AVIF support planned next.",
+              desc: "Choose a more suitable output format per image across PNG, JPEG, WebP and AVIF.",
             },
             {
               title: "Ready for batch asset cleanup",
@@ -294,7 +294,10 @@ export default function HomeCompressLanding() {
                   if (variant.id !== variantId || variant.status !== "processing") {
                     return variant;
                   }
-                  const nextProgress = Math.min(variant.progress + Math.random() * 12 + 4, 92);
+                  const target = 98;
+                  const remaining = Math.max(0, target - variant.progress);
+                  const step = Math.max(0.4, remaining * (0.08 + Math.random() * 0.07));
+                  const nextProgress = Math.min(variant.progress + step, target);
                   return { ...variant, progress: nextProgress };
                 }),
               },

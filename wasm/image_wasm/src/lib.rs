@@ -1,7 +1,8 @@
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, RgbaImage};
 use imagequant::{Attributes as ImageQuant, RGBA as QuantRgba};
 use lodepng::{Encoder as LodePngEncoder, RGBA};
 use mozjpeg_rs::{Encoder as MozJpegEncoder, Subsampling};
+use ravif::{BitDepth as RavifBitDepth, Encoder as RavifEncoder, Img as RavifImg, RGBA8 as RavifRgba8};
 use wasm_bindgen::prelude::*;
 
 #[global_allocator]
@@ -53,6 +54,7 @@ fn original_candidate(input: &[u8], format: ImageFormat) -> Candidate {
         ImageFormat::Jpeg => ("image/jpeg", "jpg"),
         ImageFormat::Png => ("image/png", "png"),
         ImageFormat::WebP => ("image/webp", "webp"),
+        ImageFormat::Avif => ("image/avif", "avif"),
         _ => ("application/octet-stream", "bin"),
     };
 
@@ -81,8 +83,47 @@ fn quality_candidates(quality: u8) -> [u8; 5] {
     ]
 }
 
+fn avif_speed_for_pixels(pixel_count: usize) -> u8 {
+    if pixel_count <= 900_000 {
+        5
+    } else if pixel_count <= 2_500_000 {
+        6
+    } else if pixel_count <= 5_000_000 {
+        7
+    } else {
+        8
+    }
+}
+
+fn avif_quality_candidates(quality: u8, pixel_count: usize) -> Vec<u8> {
+    // AVIF at the same "quality" number is often visually stronger than JPEG/WebP.
+    // Slightly lowering target quality tends to improve byte size while keeping acceptable output.
+    let base = quality.clamp(1, 100).saturating_sub(10).clamp(24, 92);
+    let mut candidates = vec![base];
+
+    if pixel_count <= 3_000_000 {
+        candidates.push(base.saturating_sub(8).clamp(20, 88));
+    }
+    if pixel_count <= 1_200_000 {
+        candidates.push(base.saturating_sub(14).clamp(18, 84));
+    }
+
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates
+}
+
 fn is_opaque(img: &DynamicImage) -> bool {
     img.to_rgba8().pixels().all(|pixel| pixel[3] == 255)
+}
+
+fn is_opaque_rgba(rgba: &RgbaImage) -> bool {
+    rgba.pixels().all(|pixel| pixel[3] == 255)
+}
+
+fn avif_bit_depth_for_pixels(pixel_count: usize) -> RavifBitDepth {
+    let _ = pixel_count;
+    RavifBitDepth::Auto
 }
 
 fn encode_jpeg_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, JsValue> {
@@ -149,6 +190,27 @@ fn encode_quantized_png_from_image(img: &DynamicImage, quality: u8) -> Result<Ve
         .map_err(|e| JsValue::from_str(&format!("PNG encode failed: {}", e)))
 }
 
+fn encode_avif_from_pixels(
+    pixels: &[RavifRgba8],
+    width: usize,
+    height: usize,
+    quality: u8,
+    alpha_quality: u8,
+    speed: u8,
+    bit_depth: RavifBitDepth,
+) -> Result<Vec<u8>, JsValue> {
+    let ravif_img = RavifImg::new(pixels, width, height);
+    let encoded = RavifEncoder::new()
+        .with_quality(quality.clamp(1, 100) as f32)
+        .with_alpha_quality(alpha_quality.clamp(1, 100) as f32)
+        .with_speed(speed)
+        .with_bit_depth(bit_depth)
+        .encode_rgba(ravif_img)
+        .map_err(|e| JsValue::from_str(&format!("AVIF encode failed: {}", e)))?;
+
+    Ok(encoded.avif_file)
+}
+
 fn encode_candidate_for_format(
     img: &DynamicImage,
     target_format: &str,
@@ -189,9 +251,54 @@ fn encode_candidate_for_format(
             ext: "png",
         }),
         "webp" => Err(JsValue::from_str("WebP compression is handled outside WASM")),
-        "avif" => Err(JsValue::from_str(
-            "AVIF compression is not supported yet",
-        )),
+        "avif" => {
+            let rgba = img.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            let pixel_count = (width as usize) * (height as usize);
+            let encode_speed = avif_speed_for_pixels(pixel_count);
+            let bit_depth = avif_bit_depth_for_pixels(pixel_count);
+            let base_alpha_quality = if is_opaque_rgba(&rgba) {
+                quality
+            } else {
+                quality.saturating_sub(8).max(20)
+            };
+            let pixels: Vec<RavifRgba8> = rgba
+                .pixels()
+                .map(|pixel| RavifRgba8::new(pixel[0], pixel[1], pixel[2], pixel[3]))
+                .collect();
+
+            let mut best_bytes: Option<Vec<u8>> = None;
+            for candidate_quality in avif_quality_candidates(quality, pixel_count) {
+                let candidate_alpha_quality = base_alpha_quality.min(candidate_quality);
+                if let Ok(bytes) =
+                    encode_avif_from_pixels(
+                        pixels.as_slice(),
+                        width as usize,
+                        height as usize,
+                        candidate_quality,
+                        candidate_alpha_quality,
+                        encode_speed,
+                        bit_depth,
+                    )
+                {
+                    let should_replace = best_bytes
+                        .as_ref()
+                        .map(|current| bytes.len() < current.len())
+                        .unwrap_or(true);
+                    if should_replace {
+                        best_bytes = Some(bytes);
+                    }
+                }
+            }
+
+            best_bytes
+                .map(|bytes| Candidate {
+                    bytes,
+                    mime: "image/avif",
+                    ext: "avif",
+                })
+                .ok_or_else(|| JsValue::from_str("AVIF encode failed"))
+        }
         _ => Err(JsValue::from_str("Unsupported target format")),
     }
 }
