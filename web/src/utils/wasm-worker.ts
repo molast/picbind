@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import { createUuid } from "@/utils/uuid";
 import { compressWithWasm } from "@/utils/wasm";
 
 type WorkerSuccessMessage = {
@@ -93,7 +94,7 @@ export async function compressWithWasmWorker(
     ext: string;
     fileName: string;
   }>((resolve, reject) => {
-    const id = crypto.randomUUID();
+    const id = createUuid();
     pendingTasks.set(id, { resolve, reject });
 
     try {

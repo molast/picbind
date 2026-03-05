@@ -4,6 +4,7 @@ import React from "react";
 import { getLang, setLang as persistLang, type Lang } from "@/locales";
 import { useStore } from "@/stores";
 import SystemManager from "@/utils/System";
+import { createUuid } from "@/utils/uuid";
 import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm-worker";
 import type { OutputFormat } from "@/utils/wasm";
 
@@ -56,7 +57,7 @@ function normalizeSourceFormat(file: File): OutputFormat {
 
 function createVariant(format: OutputFormat): OutputVariant {
   return {
-    id: `${format}-${crypto.randomUUID()}`,
+    id: `${format}-${createUuid()}`,
     format,
     progress: 0,
     status: "queued",
@@ -84,7 +85,7 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
 
 function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
   return {
-    id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+    id: `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`,
     file,
     previewUrl: URL.createObjectURL(file),
     variants: ensureVariants(

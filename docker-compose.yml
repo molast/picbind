@@ -3,9 +3,7 @@ version: "3.9"
 services:
   web:
     container_name: pixwasm-web
-    build:
-      context: ./web
-      dockerfile: Dockerfile
+    image: registry.cn-shanghai.aliyuncs.com/molast/nano-img:v1.0.4
     environment:
       - PORT=1997
     ports:
