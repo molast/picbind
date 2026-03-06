@@ -15,12 +15,20 @@ export type HomeCompressLandingCopy = {
   unsupportedFormat: string;
   downloadZip: string;
   cards: Array<{ title: string; desc: string }>;
+  errorOverlay: {
+    failed: string;
+    seeWhy: string;
+    lineTransparency: string;
+    lineTransparencyDetail: string;
+    lineGeneric: string;
+    convertAnyway: string;
+  };
 };
 
 const zh = {
   Symbol: "zh",
   HomeCompressLanding: {
-    pageTitle: "图片压缩",
+    pageTitle: "NanoImg-智能压缩 WebP、PNG 和 JPEG 图像",
     heroKicker: "智能图片压缩",
     heroTitle: "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF",
     heroDesc: "像 TinyPNG 一样直接开始处理图片，首页完成上传、压缩、下载，尽量减少跳转和流失。",
@@ -50,6 +58,14 @@ const zh = {
         desc: "单张下载和 ZIP 打包都保留，适合一次处理多张图片后集中交付。",
       },
     ],
+    errorOverlay: {
+      failed: "失败",
+      seeWhy: "查看原因",
+      lineTransparency: "原图包含透明图层。",
+      lineTransparencyDetail: "你仍可继续转换，但透明背景会替换为白色。",
+      lineGeneric: "这张图转换为 JPEG 失败。",
+      convertAnyway: "仍然转换",
+    },
   } as HomeCompressLandingCopy,
 };
 

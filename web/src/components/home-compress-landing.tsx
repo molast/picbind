@@ -16,6 +16,7 @@ type VariantStatus = "queued" | "processing" | "done" | "error";
 type OutputVariant = {
   id: string;
   format: OutputFormat;
+  allowAlphaLoss?: boolean;
   outputUrl?: string;
   outputName?: string;
   outputExt?: string;
@@ -145,7 +146,9 @@ export default function HomeCompressLanding() {
   const [lang, setLang] = React.useState<Lang>("zh");
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
+  const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
   const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
+  const blockedCopy = copy.errorOverlay;
 
   React.useEffect(() => {
     setLang(getLang());
@@ -286,6 +289,7 @@ export default function HomeCompressLanding() {
             currentItem.file,
             80,
             currentVariant.format,
+            Boolean(currentVariant.allowAlphaLoss),
           );
           if (isUnmountedRef.current) {
             break;
@@ -421,6 +425,30 @@ export default function HomeCompressLanding() {
       prev.length === formatOptions.length ? [] : formatOptions.map((item) => item.key),
     );
   };
+
+  const handleConvertAnyway = React.useCallback((itemId: string, variantId: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id !== itemId
+          ? item
+          : {
+              ...item,
+              variants: item.variants.map((variant) =>
+                variant.id === variantId
+                  ? {
+                      ...variant,
+                      allowAlphaLoss: true,
+                      status: "queued",
+                      progress: 0,
+                      errorMessage: undefined,
+                    }
+                  : variant,
+              ),
+            },
+      ),
+    );
+    setWhyVariantId(null);
+  }, []);
 
   return (
     <main className="w-full bg-[#ececec] text-slate-800">
@@ -558,7 +586,7 @@ export default function HomeCompressLanding() {
 
       {items.length > 0 && (
         <section className="relative z-10 mx-auto -mt-8 w-full max-w-[1100px] px-4 pb-20 md:-mt-12">
-          <div className="overflow-hidden rounded-[14px] bg-[#4a4f5d] text-white shadow-[0_22px_50px_rgba(40,42,52,0.25)]">
+          <div className="overflow-visible rounded-[14px] bg-[#4a4f5d] text-white shadow-[0_22px_50px_rgba(40,42,52,0.25)]">
             <div className="flex flex-col gap-5 px-6 py-5 md:flex-row md:items-start md:justify-between">
               <div className="max-w-3xl">
                 <h3 className="text-2xl font-semibold text-lime-300">
@@ -674,10 +702,52 @@ export default function HomeCompressLanding() {
                                     </a>
                                   )}
                                 </>
-                              ) : (
-                                <>
-                                  <div className={`rounded-[14px] px-2.5 py-1 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}>
-                                    {variant.format}
+                            ) : variant.status === "error" && variant.format === "jpeg" ? (
+                              <>
+                                <div
+                                  className="min-w-[68px] text-right"
+                                  onMouseEnter={() => setWhyVariantId(variant.id)}
+                                  onMouseLeave={() => setWhyVariantId((prev) => (prev === variant.id ? null : prev))}
+                                >
+                                  <div className="text-[15px] font-semibold leading-none text-[#4a4f5d]">{blockedCopy.failed}</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setWhyVariantId((prev) => (prev === variant.id ? null : variant.id))}
+                                    className="mt-1 cursor-help border-b border-dotted border-[#6c7380] text-[10px] leading-none text-[#6c7380]"
+                                  >
+                                    {blockedCopy.seeWhy}
+                                  </button>
+                                  {whyVariantId === variant.id && (
+                                    <div className="absolute right-[84px] top-[28px] z-20 w-[320px] rounded-xl bg-white p-5 text-left shadow-[0_10px_30px_rgba(0,0,0,0.2)] ring-1 ring-black/5">
+                                      <p className="text-[13px] leading-6 text-slate-700">
+                                        {isTransparencyBlocked(variant.errorMessage) ? blockedCopy.lineTransparency : blockedCopy.lineGeneric}
+                                      </p>
+                                      {isTransparencyBlocked(variant.errorMessage) && (
+                                        <>
+                                          <p className="mt-3 text-[13px] leading-6 text-slate-700">
+                                            {blockedCopy.lineTransparencyDetail}
+                                          </p>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleConvertAnyway(item.id, variant.id)}
+                                            className="mt-3 border-b border-dotted border-lime-500 text-[16px] leading-none text-lime-600"
+                                          >
+                                            {blockedCopy.convertAnyway}
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="inline-flex items-center gap-2 rounded-[14px] bg-[#f7eae8] px-3 py-2 text-[11px] font-semibold text-[#ef2f1a]">
+                                  <span>⚠</span>
+                                  <span>JPEG</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className={`rounded-[14px] px-2.5 py-1 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}>
+                                  {variant.format}
                                   </div>
                                   <div className="max-w-[96px] text-[10px] leading-3.5">
                                     {detail}

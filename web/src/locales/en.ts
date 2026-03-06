@@ -3,7 +3,7 @@ import type { HomeCompressLandingCopy, LocaleType } from "./zh";
 const en: LocaleType = {
   Symbol: "en",
   HomeCompressLanding: {
-    pageTitle: "Image Compression",
+    pageTitle: "NanoImg-Compress WebP,PNG and JPEG images intelligently",
     heroKicker: "Smart Image Compression",
     heroTitle: "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
     heroDesc:
@@ -35,6 +35,14 @@ const en: LocaleType = {
         desc: "Keep both single-file download and ZIP export for grouped delivery after bulk compression.",
       },
     ],
+    errorOverlay: {
+      failed: "Failed",
+      seeWhy: "See why",
+      lineTransparency: "Your original image contains transparency.",
+      lineTransparencyDetail: "We can convert it anyway, but the transparent background will be replaced by white.",
+      lineGeneric: "JPEG conversion failed for this image.",
+      convertAnyway: "Convert anyway",
+    },
   } as HomeCompressLandingCopy,
 };
 

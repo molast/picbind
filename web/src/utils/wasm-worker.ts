@@ -82,10 +82,11 @@ export async function compressWithWasmWorker(
   file: File,
   quality = 80,
   targetFormat?: OutputFormat,
+  allowAlphaLoss = false,
 ) {
   const worker = getWorker();
   if (!worker) {
-    return compressWithWasm(file, quality, targetFormat);
+    return compressWithWasm(file, quality, targetFormat, allowAlphaLoss);
   }
 
   return new Promise<{
@@ -98,7 +99,7 @@ export async function compressWithWasmWorker(
     pendingTasks.set(id, { resolve, reject });
 
     try {
-      worker.postMessage({ id, file, quality, targetFormat });
+      worker.postMessage({ id, file, quality, targetFormat, allowAlphaLoss });
     } catch (error) {
       pendingTasks.delete(id);
       reject(error);

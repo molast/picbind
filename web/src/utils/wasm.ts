@@ -11,6 +11,7 @@ export async function compressWithWasm(
   file: File,
   quality = 80,
   targetFormat?: OutputFormat,
+  allowAlphaLoss = false,
 ) {
-  return compressImageWithAlgorithms(file, quality, targetFormat);
+  return compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
 }

@@ -116,6 +116,25 @@ export function compress_image_to_format(input, quality, target_format) {
     return CompressionResult.__wrap(ret[0]);
 }
 
+/**
+ * @param {Uint8Array} input
+ * @param {number} quality
+ * @param {string} target_format
+ * @param {boolean} allow_alpha_loss
+ * @returns {CompressionResult}
+ */
+export function compress_image_to_format_with_options(input, quality, target_format, allow_alpha_loss) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(target_format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_image_to_format_with_options(ptr0, len0, quality, ptr1, len1, allow_alpha_loss);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

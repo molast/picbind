@@ -14,5 +14,14 @@ pub fn compress_image_to_format(
     quality: u8,
     target_format: &str,
 ) -> Result<CompressionResult, JsValue> {
-    to_format::compress_image_to_target_format(input, quality, target_format)
+    to_format::compress_image_to_target_format(input, quality, target_format, false)
+}
+
+pub fn compress_image_to_format_with_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+) -> Result<CompressionResult, JsValue> {
+    to_format::compress_image_to_target_format(input, quality, target_format, allow_alpha_loss)
 }

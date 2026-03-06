@@ -1,7 +1,1 @@
 *
-!.gitignore
-!image_wasm.js
-!image_wasm.d.ts
-!image_wasm_bg.wasm
-!image_wasm_bg.wasm.d.ts
-!package.json

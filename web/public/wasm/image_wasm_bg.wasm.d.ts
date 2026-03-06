@@ -4,6 +4,7 @@ export const memory: WebAssembly.Memory;
 export const __wbg_compressionresult_free: (a: number, b: number) => void;
 export const compress_image: (a: number, b: number, c: number) => [number, number, number];
 export const compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+export const compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const compressionresult_bytes: (a: number) => [number, number];
 export const compressionresult_ext: (a: number) => [number, number];
 export const compressionresult_mime: (a: number) => [number, number];

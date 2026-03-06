@@ -43,3 +43,18 @@ pub fn compress_image_to_format(
 ) -> Result<CompressionResult, JsValue> {
     core::pipeline::compress_image_to_format(input, quality, target_format)
 }
+
+#[wasm_bindgen]
+pub fn compress_image_to_format_with_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+) -> Result<CompressionResult, JsValue> {
+    core::pipeline::compress_image_to_format_with_options(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+    )
+}
