@@ -503,8 +503,8 @@ export default function HomeCompressLanding() {
         <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/bamboo-panda.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
 
-        <div className="relative mx-auto flex h-[720px] max-w-[1440px] flex-col overflow-hidden px-6 pb-20 pt-5 lg:h-[700px] lg:px-10">
-          <header className="flex items-center justify-end bg-white/92 px-4 py-3 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
+        <div className="relative mx-auto flex min-h-[500px] max-w-[1440px] flex-col px-6 pb-6 pt-4 lg:min-h-[480px] lg:px-10">
+          <header className="flex items-center justify-end bg-white/92 px-4 py-2.5 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -523,26 +523,8 @@ export default function HomeCompressLanding() {
             </div>
           </header>
 
-          <div className="relative z-10 flex flex-1 justify-center pt-20 lg:pt-24">
-            <div className="grid w-full items-start gap-10 lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="max-w-xl text-white drop-shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
-                <p className="text-sm font-semibold uppercase tracking-[0.36em] text-white/80">{copy.heroKicker}</p>
-                <h1 className="mt-5 font-sans text-4xl font-semibold leading-tight md:text-6xl">
-                  {copy.heroTitle}
-                </h1>
-                <p className="mt-5 max-w-lg text-base leading-7 text-white/90 md:text-lg">
-                  {copy.heroDesc}
-                </p>
-                <div className="mt-8 flex flex-wrap gap-3 text-sm text-white/95">
-                  {copy.features.map((feature) => (
-                    <span key={feature} className="rounded-full border border-white/20 bg-white/12 px-4 py-2 backdrop-blur-sm">
-                      {feature}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="w-full max-w-[640px] justify-self-center lg:translate-x-[-2%]">
+          <div className="relative z-10 flex flex-1 items-center justify-center py-6 lg:py-8">
+            <div className="w-full max-w-[780px]">
                 <div
                   onDragEnter={() => setIsDragging(true)}
                   onDragOver={(event) => {
@@ -551,24 +533,21 @@ export default function HomeCompressLanding() {
                   }}
                   onDragLeave={() => setIsDragging(false)}
                   onDrop={handleDrop}
-                  className={`rounded-[30px] bg-[rgba(108,119,95,0.78)] p-4 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
+                  className={`mx-auto w-full rounded-[26px] bg-[rgba(108,119,95,0.78)] p-3.5 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition md:p-4 ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
                 >
                   <button
                     type="button"
                     onClick={() => inputRef.current?.click()}
-                    className="flex w-full flex-col items-center rounded-[26px] border-[3px] border-dashed border-white/75 px-6 py-10 text-center text-white transition hover:bg-white/5"
+                    className="flex w-full flex-col items-center rounded-[22px] border-[3px] border-dashed border-white/75 px-6 py-8 text-center text-white transition hover:bg-white/5 md:py-9"
                   >
-                    <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-[22px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-4xl shadow-[0_16px_24px_rgba(7,33,79,0.4)]">
+                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-3xl shadow-[0_16px_24px_rgba(7,33,79,0.4)]">
                       ⬇
                     </div>
-                    <h2 className="text-[28px] font-semibold leading-none md:text-[30px]">{copy.dropTitle}</h2>
-                    <p className="mt-4 text-[14px] font-medium text-white/85 md:text-[15px]">{copy.dropDesc}</p>
-                    <span className="mt-8 rounded-full bg-white px-7 py-2 text-[14px] font-semibold text-slate-700">
-                      {copy.dropAction}
-                    </span>
+                    <h2 className="text-[20px] font-semibold leading-none md:text-[22px]">{copy.dropTitle}</h2>
+                    <p className="mt-3 text-[13px] font-medium text-white/85 md:text-[14px]">{copy.dropDesc}</p>
                   </button>
-                  <div className="mt-4 overflow-hidden rounded-[24px] bg-[rgba(246,246,243,0.96)]">
-                    <div className="flex items-center gap-3 px-5 py-4 text-[13px] text-slate-600 md:text-[14px]">
+                  <div className="mt-3 overflow-hidden rounded-[20px] bg-[rgba(246,246,243,0.96)]">
+                    <div className="flex items-center gap-3 px-5 py-3 text-[13px] text-slate-600 md:text-[14px]">
                       <button
                         type="button"
                         onClick={(event) => {
@@ -635,7 +614,6 @@ export default function HomeCompressLanding() {
                   </div>
                 </div>
               </div>
-            </div>
           </div>
         </div>
       </section>
@@ -820,12 +798,12 @@ export default function HomeCompressLanding() {
         <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(241,241,241,0))]" />
         <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
           <div className="mx-auto max-w-[980px] text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.sectionEyebrow}</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.heroKicker}</p>
             <h2 className="mt-5 font-sans text-3xl font-semibold leading-tight text-slate-700 md:text-5xl">
-              {copy.sectionTitle}
+              {copy.heroTitle}
             </h2>
             <p className="mx-auto mt-6 max-w-[920px] text-lg leading-8 text-slate-500 md:text-[22px] md:leading-10">
-              {copy.sectionDesc}
+              {copy.heroDesc}
             </p>
           </div>
 
