@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React from "react";
-import { getLang, setLang as persistLang, type Lang } from "@/locales";
+import { getHomeCompressLandingCopy, getLang, setLang as persistLang, type Lang } from "@/locales";
 import { useStore } from "@/stores";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
@@ -145,81 +145,7 @@ export default function HomeCompressLanding() {
   const [lang, setLang] = React.useState<Lang>("zh");
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
-  const isZh = lang === "zh";
-
-  const copy = React.useMemo(
-    () => ({
-      heroKicker: isZh ? "智能图片压缩" : "Smart Image Compression",
-      heroTitle: isZh ? "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF" : "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
-      heroDesc: isZh
-        ? "像 TinyPNG 一样直接开始处理图片，首页完成上传、压缩、下载，尽量减少跳转和流失。"
-        : "Start compressing like TinyPNG: upload, optimize and download from one focused homepage without extra steps.",
-      dropTitle: isZh ? "将图片拖到这里开始压缩" : "Drop your images here!",
-      dropDesc: isZh ? "最多 20 张图片，单张不超过 5 MB" : "Up to 20 images, max 5 MB each.",
-      dropAction: isZh ? "选择图片" : "Select images",
-      autoLabel: isZh ? "上传后自动开始压缩" : "Convert my images automatically",
-      selectAll: isZh ? "全选" : "SELECT ALL",
-      processingTitle: isZh
-        ? "图片正在优化中，请稍等片刻，我们会尽快给出这一批图片更合适的压缩结果。"
-        : "Your images are being processed now. Give us a moment to finish a cleaner, lighter result set.",
-      completedTitle: (savedPercent: number, done: number, totalSaved: string) =>
-        isZh
-          ? `这次压缩共节省 ${savedPercent}% · 已优化 ${done} 张图片 · 共减少 ${totalSaved}`
-          : `Compression finished. Saved ${savedPercent}% across ${done} image${done === 1 ? "" : "s"} with ${totalSaved} reduced in total.`,
-      optimizing: isZh ? "压缩中..." : "Optimizing...",
-      queued: isZh ? "排队中" : "Queued",
-      failed: isZh ? "压缩失败" : "Failed",
-      download: isZh ? "下载" : "Download",
-      downloadZip: isZh ? "打包下载 ZIP" : "Download ZIP",
-      origin: isZh ? "原始大小" : "Original",
-      output: isZh ? "压缩后" : "Compressed",
-      saved: isZh ? "节省" : "Saved",
-      sourceFormat: isZh ? "原格式" : "Source",
-      targetFormat: isZh ? "目标格式" : "Target",
-      transparencyBlocked: isZh
-        ? "原图包含透明图层，不能直接转换为 JPEG"
-        : "The source image contains transparency, so JPEG output is blocked.",
-      unsupportedFormat: isZh ? "当前格式暂不支持" : "This format is not supported yet",
-      features: isZh
-        ? ["更轻的图片结果", "自动选择更优输出格式", "支持 AVIF 压缩"]
-        : ["Lighter image delivery", "Smarter output format selection", "AVIF compression supported"],
-      sectionEyebrow: isZh ? "更快的图片交付" : "Faster image delivery",
-      sectionTitle: isZh ? "为网页、运营素材和内容站点准备的轻量压缩入口" : "A lightweight compression entry for websites, campaigns and content teams",
-      sectionDesc: isZh
-        ? "上传后立即开始处理，自动给出更轻的 PNG、JPEG、WebP 或 AVIF 结果。"
-        : "Start processing immediately after upload and get lighter PNG, JPEG, WebP or AVIF outputs.",
-      cards: isZh
-        ? [
-            {
-              title: "更轻的页面资源",
-              desc: "优先压缩常见网页图片，减少首屏加载压力和带宽消耗。",
-            },
-            {
-              title: "自动挑选更优结果",
-              desc: "按图片内容尝试更合适的输出格式，支持 PNG、JPEG、WebP 和 AVIF。",
-            },
-            {
-              title: "适合批量整理素材",
-              desc: "单张下载和 ZIP 打包都保留，适合一次处理多张图片后集中交付。",
-            },
-          ]
-        : [
-            {
-              title: "Lighter page assets",
-              desc: "Compress common web images to reduce initial load pressure and bandwidth usage.",
-            },
-            {
-              title: "Smarter output selection",
-              desc: "Choose a more suitable output format per image across PNG, JPEG, WebP and AVIF.",
-            },
-            {
-              title: "Ready for batch asset cleanup",
-              desc: "Keep both single-file download and ZIP export for grouped delivery after bulk compression.",
-            },
-          ],
-    }),
-    [isZh],
-  );
+  const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
 
   React.useEffect(() => {
     setLang(getLang());
@@ -230,8 +156,8 @@ export default function HomeCompressLanding() {
   }, [setToken]);
 
   React.useEffect(() => {
-    document.title = isZh ? "图片压缩" : "Image Compression";
-  }, [isZh]);
+    document.title = copy.pageTitle;
+  }, [copy.pageTitle]);
 
   React.useEffect(() => {
     itemsRef.current = items;

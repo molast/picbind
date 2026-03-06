@@ -2,10 +2,9 @@
 
 import zh from "./zh";
 import en from "./en";
-import SystemManager from "@/utils/System";
 
-import type { LocaleType } from "./zh";
-export type { LocaleType, PartialLocaleType } from "./zh";
+import type { HomeCompressLandingCopy, LocaleType } from "./zh";
+export type { HomeCompressLandingCopy, LocaleType, PartialLocaleType } from "./zh";
 
 const ALL_LANGS = {
   zh,
@@ -32,11 +31,13 @@ const DEFAULT_LANG = "zh";
 
 const fallbackLang = zh;
 const targetLang = ALL_LANGS[getLang()] as LocaleType;
+const currentLang = { ...fallbackLang, ...targetLang };
 
-// if target lang missing some fields, it will use fallback lang string
-SystemManager.mergeData(fallbackLang, targetLang);
+export default currentLang as LocaleType;
 
-export default fallbackLang as LocaleType;
+export function getHomeCompressLandingCopy(lang: Lang): HomeCompressLandingCopy {
+  return ALL_LANGS[lang].HomeCompressLanding ?? fallbackLang.HomeCompressLanding;
+}
 
 function getItem(key: string) {
   try {
