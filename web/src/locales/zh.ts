@@ -31,7 +31,7 @@ const zh = {
     pageTitle: "NanoImg-智能压缩 WebP、PNG 和 JPEG 图像",
     heroKicker: "智能图片压缩",
     heroTitle: "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF",
-    heroDesc: "像 TinyPNG 一样直接开始处理图片，首页完成上传、压缩、下载，尽量减少跳转和流失。",
+    heroDesc: "打开首页即可开始处理图片，在同一页面完成上传、压缩和下载，减少操作路径，让交付更高效。",
     dropTitle: "将图片拖到这里开始压缩",
     dropDesc: "最多 20 张图片，单张不超过 5 MB",
     autoLabel: "上传后自动开始压缩",

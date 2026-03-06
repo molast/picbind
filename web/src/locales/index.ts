@@ -27,7 +27,7 @@ export const ALL_LANG_OPTIONS = [
 ];
 
 const LANG_KEY = "ai-translator-lang-v2";
-const DEFAULT_LANG = "zh";
+const DEFAULT_LANG = "en";
 
 const fallbackLang = zh;
 const targetLang = ALL_LANGS[getLang()] as LocaleType;
@@ -53,14 +53,6 @@ function setItem(key: string, value: string) {
   } catch {}
 }
 
-function getLanguage() {
-  try {
-    return navigator.language.toLowerCase();
-  } catch {
-    return DEFAULT_LANG;
-  }
-}
-
 export function getLang(): Lang {
   if (typeof window !== "undefined") {
     let urlLang = new URLSearchParams(window.location.search).get("lang");
@@ -73,13 +65,6 @@ export function getLang(): Lang {
   const savedLang = getItem(LANG_KEY);
   if (AllLangs.includes((savedLang ?? "") as Lang)) {
     return savedLang as Lang;
-  }
-
-  const lang = getLanguage();
-  for (const option of AllLangs) {
-    if (lang.includes(option)) {
-      return option;
-    }
   }
 
   return DEFAULT_LANG;

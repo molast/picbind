@@ -143,7 +143,7 @@ export default function HomeCompressLanding() {
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCompressing, setIsCompressing] = React.useState(false);
-  const [lang, setLang] = React.useState<Lang>("zh");
+  const [lang, setLang] = React.useState<Lang>("en");
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
@@ -452,12 +452,12 @@ export default function HomeCompressLanding() {
 
   return (
     <main className="w-full bg-[#ececec] text-slate-800">
-      <section className="relative overflow-hidden bg-[#78956b]">
+      <section className="relative min-h-[580px] overflow-hidden bg-[#78956b] lg:min-h-[560px]">
         <div className="absolute inset-0 bg-[url('/images/bamboo.avif')] bg-cover bg-left-center bg-no-repeat" />
         <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/bamboo-panda.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
 
-        <div className="relative mx-auto flex min-h-[500px] max-w-[1440px] flex-col px-6 pb-6 pt-4 lg:min-h-[480px] lg:px-10">
+        <div className="relative mx-auto flex min-h-[580px] max-w-[1440px] flex-col px-6 pb-6 pt-4 lg:min-h-[560px] lg:px-10">
           <header className="flex items-center justify-end bg-white/92 px-4 py-2.5 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
             <div className="flex items-center gap-2">
               <button
@@ -477,7 +477,7 @@ export default function HomeCompressLanding() {
             </div>
           </header>
 
-          <div className="relative z-10 flex flex-1 items-center justify-center py-6 lg:py-8">
+          <div className="relative z-10 flex flex-1 items-start justify-center pt-6 lg:pt-8">
             <div className="w-full max-w-[780px]">
                 <div
                   onDragEnter={() => setIsDragging(true)}
@@ -492,7 +492,7 @@ export default function HomeCompressLanding() {
                   <button
                     type="button"
                     onClick={() => inputRef.current?.click()}
-                    className="flex w-full flex-col items-center rounded-[22px] border-[3px] border-dashed border-white/75 px-6 py-8 text-center text-white transition hover:bg-white/5 md:py-9"
+                    className="flex h-[228px] w-full flex-col items-center justify-center rounded-[22px] border-[3px] border-dashed border-white/75 px-6 py-5 text-center text-white transition hover:bg-white/5 md:h-[245px] md:py-6"
                   >
                     <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-3xl shadow-[0_16px_24px_rgba(7,33,79,0.4)]">
                       ⬇
