@@ -27,6 +27,7 @@ export const ALL_LANG_OPTIONS = [
 ];
 
 const LANG_KEY = "ai-translator-lang-v2";
+const LANG_COOKIE_KEY = "nano-img-lang";
 const DEFAULT_LANG = "en";
 
 const fallbackLang = zh;
@@ -53,6 +54,29 @@ function setItem(key: string, value: string) {
   } catch {}
 }
 
+function getCookie(key: string) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const encodedKey = encodeURIComponent(key);
+  const hit = document.cookie
+    .split("; ")
+    .find((item) => item.startsWith(`${encodedKey}=`));
+  if (!hit) {
+    return null;
+  }
+  return decodeURIComponent(hit.slice(encodedKey.length + 1));
+}
+
+function setCookie(key: string, value: string) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const encodedKey = encodeURIComponent(key);
+  const encodedValue = encodeURIComponent(value);
+  document.cookie = `${encodedKey}=${encodedValue}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+
 export function getLang(): Lang {
   if (typeof window !== "undefined") {
     let urlLang = new URLSearchParams(window.location.search).get("lang");
@@ -67,6 +91,11 @@ export function getLang(): Lang {
     return savedLang as Lang;
   }
 
+  const cookieLang = getCookie(LANG_COOKIE_KEY);
+  if (AllLangs.includes((cookieLang ?? "") as Lang)) {
+    return cookieLang as Lang;
+  }
+
   return DEFAULT_LANG;
 }
 
@@ -77,6 +106,7 @@ export function changeLang(lang: Lang | string) {
 
 export function setLang(lang: Lang) {
   setItem(LANG_KEY, lang);
+  setCookie(LANG_COOKIE_KEY, lang);
 }
 
 export function getISOLang() {

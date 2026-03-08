@@ -134,7 +134,11 @@ function formatDeltaPercent(percent?: number) {
   return `${percent}%`;
 }
 
-export default function HomeCompressLanding() {
+type HomeCompressLandingProps = {
+  initialLang?: Lang;
+};
+
+export default function HomeCompressLanding({ initialLang = "en" }: HomeCompressLandingProps) {
   const { setToken } = useStore();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
@@ -143,7 +147,7 @@ export default function HomeCompressLanding() {
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCompressing, setIsCompressing] = React.useState(false);
-  const [lang, setLang] = React.useState<Lang>("en");
+  const [lang, setLang] = React.useState<Lang>(initialLang);
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);

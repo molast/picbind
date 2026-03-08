@@ -7,7 +7,7 @@ const en: LocaleType = {
     heroKicker: "Smart Image Compression",
     heroTitle: "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
     heroDesc:
-      "Start compressing like TinyPNG: upload, optimize and download from one focused homepage without extra steps.",
+      "Upload, optimize, and download in one focused homepage flow with fewer steps and faster delivery.",
     dropTitle: "Drop your images here!",
     dropDesc: "Up to 20 images, max 5 MB each.",
     autoLabel: "Convert my images automatically",
