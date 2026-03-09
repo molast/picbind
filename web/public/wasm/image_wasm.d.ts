@@ -38,6 +38,8 @@ export function compress_image_to_format(input: Uint8Array, quality: number, tar
 
 export function compress_image_to_format_with_options(input: Uint8Array, quality: number, target_format: string, allow_alpha_loss: boolean): CompressionResult;
 
+export function create_zip_from_items(items: Array<any>): Uint8Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -49,6 +51,7 @@ export interface InitOutput {
     readonly compressionresult_bytes: (a: number) => [number, number];
     readonly compressionresult_ext: (a: number) => [number, number];
     readonly compressionresult_mime: (a: number) => [number, number];
+    readonly create_zip_from_items: (a: any) => [number, number, number, number];
     readonly lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_add_text: (a: number, b: number, c: number) => number;
     readonly lodepng_auto_choose_color: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -126,10 +129,12 @@ export interface InitOutput {
     readonly zlib_compress: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly zlib_decompress: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_chunk_next_const: (a: number) => number;
-    readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
-    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }

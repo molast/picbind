@@ -8,6 +8,7 @@ export const compress_image_to_format_with_options: (a: number, b: number, c: nu
 export const compressionresult_bytes: (a: number) => [number, number];
 export const compressionresult_ext: (a: number) => [number, number];
 export const compressionresult_mime: (a: number) => [number, number];
+export const create_zip_from_items: (a: any) => [number, number, number, number];
 export const lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
 export const lodepng_add_text: (a: number, b: number, c: number) => number;
 export const lodepng_auto_choose_color: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -85,9 +86,11 @@ export const lodepng_zlib_decompress: (a: number, b: number, c: number, d: numbe
 export const zlib_compress: (a: number, b: number, c: number, d: number, e: number) => number;
 export const zlib_decompress: (a: number, b: number, c: number, d: number, e: number) => number;
 export const lodepng_chunk_next_const: (a: number) => number;
-export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;
-export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;
 export const __wbindgen_start: () => void;

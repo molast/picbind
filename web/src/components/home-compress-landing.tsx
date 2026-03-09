@@ -9,6 +9,7 @@ import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm
 import type { OutputFormat } from "@/utils/wasm";
 
 const MAX_FILES = 20;
+const MAX_CONCURRENT_COMPRESSIONS = 2;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 type VariantStatus = "queued" | "processing" | "done" | "error";
@@ -32,6 +33,7 @@ type HomeItem = {
   file: File;
   previewUrl: string;
   variants: OutputVariant[];
+  updatedAt: number;
 };
 
 const formatSize = (size: number) => {
@@ -85,15 +87,18 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
 }
 
 function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
+  const now = Date.now();
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`,
     file,
     previewUrl: URL.createObjectURL(file),
+    updatedAt: now,
     variants: ensureVariants(
       {
         id: "",
         file,
         previewUrl: "",
+        updatedAt: now,
         variants: [],
       },
       selectedFormats,
@@ -253,31 +258,24 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
       return;
     }
 
-    setIsCompressing(true);
-    try {
-      while (!isUnmountedRef.current) {
-        const currentItem = itemsRef.current.find((item) =>
-          item.variants.some((variant) => variant.status === "queued"),
-        );
-        const currentVariant = currentItem?.variants.find(
-          (variant) => variant.status === "queued",
-        );
+    const claimed = new Set<string>();
+    const running = new Map<string, Promise<void>>();
 
-        if (!currentItem || !currentVariant) {
-          break;
-        }
-
+    const runOne = (currentItem: HomeItem, currentVariant: OutputVariant) =>
+      (async () => {
+        const startedAt = Date.now();
         setItems((prev) =>
           prev.map((item) =>
             item.id === currentItem.id
               ? {
                   ...item,
+                  updatedAt: startedAt,
                   variants: item.variants.map((variant) =>
                     variant.id === currentVariant.id
                       ? {
                           ...variant,
                           status: "processing",
-                          progress: Math.max(variant.progress, 8),
+                          progress: 0,
                           errorMessage: undefined,
                         }
                       : variant,
@@ -296,7 +294,7 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
             Boolean(currentVariant.allowAlphaLoss),
           );
           if (isUnmountedRef.current) {
-            break;
+            return;
           }
 
           stopFakeProgress(currentItem.id, currentVariant.id);
@@ -306,11 +304,13 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
             ((outputSize - currentItem.file.size) / currentItem.file.size) * 100,
           );
 
+          const doneAt = Date.now();
           setItems((prev) =>
             prev.map((item) =>
               item.id === currentItem.id
                 ? {
                     ...item,
+                    updatedAt: doneAt,
                     variants: item.variants.map((variant) =>
                       variant.id === currentVariant.id
                         ? {
@@ -332,11 +332,13 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
           );
         } catch (error) {
           stopFakeProgress(currentItem.id, currentVariant.id);
+          const failedAt = Date.now();
           setItems((prev) =>
             prev.map((item) =>
               item.id === currentItem.id
                 ? {
                     ...item,
+                    updatedAt: failedAt,
                     variants: item.variants.map((variant) =>
                       variant.id === currentVariant.id
                         ? {
@@ -355,6 +357,43 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
             ),
           );
         }
+      })();
+
+    setIsCompressing(true);
+    try {
+      while (!isUnmountedRef.current) {
+        while (running.size < MAX_CONCURRENT_COMPRESSIONS && !isUnmountedRef.current) {
+          const nextTask = itemsRef.current
+            .flatMap((item) => item.variants.map((variant) => ({ item, variant })))
+            .find(({ item, variant }) => {
+              if (variant.status !== "queued") {
+                return false;
+              }
+              const key = `${item.id}:${variant.id}`;
+              return !claimed.has(key) && !running.has(key);
+            });
+
+          if (!nextTask) {
+            break;
+          }
+
+          const key = `${nextTask.item.id}:${nextTask.variant.id}`;
+          claimed.add(key);
+          const job = runOne(nextTask.item, nextTask.variant).finally(() => {
+            running.delete(key);
+            claimed.delete(key);
+          });
+          running.set(key, job);
+        }
+
+        if (running.size === 0) {
+          break;
+        }
+        await Promise.race(running.values());
+      }
+
+      if (running.size > 0) {
+        await Promise.allSettled(Array.from(running.values()));
       }
     } finally {
       if (!isUnmountedRef.current) {
@@ -374,6 +413,10 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
 
   const completedItems = items.filter((item) =>
     item.variants.some((variant) => variant.status === "done"),
+  );
+  const sortedItems = React.useMemo(
+    () => [...items].sort((a, b) => b.updatedAt - a.updatedAt),
+    [items],
   );
   const completedCount = completedItems.length;
   const totalOriginalSize = completedItems.reduce((sum, item) => sum + item.file.size, 0);
@@ -431,12 +474,14 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
   };
 
   const handleConvertAnyway = React.useCallback((itemId: string, variantId: string) => {
+    const now = Date.now();
     setItems((prev) =>
       prev.map((item) =>
         item.id !== itemId
           ? item
           : {
               ...item,
+              updatedAt: now,
               variants: item.variants.map((variant) =>
                 variant.id === variantId
                   ? {
@@ -606,7 +651,7 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
                   onClick={() =>
                     SystemManager.downloadZip(
                       zipItems,
-                      `compressed-images-${SystemManager.getNowformatTime()}.zip`,
+                      `nanoimg-images-${SystemManager.getNowformatTime()}.zip`,
                     )
                   }
                   className="rounded-xl bg-lime-300 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
@@ -617,9 +662,22 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
             </div>
 
             <div className="bg-[#f3f3f3] text-slate-700">
-              {items.map((item) => {
+              {sortedItems.map((item) => {
                 const bestVariant = getBestDoneVariant(item);
                 const doneVariants = getDoneVariants(item);
+                const activeVariant = getActiveVariant(item);
+                const hasInFlightVariant = item.variants.some(
+                  (variant) => variant.status !== "done" && variant.status !== "error",
+                );
+                const activeProgress = hasInFlightVariant
+                  ? Math.min(
+                      100,
+                      Math.max(
+                        0,
+                        activeVariant?.status === "processing" ? activeVariant.progress : 0,
+                      ),
+                    )
+                  : 100;
                 const rankedVariants = [...item.variants].sort((left, right) => {
                   const leftPercent = left.status === "done" ? left.percent ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
                   const rightPercent = right.status === "done" ? right.percent ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY;
@@ -765,23 +823,21 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
                     </div>
                     <div
                       className={`mt-1.5 overflow-hidden rounded-full ${
-                        item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
+                        hasInFlightVariant
                           ? "h-[4px] bg-[#d7e6c7]"
                           : "h-px bg-[#d4d5d8]"
                       }`}
                     >
                       <div
                         className={`transition-all duration-300 ${
-                          item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
-                            ? "h-[4px] bg-[#8cc63f]"
+                          hasInFlightVariant
+                            ? activeProgress <= 0
+                              ? "h-[4px] bg-[#8cc63f] transition-none"
+                              : "h-[4px] bg-[#8cc63f]"
                             : "h-px bg-[#8b909b]"
                         }`}
                         style={{
-                          width: `${
-                            item.variants.some((variant) => variant.status !== "done" && variant.status !== "error")
-                              ? Math.max(getActiveVariant(item)?.progress ?? 0, 6)
-                              : 100
-                          }%`,
+                          width: `${activeProgress}%`,
                         }}
                       />
                     </div>

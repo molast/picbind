@@ -1,4 +1,5 @@
 use wasm_bindgen::prelude::*;
+use js_sys::{Array, Reflect, Uint8Array};
 
 mod core;
 
@@ -57,4 +58,23 @@ pub fn compress_image_to_format_with_options(
         target_format,
         allow_alpha_loss,
     )
+}
+
+#[wasm_bindgen]
+pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
+    let mut entries = Vec::with_capacity(items.length() as usize);
+
+    for item in items.iter() {
+        let name = Reflect::get(&item, &JsValue::from_str("name"))
+            .map_err(|_| JsValue::from_str("Invalid zip item: missing name"))?
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Invalid zip item: name must be string"))?;
+        let bytes_value = Reflect::get(&item, &JsValue::from_str("bytes"))
+            .map_err(|_| JsValue::from_str("Invalid zip item: missing bytes"))?;
+        let bytes = Uint8Array::new(&bytes_value).to_vec();
+
+        entries.push(core::zip::ZipEntry { name, data: bytes });
+    }
+
+    core::zip::create_zip(entries).map_err(|message| JsValue::from_str(&message))
 }

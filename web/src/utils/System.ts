@@ -1,11 +1,9 @@
+import { initWasm } from "@/utils/wasm-runtime";
+
 type ZipItem = {
   name: string;
   blob: Blob;
 };
-
-function toBlobPart(bytes: Uint8Array) {
-  return new Uint8Array(bytes);
-}
 
 export default class SystemManager {
   static mergeData = (target: any, source: any) => {
@@ -85,151 +83,52 @@ export default class SystemManager {
     }, 300);
   };
 
-  static downloadVideo = (url: string, name?: string) => {
-    fetch(url)
-      .then((response) => response.blob())
-      .then((blob) => {
-        const currentTime = SystemManager.getNowformatTime();
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = name || `result-${currentTime}.mp4`;
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-      })
-      .catch((error) => {
-        console.error("download video failed:", error);
-      });
-  };
-
   static downloadZip = async (items: Array<{ name: string; url: string }>, zipName?: string) => {
     const validItems = items.filter((item) => item.url);
     if (!validItems.length) return;
 
-    const blobs = await Promise.all(
-      validItems.map(async (item) => ({
-        name: item.name,
-        blob: await fetch(item.url).then((response) => response.blob()),
-      })),
-    );
+    try {
+      const blobs = await Promise.all(
+        validItems.map(async (item) => ({
+          name: item.name,
+          blob: await fetch(item.url).then((response) => response.blob()),
+        })),
+      );
 
-    const zipBlob = await SystemManager.createZipBlob(blobs);
-    const link = document.createElement("a");
-    const objectUrl = URL.createObjectURL(zipBlob);
-    link.href = objectUrl;
-    link.download = zipName || `result-${SystemManager.getNowformatTime()}.zip`;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 300);
+      const zipBlob = await SystemManager.createZipBlob(blobs);
+      const link = document.createElement("a");
+      const objectUrl = URL.createObjectURL(zipBlob);
+      link.href = objectUrl;
+      link.download = zipName || `nanoimg-${SystemManager.getNowformatTime()}.zip`;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 300);
+    } catch (error) {
+      console.error("ZIP download failed:", error);
+    }
   };
 
   private static async createZipBlob(items: ZipItem[]) {
-    const encoder = new TextEncoder();
-    const localParts: Uint8Array[] = [];
-    const centralParts: Uint8Array[] = [];
-    let offset = 0;
-
-    for (const item of items) {
-      const data = new Uint8Array(await item.blob.arrayBuffer());
-      const fileName = encoder.encode(item.name);
-      const crc32 = SystemManager.crc32(data);
-      const dosTime = SystemManager.getDosTime();
-      const dosDate = SystemManager.getDosDate();
-
-      const localHeader = new Uint8Array(30 + fileName.length + data.length);
-      const localView = new DataView(localHeader.buffer);
-      let pointer = 0;
-      localView.setUint32(pointer, 0x04034b50, true); pointer += 4;
-      localView.setUint16(pointer, 20, true); pointer += 2;
-      localView.setUint16(pointer, 0, true); pointer += 2;
-      localView.setUint16(pointer, 0, true); pointer += 2;
-      localView.setUint16(pointer, dosTime, true); pointer += 2;
-      localView.setUint16(pointer, dosDate, true); pointer += 2;
-      localView.setUint32(pointer, crc32, true); pointer += 4;
-      localView.setUint32(pointer, data.length, true); pointer += 4;
-      localView.setUint32(pointer, data.length, true); pointer += 4;
-      localView.setUint16(pointer, fileName.length, true); pointer += 2;
-      localView.setUint16(pointer, 0, true); pointer += 2;
-      localHeader.set(fileName, pointer); pointer += fileName.length;
-      localHeader.set(data, pointer);
-      localParts.push(localHeader);
-
-      const centralHeader = new Uint8Array(46 + fileName.length);
-      const centralView = new DataView(centralHeader.buffer);
-      pointer = 0;
-      centralView.setUint32(pointer, 0x02014b50, true); pointer += 4;
-      centralView.setUint16(pointer, 20, true); pointer += 2;
-      centralView.setUint16(pointer, 20, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint16(pointer, dosTime, true); pointer += 2;
-      centralView.setUint16(pointer, dosDate, true); pointer += 2;
-      centralView.setUint32(pointer, crc32, true); pointer += 4;
-      centralView.setUint32(pointer, data.length, true); pointer += 4;
-      centralView.setUint32(pointer, data.length, true); pointer += 4;
-      centralView.setUint16(pointer, fileName.length, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint16(pointer, 0, true); pointer += 2;
-      centralView.setUint32(pointer, 0, true); pointer += 4;
-      centralView.setUint32(pointer, offset, true); pointer += 4;
-      centralHeader.set(fileName, pointer);
-      centralParts.push(centralHeader);
-
-      offset += localHeader.length;
+    const mod = await initWasm();
+    if (!mod || typeof mod.create_zip_from_items !== "function") {
+      throw new Error("WASM module does not expose create_zip_from_items");
     }
 
-    const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-    const end = new Uint8Array(22);
-    const endView = new DataView(end.buffer);
-    let pointer = 0;
-    endView.setUint32(pointer, 0x06054b50, true); pointer += 4;
-    endView.setUint16(pointer, 0, true); pointer += 2;
-    endView.setUint16(pointer, 0, true); pointer += 2;
-    endView.setUint16(pointer, items.length, true); pointer += 2;
-    endView.setUint16(pointer, items.length, true); pointer += 2;
-    endView.setUint32(pointer, centralSize, true); pointer += 4;
-    endView.setUint32(pointer, offset, true); pointer += 4;
-    endView.setUint16(pointer, 0, true);
-
-    return new Blob(
-      [...localParts.map(toBlobPart), ...centralParts.map(toBlobPart), toBlobPart(end)],
-      { type: "application/zip" },
+    const payload = await Promise.all(
+      items.map(async (item) => ({
+        name: item.name,
+        bytes: new Uint8Array(await item.blob.arrayBuffer()),
+      })),
     );
-  }
-
-  private static getDosTime() {
-    const now = new Date();
-    return (now.getHours() << 11) | (now.getMinutes() << 5) | (Math.floor(now.getSeconds() / 2));
-  }
-
-  private static getDosDate() {
-    const now = new Date();
-    return (((now.getFullYear() - 1980) & 0x7f) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-  }
-
-  private static crc32(data: Uint8Array) {
-    let crc = 0 ^ -1;
-    for (let i = 0; i < data.length; i += 1) {
-      crc = (crc >>> 8) ^ SystemManager.crcTable[(crc ^ data[i]) & 0xff];
+    try {
+      const zipBytes = mod.create_zip_from_items(payload) as Uint8Array | ArrayLike<number>;
+      return new Blob([new Uint8Array(zipBytes)], { type: "application/zip" });
+    } catch (error) {
+      throw new Error(
+        `WASM zip creation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-    return (crc ^ -1) >>> 0;
   }
-
-  private static crcTable = (() => {
-    const table = new Uint32Array(256);
-    for (let n = 0; n < 256; n += 1) {
-      let c = n;
-      for (let k = 0; k < 8; k += 1) {
-        c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-      }
-      table[n] = c >>> 0;
-    }
-    return table;
-  })();
 }

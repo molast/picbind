@@ -4,3 +4,4 @@ pub mod jpeg;
 pub mod pipeline;
 pub mod png;
 pub mod quality;
+pub mod zip;
