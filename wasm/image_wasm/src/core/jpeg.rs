@@ -14,7 +14,6 @@ pub fn encode_jpeg_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>
 fn encode_jpeg_from_rgb_image(rgb_img: &RgbImage, quality: u8) -> Result<Vec<u8>, JsValue> {
     let (width, height) = rgb_img.dimensions();
     let raw_pixels = rgb_img.as_raw();
-
     MozJpegEncoder::max_compression()
         .quality(quality)
         .progressive(true)
