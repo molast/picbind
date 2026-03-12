@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React from "react";
+import { ReactCompareSlider, ReactCompareSliderImage } from "react-compare-slider";
 import { getHomeCompressLandingCopy, getLang, setLang as persistLang, type Lang } from "@/locales";
 import {
   flushCompressedCountNow,
@@ -163,8 +164,35 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
+  const [compareSizes, setCompareSizes] = React.useState<{ original: string; compressed: string }>({
+    original: "--",
+    compressed: "--",
+  });
   const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
   const blockedCopy = copy.errorOverlay;
+  const compareCopy = React.useMemo(
+    () =>
+      lang === "zh"
+        ? {
+            kicker: "无明显画质损失的压缩对比",
+            title: "你能看出区别吗？",
+            desc: "拖动中间滑块，查看原图与压缩图的细节差异。",
+            original: "原图",
+            compressed: "压缩后",
+            hintLeft: "暗部细节依然保留",
+            hintRight: "细小纹理仍然清晰",
+          }
+        : {
+            kicker: "Image Comparison",
+            title: "Can you tell the difference?",
+            desc: "Drag the slider to compare original and compressed image quality.",
+            original: "ORIGINAL",
+            compressed: "COMPRESSED",
+            hintLeft: "Darker places stay intact",
+            hintRight: "Tiny details are still there",
+          },
+    [lang],
+  );
 
   React.useEffect(() => {
     setLang(getLang());
@@ -212,6 +240,33 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
   React.useEffect(() => {
     document.title = copy.pageTitle;
   }, [copy.pageTitle]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadSizes = async () => {
+      try {
+        const [originBlob, compressedBlob] = await Promise.all([
+          fetch("/images/moutain.0913afc.png").then((res) => res.blob()),
+          fetch("/images/moutain-compressed.0913afc.jpg").then((res) => res.blob()),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setCompareSizes({
+          original: formatSize(originBlob.size),
+          compressed: formatSize(compressedBlob.size),
+        });
+      } catch {
+        if (!cancelled) {
+          setCompareSizes({ original: "--", compressed: "--" });
+        }
+      }
+    };
+    void loadSizes();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   React.useEffect(() => {
     itemsRef.current = items;
@@ -898,21 +953,6 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
       <section className="relative overflow-hidden bg-[#f1f1f1] py-24">
         <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(241,241,241,0))]" />
         <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
-          <div className="mx-auto flex w-full justify-center">
-            <div
-              className={`inline-flex items-end gap-3 rounded-2xl border border-sky-200/70 bg-white px-8 py-5 shadow-[0_16px_40px_rgba(56,118,185,0.14)] transition-all duration-300 ${
-                isCountBouncing ? "scale-[1.04] shadow-[0_18px_55px_rgba(14,165,233,0.28)]" : ""
-              }`}
-            >
-              <span className="pb-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">
-                {lang === "zh" ? "累计压缩" : "Total Compressed"}
-              </span>
-              <span className="text-5xl font-extrabold leading-none text-slate-700 md:text-6xl">
-                {displayedCompressedCount.toLocaleString()}
-              </span>
-            </div>
-          </div>
-
           <div className="mx-auto max-w-[980px] text-center">
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.heroKicker}</p>
             <h2 className="mt-5 font-sans text-3xl font-semibold leading-tight text-slate-700 md:text-5xl">
@@ -921,6 +961,88 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
             <p className="mx-auto mt-6 max-w-[920px] text-lg leading-8 text-slate-500 md:text-[22px] md:leading-10">
               {copy.heroDesc}
             </p>
+          </div>
+
+          <div className="mx-auto w-full max-w-[1180px] rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_16px_45px_rgba(148,163,184,0.12)] md:p-8">
+            <div className="mx-auto max-w-[820px] text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">{compareCopy.kicker}</p>
+              <h3 className="mt-3 text-3xl font-semibold text-slate-700 md:text-4xl">{compareCopy.title}</h3>
+              <p className="mt-3 text-sm text-slate-500 md:text-base">{compareCopy.desc}</p>
+            </div>
+
+            <div className="relative mt-6">
+              <div className="relative overflow-hidden rounded-[24px] border border-slate-200">
+                <ReactCompareSlider
+                  className="h-[320px] w-full md:h-[520px]"
+                  itemOne={
+                    <ReactCompareSliderImage
+                      src="/images/moutain.0913afc.png"
+                      alt="Original mountain image"
+                      style={{ objectFit: "cover" }}
+                    />
+                  }
+                  itemTwo={
+                    <ReactCompareSliderImage
+                      src="/images/moutain-compressed.0913afc.jpg"
+                      alt="Compressed mountain image"
+                      style={{ objectFit: "cover" }}
+                    />
+                  }
+                  handle={
+                    <div className="flex h-full items-center">
+                      <div className="h-full w-[2px] bg-white/85 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]" />
+                      <div className="-ml-[14px] flex h-7 w-7 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-600 shadow-md">
+                        <>↔</>
+                      </div>
+                    </div>
+                  }
+                />
+                <div className="pointer-events-none absolute bottom-5 left-[13%] text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)]">
+                  <div className="text-sm font-semibold tracking-[0.12em] md:text-base">{compareCopy.original}</div>
+                  <div className="mt-0.5 text-[11px] text-white/90">{compareSizes.original}</div>
+                </div>
+                <div className="pointer-events-none absolute right-[13%] top-10 text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)]">
+                  <div className="text-sm font-semibold tracking-[0.12em] md:text-base">{compareCopy.compressed}</div>
+                  <div className="mt-0.5 text-[11px] text-white/90">{compareSizes.compressed}</div>
+                </div>
+              </div>
+
+              <svg
+                viewBox="0 0 1000 90"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-x-0 top-[79%] z-20 h-[72px] w-full"
+              >
+                <path
+                  d="M300 86 C 308 66, 302 40, 294 8"
+                  fill="none"
+                  stroke="#0ea5e9"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.95"
+                />
+                <path
+                  d="M700 86 C 692 66, 698 40, 706 8"
+                  fill="none"
+                  stroke="#0ea5e9"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.95"
+                />
+                <path d="M287 11 L 294 1 L 301 11" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" />
+                <path d="M699 11 L 706 1 L 713 11" fill="none" stroke="#0ea5e9" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+
+              <div className="relative z-30 mt-12 grid gap-4 text-center text-sky-600 md:grid-cols-2">
+                <p className="mx-auto max-w-[260px] text-base font-medium leading-tight md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
+                  {compareCopy.hintLeft}
+                </p>
+                <p className="mx-auto max-w-[260px] text-base font-medium leading-tight md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
+                  {compareCopy.hintRight}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-6 md:grid-cols-3">
@@ -934,6 +1056,21 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
                 <p className="mt-4 text-base leading-8 text-slate-500">{card.desc}</p>
               </article>
             ))}
+          </div>
+
+          <div className="mx-auto flex w-full justify-center pt-2">
+            <div
+              className={`inline-flex items-end gap-3 rounded-2xl border border-sky-200/70 bg-white px-8 py-5 shadow-[0_16px_40px_rgba(56,118,185,0.14)] transition-all duration-300 ${
+                isCountBouncing ? "scale-[1.04] shadow-[0_18px_55px_rgba(14,165,233,0.28)]" : ""
+              }`}
+            >
+              <span className="pb-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">
+                {lang === "zh" ? "累计压缩" : "Total Compressed"}
+              </span>
+              <span className="text-5xl font-extrabold leading-none text-slate-700 md:text-6xl">
+                {displayedCompressedCount.toLocaleString()}
+              </span>
+            </div>
           </div>
         </div>
       </section>

@@ -2,11 +2,15 @@
 
 const METRICS_ENABLED = process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
 const METRICS_API_PATH = process.env.NEXT_PUBLIC_METRICS_API_PATH || "/api/metrics";
+const MAX_DELTA_PER_REQUEST = 20;
+const FLUSH_DELAY_MS = 1200;
+const MAX_RETRY_DELAY_MS = 15_000;
 
 let pendingCount = 0;
 let flushTimer: number | null = null;
 let flushing = false;
 let totalCompressedCache: number | null = null;
+let retryDelayMs = FLUSH_DELAY_MS;
 
 async function writeCount(delta: number) {
   const response = await fetch(METRICS_API_PATH, {
@@ -42,14 +46,23 @@ async function flushPending() {
 
   try {
     while (pendingCount > 0) {
-      const delta = pendingCount;
-      pendingCount = 0;
+      const delta = Math.min(pendingCount, MAX_DELTA_PER_REQUEST);
+      pendingCount -= delta;
       try {
         const total = await writeCount(delta);
         totalCompressedCache = total;
+        retryDelayMs = FLUSH_DELAY_MS;
       } catch (error) {
         pendingCount += delta;
         console.error("Compression metrics write failed:", error);
+        if (!flushTimer) {
+          const waitMs = retryDelayMs;
+          flushTimer = window.setTimeout(async () => {
+            flushTimer = null;
+            await flushPending();
+          }, waitMs);
+          retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+        }
         break;
       }
     }
@@ -72,7 +85,7 @@ export function reportCompressedCount(delta = 1) {
   flushTimer = window.setTimeout(async () => {
     flushTimer = null;
     await flushPending();
-  }, 1200);
+  }, FLUSH_DELAY_MS);
 }
 
 export async function flushCompressedCountNow() {
