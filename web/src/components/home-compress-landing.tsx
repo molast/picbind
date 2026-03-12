@@ -2,7 +2,11 @@
 
 import React from "react";
 import { getHomeCompressLandingCopy, getLang, setLang as persistLang, type Lang } from "@/locales";
-import { useStore } from "@/stores";
+import {
+  flushCompressedCountNow,
+  loadTotalCompressedCount,
+  reportCompressedCount,
+} from "@/utils/compression-metrics";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
 import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm-worker";
@@ -144,14 +148,17 @@ type HomeCompressLandingProps = {
 };
 
 export default function HomeCompressLanding({ initialLang = "en" }: HomeCompressLandingProps) {
-  const { setToken } = useStore();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
+  const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
   const isUnmountedRef = React.useRef(false);
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCompressing, setIsCompressing] = React.useState(false);
+  const [totalCompressedCount, setTotalCompressedCount] = React.useState(0);
+  const [displayedCompressedCount, setDisplayedCompressedCount] = React.useState(0);
+  const [isCountBouncing, setIsCountBouncing] = React.useState(false);
   const [lang, setLang] = React.useState<Lang>(initialLang);
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>([]);
@@ -161,11 +168,46 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
 
   React.useEffect(() => {
     setLang(getLang());
-    const apiKeyFromEnv = process.env.NEXT_PUBLIC_API_KEY;
-    if (apiKeyFromEnv) {
-      setToken(apiKeyFromEnv);
+    void loadTotalCompressedCount().then((total) => {
+      setTotalCompressedCount(total);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    displayedCountRef.current = displayedCompressedCount;
+  }, [displayedCompressedCount]);
+
+  React.useEffect(() => {
+    const from = displayedCountRef.current;
+    const to = totalCompressedCount;
+    if (from === to) {
+      return;
     }
-  }, [setToken]);
+
+    if (to > from) {
+      setIsCountBouncing(true);
+      const timer = window.setTimeout(() => setIsCountBouncing(false), 320);
+      const startTime = performance.now();
+      const duration = 560;
+      let rafId = 0;
+      const step = (now: number) => {
+        const elapsed = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - (1 - elapsed) * (1 - elapsed);
+        const value = Math.round(from + (to - from) * eased);
+        setDisplayedCompressedCount(value);
+        if (elapsed < 1) {
+          rafId = window.requestAnimationFrame(step);
+        }
+      };
+      rafId = window.requestAnimationFrame(step);
+      return () => {
+        window.clearTimeout(timer);
+        window.cancelAnimationFrame(rafId);
+      };
+    }
+
+    setDisplayedCompressedCount(to);
+  }, [totalCompressedCount]);
 
   React.useEffect(() => {
     document.title = copy.pageTitle;
@@ -180,6 +222,7 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
     return () => {
       const timerMap = timersRef.current;
       isUnmountedRef.current = true;
+      void flushCompressedCountNow();
       Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
       terminateCompressionWorker();
       itemsRef.current.forEach((item) => {
@@ -303,6 +346,8 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
           const percent = Math.round(
             ((outputSize - currentItem.file.size) / currentItem.file.size) * 100,
           );
+          reportCompressedCount(1);
+          setTotalCompressedCount((prev) => prev + 1);
 
           const doneAt = Date.now();
           setItems((prev) =>
@@ -853,6 +898,21 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
       <section className="relative overflow-hidden bg-[#f1f1f1] py-24">
         <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(241,241,241,0))]" />
         <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
+          <div className="mx-auto flex w-full justify-center">
+            <div
+              className={`inline-flex items-end gap-3 rounded-2xl border border-sky-200/70 bg-white px-8 py-5 shadow-[0_16px_40px_rgba(56,118,185,0.14)] transition-all duration-300 ${
+                isCountBouncing ? "scale-[1.04] shadow-[0_18px_55px_rgba(14,165,233,0.28)]" : ""
+              }`}
+            >
+              <span className="pb-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-600">
+                {lang === "zh" ? "累计压缩" : "Total Compressed"}
+              </span>
+              <span className="text-5xl font-extrabold leading-none text-slate-700 md:text-6xl">
+                {displayedCompressedCount.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
           <div className="mx-auto max-w-[980px] text-center">
             <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">{copy.heroKicker}</p>
             <h2 className="mt-5 font-sans text-3xl font-semibold leading-tight text-slate-700 md:text-5xl">

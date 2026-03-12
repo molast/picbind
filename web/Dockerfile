@@ -12,6 +12,8 @@ FROM docker.m.daocloud.io/library/node:20-alpine AS builder
 WORKDIR /app
 ENV NEXT_OUTPUT_MODE=standalone
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_METRICS_ENABLED=true
+ENV NEXT_PUBLIC_METRICS_API_PATH=/api/metrics
 RUN npm config set registry https://registry.npmmirror.com \
   && npm install -g pnpm@10 --registry=https://registry.npmmirror.com \
   && pnpm config set registry https://registry.npmmirror.com
@@ -24,10 +26,13 @@ FROM docker.m.daocloud.io/library/node:20-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_METRICS_ENABLED=true
+ENV NEXT_PUBLIC_METRICS_API_PATH=/api/metrics
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
+RUN mkdir -p /app/.data
 
 EXPOSE 1997
 CMD ["node", "server.js"]

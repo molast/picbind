@@ -3,9 +3,19 @@ version: "3.9"
 services:
   web:
     container_name: pixwasm-web
-    image: registry.cn-shanghai.aliyuncs.com/molast/nano-img:v1.0.4
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: registry.cn-shanghai.aliyuncs.com/molast/nano-img:v1.0.5
     environment:
       - PORT=1997
+      - NEXT_PUBLIC_METRICS_ENABLED=true
+      - NEXT_PUBLIC_METRICS_API_PATH=/api/metrics
     ports:
       - "1997:1997"
+    volumes:
+      - nanoimg_metrics_data:/app/.data
     restart: unless-stopped
+
+volumes:
+  nanoimg_metrics_data:

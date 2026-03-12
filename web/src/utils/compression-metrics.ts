@@ -1,0 +1,103 @@
+"use client";
+
+const METRICS_ENABLED = process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
+const METRICS_API_PATH = process.env.NEXT_PUBLIC_METRICS_API_PATH || "/api/metrics";
+
+let pendingCount = 0;
+let flushTimer: number | null = null;
+let flushing = false;
+let totalCompressedCache: number | null = null;
+
+async function writeCount(delta: number) {
+  const response = await fetch(METRICS_API_PATH, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ delta }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Metrics write failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as { totalCompressed?: number };
+  return Number(data.totalCompressed || 0);
+}
+
+async function readTotalCount() {
+  const response = await fetch(METRICS_API_PATH, { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Metrics read failed with status ${response.status}`);
+  }
+  const data = (await response.json()) as { totalCompressed?: number };
+  return Number(data.totalCompressed || 0);
+}
+
+async function flushPending() {
+  if (flushing) {
+    return;
+  }
+  flushing = true;
+
+  try {
+    while (pendingCount > 0) {
+      const delta = pendingCount;
+      pendingCount = 0;
+      try {
+        const total = await writeCount(delta);
+        totalCompressedCache = total;
+      } catch (error) {
+        pendingCount += delta;
+        console.error("Compression metrics write failed:", error);
+        break;
+      }
+    }
+  } finally {
+    flushing = false;
+  }
+}
+
+export function reportCompressedCount(delta = 1) {
+  if (!METRICS_ENABLED || delta <= 0) {
+    return;
+  }
+
+  pendingCount += delta;
+
+  if (flushTimer) {
+    return;
+  }
+
+  flushTimer = window.setTimeout(async () => {
+    flushTimer = null;
+    await flushPending();
+  }, 1200);
+}
+
+export async function flushCompressedCountNow() {
+  if (!METRICS_ENABLED) {
+    return;
+  }
+  if (flushTimer) {
+    window.clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  await flushPending();
+}
+
+export async function loadTotalCompressedCount() {
+  if (!METRICS_ENABLED) {
+    totalCompressedCache = 0;
+    return 0;
+  }
+
+  try {
+    const total = await readTotalCount();
+    totalCompressedCache = total;
+    return total;
+  } catch (error) {
+    console.error("Compression metrics read failed:", error);
+    return totalCompressedCache ?? 0;
+  }
+}

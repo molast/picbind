@@ -18,25 +18,6 @@
 
 水印加/去
 
-🟡 AI类
-
-背景自动去除
-
-自动抠图
-
-人像增强
-
-AI 批量修图
-
-🟡 高级编辑类
-
-图层叠加
-
-模板设计
-
-文字/字体编辑
-
-路径/矢量工具
 
 🟡 组合型
 
@@ -109,60 +90,22 @@ PDF 转图片 / 图片转 PDF
 | **API 收费**      | 提供图片处理 API（WASM/Server） | 企业集成      |
 | **广告 + 联盟流量**   | 轻量站点放广告                 | 短期收益      |
 
-
-### WASM 环境
-
-- 创建wasm lib
-cargo new image_wasm --lib
-
-- wasm-pack 命令安装
-- wasm-opt
-
-> 下载：https://github.com/WebAssembly/binaryen/releases/download/version_117/binaryen-version_117-x86_64-windows.tar.gz
->
--- 打包
-> wasm-pack build --target web --out-dir ../../web/public/wasm
-
--- 使用
-
-icon 库
-https://remixicon.cn/icon/gallery-fill
-
-```ts
-// 定义wasm 的入口
-"use client";
-
-let cached: any = null;
-
-export async function initWasm() {
-    if (!cached) {
-        try {
-            const mod = await import("@wasm/image_wasm");
-
-            const wasmBinary = await fetch("/wasm/image_wasm_bg.wasm").then(r => r.arrayBuffer());
-            cached = await mod.default({wasmBinary});
-        } catch (err) {
-            console.error("WASM load failed:", err);
-        }
-    }
-    return cached;
-}
+### 文案
+-- 跟tinyPNG 体现出差异化，不需要上传服务器
 ```
+SEO 
 
-```ts
-// 使用处
-const [wasm, setWasm] = useState<any>(null);
-const [loading, setLoading] = useState(false);
+image compressor
+compress image online
+png compressor
 
-useEffect(() => {
-    initWasm().then(setWasm);
-}, []);
+Free Image Compressor
 
-if (!wasm) return;
+Compress PNG, JPG, WebP and AVIF images online.
+Reduce file size while keeping image quality.
 
-setLoading(true);
-
-const resp = wasm.xxxxxxx(aaa, bbb);    // wasm方法调用
-
-setLoading(false);
+✔ Batch compress up to 20 images
+✔ Convert images automatically
+✔ Supports PNG, JPEG, WebP and AVIF
+✔ Download individually or as ZIP
 ```
