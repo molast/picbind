@@ -37,6 +37,14 @@ pub fn compress_image(input: &[u8], quality: u8) -> Result<CompressionResult, Js
 }
 
 #[wasm_bindgen]
+pub fn compress_png_with_deflate(
+    input: &[u8],
+    compression_level: u8,
+) -> Result<CompressionResult, JsValue> {
+    core::pipeline::compress_png_with_deflate(input, compression_level)
+}
+
+#[wasm_bindgen]
 pub fn compress_image_to_format(
     input: &[u8],
     quality: u8,

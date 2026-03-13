@@ -136,6 +136,21 @@ export function compress_image_to_format_with_options(input, quality, target_for
 }
 
 /**
+ * @param {Uint8Array} input
+ * @param {number} compression_level
+ * @returns {CompressionResult}
+ */
+export function compress_png_with_deflate(input, compression_level) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_png_with_deflate(ptr0, len0, compression_level);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
  * @param {Array<any>} items
  * @returns {Uint8Array}
  */

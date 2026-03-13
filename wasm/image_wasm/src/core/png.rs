@@ -1,7 +1,23 @@
 use image::DynamicImage;
 use imagequant::{Attributes as ImageQuant, RGBA as QuantRgba};
-use lodepng::{Encoder as LodePngEncoder, RGBA};
+use lodepng::{Encoder as LodePngEncoder, FilterStrategy, RGBA};
 use wasm_bindgen::JsValue;
+
+pub fn encode_deflated_png_from_image(
+    img: &DynamicImage,
+    compression_level: u8,
+) -> Result<Vec<u8>, JsValue> {
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+
+    let mut encoder = LodePngEncoder::new();
+    encoder.set_auto_convert(true);
+    encoder.set_filter_strategy(FilterStrategy::BRUTE_FORCE, false);
+    encoder.settings_mut().set_level(compression_level.min(9));
+    encoder
+        .encode(rgba.as_raw(), width as usize, height as usize)
+        .map_err(|e| JsValue::from_str(&format!("PNG deflate encode failed: {}", e)))
+}
 
 pub fn encode_quantized_png_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, JsValue> {
     let rgba = img.to_rgba8();

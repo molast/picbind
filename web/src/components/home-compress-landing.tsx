@@ -8,6 +8,7 @@ import {
   loadTotalCompressedCount,
   reportCompressedCount,
 } from "@/utils/compression-metrics";
+import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
 import { compressWithWasmWorker, terminateCompressionWorker } from "@/utils/wasm-worker";
@@ -16,6 +17,8 @@ import type { OutputFormat } from "@/utils/wasm";
 const MAX_FILES = 20;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
+const COMPARE_IMAGE_SOURCE_NAME = "compare-original.png";
 
 type VariantStatus = "queued" | "processing" | "done" | "error";
 
@@ -153,6 +156,7 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
   const itemsRef = React.useRef<HomeItem[]>([]);
   const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
+  const compareCompressedUrlRef = React.useRef<string | null>(null);
   const isUnmountedRef = React.useRef(false);
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -168,6 +172,7 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
     original: "--",
     compressed: "--",
   });
+  const [compareCompressedSrc, setCompareCompressedSrc] = React.useState(COMPARE_IMAGE_SOURCE_PATH);
   const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
   const blockedCopy = copy.errorOverlay;
   const compareCopy = React.useMemo(
@@ -243,28 +248,41 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
 
   React.useEffect(() => {
     let cancelled = false;
-    const loadSizes = async () => {
+    const buildCompareImage = async () => {
       try {
-        const [originBlob, compressedBlob] = await Promise.all([
-          fetch("/images/moutain.0913afc.png").then((res) => res.blob()),
-          fetch("/images/moutain-compressed.0913afc.jpg").then((res) => res.blob()),
-        ]);
+        const originBlob = await fetch(COMPARE_IMAGE_SOURCE_PATH).then((res) => res.blob());
+        const sourceFile = new File([originBlob], COMPARE_IMAGE_SOURCE_NAME, { type: "image/png" });
+        const compressed = await compressWithWasmWorker(sourceFile, 80, "jpeg", false);
+
         if (cancelled) {
           return;
         }
+
+        if (compareCompressedUrlRef.current?.startsWith("blob:")) {
+          URL.revokeObjectURL(compareCompressedUrlRef.current);
+        }
+        const compressedUrl = URL.createObjectURL(compressed.blob);
+        compareCompressedUrlRef.current = compressedUrl;
+        setCompareCompressedSrc(compressedUrl);
         setCompareSizes({
-          original: formatSize(originBlob.size),
-          compressed: formatSize(compressedBlob.size),
+          original: formatSize(sourceFile.size),
+          compressed: formatSize(compressed.blob.size),
         });
-      } catch {
+      } catch (error) {
+        console.error("Compare image compression failed:", error);
         if (!cancelled) {
           setCompareSizes({ original: "--", compressed: "--" });
+          setCompareCompressedSrc(COMPARE_IMAGE_SOURCE_PATH);
         }
       }
     };
-    void loadSizes();
+    void buildCompareImage();
     return () => {
       cancelled = true;
+      if (compareCompressedUrlRef.current?.startsWith("blob:")) {
+        URL.revokeObjectURL(compareCompressedUrlRef.current);
+        compareCompressedUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -532,7 +550,10 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
   const zipItems = completedItems.flatMap((item) =>
     item.variants
       .filter((variant) => variant.status === "done" && variant.outputUrl && variant.outputName)
-      .map((variant) => ({ name: variant.outputName!, url: variant.outputUrl! })),
+      .map((variant) => ({
+        name: buildZipEntryFileName(variant.outputName!),
+        url: variant.outputUrl!,
+      })),
   );
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
@@ -976,14 +997,14 @@ export default function HomeCompressLanding({ initialLang = "en" }: HomeCompress
                   className="h-[320px] w-full md:h-[520px]"
                   itemOne={
                     <ReactCompareSliderImage
-                      src="/images/moutain.0913afc.png"
+                      src={COMPARE_IMAGE_SOURCE_PATH}
                       alt="Original mountain image"
                       style={{ objectFit: "cover" }}
                     />
                   }
                   itemTwo={
                     <ReactCompareSliderImage
-                      src="/images/moutain-compressed.0913afc.jpg"
+                      src={compareCompressedSrc}
                       alt="Compressed mountain image"
                       style={{ objectFit: "cover" }}
                     />

@@ -38,6 +38,8 @@ export function compress_image_to_format(input: Uint8Array, quality: number, tar
 
 export function compress_image_to_format_with_options(input: Uint8Array, quality: number, target_format: string, allow_alpha_loss: boolean): CompressionResult;
 
+export function compress_png_with_deflate(input: Uint8Array, compression_level: number): CompressionResult;
+
 export function create_zip_from_items(items: Array<any>): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -48,6 +50,7 @@ export interface InitOutput {
     readonly compress_image: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly compress_png_with_deflate: (a: number, b: number, c: number) => [number, number, number];
     readonly compressionresult_bytes: (a: number) => [number, number];
     readonly compressionresult_ext: (a: number) => [number, number];
     readonly compressionresult_mime: (a: number) => [number, number];

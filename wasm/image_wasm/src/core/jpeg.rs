@@ -14,10 +14,18 @@ pub fn encode_jpeg_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>
 fn encode_jpeg_from_rgb_image(rgb_img: &RgbImage, quality: u8) -> Result<Vec<u8>, JsValue> {
     let (width, height) = rgb_img.dimensions();
     let raw_pixels = rgb_img.as_raw();
+    let subsampling = if quality >= 96 {
+        Subsampling::S444
+    } else if quality >= 90 {
+        Subsampling::S422
+    } else {
+        Subsampling::S420
+    };
+
     MozJpegEncoder::max_compression()
         .quality(quality)
         .progressive(true)
-        .subsampling(Subsampling::S420)
+        .subsampling(subsampling)
         .optimize_huffman(true)
         .encode_rgb(raw_pixels, width, height)
         .map_err(|e| JsValue::from_str(&format!("JPEG encode failed: {}", e)))

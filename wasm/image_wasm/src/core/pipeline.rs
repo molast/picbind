@@ -9,6 +9,22 @@ pub fn compress_image(input: &[u8], quality: u8) -> Result<CompressionResult, Js
     auto::compress_image_auto(input, quality)
 }
 
+pub fn compress_png_with_deflate(
+    input: &[u8],
+    compression_level: u8,
+) -> Result<CompressionResult, JsValue> {
+    let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let img = image::load_from_memory_with_format(input, format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let bytes = super::png::encode_deflated_png_from_image(&img, compression_level)?;
+
+    Ok(CompressionResult {
+        bytes,
+        mime: "image/png".to_string(),
+        ext: "png".to_string(),
+    })
+}
+
 pub fn compress_image_to_format(
     input: &[u8],
     quality: u8,

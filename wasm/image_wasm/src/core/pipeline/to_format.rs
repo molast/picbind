@@ -9,12 +9,15 @@ use super::super::{
     jpeg::{encode_jpeg_from_image, encode_jpeg_from_image_with_white_background, is_opaque},
     png::encode_quantized_png_from_image,
     quality::{
-        avif_bit_depth_for_pixels, avif_quality_candidates, avif_speed_for_pixels, quality_candidates,
+        avif_bit_depth_for_pixels, avif_quality_candidates, avif_speed_for_pixels,
+        png_to_jpeg_quality_candidates, quality_candidates,
     },
 };
 
 fn encode_candidate_for_format(
     img: &DynamicImage,
+    input_len: usize,
+    source_format: image::ImageFormat,
     target_format: &str,
     quality: u8,
     allow_alpha_loss: bool,
@@ -27,8 +30,18 @@ fn encode_candidate_for_format(
                 ));
             }
 
+            let is_png_to_jpeg = source_format == image::ImageFormat::Png;
             let mut best_bytes: Option<Vec<u8>> = None;
-            for candidate_quality in quality_candidates(quality).into_iter().filter(|q| *q >= 35) {
+            let candidate_qualities: Vec<u8> = if is_png_to_jpeg {
+                png_to_jpeg_quality_candidates(img, quality, input_len)
+            } else {
+                quality_candidates(quality)
+                    .into_iter()
+                    .filter(|q| *q >= 35)
+                    .collect()
+            };
+
+            for candidate_quality in candidate_qualities {
                 let encoded = if allow_alpha_loss {
                     encode_jpeg_from_image_with_white_background(img, candidate_quality)
                 } else {
@@ -118,6 +131,8 @@ pub fn compress_image_to_target_format(
 
     let candidate = encode_candidate_for_format(
         &img,
+        input.len(),
+        format,
         &target_format.to_ascii_lowercase(),
         quality,
         allow_alpha_loss,
