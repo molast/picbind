@@ -136,7 +136,7 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   );
   const missingVariants = wantedFormats
     .filter((format) => !existingFormats.has(format))
-    .map(createVariant);
+    .map((format) => createVariant(format));
 
   if (!missingVariants.length) {
     return item;
@@ -936,32 +936,32 @@ export default function HomeCompressLanding({
 
   return (
     <main className="w-full bg-[#ececec] text-slate-800">
-      <section className="relative min-h-[580px] overflow-hidden bg-[#78956b] lg:min-h-[560px]">
+      <section className="relative min-h-[470px] overflow-hidden bg-[#78956b] sm:min-h-[520px] lg:min-h-[560px]">
         <div className="absolute inset-0 bg-[url('/images/bamboo.avif')] bg-cover bg-left-center bg-no-repeat" />
         <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/bamboo-panda.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
 
-        <div className="relative mx-auto flex min-h-[580px] max-w-[1440px] flex-col px-6 pb-6 pt-4 lg:min-h-[560px] lg:px-10">
-          <header className="flex items-center justify-end bg-white/92 px-4 py-2.5 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur md:px-6">
+        <div className="relative mx-auto flex min-h-[470px] max-w-[1440px] flex-col px-4 pb-5 pt-3 sm:min-h-[520px] sm:px-6 sm:pb-6 sm:pt-4 lg:min-h-[560px] lg:px-10">
+          <header className="flex items-center justify-end bg-white/92 px-3 py-2 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur sm:px-4 sm:py-2.5 md:px-6">
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleSwitchLang("zh")}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${lang === "zh" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition sm:text-xs ${lang === "zh" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
               >
                 中文
               </button>
               <button
                 type="button"
                 onClick={() => handleSwitchLang("en")}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${lang === "en" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition sm:text-xs ${lang === "en" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
               >
                 EN
               </button>
             </div>
           </header>
 
-          <div className="relative z-10 flex flex-1 items-start justify-center pt-6 lg:pt-8">
+          <div className="relative z-10 flex flex-1 items-start justify-center pt-4 sm:pt-6 lg:pt-8">
             <div className="w-full max-w-[780px]">
               <div
                 onDragEnter={() => setIsDragging(true)}
@@ -971,25 +971,25 @@ export default function HomeCompressLanding({
                 }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
-                className={`mx-auto w-full rounded-[26px] bg-[rgba(108,119,95,0.78)] p-3.5 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition md:p-4 ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
+                className={`mx-auto w-full rounded-[24px] bg-[rgba(108,119,95,0.78)] p-3 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition sm:rounded-[26px] sm:p-3.5 md:p-4 ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
               >
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
-                  className="flex h-[228px] w-full flex-col items-center justify-center rounded-[22px] border-[3px] border-dashed border-white/75 px-6 py-5 text-center text-white transition hover:bg-white/5 md:h-[245px] md:py-6"
+                  className="flex h-[172px] w-full flex-col items-center justify-center rounded-[20px] border-[3px] border-dashed border-white/75 px-4 py-4 text-center text-white transition hover:bg-white/5 sm:h-[205px] sm:px-6 sm:py-5 md:h-[245px] md:py-6"
                 >
-                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-3xl shadow-[0_16px_24px_rgba(7,33,79,0.4)]">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[16px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-[28px] shadow-[0_16px_24px_rgba(7,33,79,0.4)] sm:mb-4 sm:h-14 sm:w-14 sm:rounded-[18px] sm:text-3xl">
                     ⬇
                   </div>
-                  <h2 className="text-[20px] font-semibold leading-none md:text-[22px]">
+                  <h2 className="text-[16px] font-semibold leading-tight sm:text-[19px] md:text-[22px]">
                     {copy.dropTitle}
                   </h2>
-                  <p className="mt-3 text-[13px] font-medium text-white/85 md:text-[14px]">
+                  <p className="mt-2 text-[11px] font-medium text-white/85 sm:mt-3 sm:text-[13px] md:text-[14px]">
                     {copy.dropDesc}
                   </p>
                 </button>
-                <div className="mt-3 overflow-hidden rounded-[20px] bg-[rgba(246,246,243,0.96)]">
-                  <div className="flex items-center gap-3 px-5 py-3 text-[13px] text-slate-600 md:text-[14px]">
+                <div className="mt-3 overflow-hidden rounded-[18px] bg-[rgba(246,246,243,0.96)] sm:rounded-[20px]">
+                  <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-slate-600 sm:px-5 sm:text-[13px] md:text-[14px]">
                     <button
                       type="button"
                       onClick={(event) => {
@@ -1012,12 +1012,12 @@ export default function HomeCompressLanding({
                   <div
                     className={`overflow-hidden bg-[#edf0e4] transition-all duration-200 ${
                       showFormatOptions
-                        ? "max-h-24 border-t border-[#e2e6d8]"
+                        ? "max-h-40 border-t border-[#e2e6d8] sm:max-h-24"
                         : "max-h-0 border-t-0"
                     }`}
                   >
                     <div
-                      className={`flex min-h-[60px] flex-wrap items-center gap-2 px-4 py-3 transition-opacity duration-150 md:flex-nowrap ${
+                      className={`flex min-h-[60px] flex-wrap items-center gap-2 px-3 py-3 transition-opacity duration-150 sm:px-4 md:flex-nowrap ${
                         showFormatOptions
                           ? "opacity-100"
                           : "pointer-events-none opacity-0"
@@ -1440,38 +1440,38 @@ export default function HomeCompressLanding({
         </section>
       )}
 
-      <section className="relative overflow-hidden bg-[#f1f1f1] py-24">
+      <section className="relative overflow-hidden bg-[#f1f1f1] py-16 sm:py-20 md:py-24">
         <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(241,241,241,0))]" />
-        <div className="mx-auto flex max-w-[1180px] flex-col gap-14 px-6 lg:px-10">
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-10 px-4 sm:gap-12 sm:px-6 lg:gap-14 lg:px-10">
           <div className="mx-auto max-w-[980px] text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-600">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-600 sm:text-sm sm:tracking-[0.28em]">
               {copy.heroKicker}
             </p>
-            <h2 className="mt-5 font-sans text-3xl font-semibold leading-tight text-slate-700 md:text-5xl">
+            <h2 className="mt-4 font-sans text-[32px] font-semibold leading-[1.08] text-slate-700 sm:mt-5 sm:text-[42px] md:text-5xl">
               {copy.heroTitle}
             </h2>
-            <p className="mx-auto mt-6 max-w-[920px] text-lg leading-8 text-slate-500 md:text-[22px] md:leading-10">
+            <p className="mx-auto mt-4 max-w-[920px] text-[15px] leading-7 text-slate-500 sm:mt-5 sm:text-[17px] sm:leading-8 md:mt-6 md:text-[22px] md:leading-10">
               {copy.heroDesc}
             </p>
           </div>
 
-          <div className="mx-auto w-full max-w-[1180px] rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_16px_45px_rgba(148,163,184,0.12)] md:p-8">
+          <div className="mx-auto w-full max-w-[1180px] rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_45px_rgba(148,163,184,0.12)] sm:rounded-[28px] sm:p-5 md:p-8">
             <div className="mx-auto max-w-[820px] text-center">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-600">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-600 sm:text-xs sm:tracking-[0.24em]">
                 {compareCopy.kicker}
               </p>
-              <h3 className="mt-3 text-3xl font-semibold text-slate-700 md:text-4xl">
+              <h3 className="mt-3 text-[26px] font-semibold leading-tight text-slate-700 sm:text-3xl md:text-4xl">
                 {compareCopy.title}
               </h3>
-              <p className="mt-3 text-sm text-slate-500 md:text-base">
+              <p className="mt-3 text-[13px] leading-6 text-slate-500 sm:text-sm md:text-base">
                 {compareCopy.desc}
               </p>
             </div>
 
-            <div className="relative mt-6">
+            <div className="relative mt-5 sm:mt-6">
               <div className="relative overflow-hidden rounded-[24px] border border-slate-200">
                 <ReactCompareSlider
-                  className="h-[320px] w-full md:h-[520px]"
+                  className="h-[265px] w-full sm:h-[360px] md:h-[520px]"
                   itemOne={
                     <ReactCompareSliderImage
                       src={COMPARE_IMAGE_SOURCE_PATH}
@@ -1495,19 +1495,19 @@ export default function HomeCompressLanding({
                     </div>
                   }
                 />
-                <div className="pointer-events-none absolute bottom-5 left-[13%] text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)]">
-                  <div className="text-sm font-semibold tracking-[0.12em] md:text-base">
+                <div className="pointer-events-none absolute bottom-4 left-[9%] text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)] sm:bottom-5 sm:left-[13%]">
+                  <div className="text-[10px] font-semibold tracking-[0.12em] sm:text-sm md:text-base">
                     {compareCopy.original}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-white/90">
+                  <div className="mt-0.5 text-[10px] text-white/90 sm:text-[11px]">
                     {compareSizes.original}
                   </div>
                 </div>
-                <div className="pointer-events-none absolute right-[13%] top-10 text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)]">
-                  <div className="text-sm font-semibold tracking-[0.12em] md:text-base">
+                <div className="pointer-events-none absolute right-[9%] top-6 text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)] sm:right-[13%] sm:top-10">
+                  <div className="text-[10px] font-semibold tracking-[0.12em] sm:text-sm md:text-base">
                     {compareCopy.compressed}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-white/90">
+                  <div className="mt-0.5 text-[10px] text-white/90 sm:text-[11px]">
                     {compareSizes.compressed}
                   </div>
                 </div>
@@ -1516,10 +1516,10 @@ export default function HomeCompressLanding({
               <svg
                 viewBox="0 0 1000 90"
                 preserveAspectRatio="none"
-                className="pointer-events-none absolute inset-x-0 top-[79%] z-20 h-[72px] w-full"
+                className="pointer-events-none absolute inset-x-0 top-[77%] z-20 h-[44px] w-full sm:top-[79%] sm:h-[72px]"
               >
                 <path
-                  d="M300 86 C 308 66, 302 40, 294 8"
+                  d="M300 86 C 306 68, 301 44, 297 20"
                   fill="none"
                   stroke="#0ea5e9"
                   strokeWidth="3"
@@ -1528,7 +1528,7 @@ export default function HomeCompressLanding({
                   opacity="0.95"
                 />
                 <path
-                  d="M700 86 C 692 66, 698 40, 706 8"
+                  d="M700 86 C 694 68, 699 44, 703 20"
                   fill="none"
                   stroke="#0ea5e9"
                   strokeWidth="3"
@@ -1537,14 +1537,14 @@ export default function HomeCompressLanding({
                   opacity="0.95"
                 />
                 <path
-                  d="M287 11 L 294 1 L 301 11"
+                  d="M290 24 L 297 14 L 304 24"
                   fill="none"
                   stroke="#0ea5e9"
                   strokeWidth="3"
                   strokeLinecap="round"
                 />
                 <path
-                  d="M699 11 L 706 1 L 713 11"
+                  d="M696 24 L 703 14 L 710 24"
                   fill="none"
                   stroke="#0ea5e9"
                   strokeWidth="3"
@@ -1552,11 +1552,11 @@ export default function HomeCompressLanding({
                 />
               </svg>
 
-              <div className="relative z-30 mt-12 grid gap-4 text-center text-sky-600 md:grid-cols-2">
-                <p className="mx-auto max-w-[260px] text-base font-medium leading-tight md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
+              <div className="relative z-30 mt-16 grid grid-cols-2 gap-4 text-center text-sky-600 sm:mt-12 md:grid-cols-2">
+                <p className="mx-auto max-w-[150px] text-[11px] font-medium leading-tight sm:max-w-[260px] sm:text-base md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
                   {compareCopy.hintLeft}
                 </p>
-                <p className="mx-auto max-w-[260px] text-base font-medium leading-tight md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
+                <p className="mx-auto max-w-[150px] text-[11px] font-medium leading-tight sm:max-w-[260px] sm:text-base md:text-2xl [font-family:'Comic_Sans_MS','Marker_Felt','Bradley_Hand',cursive]">
                   {compareCopy.hintRight}
                 </p>
               </div>
