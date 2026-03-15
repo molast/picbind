@@ -23,6 +23,15 @@ export type HomeCompressLandingCopy = {
     lineGeneric: string;
     convertAnyway: string;
   };
+  metricsOverlay: {
+    title: string;
+    qualityScore: string;
+    ssim: string;
+    msSsim: string;
+    edgeRetention: string;
+    blurLoss: string;
+    loading: string;
+  };
 };
 
 const zh = {
@@ -65,6 +74,15 @@ const zh = {
       lineTransparencyDetail: "你仍可继续转换，但透明背景会替换为白色。",
       lineGeneric: "这张图转换为 JPEG 失败。",
       convertAnyway: "仍然转换",
+    },
+    metricsOverlay: {
+      title: "压缩质量对比",
+      qualityScore: "综合质量",
+      ssim: "结构相似度",
+      msSsim: "多尺度 SSIM",
+      edgeRetention: "边缘保留",
+      blurLoss: "模糊损失",
+      loading: "分析中...",
     },
   } as HomeCompressLandingCopy,
 };

@@ -7,6 +7,40 @@ import { initWasm } from "@/utils/wasm-runtime";
 export type { OutputFormat };
 export { buildCompressedFileName, initWasm };
 
+export type ImageQualityComparison = {
+  width: number;
+  height: number;
+  ssim: number;
+  msSsim: number;
+  edgeRetention: number;
+  blurLossPercent: number;
+  overallQualityScore: number;
+  originalEdgeEnergy: number;
+  compressedEdgeEnergy: number;
+  originalLaplacianVariance: number;
+  compressedLaplacianVariance: number;
+};
+
+export type ImageAnalysisMetrics = {
+  width: number;
+  height: number;
+  pixelCount: number;
+  sourceSizeBytes: number;
+  sourceSizeMb: number;
+  sourceFormat: string;
+  hasAlpha: boolean;
+  alphaRatio: number;
+  sampleStride: number;
+  sampleCount: number;
+  edgeStrength: number;
+  brightnessVariance: number;
+  colorComplexity: number;
+  detailCoverage: number;
+  flatCoverage: number;
+  complexityScore: number;
+  compressibilityScore: number;
+};
+
 export async function compressWithWasm(
   file: File,
   quality = 80,
@@ -14,4 +48,30 @@ export async function compressWithWasm(
   allowAlphaLoss = false,
 ) {
   return compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
+}
+
+export async function compareImageQuality(
+  original: Blob | File,
+  compressed: Blob | File,
+): Promise<ImageQualityComparison> {
+  const mod = await initWasm();
+  if (!mod || typeof mod.compare_image_quality !== "function") {
+    throw new Error("WASM module does not expose compare_image_quality");
+  }
+
+  const originalBytes = new Uint8Array(await original.arrayBuffer());
+  const compressedBytes = new Uint8Array(await compressed.arrayBuffer());
+  return mod.compare_image_quality(originalBytes, compressedBytes) as ImageQualityComparison;
+}
+
+export async function analyzeImageMetrics(
+  input: Blob | File,
+): Promise<ImageAnalysisMetrics> {
+  const mod = await initWasm();
+  if (!mod || typeof mod.analyze_image_metrics !== "function") {
+    throw new Error("WASM module does not expose analyze_image_metrics");
+  }
+
+  const bytes = new Uint8Array(await input.arrayBuffer());
+  return mod.analyze_image_metrics(bytes) as ImageAnalysisMetrics;
 }

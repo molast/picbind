@@ -8,9 +8,9 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 pub struct CompressionResult {
-    bytes: Vec<u8>,
-    mime: String,
-    ext: String,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) mime: String,
+    pub(crate) ext: String,
 }
 
 #[wasm_bindgen]
@@ -85,4 +85,14 @@ pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
     }
 
     core::zip::create_zip(entries).map_err(|message| JsValue::from_str(&message))
+}
+
+#[wasm_bindgen]
+pub fn compare_image_quality(original_input: &[u8], compressed_input: &[u8]) -> Result<JsValue, JsValue> {
+    core::metrics::compare_image_quality(original_input, compressed_input)?.to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn analyze_image_metrics(input: &[u8]) -> Result<JsValue, JsValue> {
+    core::analysis::analyze_image_metrics(input)?.to_js_value()
 }

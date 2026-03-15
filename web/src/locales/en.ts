@@ -43,6 +43,15 @@ const en: LocaleType = {
       lineGeneric: "JPEG conversion failed for this image.",
       convertAnyway: "Convert anyway",
     },
+    metricsOverlay: {
+      title: "Compression Quality",
+      qualityScore: "Quality score",
+      ssim: "SSIM",
+      msSsim: "MS-SSIM",
+      edgeRetention: "Edge retention",
+      blurLoss: "Blur loss",
+      loading: "Analyzing...",
+    },
   } as HomeCompressLandingCopy,
 };
 

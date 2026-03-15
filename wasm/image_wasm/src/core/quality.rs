@@ -1,6 +1,8 @@
 use image::DynamicImage;
 use ravif::BitDepth as RavifBitDepth;
 
+use super::analysis::analyze_dynamic_image;
+
 const PNG_TO_JPEG_MIN_QUALITY_FLOOR: u8 = 80;
 
 pub fn quality_candidates(quality: u8) -> [u8; 5] {
@@ -18,103 +20,15 @@ pub fn png_to_jpeg_quality_candidates(
     requested_quality: u8,
     source_size_bytes: usize,
 ) -> Vec<u8> {
-    let rgb = img.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    let pixel_count = (width as usize) * (height as usize);
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "png");
+    let width = analysis.width;
+    let height = analysis.height;
+    let pixel_count = analysis.pixel_count;
     if width < 2 || height < 2 {
         return vec![requested_quality.max(95), requested_quality.max(93)];
     }
-
-    // Sample the image on a coarse grid to estimate how much detail and color variation it contains.
-    let stride = ((width.max(height) / 320).max(1)) as usize;
-    let mut sample_count = 0usize;
-    let mut luminance_sum = 0.0f64;
-    let mut luminance_sq_sum = 0.0f64;
-    let mut edge_sum = 0.0f64;
-    let mut color_sum = 0.0f64;
-    let mut detail_samples = 0usize;
-    let mut flat_samples = 0usize;
-
-    let to_luma = |r: u8, g: u8, b: u8| -> f64 {
-        0.2126 * (r as f64) + 0.7152 * (g as f64) + 0.0722 * (b as f64)
-    };
-
-    for y in (0..height as usize).step_by(stride) {
-        for x in (0..width as usize).step_by(stride) {
-            let current = rgb.get_pixel(x as u32, y as u32).0;
-            let luma = to_luma(current[0], current[1], current[2]);
-            luminance_sum += luma;
-            luminance_sq_sum += luma * luma;
-            color_sum += ((current[0] as f64 - current[1] as f64).abs()
-                + (current[1] as f64 - current[2] as f64).abs()
-                + (current[0] as f64 - current[2] as f64).abs())
-                / 3.0;
-
-            let mut local_edge = 0.0f64;
-            if x + stride < width as usize {
-                let right = rgb.get_pixel((x + stride) as u32, y as u32).0;
-                let right_luma = to_luma(right[0], right[1], right[2]);
-                let delta = (luma - right_luma).abs();
-                edge_sum += delta;
-                local_edge += delta;
-            }
-            if y + stride < height as usize {
-                let bottom = rgb.get_pixel(x as u32, (y + stride) as u32).0;
-                let bottom_luma = to_luma(bottom[0], bottom[1], bottom[2]);
-                let delta = (luma - bottom_luma).abs();
-                edge_sum += delta;
-                local_edge += delta;
-            }
-
-            let local_color = ((current[0] as f64 - current[1] as f64).abs()
-                + (current[1] as f64 - current[2] as f64).abs()
-                + (current[0] as f64 - current[2] as f64).abs())
-                / 3.0;
-
-            if local_edge >= 22.0 || (local_edge >= 14.0 && local_color >= 18.0) {
-                detail_samples += 1;
-            } else if local_edge <= 6.0 && local_color <= 10.0 {
-                flat_samples += 1;
-            }
-
-            sample_count += 1;
-        }
-    }
-
-    if sample_count == 0 {
-        return vec![requested_quality.max(95), requested_quality.max(93)];
-    }
-
-    let mean_luma = luminance_sum / sample_count as f64;
-    let variance = (luminance_sq_sum / sample_count as f64) - mean_luma * mean_luma;
-    let normalized_variance = (variance.sqrt() / 64.0).clamp(0.0, 1.0);
-    let normalized_edge = (edge_sum / sample_count as f64 / 48.0).clamp(0.0, 1.0);
-    let normalized_color = (color_sum / sample_count as f64 / 48.0).clamp(0.0, 1.0);
-    let detail_coverage = (detail_samples as f64 / sample_count as f64).clamp(0.0, 1.0);
-    let flat_coverage = (flat_samples as f64 / sample_count as f64).clamp(0.0, 1.0);
-
-    // Averages alone overrate scenes with a few sharp regions plus large smooth areas.
-    // Coverage makes us more tolerant of images like landscape + sky/water, and more
-    // conservative on images where detailed structures occupy a larger share of the frame.
-    let complexity = (0.32 * normalized_edge
-        + 0.22 * normalized_variance
-        + 0.16 * normalized_color
-        + 0.22 * detail_coverage
-        - 0.14 * flat_coverage)
-        .clamp(0.0, 1.0);
-
-    let base = requested_quality.max(91);
-    let adaptive = if complexity >= 0.58 {
-        base.saturating_add(3).min(97)
-    } else if complexity >= 0.42 {
-        base.saturating_add(1).min(96)
-    } else if complexity >= 0.24 {
-        base
-    } else {
-        base.saturating_sub(1).max(92)
-    };
-
-    let source_size_mb = source_size_bytes as f64 / (1024.0 * 1024.0);
+    let complexity = analysis.complexity_score;
+    let source_size_mb = analysis.source_size_mb;
     let size_stage = if source_size_mb < 1.0 {
         0
     } else {
@@ -144,24 +58,206 @@ pub fn png_to_jpeg_quality_candidates(
         _ => PNG_TO_JPEG_MIN_QUALITY_FLOOR,
     }
     .max(PNG_TO_JPEG_MIN_QUALITY_FLOOR);
+
+    let base = requested_quality.max(91) as i32;
+    let mut adaptive = base;
+
+    adaptive += match () {
+        _ if analysis.detail_coverage >= 0.34 => 4,
+        _ if analysis.detail_coverage >= 0.24 => 2,
+        _ if analysis.detail_coverage >= 0.16 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if analysis.edge_strength >= 0.42 => 2,
+        _ if analysis.edge_strength >= 0.30 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if analysis.color_complexity >= 0.34 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if complexity >= 0.62 => 2,
+        _ if complexity >= 0.48 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if analysis.alpha_ratio >= 0.08 => 2,
+        _ if analysis.alpha_ratio >= 0.02 => 1,
+        _ => 0,
+    };
+
+    adaptive -= match () {
+        _ if analysis.flat_coverage >= 0.52 => 4,
+        _ if analysis.flat_coverage >= 0.38 => 2,
+        _ if analysis.flat_coverage >= 0.24 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.compressibility_score >= 0.72 => 4,
+        _ if analysis.compressibility_score >= 0.58 => 2,
+        _ if analysis.compressibility_score >= 0.44 => 1,
+        _ => 0,
+    };
+    adaptive -= large_image_bias as i32;
+    adaptive -= match () {
+        _ if pixel_count >= 8_000_000 => 2,
+        _ if pixel_count >= 5_000_000 => 1,
+        _ => 0,
+    };
+
     let adaptive = adaptive
-        .saturating_sub(large_image_bias)
-        .max(PNG_TO_JPEG_MIN_QUALITY_FLOOR)
-        .max(min_quality)
-        .saturating_add(2)
-        .min(98);
+        .clamp(PNG_TO_JPEG_MIN_QUALITY_FLOOR as i32, 98)
+        .max(min_quality as i32) as u8;
 
     let mut candidates = vec![
         adaptive,
         adaptive.saturating_sub(1),
         adaptive.saturating_sub(2),
         adaptive.saturating_sub(3),
+        adaptive.saturating_sub(5),
     ];
     candidates.retain(|quality| *quality >= PNG_TO_JPEG_MIN_QUALITY_FLOOR);
     candidates.sort_unstable();
     candidates.dedup();
     candidates.reverse();
     candidates
+}
+
+pub fn jpeg_to_jpeg_quality_candidates(
+    img: &DynamicImage,
+    requested_quality: u8,
+    source_size_bytes: usize,
+) -> Vec<u8> {
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
+    let (width, height) = (analysis.width, analysis.height);
+    if width < 2 || height < 2 {
+        return vec![requested_quality.max(92), requested_quality.max(90)];
+    }
+
+    let base = requested_quality.max(84) as i32;
+    let mut adaptive = base;
+
+    adaptive += match () {
+        _ if analysis.detail_coverage >= 0.30 => 3,
+        _ if analysis.detail_coverage >= 0.20 => 2,
+        _ if analysis.detail_coverage >= 0.12 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if analysis.edge_strength >= 0.40 => 1,
+        _ if analysis.edge_strength >= 0.28 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
+        _ if analysis.complexity_score >= 0.60 => 1,
+        _ if analysis.complexity_score >= 0.46 => 1,
+        _ => 0,
+    };
+
+    adaptive -= match () {
+        _ if analysis.flat_coverage >= 0.52 => 4,
+        _ if analysis.flat_coverage >= 0.40 => 3,
+        _ if analysis.flat_coverage >= 0.28 => 2,
+        _ if analysis.flat_coverage >= 0.18 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.source_size_mb >= 3.0 => 5,
+        _ if analysis.source_size_mb >= 2.5 => 4,
+        _ if analysis.source_size_mb >= 2.0 => 3,
+        _ if analysis.source_size_mb >= 1.5 => 2,
+        _ if analysis.source_size_mb >= 1.0 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.compressibility_score >= 0.72 => 5,
+        _ if analysis.compressibility_score >= 0.60 => 3,
+        _ if analysis.compressibility_score >= 0.48 => 2,
+        _ if analysis.compressibility_score >= 0.36 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.pixel_count >= 8_000_000 => 2,
+        _ if analysis.pixel_count >= 4_000_000 => 1,
+        _ => 0,
+    };
+
+    let adaptive = adaptive.clamp(78, 94) as u8;
+    let mut candidates = vec![
+        adaptive,
+        adaptive.saturating_sub(1),
+        adaptive.saturating_sub(3),
+        adaptive.saturating_sub(5),
+        adaptive.saturating_sub(7),
+        adaptive.saturating_sub(9),
+        adaptive.saturating_sub(12),
+        adaptive.saturating_sub(15),
+        adaptive.saturating_sub(18),
+        adaptive.saturating_sub(22),
+        adaptive.saturating_sub(26),
+    ];
+    candidates.retain(|quality| *quality >= 60);
+    candidates.sort_unstable();
+    candidates.dedup();
+    candidates.reverse();
+    candidates
+}
+
+pub fn jpeg_to_jpeg_quality_thresholds(
+    img: &DynamicImage,
+    source_size_bytes: usize,
+) -> (f64, f64) {
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
+    let min_ms_ssim = if analysis.detail_coverage >= 0.30 || analysis.edge_strength >= 0.38 {
+        0.982
+    } else if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
+        0.966
+    } else {
+        0.972
+    };
+
+    let max_blur_loss_percent = if analysis.detail_coverage >= 0.30 {
+        5.5
+    } else if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
+        9.0
+    } else {
+        7.0
+    };
+
+    (min_ms_ssim, max_blur_loss_percent)
+}
+
+pub fn jpeg_to_jpeg_rescue_qualities(
+    img: &DynamicImage,
+    source_size_bytes: usize,
+    min_candidate_quality: u8,
+) -> Vec<u8> {
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
+    let mut rescue_qualities = vec![58u8, 54, 50, 46, 42];
+    let is_large_jpeg = analysis.source_size_mb >= 1.5 || analysis.pixel_count >= 3_000_000;
+    let is_medium_jpeg = analysis.source_size_mb >= 0.8 || analysis.pixel_count >= 1_500_000;
+
+    if is_large_jpeg {
+        let mut search_quality = min_candidate_quality.saturating_sub(2);
+        while search_quality >= 6 {
+            rescue_qualities.push(search_quality);
+            if search_quality <= 7 {
+                break;
+            }
+            search_quality = search_quality.saturating_sub(2);
+        }
+    } else if is_medium_jpeg {
+        rescue_qualities.extend([38u8, 34, 30, 26, 22, 18, 14, 10]);
+    } else {
+        rescue_qualities = vec![58u8, 50, 42, 34, 26, 18];
+    }
+
+    rescue_qualities.sort_unstable();
+    rescue_qualities.dedup();
+    rescue_qualities.reverse();
+    rescue_qualities
 }
 
 pub fn avif_speed_for_pixels(pixel_count: usize) -> u8 {

@@ -2,6 +2,8 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_compressionresult_free: (a: number, b: number) => void;
+export const analyze_image_metrics: (a: number, b: number) => [number, number, number];
+export const compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const compress_image: (a: number, b: number, c: number) => [number, number, number];
 export const compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];

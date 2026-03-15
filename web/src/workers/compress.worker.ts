@@ -21,19 +21,17 @@ workerScope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     const bytes = new Uint8Array(await output.blob.arrayBuffer());
     const mime = output.mime;
     const ext = output.ext;
-    const cloned = new Uint8Array(bytes.length);
-    cloned.set(bytes);
 
     workerScope.postMessage(
       {
         id,
         ok: true,
-        bytes: cloned.buffer,
+        bytes: bytes.buffer,
         mime,
         ext,
         fileName: output.fileName,
       },
-      [cloned.buffer],
+      [bytes.buffer],
     );
   } catch (error) {
     const errorMessage =

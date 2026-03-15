@@ -32,6 +32,10 @@ export class CompressionResult {
     readonly mime: string;
 }
 
+export function analyze_image_metrics(input: Uint8Array): any;
+
+export function compare_image_quality(original_input: Uint8Array, compressed_input: Uint8Array): any;
+
 export function compress_image(input: Uint8Array, quality: number): CompressionResult;
 
 export function compress_image_to_format(input: Uint8Array, quality: number, target_format: string): CompressionResult;
@@ -47,6 +51,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressionresult_free: (a: number, b: number) => void;
+    readonly analyze_image_metrics: (a: number, b: number) => [number, number, number];
+    readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compress_image: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
