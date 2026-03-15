@@ -85,7 +85,7 @@ function createCompressionWorker() {
 export async function compressWithWasmWorker(
   file: File,
   quality = 80,
-  targetFormat?: OutputFormat,
+  targetFormat: OutputFormat,
   allowAlphaLoss = false,
 ) {
   if (typeof window === "undefined") {

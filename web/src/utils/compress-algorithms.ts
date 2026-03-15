@@ -786,7 +786,7 @@ async function compressWithWebpCodec(
 async function compressWithWasmCodec(
   file: File,
   quality = 80,
-  targetFormat?: Exclude<OutputFormat, "webp">,
+  targetFormat: Exclude<OutputFormat, "webp">,
   allowAlphaLoss = false,
 ): Promise<CompressResult> {
   const mod = await initWasm();
@@ -849,22 +849,13 @@ async function compressWithWasmCodec(
 export async function compressImageWithAlgorithms(
   file: File,
   quality = 80,
-  targetFormat?: OutputFormat,
+  targetFormat: OutputFormat,
   allowAlphaLoss = false,
 ): Promise<CompressResult> {
   const sourceFormat = sourceFormatFromFile(file);
 
   if (targetFormat === "webp") {
     const requireSmaller = requiresSmallerResult(targetFormat, sourceFormat);
-    try {
-      return await compressWithWebpCodec(file, quality, requireSmaller);
-    } catch {
-      return compressWebpWithCanvasFallback(file, quality, requireSmaller);
-    }
-  }
-
-  if (!targetFormat && sourceFormat === "webp") {
-    const requireSmaller = requiresSmallerResult("webp", sourceFormat);
     try {
       return await compressWithWebpCodec(file, quality, requireSmaller);
     } catch {

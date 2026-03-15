@@ -7,7 +7,7 @@ type WorkerRequest = {
   id: string;
   file: File;
   quality: number;
-  targetFormat?: OutputFormat;
+  targetFormat: OutputFormat;
   allowAlphaLoss?: boolean;
 };
 

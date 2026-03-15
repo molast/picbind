@@ -42,7 +42,6 @@ type VariantStatus = "queued" | "processing" | "done" | "error";
 type OutputVariant = {
   id: string;
   format: OutputFormat;
-  isAuto?: boolean;
   allowAlphaLoss?: boolean;
   outputUrl?: string;
   outputName?: string;
@@ -105,11 +104,10 @@ function normalizeOutputFormat(ext?: string): OutputFormat {
   return "jpeg";
 }
 
-function createVariant(format: OutputFormat, isAuto = false): OutputVariant {
+function createVariant(format: OutputFormat): OutputVariant {
   return {
     id: `${format}-${createUuid()}`,
     format,
-    isAuto,
     progress: 0,
     status: "queued",
   };
@@ -130,9 +128,7 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
 
   const wantedFormats = getDesiredFormats(item.file, selectedFormats);
   const existingFormats = new Set(
-    item.variants
-      .filter((variant) => !variant.isAuto)
-      .map((variant) => variant.format),
+    item.variants.map((variant) => variant.format),
   );
   const missingVariants = wantedFormats
     .filter((format) => !existingFormats.has(format))
@@ -161,7 +157,7 @@ function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
         },
         selectedFormats,
       ).variants
-    : [createVariant(normalizeSourceFormat(file), true)];
+    : [createVariant(normalizeSourceFormat(file))];
 
   return {
     id: `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`,
@@ -672,7 +668,7 @@ export default function HomeCompressLanding({
           const compressed = await compressWithWasmWorker(
             currentItem.file,
             80,
-            currentVariant.isAuto ? undefined : currentVariant.format,
+            currentVariant.format,
             Boolean(currentVariant.allowAlphaLoss),
           );
           if (isUnmountedRef.current) {
@@ -703,7 +699,6 @@ export default function HomeCompressLanding({
                         ? {
                             ...variant,
                             format: normalizeOutputFormat(compressed.ext),
-                            isAuto: false,
                             status: "done",
                             outputUrl,
                             outputName: compressed.fileName,

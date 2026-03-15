@@ -44,7 +44,7 @@ export type ImageAnalysisMetrics = {
 export async function compressWithWasm(
   file: File,
   quality = 80,
-  targetFormat?: OutputFormat,
+  targetFormat: OutputFormat,
   allowAlphaLoss = false,
 ) {
   return compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
