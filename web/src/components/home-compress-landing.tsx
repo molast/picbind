@@ -295,7 +295,7 @@ type HomeCompressLandingProps = {
 };
 
 export default function HomeCompressLanding({
-  initialLang = "en",
+  initialLang = "zh",
   showCompressedCount = true,
   showCompareSection = true,
 }: HomeCompressLandingProps) {

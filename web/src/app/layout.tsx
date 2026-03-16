@@ -1,8 +1,79 @@
-import "./globals.css";
+﻿import "./globals.css";
 import type { Metadata } from "next";
+import { getSiteUrl } from "@/server/site-config";
+
+const siteUrl = getSiteUrl();
+const siteName = "NanoImg";
+const title = "NanoImg - 智能压缩 WebP、PNG、JPEG 和 AVIF 图片";
+const description =
+  "NanoImg 提供在线图片智能压缩与格式转换服务，支持 PNG、JPEG、WebP、AVIF，支持批量压缩、质量对比和轻量交付。";
 
 export const metadata: Metadata = {
-  title: "NanoImg-Compress WebP,PNG and JPEG images intelligently | nano.molast.com",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: title,
+    template: `%s | ${siteName}`,
+  },
+  description,
+  applicationName: siteName,
+  keywords: [
+    "图片压缩",
+    "在线图片压缩",
+    "智能图片压缩",
+    "无损图片压缩",
+    "WebP 压缩",
+    "PNG 压缩",
+    "JPEG 压缩",
+    "AVIF 压缩",
+    "图片格式转换",
+    "image compressor",
+    "compress images online",
+    "png compressor",
+    "jpeg compressor",
+    "webp compressor",
+    "avif compressor",
+    "png to jpg",
+    "webp converter",
+    "avif converter",
+    "NanoImg",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    url: siteUrl,
+    siteName,
+    title,
+    description,
+    locale: "zh_CN",
+    images: [
+      {
+        url: "/images/compare-original.png",
+        width: 1365,
+        height: 768,
+        alt: "NanoImg image compression preview",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/images/compare-original.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  category: "technology",
 };
 
 export default function RootLayout({
@@ -11,7 +82,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body>{children}</body>
     </html>
   );

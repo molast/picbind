@@ -10,7 +10,7 @@ export default async function HomePage() {
   noStore();
   const cookieStore = cookies();
   const cookieLang = cookieStore.get("nano-img-lang")?.value;
-  const initialLang: Lang = cookieLang === "zh" ? "zh" : "en";
+  const initialLang: Lang = cookieLang === "en" ? "en" : "zh";
   const uiConfig = await getPublicUiConfig();
 
   return (

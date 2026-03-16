@@ -4,7 +4,11 @@ import zh from "./zh";
 import en from "./en";
 
 import type { HomeCompressLandingCopy, LocaleType } from "./zh";
-export type { HomeCompressLandingCopy, LocaleType, PartialLocaleType } from "./zh";
+export type {
+  HomeCompressLandingCopy,
+  LocaleType,
+  PartialLocaleType,
+} from "./zh";
 
 const ALL_LANGS = {
   zh,
@@ -28,7 +32,7 @@ export const ALL_LANG_OPTIONS = [
 
 const LANG_KEY = "ai-translator-lang-v2";
 const LANG_COOKIE_KEY = "nano-img-lang";
-const DEFAULT_LANG = "en";
+const DEFAULT_LANG = "zh";
 
 const fallbackLang = zh;
 const targetLang = ALL_LANGS[getLang()] as LocaleType;
@@ -36,7 +40,9 @@ const currentLang = { ...fallbackLang, ...targetLang };
 
 export default currentLang as LocaleType;
 
-export function getHomeCompressLandingCopy(lang: Lang): HomeCompressLandingCopy {
+export function getHomeCompressLandingCopy(
+  lang: Lang,
+): HomeCompressLandingCopy {
   return ALL_LANGS[lang].HomeCompressLanding ?? fallbackLang.HomeCompressLanding;
 }
 
@@ -113,6 +119,8 @@ export function getISOLang() {
   const isoLangString: Record<string, string> = {
     cn: "zh-Hans",
     tw: "zh-Hant",
+    zh: "zh-Hans",
+    en: "en",
   };
 
   const lang = getLang();

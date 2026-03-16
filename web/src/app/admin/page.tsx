@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import AdminDashboard from "@/components/admin-dashboard";
@@ -11,6 +12,17 @@ type AdminPageProps = {
 };
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "Admin",
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false,
+    },
+  },
+};
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
   noStore();
