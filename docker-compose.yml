@@ -11,7 +11,7 @@ services:
       - PORT=${PORT:-1997}
       - NEXT_PUBLIC_METRICS_ENABLED=${NEXT_PUBLIC_METRICS_ENABLED:-true}
       - NEXT_PUBLIC_METRICS_API_PATH=${NEXT_PUBLIC_METRICS_API_PATH:-/api/metrics}
-      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-https://www.molast.com}
+      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-https://molast.com}
       - NANOIMG_ADMIN_KEY=${NANOIMG_ADMIN_KEY:-change-this-admin-key}
     ports:
       - "${HOST_PORT:-1997}:${PORT:-1997}"

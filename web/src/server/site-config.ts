@@ -1,4 +1,4 @@
-const DEFAULT_SITE_URL = "https://www.molast.com";
+const DEFAULT_SITE_URL = "https://molast.com";
 
 export function getSiteUrl() {
   const raw =
