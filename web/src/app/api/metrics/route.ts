@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTotalCompressedCount, incrementCompressedCount } from "@/server/metrics-store";
+import {
+  getAdminDashboardState,
+  incrementCompressedCount,
+  recordCompressionEvents,
+  type CompressionFormat,
+} from "@/server/metrics-store";
 
 export const runtime = "nodejs";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_POSTS = 30;
 const DELTA_MAX = 20;
+const EVENT_BATCH_MAX = 50;
 
 const ipBuckets = new Map<string, number[]>();
 
@@ -20,7 +26,9 @@ function getClientIp(request: NextRequest) {
 function isRateLimited(ip: string) {
   const now = Date.now();
   const bucket = ipBuckets.get(ip) || [];
-  const next = bucket.filter((timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS);
+  const next = bucket.filter(
+    (timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS,
+  );
   if (next.length >= RATE_LIMIT_MAX_POSTS) {
     ipBuckets.set(ip, next);
     return true;
@@ -45,11 +53,22 @@ function hasInvalidOrigin(request: NextRequest) {
 
 export async function GET() {
   try {
-    const totalCompressed = await getTotalCompressedCount();
-    return NextResponse.json({ totalCompressed }, { status: 200 });
+    const state = await getAdminDashboardState();
+    return NextResponse.json(
+      {
+        totalCompressed: state.totalCompressed,
+        totalSavedBytes: state.totalSavedBytes,
+        formatStats: state.formatStats,
+      },
+      { status: 200 },
+    );
   } catch (error) {
     return NextResponse.json(
-      { error: `Failed to read metrics: ${error instanceof Error ? error.message : String(error)}` },
+      {
+        error: `Failed to read metrics: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      },
       { status: 500 },
     );
   }
@@ -71,7 +90,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 
-    const body = (await request.json()) as { delta?: number };
+    const body = (await request.json()) as {
+      delta?: number;
+      events?: Array<{ format?: CompressionFormat; savedBytes?: number }>;
+    };
+
+    if (Array.isArray(body.events)) {
+      if (!body.events.length || body.events.length > EVENT_BATCH_MAX) {
+        return NextResponse.json({ error: "Invalid events" }, { status: 400 });
+      }
+
+      const state = await recordCompressionEvents(
+        body.events.map((event) => ({
+          format: event.format as CompressionFormat,
+          savedBytes: Number(event.savedBytes ?? 0),
+        })),
+      );
+
+      return NextResponse.json(
+        {
+          totalCompressed: state.totalCompressed,
+          totalSavedBytes: state.totalSavedBytes,
+          formatStats: state.formatStats,
+        },
+        { status: 200 },
+      );
+    }
+
     const delta = Number(body.delta ?? 0);
     if (!Number.isFinite(delta) || delta <= 0 || delta > DELTA_MAX) {
       return NextResponse.json({ error: "Invalid delta" }, { status: 400 });
@@ -81,7 +126,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ totalCompressed }, { status: 200 });
   } catch (error) {
     return NextResponse.json(
-      { error: `Failed to update metrics: ${error instanceof Error ? error.message : String(error)}` },
+      {
+        error: `Failed to update metrics: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      },
       { status: 500 },
     );
   }

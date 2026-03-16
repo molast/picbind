@@ -14,8 +14,10 @@ import {
 import {
   flushCompressedCountNow,
   loadTotalCompressedCount,
+  reportCompressionResult,
   reportCompressedCount,
 } from "@/utils/compression-metrics";
+import { reportPageViewOnce } from "@/utils/page-view";
 import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
@@ -288,10 +290,14 @@ async function logCompressionAnalysis(
 
 type HomeCompressLandingProps = {
   initialLang?: Lang;
+  showCompressedCount?: boolean;
+  showCompareSection?: boolean;
 };
 
 export default function HomeCompressLanding({
   initialLang = "en",
+  showCompressedCount = true,
+  showCompareSection = true,
 }: HomeCompressLandingProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
@@ -427,11 +433,24 @@ export default function HomeCompressLanding({
   );
 
   React.useEffect(() => {
+    void reportPageViewOnce();
+  }, []);
+
+  React.useEffect(() => {
     setLang(getLang());
+  }, []);
+
+  React.useEffect(() => {
+    if (!showCompressedCount) {
+      setTotalCompressedCount(0);
+      setDisplayedCompressedCount(0);
+      return;
+    }
+
     void loadTotalCompressedCount().then((total) => {
       setTotalCompressedCount(total);
     });
-  }, []);
+  }, [showCompressedCount]);
 
   React.useEffect(() => {
     displayedCountRef.current = displayedCompressedCount;
@@ -684,7 +703,11 @@ export default function HomeCompressLanding({
                 100 *
                 10),
             ) / 10;
-          reportCompressedCount(1);
+          reportCompressionResult(
+            normalizeOutputFormat(compressed.ext),
+            currentItem.file.size,
+            outputSize,
+          );
           setTotalCompressedCount((prev) => prev + 1);
 
           const doneAt = Date.now();
@@ -1450,6 +1473,7 @@ export default function HomeCompressLanding({
             </p>
           </div>
 
+          {showCompareSection ? (
           <div className="mx-auto w-full max-w-[1180px] rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_45px_rgba(148,163,184,0.12)] sm:rounded-[28px] sm:p-5 md:p-8">
             <div className="mx-auto max-w-[820px] text-center">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-600 sm:text-xs sm:tracking-[0.24em]">
@@ -1557,6 +1581,7 @@ export default function HomeCompressLanding({
               </div>
             </div>
           </div>
+          ) : null}
 
           <div className="grid gap-6 md:grid-cols-3">
             {copy.cards.map((card) => (
@@ -1575,6 +1600,7 @@ export default function HomeCompressLanding({
             ))}
           </div>
 
+          {showCompressedCount ? (
           <div className="mx-auto flex w-full justify-center pt-2">
             <div
               className={`inline-flex items-end gap-3 rounded-2xl border border-sky-200/70 bg-white px-8 py-5 shadow-[0_16px_40px_rgba(56,118,185,0.14)] transition-all duration-300 ${
@@ -1591,6 +1617,7 @@ export default function HomeCompressLanding({
               </span>
             </div>
           </div>
+          ) : null}
         </div>
       </section>
     </main>

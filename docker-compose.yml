@@ -11,6 +11,7 @@ services:
       - PORT=1997
       - NEXT_PUBLIC_METRICS_ENABLED=true
       - NEXT_PUBLIC_METRICS_API_PATH=/api/metrics
+      - NANOIMG_ADMIN_KEY=change-this-admin-key
     ports:
       - "1997:1997"
     volumes:
