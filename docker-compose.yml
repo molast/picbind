@@ -2,18 +2,19 @@ version: "3.9"
 
 services:
   web:
-    container_name: pixwasm-web
+    container_name: ${NANOIMG_CONTAINER_NAME:-pixwasm-web}
     build:
       context: ./web
       dockerfile: Dockerfile
-    image: registry.cn-shanghai.aliyuncs.com/molast/nano-img:v1.0.5
+    image: registry.cn-shanghai.aliyuncs.com/molast/nano-img:${NANOIMG_IMAGE_TAG:-v1.0.5}
     environment:
-      - PORT=1997
-      - NEXT_PUBLIC_METRICS_ENABLED=true
-      - NEXT_PUBLIC_METRICS_API_PATH=/api/metrics
-      - NANOIMG_ADMIN_KEY=change-this-admin-key
+      - PORT=${PORT:-1997}
+      - NEXT_PUBLIC_METRICS_ENABLED=${NEXT_PUBLIC_METRICS_ENABLED:-true}
+      - NEXT_PUBLIC_METRICS_API_PATH=${NEXT_PUBLIC_METRICS_API_PATH:-/api/metrics}
+      - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL:-https://www.molast.com}
+      - NANOIMG_ADMIN_KEY=${NANOIMG_ADMIN_KEY:-change-this-admin-key}
     ports:
-      - "1997:1997"
+      - "${HOST_PORT:-1997}:${PORT:-1997}"
     volumes:
       - nanoimg_metrics_data:/app/.data
     restart: unless-stopped
