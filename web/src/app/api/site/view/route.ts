@@ -11,7 +11,13 @@ function hasInvalidOrigin(request: NextRequest) {
 
   try {
     const originHost = new URL(origin).host;
-    return originHost !== request.nextUrl.host;
+    const requestHost = request.nextUrl.host;
+    
+    // Allow requests from the same domain or www subdomain
+    const normalizedOriginHost = originHost.replace(/^www\./, '');
+    const normalizedRequestHost = requestHost.replace(/^www\./, '');
+    
+    return normalizedOriginHost !== normalizedRequestHost;
   } catch {
     return true;
   }
