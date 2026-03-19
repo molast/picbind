@@ -1,7 +1,7 @@
 "use client";
 
-// Use absolute URL to ensure correct endpoint
-const PAGE_VIEW_API_PATH = "https://molast.com/api/site/view";
+const PAGE_VIEW_API_PATH =
+  process.env.NEXT_PUBLIC_PAGE_VIEW_API_PATH || "/api/site/view";
 const PAGE_VIEW_SESSION_KEY = "nanoimg-page-view-reported";
 
 export async function reportPageViewOnce() {
