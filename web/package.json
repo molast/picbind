@@ -30,6 +30,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "context-filter-polyfill": "^0.3.13",
+    "google-fonts-complete": "^2.2.3",
     "konva": "^9.3.14",
     "lodash": "^4.17.21",
     "next": "14.2.5",
