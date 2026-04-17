@@ -114,7 +114,7 @@ function compactHex(value: string) {
   if (!/^#[0-9A-F]{6}$/.test(hex)) {
     return value;
   }
-  const [r1, r2, g1, g2, b1, b2] = hex.slice(1);
+  const [r1, r2, g1, g2, b1, b2] = hex.slice(1).split("");
   if (r1 === r2 && g1 === g2 && b1 === b2) {
     return `#${r1}${g1}${b1}`;
   }

@@ -89,7 +89,7 @@ export async function downloadFaviconZip(files: FaviconSet) {
   ];
 
   const zipBytes = mod.create_zip_from_items(zipEntries) as Uint8Array;
-  const blob = new Blob([zipBytes], { type: "application/zip" });
+  const blob = new Blob([new Uint8Array(zipBytes)], { type: "application/zip" });
   triggerDownload(blob, "favicon_package.zip");
 }
 

@@ -72,7 +72,8 @@ function parseGoogleFontCatalog(raw: Record<string, GoogleFontsCompleteEntry>) {
       }) as Array<"normal" | "italic">;
 
     for (const style of styles) {
-      const byWeight = entry.variants[style] ?? {};
+      const byWeight: Record<string, GoogleFontsCompleteVariant> =
+        entry.variants[style] ?? {};
       const sortedWeights = Object.keys(byWeight)
         .map((value) => Number(value))
         .filter((value) => Number.isFinite(value))
