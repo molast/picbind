@@ -6,9 +6,9 @@ import { getAdminDashboardState } from "@/server/metrics-store";
 import { isAdminConfigured, isAdminKeyValid } from "@/server/admin-auth";
 
 type AdminPageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     key?: string;
-  };
+  }>;
 };
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     notFound();
   }
 
-  const key = searchParams?.key || "";
+  const resolvedSearchParams = await searchParams;
+  const key = resolvedSearchParams?.key || "";
   if (!isAdminKeyValid(key)) {
     notFound();
   }
