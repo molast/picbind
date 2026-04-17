@@ -12,6 +12,7 @@ export const compressionresult_bytes: (a: number) => [number, number];
 export const compressionresult_ext: (a: number) => [number, number];
 export const compressionresult_mime: (a: number) => [number, number];
 export const create_zip_from_items: (a: any) => [number, number, number, number];
+export const generate_favicon: (a: number, b: number) => [number, number, number];
 export const lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
 export const lodepng_add_text: (a: number, b: number, c: number) => number;
 export const lodepng_auto_choose_color: (a: number, b: number, c: number, d: number, e: number) => number;

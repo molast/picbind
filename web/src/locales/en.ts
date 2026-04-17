@@ -10,6 +10,7 @@ const en: LocaleType = {
       "Upload, optimize, and download in one focused homepage flow with fewer steps and faster delivery.",
     dropTitle: "Drop your images here!",
     dropDesc: "Up to 20 images, max 5 MB each.",
+    faviconEntry: "Favicon",
     autoLabel: "Convert my images automatically",
     selectAll: "SELECT ALL",
     processingTitle:

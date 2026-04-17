@@ -5,6 +5,7 @@ export type HomeCompressLandingCopy = {
   heroDesc: string;
   dropTitle: string;
   dropDesc: string;
+  faviconEntry: string;
   autoLabel: string;
   selectAll: string;
   processingTitle: string;
@@ -43,6 +44,7 @@ const zh = {
     heroDesc: "打开首页即可开始处理图片，在同一页面完成上传、压缩和下载，减少操作路径，让交付更高效。",
     dropTitle: "将图片拖到这里开始压缩",
     dropDesc: "最多 20 张图片，单张不超过 5 MB",
+    faviconEntry: "Favicon",
     autoLabel: "上传后自动开始压缩",
     selectAll: "全选",
     processingTitle: "图片正在优化中，请稍等片刻，我们会尽快给出这一批图片更合适的压缩结果。",

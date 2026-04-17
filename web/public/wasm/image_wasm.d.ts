@@ -46,6 +46,8 @@ export function compress_png_with_deflate(input: Uint8Array, compression_level: 
 
 export function create_zip_from_items(items: Array<any>): Uint8Array;
 
+export function generate_favicon(input: Uint8Array): object;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -61,6 +63,7 @@ export interface InitOutput {
     readonly compressionresult_ext: (a: number) => [number, number];
     readonly compressionresult_mime: (a: number) => [number, number];
     readonly create_zip_from_items: (a: any) => [number, number, number, number];
+    readonly generate_favicon: (a: number, b: number) => [number, number, number];
     readonly lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_add_text: (a: number, b: number, c: number) => number;
     readonly lodepng_auto_choose_color: (a: number, b: number, c: number, d: number, e: number) => number;

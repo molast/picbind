@@ -1,5 +1,9 @@
 use wasm_bindgen::prelude::*;
 use js_sys::{Array, Reflect, Uint8Array};
+use image::codecs::ico::IcoEncoder;
+use image::imageops::FilterType;
+use image::{ColorType, DynamicImage, GenericImageView, ImageEncoder, ImageFormat};
+use std::io::Cursor;
 
 mod core;
 
@@ -95,4 +99,66 @@ pub fn compare_image_quality(original_input: &[u8], compressed_input: &[u8]) -> 
 #[wasm_bindgen]
 pub fn analyze_image_metrics(input: &[u8]) -> Result<JsValue, JsValue> {
     core::analysis::analyze_image_metrics(input)?.to_js_value()
+}
+
+fn square_crop(img: DynamicImage) -> DynamicImage {
+    let (width, height) = img.dimensions();
+    if width == height {
+        return img;
+    }
+
+    let edge = width.min(height);
+    let crop_x = (width.saturating_sub(edge)) / 2;
+    let crop_y = (height.saturating_sub(edge)) / 2;
+    img.crop_imm(crop_x, crop_y, edge, edge)
+}
+
+fn encode_png(img: &DynamicImage) -> Result<Vec<u8>, JsValue> {
+    let mut out = Vec::new();
+    img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+        .map_err(|err| JsValue::from_str(&format!("PNG encode failed: {err}")))?;
+    Ok(out)
+}
+
+fn generate_png_size(base: &DynamicImage, size: u32) -> Result<Vec<u8>, JsValue> {
+    let resized = base.resize_exact(size, size, FilterType::Lanczos3);
+    encode_png(&resized)
+}
+
+fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {
+    let resized = base.resize_exact(32, 32, FilterType::Lanczos3).to_rgba8();
+    let mut out = Vec::new();
+    IcoEncoder::new(&mut out)
+        .write_image(
+            resized.as_raw(),
+            resized.width(),
+            resized.height(),
+            ColorType::Rgba8.into(),
+        )
+        .map_err(|err| JsValue::from_str(&format!("ICO encode failed: {err}")))?;
+    Ok(out)
+}
+
+#[wasm_bindgen]
+pub fn generate_favicon(input: &[u8]) -> Result<js_sys::Object, JsValue> {
+    let decoded =
+        image::load_from_memory(input).map_err(|err| JsValue::from_str(&format!("Decode failed: {err}")))?;
+    let square = square_crop(decoded);
+
+    let favicon16 = generate_png_size(&square, 16)?;
+    let favicon32 = generate_png_size(&square, 32)?;
+    let apple = generate_png_size(&square, 180)?;
+    let android192 = generate_png_size(&square, 192)?;
+    let android512 = generate_png_size(&square, 512)?;
+    let ico = generate_ico(&square)?;
+
+    let output = js_sys::Object::new();
+    Reflect::set(&output, &JsValue::from_str("favicon16"), &Uint8Array::from(favicon16.as_slice()).into())?;
+    Reflect::set(&output, &JsValue::from_str("favicon32"), &Uint8Array::from(favicon32.as_slice()).into())?;
+    Reflect::set(&output, &JsValue::from_str("apple"), &Uint8Array::from(apple.as_slice()).into())?;
+    Reflect::set(&output, &JsValue::from_str("android192"), &Uint8Array::from(android192.as_slice()).into())?;
+    Reflect::set(&output, &JsValue::from_str("android512"), &Uint8Array::from(android512.as_slice()).into())?;
+    Reflect::set(&output, &JsValue::from_str("ico"), &Uint8Array::from(ico.as_slice()).into())?;
+
+    Ok(output)
 }

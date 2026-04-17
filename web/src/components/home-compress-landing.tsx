@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React from "react";
+import Link from "next/link";
 import {
   ReactCompareSlider,
   ReactCompareSliderImage,
@@ -970,7 +971,13 @@ export default function HomeCompressLanding({
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
 
         <div className="relative mx-auto flex min-h-[470px] max-w-[1440px] flex-col px-4 pb-5 pt-3 sm:min-h-[520px] sm:px-6 sm:pb-6 sm:pt-4 lg:min-h-[560px] lg:px-10">
-          <header className="flex items-center justify-end bg-white/92 px-3 py-2 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur sm:px-4 sm:py-2.5 md:px-6">
+          <header className="flex items-center justify-between gap-3 bg-white/92 px-3 py-2 shadow-[0_16px_50px_rgba(26,34,24,0.12)] backdrop-blur sm:px-4 sm:py-2.5 md:px-6">
+            <Link
+              href="/favicon-generator"
+              className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100 sm:text-xs"
+            >
+              {copy.faviconEntry}
+            </Link>
             <div className="flex items-center gap-2">
               <button
                 type="button"
