@@ -95,7 +95,7 @@ export type FaviconGeneratorCopy = {
 const zh = {
   Symbol: "zh",
   HomeCompressLanding: {
-    pageTitle: "NanoImg-智能压缩 WebP、PNG 和 JPEG 图像",
+    pageTitle: "PicBind-智能压缩 WebP、PNG 和 JPEG 图像",
     heroKicker: "智能图片压缩",
     heroTitle: "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF",
     heroDesc: "打开首页即可开始处理图片，在同一页面完成上传、压缩和下载，减少操作路径，让交付更高效。",

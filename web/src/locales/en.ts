@@ -7,7 +7,7 @@ import type {
 const en: LocaleType = {
   Symbol: "en",
   HomeCompressLanding: {
-    pageTitle: "NanoImg-Compress WebP,PNG and JPEG images intelligently",
+    pageTitle: "PicBind-Compress WebP,PNG and JPEG images intelligently",
     heroKicker: "Smart Image Compression",
     heroTitle: "Upload once, compress PNG, JPEG, WebP and AVIF automatically",
     heroDesc:

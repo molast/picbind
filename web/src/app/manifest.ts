@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "NanoImg",
-    short_name: "NanoImg",
+    name: "PicBind",
+    short_name: "PicBind",
     description:
       "Compress WebP, PNG, JPEG and AVIF images online with intelligent format handling.",
     start_url: "/img-compress",

@@ -98,7 +98,7 @@ export default function AdminDashboard({
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-600">
-            NanoImg Admin
+            PicBind Admin
           </p>
           <h1 className="mt-3 text-3xl font-semibold text-slate-900">
             后台控制台

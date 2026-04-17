@@ -252,7 +252,7 @@ function logCompressionFailure(
   }
 
   console.groupCollapsed(
-    `[NanoImg][${format.toUpperCase()}][FAILED] ${sourceFile.name}`,
+    `[PicBind][${format.toUpperCase()}][FAILED] ${sourceFile.name}`,
   );
   console.log("Source file", {
     name: sourceFile.name,
@@ -276,7 +276,7 @@ async function logCompressionAnalysis(
   }
 
   try {
-    const label = `[NanoImg][${format.toUpperCase()}] ${sourceFile.name}`;
+    const label = `[PicBind][${format.toUpperCase()}] ${sourceFile.name}`;
     console.groupCollapsed(label);
     console.log("Source metrics", sourceMetrics);
     console.log("Compressed metrics", compressedMetrics);
@@ -284,7 +284,7 @@ async function logCompressionAnalysis(
     console.groupEnd();
   } catch (error) {
     console.warn(
-      `[NanoImg][${format.toUpperCase()}] Failed to analyze compression metrics for ${sourceFile.name}`,
+      `[PicBind][${format.toUpperCase()}] Failed to analyze compression metrics for ${sourceFile.name}`,
       error,
     );
   }
@@ -425,7 +425,7 @@ export default function HomeCompressLanding({
         delete metricsRequestsRef.current[requestKey];
         if (IS_DEV) {
           console.warn(
-            `[NanoImg][${variant.format.toUpperCase()}] Failed to analyze hover metrics for ${item.file.name}`,
+            `[PicBind][${variant.format.toUpperCase()}] Failed to analyze hover metrics for ${item.file.name}`,
             error,
           );
         }

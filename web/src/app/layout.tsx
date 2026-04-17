@@ -3,10 +3,10 @@ import type { Metadata } from "next";
 import { getSiteUrl } from "@/server/site-config";
 
 const siteUrl = getSiteUrl();
-const siteName = "NanoImg";
-const title = "NanoImg - 智能压缩 WebP、PNG、JPEG 和 AVIF 图片";
+const siteName = "PicBind";
+const title = "PicBind - 智能压缩 WebP、PNG、JPEG 和 AVIF 图片";
 const description =
-  "NanoImg 提供在线图片智能压缩与格式转换服务，支持 PNG、JPEG、WebP、AVIF，支持批量压缩、质量对比和轻量交付。";
+  "PicBind 提供在线图片智能压缩与格式转换服务，支持 PNG、JPEG、WebP、AVIF，支持批量压缩、质量对比和轻量交付。";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     "png to jpg",
     "webp converter",
     "avif converter",
-    "NanoImg",
+    "PicBind",
   ],
   alternates: {
     canonical: "/",
@@ -76,7 +76,7 @@ export const metadata: Metadata = {
         url: "/images/compare-original.png",
         width: 1365,
         height: 768,
-        alt: "NanoImg image compression preview",
+        alt: "PicBind image compression preview",
       },
     ],
   },

@@ -36,7 +36,8 @@ export const ALL_LANG_OPTIONS = [
 ];
 
 const LANG_KEY = "ai-translator-lang-v2";
-const LANG_COOKIE_KEY = "nano-img-lang";
+const LANG_COOKIE_KEY = "picbind-lang";
+const LEGACY_LANG_COOKIE_KEY = "nano-img-lang";
 const DEFAULT_LANG = "zh";
 
 const fallbackLang = zh;
@@ -106,7 +107,7 @@ export function getLang(): Lang {
     return savedLang as Lang;
   }
 
-  const cookieLang = getCookie(LANG_COOKIE_KEY);
+  const cookieLang = getCookie(LANG_COOKIE_KEY) || getCookie(LEGACY_LANG_COOKIE_KEY);
   if (AllLangs.includes((cookieLang ?? "") as Lang)) {
     return cookieLang as Lang;
   }

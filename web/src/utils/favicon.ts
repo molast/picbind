@@ -23,8 +23,8 @@ function toUint8Array(value: unknown, field: string): Uint8Array {
 
 function buildManifestBytes() {
   const manifest = {
-    name: "NanoImg",
-    short_name: "NanoImg",
+    name: "PicBind",
+    short_name: "PicBind",
     icons: [
       {
         src: "/android-chrome-192x192.png",
