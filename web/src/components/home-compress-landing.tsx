@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ReactCompareSlider,
   ReactCompareSliderImage,
@@ -965,36 +966,77 @@ export default function HomeCompressLanding({
 
   return (
     <main className="w-full bg-[#ececec] text-slate-800">
-      <section className="relative min-h-[470px] overflow-hidden bg-[#78956b] sm:min-h-[520px] lg:min-h-[560px]">
-        <div className="absolute inset-0 bg-[url('/images/bamboo.avif')] bg-cover bg-left-center bg-no-repeat" />
-        <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/bamboo-panda.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(22,40,20,0.36),rgba(76,102,59,0.12)_40%,rgba(236,244,216,0.16)_100%)]" />
+      <section className="relative min-h-[470px] overflow-hidden bg-[#c8d8f2] sm:min-h-[520px] lg:min-h-[560px]">
+        <div className="absolute inset-0 bg-[url('/images/hero-background.avif')] bg-cover bg-center bg-no-repeat" />
+        <div className="absolute inset-y-0 right-0 hidden w-[38%] bg-[url('/images/hero-illustration.avif')] bg-contain bg-right-bottom bg-no-repeat lg:block" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(216,228,248,0.44),rgba(216,228,248,0.34)_50%,rgba(216,228,248,0.44)_100%)]" />
 
-        <div className="relative mx-auto flex min-h-[470px] max-w-[1440px] flex-col px-4 pb-5 pt-3 sm:min-h-[520px] sm:px-6 sm:pb-6 sm:pt-4 lg:min-h-[560px] lg:px-10">
-          <header className="relative py-1 sm:py-1.5">
-            <div className="mx-auto flex h-11 w-full max-w-[780px] items-center rounded-sm bg-white/10 px-3 shadow-[0_16px_50px_rgba(26,34,24,0.08)] backdrop-blur-sm sm:h-12 sm:px-4">
-              <Link
-                href="/favicon-generator"
-                className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-100 sm:text-xs"
-              >
-                {copy.faviconEntry}
-              </Link>
+        <div className="relative mx-auto flex min-h-[470px] max-w-[1440px] flex-col px-4 pb-5 pt-0 sm:min-h-[520px] sm:px-6 sm:pb-6 sm:pt-0 lg:min-h-[560px] lg:px-10">
+          <header className="relative py-0">
+            <div className="-mx-4 flex h-[64px] items-center px-5 sm:-mx-6 sm:px-8 lg:-mx-10 lg:px-12">
+              <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between">
+              <div className="flex min-w-0 items-center gap-8">
+                <Link href="/img-compress" className="inline-flex items-center">
+                  <Image
+                    src="/images/wordmark.png"
+                    alt="Picbind"
+                    width={178}
+                    height={38}
+                    className="h-10 w-auto object-contain"
+                    priority
+                  />
+                </Link>
+                <nav className="hidden items-center gap-3 text-[15px] font-semibold text-[#4d5d7a] md:flex">
+                  <button
+                    type="button"
+                    className="rounded-full bg-[#c7dbff] px-3 py-1 text-[#2f65cf]"
+                  >
+                    {lang === "zh" ? "图片压缩" : "Image Compress"}
+                  </button>
+                  <Link
+                    href="/favicon-converter"
+                    className="rounded-full px-3 py-1 transition hover:bg-white/35"
+                  >
+                    {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
+                  </Link>
+                </nav>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchLang("zh")}
+                  className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition ${
+                    lang === "zh"
+                      ? "bg-[#0f2f75] text-white"
+                      : "bg-[#eef3ff] text-[#536689] hover:bg-white"
+                  }`}
+                >
+                  中文
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchLang("en")}
+                  className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition ${
+                    lang === "en"
+                      ? "bg-[#0f2f75] text-white"
+                      : "bg-[#eef3ff] text-[#536689] hover:bg-white"
+                  }`}
+                >
+                  EN
+                </button>
+              </div>
+              </div>
             </div>
-            <div className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-2">
+            <div className="mx-auto mt-2 flex items-center gap-2 px-1 text-[14px] font-semibold text-[#4d5d7a] md:hidden">
               <button
                 type="button"
-                onClick={() => handleSwitchLang("zh")}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition sm:text-xs ${lang === "zh" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                className="rounded-full bg-[#c3d8ff] px-3 py-1 text-[#2f65cf]"
               >
-                中文
+                {lang === "zh" ? "图片压缩" : "Image Compress"}
               </button>
-              <button
-                type="button"
-                onClick={() => handleSwitchLang("en")}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold transition sm:text-xs ${lang === "en" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-              >
-                EN
-              </button>
+              <Link href="/favicon-converter" className="rounded-full px-3 py-1">
+                {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
+              </Link>
             </div>
           </header>
 
@@ -1008,25 +1050,38 @@ export default function HomeCompressLanding({
                 }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
-                className={`mx-auto w-full rounded-[24px] bg-[rgba(108,119,95,0.78)] p-3 shadow-[0_22px_60px_rgba(24,32,24,0.24)] backdrop-blur-sm transition sm:rounded-[26px] sm:p-3.5 md:p-4 ${isDragging ? "scale-[1.01] ring-2 ring-white/60" : ""}`}
+                className={`mx-auto w-full rounded-[24px] bg-[rgba(223,232,250,0.68)] p-3 shadow-[0_20px_52px_rgba(64,92,148,0.16)] backdrop-blur-sm transition sm:rounded-[26px] sm:p-3.5 md:p-4 ${isDragging ? "scale-[1.01] ring-2 ring-[#9ec0ff]/70" : ""}`}
               >
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
-                  className="flex h-[172px] w-full flex-col items-center justify-center rounded-[20px] border-[3px] border-dashed border-white/75 px-4 py-4 text-center text-white transition hover:bg-white/5 sm:h-[205px] sm:px-6 sm:py-5 md:h-[245px] md:py-6"
+                  className="flex h-[172px] w-full flex-col items-center justify-center rounded-[20px] border-[3px] border-dashed border-[#7aabff] bg-[rgba(242,247,255,0.62)] px-4 py-4 text-center text-[#22325d] transition hover:bg-[rgba(242,247,255,0.78)] sm:h-[205px] sm:px-6 sm:py-5 md:h-[245px] md:py-6"
                 >
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[16px] bg-[linear-gradient(135deg,#4482d6,#143c88)] text-[28px] shadow-[0_16px_24px_rgba(7,33,79,0.4)] sm:mb-4 sm:h-14 sm:w-14 sm:rounded-[18px] sm:text-3xl">
-                    ⬇
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[14px] bg-[linear-gradient(180deg,#6fb2f8,#438ef2)] shadow-[0_8px_18px_rgba(68,133,232,0.22)] sm:mb-4 sm:h-14 sm:w-14 sm:rounded-[16px]">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-7 w-7 text-white sm:h-8 sm:w-8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 4v10" />
+                      <path d="m8.5 10.5 3.5 3.5 3.5-3.5" />
+                      <path d="M6 19h12" />
+                    </svg>
                   </div>
-                  <h2 className="text-[16px] font-semibold leading-tight sm:text-[19px] md:text-[22px]">
+                  <h2 className="text-[16px] font-semibold leading-tight text-[#21335f] sm:text-[19px] md:text-[22px]">
                     {copy.dropTitle}
                   </h2>
-                  <p className="mt-2 text-[11px] font-medium text-white/85 sm:mt-3 sm:text-[13px] md:text-[14px]">
+                  <p className="mt-2 text-[11px] font-medium text-[#5d6d95] sm:mt-3 sm:text-[13px] md:text-[14px]">
                     {copy.dropDesc}
                   </p>
                 </button>
-                <div className="mt-3 overflow-hidden rounded-[18px] bg-[rgba(246,246,243,0.96)] sm:rounded-[20px]">
-                  <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-slate-600 sm:px-5 sm:text-[13px] md:text-[14px]">
+                <div className="mt-3 overflow-hidden rounded-[18px] bg-[rgba(251,253,255,0.98)] sm:rounded-[20px]">
+                  <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-[#5f6e90] sm:px-5 sm:text-[13px] md:text-[14px]">
                     <button
                       type="button"
                       onClick={(event) => {
@@ -1035,7 +1090,7 @@ export default function HomeCompressLanding({
                       }}
                       aria-pressed={showFormatOptions}
                       className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${
-                        showFormatOptions ? "bg-lime-500" : "bg-slate-300"
+                        showFormatOptions ? "bg-[#5a9dff]" : "bg-[#c5d2e6]"
                       }`}
                     >
                       <span
@@ -1047,9 +1102,9 @@ export default function HomeCompressLanding({
                     <span className="font-medium">{copy.autoLabel}</span>
                   </div>
                   <div
-                    className={`overflow-hidden bg-[#edf0e4] transition-all duration-200 ${
+                    className={`overflow-hidden bg-[#edf3ff] transition-all duration-200 ${
                       showFormatOptions
-                        ? "max-h-40 border-t border-[#e2e6d8] sm:max-h-24"
+                        ? "max-h-40 border-t border-[#d5e0f8] sm:max-h-24"
                         : "max-h-0 border-t-0"
                     }`}
                   >
@@ -1072,25 +1127,25 @@ export default function HomeCompressLanding({
                             }}
                             className={`inline-flex h-8 min-w-[82px] items-center justify-center rounded-full border px-2.5 text-[10px] font-semibold tracking-[0.02em] transition md:min-w-[88px] md:text-[11px] ${
                               active
-                                ? "border-lime-500 bg-white text-lime-600 shadow-sm"
-                                : "border-slate-300 bg-[#f7f7f2] text-slate-700"
+                                ? "border-[#5a9dff] bg-white text-[#2d6fde] shadow-sm"
+                                : "border-[#c7d3ea] bg-[#f6f8ff] text-[#5b6782]"
                             }`}
                           >
                             {active && (
-                              <span className="mr-2 text-lime-500">✓</span>
+                              <span className="mr-2 text-[#5a9dff]">✓</span>
                             )}
                             <span>{format.label}</span>
                           </button>
                         );
                       })}
-                      <span className="hidden h-8 w-px bg-slate-300 md:block" />
+                      <span className="hidden h-8 w-px bg-[#c7d3ea] md:block" />
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
                           handleSelectAllFormats();
                         }}
-                        className="inline-flex h-8 min-w-[92px] items-center justify-center rounded-full border border-slate-300 bg-[#f7f7f2] px-2.5 text-[10px] font-semibold tracking-[0.02em] text-slate-700 transition hover:bg-white md:min-w-[104px] md:text-[11px]"
+                        className="inline-flex h-8 min-w-[92px] items-center justify-center rounded-full border border-[#c7d3ea] bg-[#f6f8ff] px-2.5 text-[10px] font-semibold tracking-[0.02em] text-[#5b6782] transition hover:bg-white md:min-w-[104px] md:text-[11px]"
                       >
                         {copy.selectAll}
                       </button>

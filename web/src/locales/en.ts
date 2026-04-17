@@ -1,4 +1,8 @@
-import type { HomeCompressLandingCopy, LocaleType } from "./zh";
+import type {
+  FaviconGeneratorCopy,
+  HomeCompressLandingCopy,
+  LocaleType,
+} from "./zh";
 
 const en: LocaleType = {
   Symbol: "en",
@@ -54,6 +58,65 @@ const en: LocaleType = {
       loading: "Analyzing...",
     },
   } as HomeCompressLandingCopy,
+  FaviconGenerator: {
+    navConverter: "Converter",
+    navGenerator: "Generator",
+    heroTitleText: "Favicon Generator / Generate from Text",
+    heroTitleImage: "Favicon Converter / Generate from Image",
+    heroDescText:
+      "Quickly generate your favicon from text by selecting the text, fonts, and colors. Download your favicon in the most up to date formats.",
+    heroDescImage:
+      "Quickly generate your favicon from an image by uploading your image below. Download your favicon in the most up to date formats.",
+    breadcrumbHome: "Home",
+    breadcrumbText: "Text Generator",
+    breadcrumbImage: "Image Generator",
+    previewLabel: "Preview",
+    downloadButton: "Download",
+    generatingButton: "Generating...",
+    textSectionTitle: "Generate From Text",
+    imageSectionTitle: "Converter",
+    labels: {
+      text: "Text",
+      background: "Background",
+      square: "Square",
+      circle: "Circle",
+      rounded: "Rounded",
+      fontFamilyPrefix: "Font Family (",
+      viewGoogleFonts: "view all on Google Fonts",
+      fontVariant: "Font Variant",
+      fontSize: "Font Size",
+      fontColor: "Font Color",
+      backgroundColor: "Background Color",
+    },
+    converterDropHint: "Drag and drop your file here or click here to upload.",
+    installation: {
+      title: "Installation",
+      step1:
+        "First, use the download button to download the files listed below. Place the files in the root directory of your website.",
+      step2Prefix: "Next, copy the following link tags and paste them into the ",
+      step2Head: "head",
+      step2Suffix: " of your HTML.",
+      copy: "Copy",
+    },
+    article: {
+      title: "Why favicon.io?",
+      p1: "Whether you want to generate a favicon from text, from an existing image, or from an emoji we've got you covered. The favicon generator is completely free and extremely easy to use. The generated favicon will work for all browsers and multiple platforms.",
+      h2: "Getting started with the favicon generator",
+      p2: "The tool above will allow you to generate a favicon from text. Start by choosing one to two letters for the favicon generator. Since the favicon generator outputs very small images it's important to use few characters for maximum legibility.",
+      h3: "Making the background simple",
+      p3: "Next, select the shape of the background. There are three simple shapes available: square, circle, and rounded. These are the most common shapes used to generate a favicon.",
+      h4: "Selecting the font for your favicon",
+      p4: "The favicon generator uses Google Fonts with many fonts available. This is useful to match the font used on your own website. You can edit the font size once you've selected your font.",
+      h5: "Tailoring the colors",
+      p5: "The last step is to select the colors. If you have the HEX values of the colors you want, you can enter them directly into the input boxes. You can also use the color picker palettes below each input box.",
+    },
+    errors: {
+      unsupportedType: "Only PNG, JPG, JPEG, BMP and WebP are supported",
+      uploadFirst: "Please upload an image first.",
+      generationFailed: "Favicon generation failed",
+      copyFailed: "Copy failed",
+    },
+  } as FaviconGeneratorCopy,
 };
 
 export default en;

@@ -68,8 +68,18 @@
   * {
     @apply border-border;
   }
+  html {
+    /* Keep scrollbar space reserved to avoid layout shift between short/long pages. */
+    scrollbar-gutter: stable;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
   }
 }
 

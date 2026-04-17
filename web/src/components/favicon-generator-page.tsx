@@ -3,6 +3,8 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { getFaviconGeneratorCopy, getLang, type Lang } from "@/locales";
 import {
   downloadFaviconZip,
   generateFaviconFromImage,
@@ -466,9 +468,15 @@ function ColorPalette({
   );
 }
 
-export default function FaviconGeneratorPage() {
+export default function FaviconGeneratorPage({
+  initialMode = "text",
+}: {
+  initialMode?: GeneratorMode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const [mode, setMode] = React.useState<GeneratorMode>("text");
+  const [lang, setLang] = React.useState<Lang>("zh");
   const [isDragging, setIsDragging] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -487,6 +495,18 @@ export default function FaviconGeneratorPage() {
   const [fontSize, setFontSize] = React.useState(110);
   const [previewIcons, setPreviewIcons] = React.useState<string[]>([]);
 
+  React.useEffect(() => {
+    setLang(getLang());
+  }, []);
+
+  const mode: GeneratorMode =
+    pathname === "/favicon-converter"
+      ? "image"
+      : pathname === "/favicon-generator"
+        ? "text"
+        : initialMode;
+
+  const copy = React.useMemo(() => getFaviconGeneratorCopy(lang), [lang]);
   const htmlSnippet = React.useMemo(() => getFaviconHtmlSnippet(), []);
   const isFontListReady = fontOptions.length > 0;
   const selectedFont =
@@ -504,6 +524,18 @@ export default function FaviconGeneratorPage() {
   const backgroundColor = React.useMemo(
     () => resolveCssColor(backgroundColorInput, "#209CEE"),
     [backgroundColorInput],
+  );
+
+  const handleModeSwitch = React.useCallback(
+    (nextMode: GeneratorMode) => {
+      const targetPath =
+        nextMode === "image" ? "/favicon-converter" : "/favicon-generator";
+      if (pathname === targetPath) {
+        return;
+      }
+      router.push(targetPath);
+    },
+    [pathname, router],
   );
 
   React.useEffect(() => {
@@ -612,7 +644,7 @@ export default function FaviconGeneratorPage() {
     }
 
     if (!ALLOWED_TYPES.has(file.type)) {
-      setError("Only PNG, JPG, JPEG, BMP and WebP are supported");
+      setError(copy.errors.unsupportedType);
       return;
     }
 
@@ -624,7 +656,7 @@ export default function FaviconGeneratorPage() {
       }
       return URL.createObjectURL(file);
     });
-  }, []);
+  }, [copy.errors.unsupportedType]);
 
   const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -643,7 +675,7 @@ export default function FaviconGeneratorPage() {
 
       if (mode === "image") {
         if (!selectedFile) {
-          setError("Please upload an image first.");
+          setError(copy.errors.uploadFirst);
           return;
         }
         const files = await generateFaviconFromImage(selectedFile);
@@ -675,7 +707,7 @@ export default function FaviconGeneratorPage() {
       const files = await generateFaviconFromImage(textFile);
       await downloadFaviconZip(files);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Favicon generation failed");
+      setError(err instanceof Error ? err.message : copy.errors.generationFailed);
     } finally {
       setIsGenerating(false);
     }
@@ -685,44 +717,42 @@ export default function FaviconGeneratorPage() {
     try {
       await navigator.clipboard.writeText(htmlSnippet);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Copy failed");
+      setError(err instanceof Error ? err.message : copy.errors.copyFailed);
     }
   };
 
   return (
     <main className="w-full bg-[#efefef] text-[#1f2328]">
-      <section className="border-b border-[#d9dce0] bg-[#f2f3f5] px-5 py-3 sm:px-8 lg:px-12">
-        <div className="mx-auto flex w-full max-w-[1240px] items-center gap-8 sm:gap-10">
+      <section className="border-b border-[#d9dce0] bg-[#f2f3f5] px-5 sm:px-8 lg:px-12">
+        <div className="mx-auto flex h-[64px] w-full max-w-[1240px] items-center gap-8 sm:gap-10">
           <Link
-            href="/"
-            className="inline-flex items-center gap-3 rounded-md border border-[#d3d7dd] bg-white px-3 py-2"
+            href="/img-compress"
+            className="inline-flex items-center"
           >
             <Image
-              src="/images/logo1.png"
-              alt="NanoImg logo"
-              width={40}
-              height={40}
-              className="h-10 w-10 rounded-full object-cover"
+              src="/images/wordmark.png"
+              alt="Picbind"
+              width={178}
+              height={38}
+              className="h-10 w-auto object-contain"
+              priority
             />
-            <span className="text-2xl font-extrabold tracking-tight text-[#3b3f44] sm:text-3xl">
-              NanoImg
-            </span>
           </Link>
 
-          <nav className="flex items-center gap-6 text-xl font-semibold text-[#4a4f55] sm:gap-10 sm:text-2xl">
+          <nav className="flex items-center gap-6 text-[16px] font-semibold text-[#4a4f55] sm:gap-10 sm:text-[16px]">
             <button
               type="button"
-              onClick={() => setMode("image")}
+              onClick={() => handleModeSwitch("image")}
               className={`transition hover:text-[#1f2328] ${mode === "image" ? "text-[#1f2328]" : ""}`}
             >
-              Converter
+              {copy.navConverter}
             </button>
             <button
               type="button"
-              onClick={() => setMode("text")}
+              onClick={() => handleModeSwitch("text")}
               className={`transition hover:text-[#1f2328] ${mode === "text" ? "text-[#1f2328]" : ""}`}
             >
-              Generator
+              {copy.navGenerator}
             </button>
           </nav>
         </div>
@@ -732,31 +762,31 @@ export default function FaviconGeneratorPage() {
         <div className="mx-auto w-full max-w-[1200px]">
           <h1 className="max-w-[760px] text-3xl font-extrabold leading-[1.2] tracking-[0.01em] sm:text-5xl">
             {mode === "text"
-              ? "Favicon Generator / Generate from Text"
-              : "Favicon Generator / Generate from Image"}
+              ? copy.heroTitleText
+              : copy.heroTitleImage}
           </h1>
           <p className="mt-5 max-w-[820px] text-base text-white/70 sm:text-lg sm:leading-[1.6]">
             {mode === "text"
-              ? "Quickly generate your favicon from text by selecting the text, fonts, and colors. Download your favicon in the most up to date formats."
-              : "Quickly generate your favicon from an image by uploading your image below. Download your favicon in the most up to date formats."}
+              ? copy.heroDescText
+              : copy.heroDescImage}
           </p>
         </div>
       </section>
 
       <section className="px-5 pb-6 pt-0 sm:px-8 lg:px-12">
-        <div className="mx-auto w-full max-w-[1200px] rounded-b-md bg-[#ebebee] px-6 py-3 text-[#555b62]">
-          <Link href="/" className="text-[#377ce5] hover:underline">
-            Home
+        <div className="mx-auto w-full max-w-[1240px] rounded-b-md bg-[#ebebee] px-6 py-3 text-[#555b62]">
+          <Link href="/img-compress" className="text-[#377ce5] hover:underline">
+            {copy.breadcrumbHome}
           </Link>
           <span className="mx-3 text-[#a4a8ad]">→</span>
-          <span>{mode === "text" ? "Text Generator" : "Image Generator"}</span>
+          <span>{mode === "text" ? copy.breadcrumbText : copy.breadcrumbImage}</span>
         </div>
       </section>
 
       <section className="px-5 pb-8 sm:px-8 lg:px-12">
         <div className="mx-auto flex w-full max-w-[1240px] flex-wrap items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <strong className="text-[#2e3136]">Preview</strong>
+            <strong className="text-[#2e3136]">{copy.previewLabel}</strong>
             {mode === "text" ? (
               <div className="flex items-center gap-2">
                 {[48, 32, 16].map((iconSize, index) => {
@@ -795,7 +825,7 @@ export default function FaviconGeneratorPage() {
               disabled={isGenerating}
               className="rounded-md bg-[#3494e7] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#9fc7ee]"
             >
-              {isGenerating ? "Generating..." : "Download"}
+              {isGenerating ? copy.generatingButton : copy.downloadButton}
             </button>
           </div>
         </div>
@@ -805,14 +835,14 @@ export default function FaviconGeneratorPage() {
         <section className="px-5 pb-10 sm:px-8 lg:px-12">
           <div className="mx-auto w-full max-w-[1240px] rounded-xl border border-[#dfdfdf] bg-white p-6 shadow-[0_10px_30px_rgba(11,12,15,0.04)]">
             <h2 className="text-2xl font-bold text-[#2e3136] sm:text-3xl">
-              Generate From Text
+              {copy.textSectionTitle}
             </h2>
 
             <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="space-y-4">
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Text
+                    {copy.labels.text}
                   </span>
                   <input
                     value={text}
@@ -823,29 +853,29 @@ export default function FaviconGeneratorPage() {
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Background
+                    {copy.labels.background}
                   </span>
                   <select
                     value={backgroundShape}
                     onChange={(event) => setBackgroundShape(event.target.value as BgShape)}
                     className="w-full rounded-md border border-[#d6d7db] px-3 py-2 text-base outline-none focus:border-[#209cee]"
                   >
-                    <option value="square">Square</option>
-                    <option value="circle">Circle</option>
-                    <option value="rounded">Rounded</option>
+                    <option value="square">{copy.labels.square}</option>
+                    <option value="circle">{copy.labels.circle}</option>
+                    <option value="rounded">{copy.labels.rounded}</option>
                   </select>
                 </label>
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Font Family (
+                    {copy.labels.fontFamilyPrefix}
                     <a
                       href="https://fonts.google.com/"
                       target="_blank"
                       rel="noreferrer"
                       className="text-[#377ce5] hover:underline"
                     >
-                      view all on Google Fonts
+                      {copy.labels.viewGoogleFonts}
                     </a>
                     )
                   </span>
@@ -865,7 +895,7 @@ export default function FaviconGeneratorPage() {
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Font Variant
+                    {copy.labels.fontVariant}
                   </span>
                   <select
                     value={selectedVariant.id}
@@ -882,7 +912,7 @@ export default function FaviconGeneratorPage() {
 
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Font Size
+                    {copy.labels.fontSize}
                   </span>
                   <input
                     type="number"
@@ -898,7 +928,7 @@ export default function FaviconGeneratorPage() {
               <div>
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Font Color
+                    {copy.labels.fontColor}
                   </span>
                   <input
                     value={fontColorInput}
@@ -916,7 +946,7 @@ export default function FaviconGeneratorPage() {
               <div>
                 <label className="block">
                   <span className="mb-2 block text-sm font-semibold text-[#3a3f45]">
-                    Background Color
+                    {copy.labels.backgroundColor}
                   </span>
                   <input
                     value={backgroundColorInput}
@@ -942,7 +972,7 @@ export default function FaviconGeneratorPage() {
         <section className="px-5 pb-10 sm:px-8 lg:px-12">
           <div className="mx-auto w-full max-w-[1240px] rounded-xl border border-[#dfdfdf] bg-white p-6 shadow-[0_10px_30px_rgba(11,12,15,0.04)]">
             <h2 className="text-2xl font-bold text-[#2e3136] sm:text-3xl">
-              Converter
+              {copy.imageSectionTitle}
             </h2>
             <div
               className={`mt-6 rounded-lg border border-dashed px-6 py-12 text-center transition ${
@@ -960,7 +990,7 @@ export default function FaviconGeneratorPage() {
               onClick={() => inputRef.current?.click()}
             >
               <p className="cursor-pointer text-base text-[#57606a] sm:text-lg">
-                Drag and drop your file here or click here to upload.
+                {copy.converterDropHint}
               </p>
               {selectedFile && (
                 <p className="mt-3 text-sm font-medium text-[#24292f]">
@@ -975,10 +1005,9 @@ export default function FaviconGeneratorPage() {
 
       <section className="px-5 pb-8 sm:px-8 lg:px-12">
         <div className="mx-auto w-full max-w-[1240px] rounded-xl border border-[#dfdfdf] bg-white p-6 shadow-[0_10px_30px_rgba(11,12,15,0.04)]">
-          <h3 className="text-2xl font-bold text-[#24292f] sm:text-3xl">Installation</h3>
+          <h3 className="text-2xl font-bold text-[#24292f] sm:text-3xl">{copy.installation.title}</h3>
           <p className="mt-4 text-sm leading-[1.6] text-[#57606a] sm:text-base">
-            First, use the download button to download the files listed below. Place the files in
-            the root directory of your website.
+            {copy.installation.step1}
           </p>
           <ul className="mt-4 list-disc space-y-2 pl-7 text-sm text-[#4f5660] sm:text-base">
             {installFiles.map((item) => (
@@ -987,9 +1016,9 @@ export default function FaviconGeneratorPage() {
           </ul>
 
           <p className="mt-6 text-sm leading-[1.6] text-[#57606a] sm:text-base">
-            Next, copy the following link tags and paste them into the{" "}
-            <code className="rounded bg-[#f3f4f6] px-2 py-1 text-[#cf222e]">head</code> of your
-            HTML.
+            {copy.installation.step2Prefix}
+            <code className="rounded bg-[#f3f4f6] px-2 py-1 text-[#cf222e]">{copy.installation.step2Head}</code>
+            {copy.installation.step2Suffix}
           </p>
 
           <pre className="mt-4 overflow-auto rounded bg-[#f6f8fa] p-4 text-xs leading-[1.55] text-[#3d444d] sm:text-sm">
@@ -1001,54 +1030,44 @@ export default function FaviconGeneratorPage() {
             onClick={onCopyHtml}
             className="mt-4 rounded-md bg-[#3a98f6] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2b89e8]"
           >
-            Copy
+            {copy.installation.copy}
           </button>
         </div>
       </section>
 
       <section className="px-5 pb-16 sm:px-8 lg:px-12">
         <div className="mx-auto w-full max-w-[1240px] rounded-xl border border-[#dfdfdf] bg-white p-6 shadow-[0_10px_30px_rgba(11,12,15,0.04)]">
-          <h3 className="text-2xl font-bold text-[#24292f] sm:text-3xl">Why favicon.io?</h3>
+          <h3 className="text-2xl font-bold text-[#24292f] sm:text-3xl">{copy.article.title}</h3>
           <p className="mt-4 text-sm leading-[1.7] text-[#57606a] sm:text-base">
-            Whether you want to generate a favicon from text, from an existing image, or from an
-            emoji we&apos;ve got you covered. The favicon generator is completely free and extremely
-            easy to use. The generated favicon will work for all browsers and multiple platforms.
+            {copy.article.p1}
           </p>
 
           <h4 className="mt-7 text-2xl font-bold text-[#24292f] sm:text-3xl">
-            Getting started with the favicon generator
+            {copy.article.h2}
           </h4>
           <p className="mt-4 text-sm leading-[1.7] text-[#57606a] sm:text-base">
-            The tool above will allow you to generate a favicon from text. Start by choosing one
-            to two letters for the favicon generator. Since the favicon generator outputs very
-            small images it&apos;s important to use few characters for maximum legibility.
+            {copy.article.p2}
           </p>
 
           <h4 className="mt-7 text-2xl font-bold text-[#24292f] sm:text-3xl">
-            Making the background simple
+            {copy.article.h3}
           </h4>
           <p className="mt-4 text-sm leading-[1.7] text-[#57606a] sm:text-base">
-            Next, select the shape of the background. There are three simple shapes available:
-            square, circle, and rounded. These are the most common shapes used to generate a
-            favicon.
+            {copy.article.p3}
           </p>
 
           <h4 className="mt-7 text-2xl font-bold text-[#24292f] sm:text-3xl">
-            Selecting the font for your favicon
+            {copy.article.h4}
           </h4>
           <p className="mt-4 text-sm leading-[1.7] text-[#57606a] sm:text-base">
-            The favicon generator uses Google Fonts with many fonts available. This is useful to
-            match the font used on your own website. You can edit the font size once you&apos;ve
-            selected your font.
+            {copy.article.p4}
           </p>
 
           <h4 className="mt-7 text-2xl font-bold text-[#24292f] sm:text-3xl">
-            Tailoring the colors
+            {copy.article.h5}
           </h4>
           <p className="mt-4 text-sm leading-[1.7] text-[#57606a] sm:text-base">
-            The last step is to select the colors. If you have the HEX values of the colors you
-            want, you can enter them directly into the input boxes. You can also use the color
-            picker palettes below each input box.
+            {copy.article.p5}
           </p>
         </div>
       </section>

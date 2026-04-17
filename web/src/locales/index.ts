@@ -3,8 +3,13 @@
 import zh from "./zh";
 import en from "./en";
 
-import type { HomeCompressLandingCopy, LocaleType } from "./zh";
+import type {
+  FaviconGeneratorCopy,
+  HomeCompressLandingCopy,
+  LocaleType,
+} from "./zh";
 export type {
+  FaviconGeneratorCopy,
   HomeCompressLandingCopy,
   LocaleType,
   PartialLocaleType,
@@ -44,6 +49,10 @@ export function getHomeCompressLandingCopy(
   lang: Lang,
 ): HomeCompressLandingCopy {
   return ALL_LANGS[lang].HomeCompressLanding ?? fallbackLang.HomeCompressLanding;
+}
+
+export function getFaviconGeneratorCopy(lang: Lang): FaviconGeneratorCopy {
+  return ALL_LANGS[lang].FaviconGenerator ?? fallbackLang.FaviconGenerator;
 }
 
 function getItem(key: string) {

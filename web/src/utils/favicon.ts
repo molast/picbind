@@ -41,7 +41,7 @@ function buildManifestBytes() {
     background_color: "#ffffff",
     display: "standalone",
   };
-  return new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+  return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
 function triggerDownload(blob: Blob, fileName: string) {
