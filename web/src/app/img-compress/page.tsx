@@ -9,9 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function ImgCompressPage() {
   noStore();
   const cookieStore = await cookies();
-  const cookieLang =
-    cookieStore.get("picbind-lang")?.value ||
-    cookieStore.get("nano-img-lang")?.value;
+  const cookieLang = cookieStore.get("picbind-lang")?.value;
   const initialLang: Lang = cookieLang === "en" ? "en" : "zh";
   const uiConfig = await getPublicUiConfig();
 

@@ -37,7 +37,7 @@ export const ALL_LANG_OPTIONS = [
 
 const LANG_KEY = "ai-translator-lang-v2";
 const LANG_COOKIE_KEY = "picbind-lang";
-const LEGACY_LANG_COOKIE_KEY = "nano-img-lang";
+const LEGACY_LANG_COOKIE_KEY = "picbind-lang";
 const DEFAULT_LANG = "zh";
 
 const fallbackLang = zh;
