@@ -59,11 +59,11 @@ export default function AdminDashboard() {
   const [isLoading, setIsLoading] = React.useState(false);
 
   const stateUrl = React.useMemo(() => {
-    if (!adminStateApiPath || !activeAdminKey.trim()) {
+    if (!adminStateApiPath) {
       return "";
     }
-    return `${adminStateApiPath}?key=${encodeURIComponent(activeAdminKey.trim())}`;
-  }, [activeAdminKey, adminStateApiPath]);
+    return adminStateApiPath;
+  }, [adminStateApiPath]);
 
   const applyState = React.useCallback((next: AdminDashboardState) => {
     setState(next);
@@ -73,12 +73,20 @@ export default function AdminDashboard() {
 
   const refreshState = React.useCallback(async () => {
     if (!stateUrl) {
+      throw new Error("未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH");
+    }
+    if (!activeAdminKey.trim()) {
       throw new Error("请先输入有效的 Admin Key");
     }
 
     setIsLoading(true);
     try {
-      const response = await fetch(stateUrl, { method: "GET" });
+      const response = await fetch(stateUrl, {
+        method: "GET",
+        headers: {
+          "x-admin-key": activeAdminKey.trim(),
+        },
+      });
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("Admin Key 错误，或 Worker 未配置 ADMIN_KEY");
@@ -91,10 +99,14 @@ export default function AdminDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [applyState, stateUrl]);
+  }, [activeAdminKey, applyState, stateUrl]);
 
   const saveConfig = React.useCallback(async () => {
     if (!stateUrl) {
+      setStatusText("未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH");
+      return;
+    }
+    if (!activeAdminKey.trim()) {
       setStatusText("请先输入有效的 Admin Key");
       return;
     }
@@ -106,6 +118,7 @@ export default function AdminDashboard() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-admin-key": activeAdminKey.trim(),
         },
         body: JSON.stringify({
           showCompressedCount,
@@ -128,7 +141,7 @@ export default function AdminDashboard() {
     } finally {
       setIsSaving(false);
     }
-  }, [applyState, showCompareSection, showCompressedCount, stateUrl]);
+  }, [activeAdminKey, applyState, showCompareSection, showCompressedCount, stateUrl]);
 
   const connectAdmin = React.useCallback(async () => {
     const key = adminKeyInput.trim();
@@ -137,26 +150,8 @@ export default function AdminDashboard() {
       return;
     }
     setActiveAdminKey(key);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("picbind_admin_key", key);
-    }
     setStatusText("Admin Key 已设置，正在连接...");
   }, [adminKeyInput]);
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    const keyFromQuery = params.get("key") || "";
-    const keyFromStorage = window.localStorage.getItem("picbind_admin_key") || "";
-    const key = keyFromQuery.trim() || keyFromStorage.trim();
-    if (!key) {
-      return;
-    }
-    setAdminKeyInput(key);
-    setActiveAdminKey(key);
-  }, []);
 
   React.useEffect(() => {
     if (!stateUrl) {
@@ -166,8 +161,6 @@ export default function AdminDashboard() {
       setStatusText(error instanceof Error ? error.message : "加载后台数据失败");
     });
   }, [refreshState, stateUrl]);
-
-  const isApiConfigured = Boolean(adminStateApiPath);
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-800 sm:px-6">
@@ -182,14 +175,7 @@ export default function AdminDashboard() {
           </p>
 
           <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="mb-2 text-sm font-medium text-slate-700">
-              Worker 管理接口
-            </div>
-            <div className="mb-3 text-xs text-slate-500">
-              {isApiConfigured
-                ? `API: ${adminStateApiPath}`
-                : "未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH"}
-            </div>
+            <div className="mb-2 text-sm font-medium text-slate-700">Admin Key</div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="min-w-[260px] flex-1 rounded-xl border border-slate-300 bg-white ring-sky-300 transition focus-within:ring">
                 <input
@@ -203,7 +189,6 @@ export default function AdminDashboard() {
               <button
                 type="button"
                 onClick={() => void connectAdmin()}
-                disabled={!isApiConfigured}
                 className="rounded-full bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 连接

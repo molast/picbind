@@ -299,8 +299,8 @@ type HomeCompressLandingProps = {
 
 export default function HomeCompressLanding({
   initialLang = "zh",
-  showCompressedCount = true,
-  showCompareSection = true,
+  showCompressedCount = false,
+  showCompareSection = false,
 }: HomeCompressLandingProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
@@ -1720,16 +1720,6 @@ export default function HomeCompressLanding({
           ) : null}
         </div>
       </section>
-      <footer className="border-t border-slate-200 bg-[#ececec] px-4 py-6 text-center text-sm text-slate-500">
-        <a
-          href="https://beian.miit.gov.cn/"
-          target="_blank"
-          rel="noreferrer"
-          className="hover:text-slate-700"
-        >
-          沪ICP备2020025300号-5
-        </a>
-      </footer>
     </main>
   );
 }

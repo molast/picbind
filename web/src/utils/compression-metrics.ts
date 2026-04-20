@@ -1,7 +1,9 @@
 "use client";
 
-const METRICS_ENABLED = process.env.NEXT_PUBLIC_METRICS_ENABLED === "true";
 const METRICS_API_PATH = process.env.NEXT_PUBLIC_METRICS_API_PATH || "";
+const METRICS_ENABLED =
+  Boolean(METRICS_API_PATH) &&
+  process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
 const MAX_DELTA_PER_REQUEST = 20;
 const MAX_EVENTS_PER_REQUEST = 20;
 const FLUSH_DELAY_MS = 1200;
@@ -56,8 +58,8 @@ async function readTotalCount() {
   if (!METRICS_API_PATH) {
     return {
       totalCompressed: 0,
-      showCompressedCount: true,
-      showCompareSection: true,
+      showCompressedCount: false,
+      showCompareSection: false,
     };
   }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
@@ -187,7 +189,7 @@ export async function loadHomeDisplayConfig(defaults: {
   showCompressedCount: boolean;
   showCompareSection: boolean;
 }) {
-  if (!METRICS_API_PATH) {
+  if (!METRICS_ENABLED || !METRICS_API_PATH) {
     return defaults;
   }
 

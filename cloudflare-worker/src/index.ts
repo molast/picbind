@@ -60,8 +60,8 @@ function createInitialPayload(): MetricsPayload {
     totalViews: 0,
     totalSavedBytes: 0,
     formatStats: createInitialFormatStats(),
-    showCompressedCount: true,
-    showCompareSection: true,
+    showCompressedCount: false,
+    showCompareSection: false,
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -94,11 +94,11 @@ function normalizePayload(input: Partial<MetricsPayload> | null): MetricsPayload
     showCompressedCount:
       typeof input?.showCompressedCount === "boolean"
         ? input.showCompressedCount
-        : true,
+        : false,
     showCompareSection:
       typeof input?.showCompareSection === "boolean"
         ? input.showCompareSection
-        : true,
+        : false,
     updatedAt: input?.updatedAt || initial.updatedAt,
   };
 }
