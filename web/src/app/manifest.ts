@@ -8,7 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "PicBind",
     description:
       "Compress WebP, PNG, JPEG and AVIF images online with intelligent format handling.",
-    start_url: "/img-compress",
+    start_url: "/",
     display: "standalone",
     background_color: "#f1f1f1",
     theme_color: "#0ea5e9",

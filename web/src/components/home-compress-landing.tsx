@@ -976,7 +976,7 @@ export default function HomeCompressLanding({
             <div className="-mx-4 flex h-[64px] items-center px-5 sm:-mx-6 sm:px-8 lg:-mx-10 lg:px-12">
               <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between">
               <div className="flex min-w-0 items-center gap-8">
-                <Link href="/img-compress" className="inline-flex items-center">
+                <Link href="/" className="inline-flex items-center">
                   <Image
                     src="/images/wordmark.png"
                     alt="Picbind"

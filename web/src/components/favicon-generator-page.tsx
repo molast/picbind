@@ -726,7 +726,7 @@ export default function FaviconGeneratorPage({
       <section className="border-b border-[#d9dce0] bg-[#f2f3f5] px-5 sm:px-8 lg:px-12">
         <div className="mx-auto flex h-[64px] w-full max-w-[1240px] items-center gap-8 sm:gap-10">
           <Link
-            href="/img-compress"
+            href="/"
             className="inline-flex items-center"
           >
             <Image
@@ -775,7 +775,7 @@ export default function FaviconGeneratorPage({
 
       <section className="px-5 pb-6 pt-0 sm:px-8 lg:px-12">
         <div className="mx-auto w-full max-w-[1240px] rounded-b-md bg-[#ebebee] px-6 py-3 text-[#555b62]">
-          <Link href="/img-compress" className="text-[#377ce5] hover:underline">
+          <Link href="/" className="text-[#377ce5] hover:underline">
             {copy.breadcrumbHome}
           </Link>
           <span className="mx-3 text-[#a4a8ad]">→</span>

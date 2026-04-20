@@ -4,8 +4,12 @@ compatibility_date = "2026-04-20"
 
 [[kv_namespaces]]
 binding = "METRICS_KV"
-id = "replace-with-your-kv-namespace-id"
+id = "ffd6a9e2ce924cf2a4b93b782d525810"
 
 [vars]
-SITE_URL = "https://example.com"
-ALLOWED_ORIGINS = "https://example.com"
+SITE_URL = "https://picbind.com"
+ALLOWED_ORIGINS = "https://picbind.com"
+
+[env.preview.vars]
+SITE_URL = "https://preview.picbind.pages.dev"
+ALLOWED_ORIGINS = "*"

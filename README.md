@@ -27,7 +27,6 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 Web 应用位于 `web/`，主要页面包括：
 
 - `/`：图片压缩首页。
-- `/img-compress`：图片压缩页。
 - `/favicon-converter`：从图片生成 favicon。
 - `/favicon-generator`：从文字生成 favicon。
 - `/admin`：当前为静态占位页，后台接口后续由 Worker 接入。
@@ -144,4 +143,3 @@ site.webmanifest
 - 前端页面保持可静态导出，减少部署复杂度。
 - 动态统计和管理能力迁移到 Cloudflare Worker。
 - 不再使用 Docker 部署。
-
