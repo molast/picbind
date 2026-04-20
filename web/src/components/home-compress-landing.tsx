@@ -1198,10 +1198,10 @@ export default function HomeCompressLanding({
 
       {items.length > 0 && (
         <section className="relative z-10 mx-auto -mt-8 w-full max-w-[1100px] px-4 pb-20 md:-mt-12">
-          <div className="overflow-visible rounded-[14px] bg-[#4a4f5d] text-white shadow-[0_22px_50px_rgba(40,42,52,0.25)]">
-            <div className="flex flex-col gap-5 px-6 py-5 md:flex-row md:items-start md:justify-between">
+          <div className="overflow-visible rounded-[18px] border border-[#c4d8fb] bg-[rgba(237,244,255,0.88)] text-[#334a72] shadow-[0_18px_48px_rgba(78,120,193,0.2)] backdrop-blur">
+            <div className="flex flex-col gap-5 border-b border-[#c9dbfb] px-6 py-5 md:flex-row md:items-start md:justify-between">
               <div className="max-w-3xl">
-                <h3 className="text-2xl font-semibold text-lime-300">
+                <h3 className="text-[30px] font-semibold leading-tight text-[#2f4b7d]">
                   {hasPendingItems
                     ? copy.processingTitle
                     : copy.completedTitle(
@@ -1221,14 +1221,14 @@ export default function HomeCompressLanding({
                       `picbind-images-${SystemManager.getNowformatTime()}.zip`,
                     )
                   }
-                  className="rounded-xl bg-lime-300 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
+                  className="rounded-xl bg-[#3f80ea] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#356fd0] disabled:cursor-not-allowed disabled:bg-[#9ab3d8] disabled:text-[#eef4ff]"
                 >
                   {copy.downloadZip}
                 </button>
               </div>
             </div>
 
-            <div className="bg-[#f3f3f3] text-slate-700">
+            <div className="bg-[rgba(248,251,255,0.9)] text-[#3b4a62]">
               {sortedItems.map((item) => {
                 const bestVariant = getBestDoneVariant(item);
                 const doneVariants = getDoneVariants(item);
@@ -1265,9 +1265,9 @@ export default function HomeCompressLanding({
                 return (
                   <div
                     key={item.id}
-                    className="flex min-h-[84px] items-center gap-2.5 border-t border-[#d9d9d9] px-5 py-2.5 first:border-t-0"
+                    className="flex min-h-[84px] items-center gap-2.5 border-t border-[#d6e3f9] px-5 py-2.5 first:border-t-0"
                   >
-                    <div className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-slate-200 ring-1 ring-slate-200">
+                    <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-[#eaf1ff] ring-1 ring-[#cdddf7]">
                       <img
                         src={item.previewUrl}
                         alt={item.file.name}
@@ -1277,11 +1277,11 @@ export default function HomeCompressLanding({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between md:gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-[15px] font-semibold leading-none text-[#4a4f5d]">
+                          <div className="truncate text-[15px] font-semibold leading-none text-[#41557a]">
                             {item.file.name}
                           </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-                            <span className="inline-flex rounded-md bg-[#e9f4ef] px-2 py-0.5 text-[12px] font-semibold uppercase leading-none text-[#0d9b90]">
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#6c7f9f]">
+                            <span className="inline-flex rounded-md bg-[#e2eeff] px-2 py-0.5 text-[12px] font-semibold uppercase leading-none text-[#2f6ccc]">
                               {normalizeSourceFormat(item.file).toUpperCase()}
                             </span>
                             <span>{formatSize(item.file.size)}</span>
@@ -1291,21 +1291,21 @@ export default function HomeCompressLanding({
                           {rankedVariants.map((variant) => {
                             const toneClass =
                               variant.status === "done"
-                                ? "border-transparent bg-[#e8ecf1] text-[#4b5160]"
+                                ? "border-transparent bg-[#e5efff] text-[#45608d]"
                                 : variant.status === "error"
                                   ? "border-[#ffd9d4] bg-[#fff1ef] text-[#d14332]"
                                   : variant.status === "processing"
-                                    ? "border-transparent bg-[#eef1f4] text-sky-600"
-                                    : "border-transparent bg-[#f0f2f4] text-slate-600";
+                                    ? "border-transparent bg-[#edf4ff] text-[#3a7ce6]"
+                                    : "border-transparent bg-[#eef3fb] text-[#61779e]";
 
                             const accentClass =
                               variant.format === "jpeg"
-                                ? "text-[#0d9b90]"
+                                ? "text-[#2f6ccc]"
                                 : variant.format === "png"
                                   ? "text-[#2a7de1]"
                                   : variant.format === "webp"
                                     ? "text-[#6d4fe0]"
-                                    : "text-slate-600";
+                                    : "text-[#61779e]";
 
                             const detail =
                               variant.status === "done"
@@ -1329,17 +1329,17 @@ export default function HomeCompressLanding({
                                 {variant.status === "done" &&
                                   bestVariant?.id === variant.id &&
                                   doneVariants.length > 1 && (
-                                    <span className="absolute -right-2 -top-2 z-30 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#82c341] text-[12px] font-bold text-white shadow-sm">
+                                    <span className="absolute -right-2 -top-2 z-30 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#3f80ea] text-[12px] font-bold text-white shadow-sm">
                                       ✓
                                     </span>
                                   )}
                                 {variant.status === "done" ? (
                                   <>
                                     <div className="min-w-[52px] text-right">
-                                      <div className="text-[14px] font-semibold leading-none text-[#4a4f5d]">
+                                      <div className="text-[14px] font-semibold leading-none text-[#41557a]">
                                         {formatDeltaPercent(variant.percent)}
                                       </div>
-                                      <div className="mt-0.5 text-[10px] leading-none text-[#6c7380]">
+                                      <div className="mt-0.5 text-[10px] leading-none text-[#6f82a4]">
                                         {detail}
                                       </div>
                                     </div>
@@ -1371,7 +1371,7 @@ export default function HomeCompressLanding({
                                           download={
                                             variant.outputName || item.file.name
                                           }
-                                          className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dfe5ea] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
+                                          className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
                                         >
                                           <span className="text-[11px]">⬇</span>
                                           <span>
@@ -1532,17 +1532,17 @@ export default function HomeCompressLanding({
                       <div
                         className={`mt-1.5 overflow-hidden rounded-full ${
                           hasInFlightVariant
-                            ? "h-[4px] bg-[#d7e6c7]"
-                            : "h-px bg-[#d4d5d8]"
+                            ? "h-[4px] bg-[#dce8fb]"
+                            : "h-px bg-[#d6e3f9]"
                         }`}
                       >
                         <div
                           className={`transition-all duration-300 ${
                             hasInFlightVariant
                               ? activeProgress <= 0
-                                ? "h-[4px] bg-[#8cc63f] transition-none"
-                                : "h-[4px] bg-[#8cc63f]"
-                              : "h-px bg-[#8b909b]"
+                                ? "h-[4px] bg-[#4b86e8] transition-none"
+                                : "h-[4px] bg-[#4b86e8]"
+                              : "h-px bg-[#8aa4cf]"
                           }`}
                           style={{
                             width: `${activeProgress}%`,
