@@ -110,10 +110,20 @@ BAIDU_PUSH_TOKEN
 
 ```text
 NEXT_PUBLIC_METRICS_ENABLED=true
-NEXT_PUBLIC_METRICS_API_PATH=https://your-worker.example.workers.dev/api/metrics
+NEXT_PUBLIC_METRICS_API_PATH=https://api.picbind.com/api/metrics
 NEXT_PUBLIC_PAGE_VIEW_ENABLED=true
-NEXT_PUBLIC_PAGE_VIEW_API_PATH=https://your-worker.example.workers.dev/api/site/view
-NEXT_PUBLIC_ADMIN_STATE_API_PATH=https://your-worker.example.workers.dev/api/admin/state
+NEXT_PUBLIC_PAGE_VIEW_API_PATH=https://api.picbind.com/api/site/view
+NEXT_PUBLIC_ADMIN_STATE_API_PATH=https://api.picbind.com/api/admin/state
+```
+
+推荐的 Worker 环境变量：
+
+```text
+SITE_URL=https://picbind.com
+ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com
+BAIDU_PUSH_SITE=https://picbind.com
+ADMIN_KEY=<your-admin-key>
+BAIDU_PUSH_TOKEN=<your-baidu-token>
 ```
 
 ## Favicon 资源
