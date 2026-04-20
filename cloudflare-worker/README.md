@@ -11,6 +11,12 @@ This Worker replaces the old Next.js API routes when deploying the web app to Cl
 - `POST /api/admin/state?key=...`
 - `POST /api/seo/baidu/push?key=...`
 
+Notes:
+
+- `GET /api/metrics` is public read.
+- `POST /api/metrics` and `POST /api/site/view` require an allowed `Origin` header.
+- Admin endpoints require `ADMIN_KEY` via query `key` or request header `x-admin-key`.
+
 ## Required binding
 
 - `METRICS_KV`: Cloudflare KV namespace for metrics and UI state.

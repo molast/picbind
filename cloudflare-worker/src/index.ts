@@ -193,6 +193,14 @@ function hasInvalidOrigin(env: Env, request: Request) {
   return !allowedOrigins(env, request).has(origin);
 }
 
+function hasMissingOrInvalidOrigin(env: Env, request: Request) {
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return true;
+  }
+  return !allowedOrigins(env, request).has(origin);
+}
+
 function getAdminKey(request: Request) {
   const url = new URL(request.url);
   return url.searchParams.get("key") || request.headers.get("x-admin-key") || "";
@@ -213,7 +221,7 @@ async function handleMetrics(request: Request, env: Env) {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  if (hasInvalidOrigin(env, request)) {
+  if (hasMissingOrInvalidOrigin(env, request)) {
     return json({ error: "Invalid origin" }, { status: 403 });
   }
 
@@ -264,7 +272,7 @@ async function handlePageView(request: Request, env: Env) {
   if (request.method !== "POST") {
     return json({ error: "Method not allowed" }, { status: 405 });
   }
-  if (hasInvalidOrigin(env, request)) {
+  if (hasMissingOrInvalidOrigin(env, request)) {
     return json({ error: "Invalid origin" }, { status: 403 });
   }
   const state = await readState(env);
