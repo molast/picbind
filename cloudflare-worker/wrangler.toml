@@ -1,4 +1,4 @@
-name = "picbind-api"
+name = "picbind-worker"
 main = "src/index.ts"
 compatibility_date = "2026-04-20"
 
