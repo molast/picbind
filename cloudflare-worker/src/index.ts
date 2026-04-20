@@ -193,11 +193,18 @@ function hasInvalidOrigin(env: Env, request: Request) {
 
 function getAdminKey(request: Request) {
   const url = new URL(request.url);
-  return url.searchParams.get("key") || request.headers.get("x-admin-key") || "";
+  return (
+    url.searchParams.get("key") ||
+    request.headers.get("x-admin-key") ||
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+    ""
+  );
 }
 
 function assertAdmin(env: Env, request: Request) {
-  return Boolean(env.ADMIN_KEY && getAdminKey(request) === env.ADMIN_KEY);
+  const expectedKey = (env.ADMIN_KEY || "").trim();
+  const requestKey = getAdminKey(request).trim();
+  return Boolean(expectedKey && requestKey && requestKey === expectedKey);
 }
 
 async function handleMetrics(request: Request, env: Env) {

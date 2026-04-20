@@ -99,7 +99,7 @@ export default class SystemManager {
       const link = document.createElement("a");
       const objectUrl = URL.createObjectURL(zipBlob);
       link.href = objectUrl;
-      link.download = zipName || `nanoimg-${SystemManager.getNowformatTime()}.zip`;
+      link.download = zipName || `picbind-${SystemManager.getNowformatTime()}.zip`;
       link.style.display = "none";
       document.body.appendChild(link);
       link.click();

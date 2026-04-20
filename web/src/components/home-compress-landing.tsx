@@ -1192,7 +1192,7 @@ export default function HomeCompressLanding({
                   onClick={() =>
                     SystemManager.downloadZip(
                       zipItems,
-                      `nanoimg-images-${SystemManager.getNowformatTime()}.zip`,
+                      `picbind-images-${SystemManager.getNowformatTime()}.zip`,
                     )
                   }
                   className="rounded-xl bg-lime-300 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"

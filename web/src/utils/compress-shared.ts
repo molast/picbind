@@ -10,10 +10,10 @@ export function buildCompressedFileName(fileName: string, ext: string) {
 export function buildZipEntryFileName(fileName: string) {
   const dotIndex = fileName.lastIndexOf(".");
   if (dotIndex <= 0) {
-    return `nanoimg-${fileName}`;
+    return `picbind-${fileName}`;
   }
 
   const baseName = fileName.slice(0, dotIndex);
   const ext = fileName.slice(dotIndex + 1);
-  return `nanoimg-${baseName}.${ext}`;
+  return `picbind-${baseName}.${ext}`;
 }
