@@ -99,7 +99,7 @@ const en: LocaleType = {
       copy: "Copy",
     },
     article: {
-      title: "Why favicon.io?",
+      title: "Why picbind.com?",
       p1: "Whether you want to generate a favicon from text, from an existing image, or from an emoji we've got you covered. The favicon generator is completely free and extremely easy to use. The generated favicon will work for all browsers and multiple platforms.",
       h2: "Getting started with the favicon generator",
       p2: "The tool above will allow you to generate a favicon from text. Start by choosing one to two letters for the favicon generator. Since the favicon generator outputs very small images it's important to use few characters for maximum legibility.",

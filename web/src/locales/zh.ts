@@ -184,7 +184,7 @@ const zh = {
       copy: "复制",
     },
     article: {
-      title: "为什么选择 favicon.io？",
+      title: "为什么选择 picbind.com？",
       p1: "无论你是想从文字、已有图片或 emoji 生成 favicon，这个工具都能覆盖。它免费且易用，输出图标可兼容主流浏览器与平台。",
       h2: "如何开始生成",
       p2: "从文字生成时，建议输入 1-2 个字符。由于 favicon 尺寸很小，字符越少通常可读性越好。",
