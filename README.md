@@ -1,109 +1,147 @@
-### 各类功能提炼
+# PicBind
 
-🟡 基础处理类
+PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前重点功能是浏览器端图片压缩和 favicon 生成，图片处理尽量在本地完成，减少服务端依赖，方便部署到 Cloudflare Pages。
 
-图片压缩（PNG/JPEG/WEBP/AVIF）
+## 当前功能
 
-图片裁剪 / 旋转 / 缩放
+- 图片压缩：支持 PNG、JPEG、WebP、AVIF，支持批量上传、自动压缩、单文件下载和 ZIP 打包下载。
+- 压缩质量分析：在浏览器 Worker 中分析压缩前后的质量指标，用于辅助判断输出效果。
+- Favicon Converter：上传图片生成 favicon 图标包。
+- Favicon Generator：通过文字、Google Fonts 字体、字重、颜色和背景形状生成 favicon 图标包。
+- Favicon 打包：生成 `favicon.ico`、16/32 PNG、Apple touch icon、Android chrome icon 和 `site.webmanifest`。
+- 中英文切换：首页和 favicon 工具页均支持中文/英文文案。
+- 静态部署：Web 项目已配置为 `next export` 风格输出，适合部署到 Cloudflare Pages。
+- Worker API 骨架：统计、访问量、后台配置、百度推送接口已迁移到独立 Cloudflare Worker 目录。
 
-格式转换
+## 项目结构
 
-🟡 增强处理类
-
-图片滤镜（亮度/对比度/饱和度）
-
-颜色调整
-
-模糊 / 锐化
-
-水印加/去
-
-
-🟡 组合型
-
-PDF 转图片 / 图片转 PDF
-
-动图处理（GIF/WebP）
-
-抠图换背景
-
-主题模板化图片设计
-
-### 产品阶段规划
-🟢 短期（0–3 个月）
-
-核心目标：快速上线 MVP，验证需求
-
-要做的功能
-✔ 单图压缩（PNG/JPEG/WEBP）
-✔ 图片格式转换（PNG ↔ JPEG ↔ WebP）
-✔ 图片裁剪/缩放
-✔ 批量导入/导出
-✔ 简单滤镜（亮度/对比/对齐）
-
-先做这些的目的:
-✔ 高需求量、使用频次高
-✔ 实现逻辑简单，适合 WASM
-✔ 竞争对手成熟，但仍有优化空间（性能 + UI/UX）
-输出产物
-📌 可在线使用的图像处理站
-📌 简洁 UI + 高性能处理
-📌 一套核心 Rust → WASM 工具库
-
-🔵 中期（3–9 个月）
-
-核心目标：提升竞争力与留存
-
-添加进阶功能：
-✨ 图片批量处理（批量压缩、批量改名/格式转）
-✨ 水印批量添加/去除
-✨ 高级滤镜 + 色彩调整
-✨ 下载历史 & 管理界面
-✨ 支持临时存储（LocalStorage / IndexedDB / CDN cache）
-
-技术升级
-🔹 前端纯 WASM 图像管道（不用后端）
-🔹 可以从浏览器直接调用 FS API 处理本地批量操作
-🔹 UI 设计更完善
-
-🟣 长期（9–18 个月）
-
-核心目标：构建用户生态 + 利用 AI
-
-🚀 自动美化（人像增强 / 场景增强）
-🚀 协同编辑
-🚀 用户账户体系 & 云存储
-
-架构升级
-✔ 引入 Go 后端服务（存储/队列/AI 服务）
-✔ 结合 SaaS 模式
-✔ 支持企业版/团队协作
-
-| 模式            | 描述                   | 预期效果      |
-| --------------- | ----------------------- | ---------  |
-| **基础免费 + 高级付费** | 免费使用核心功能                | 吸引流量，高转化率 |
-| **订阅制（SaaS）**   | 高级功能放在订阅下               | 稳定收入      |
-| **按量付费**        | 压缩/AGI 次数计费             | 适合企业用户    |
-| **限速 + 去水印付费**  | 免费低速，付费高速下载/导出无水印       | 高转化       |
-| **API 收费**      | 提供图片处理 API（WASM/Server） | 企业集成      |
-| **广告 + 联盟流量**   | 轻量站点放广告                 | 短期收益      |
-
-### 文案
--- 跟tinyPNG 体现出差异化，不需要上传服务器
+```text
+.
+├── cloudflare-worker/      # Cloudflare Worker API 服务骨架
+├── wasm/image_wasm/        # Rust WASM 图片处理库
+└── web/                    # Next.js 前端应用
 ```
-SEO 
 
-image compressor
-compress image online
-png compressor
+## Web 应用
 
-Free Image Compressor
+Web 应用位于 `web/`，主要页面包括：
 
-Compress PNG, JPG, WebP and AVIF images online.
-Reduce file size while keeping image quality.
+- `/`：图片压缩首页。
+- `/img-compress`：图片压缩页。
+- `/favicon-converter`：从图片生成 favicon。
+- `/favicon-generator`：从文字生成 favicon。
+- `/admin`：当前为静态占位页，后台接口后续由 Worker 接入。
 
-✔ Batch compress up to 20 images
-✔ Convert images automatically
-✔ Supports PNG, JPEG, WebP and AVIF
-✔ Download individually or as ZIP
+常用命令：
+
+```bash
+cd web
+npm install
+npm run dev
+npm run build
 ```
+
+构建输出会生成到 `web/out/`，可作为 Cloudflare Pages 的静态产物目录。
+
+## WASM 构建
+
+Rust WASM 代码位于 `wasm/image_wasm/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：
+
+```bash
+cd web
+npm run wasm:build
+```
+
+生成文件会输出到：
+
+```text
+web/public/wasm/
+```
+
+## Cloudflare Pages 部署
+
+当前 Web 侧已移除 Next 内置 API 路由和 Docker 部署配置，适合按静态站点部署到 Cloudflare Pages。
+
+推荐配置：
+
+```text
+Build command: cd web && npm install && npm run build
+Build output directory: web/out
+```
+
+如果 Cloudflare Pages 的项目根目录直接设置为 `web/`，则可以使用：
+
+```text
+Build command: npm install && npm run build
+Build output directory: out
+```
+
+## Cloudflare Worker API
+
+Worker 服务位于 `cloudflare-worker/`，用于替代旧的 Next API 路由。
+
+当前 Worker 兼容这些接口：
+
+```text
+GET  /api/metrics
+POST /api/metrics
+POST /api/site/view
+GET  /api/admin/state?key=...
+POST /api/admin/state?key=...
+POST /api/seo/baidu/push?key=...
+```
+
+Worker 使用 Cloudflare KV 保存统计和页面配置。需要绑定：
+
+```text
+METRICS_KV
+```
+
+可选环境变量：
+
+```text
+ADMIN_KEY
+SITE_URL
+ALLOWED_ORIGINS
+BAIDU_PUSH_SITE
+BAIDU_PUSH_TOKEN
+```
+
+前端当前默认不请求统计 API。Worker 部署完成后，可在 Pages 环境变量中开启：
+
+```text
+NEXT_PUBLIC_METRICS_ENABLED=true
+NEXT_PUBLIC_METRICS_API_PATH=https://your-worker.example.workers.dev/api/metrics
+NEXT_PUBLIC_PAGE_VIEW_ENABLED=true
+NEXT_PUBLIC_PAGE_VIEW_API_PATH=https://your-worker.example.workers.dev/api/site/view
+NEXT_PUBLIC_ADMIN_STATE_API_PATH=https://your-worker.example.workers.dev/api/admin/state
+```
+
+## Favicon 资源
+
+网站自己的 favicon 资源统一放在：
+
+```text
+web/public/images/favicon/
+```
+
+包括：
+
+```text
+favicon.ico
+favicon-16x16.png
+favicon-32x32.png
+apple-touch-icon.png
+android-chrome-192x192.png
+android-chrome-512x512.png
+site.webmanifest
+```
+
+## 设计原则
+
+- 图片处理优先在浏览器本地完成。
+- WASM 承担重计算和图像编码逻辑。
+- 前端页面保持可静态导出，减少部署复杂度。
+- 动态统计和管理能力迁移到 Cloudflare Worker。
+- 不再使用 Docker 部署。
+
