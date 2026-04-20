@@ -20,6 +20,12 @@ type Env = {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<void>;
   };
+  GLOBAL_LIMITER?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
+  ROUTE_LIMITER?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
   ADMIN_KEY?: string;
   SITE_URL?: string;
   ALLOWED_ORIGINS?: string;
@@ -29,11 +35,8 @@ type Env = {
 
 const METRICS_KEY = "metrics:v1";
 const BAIDU_PUSH_ENDPOINT = "http://data.zz.baidu.com/urls";
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_POSTS = 30;
 const DELTA_MAX = 20;
 const EVENT_BATCH_MAX = 50;
-const ipBuckets = new Map<string, number[]>();
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
@@ -133,21 +136,6 @@ function getClientIp(request: Request) {
   return request.headers.get("cf-connecting-ip") || "unknown";
 }
 
-function isRateLimited(ip: string) {
-  const now = Date.now();
-  const bucket = ipBuckets.get(ip) || [];
-  const next = bucket.filter(
-    (timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS,
-  );
-  if (next.length >= RATE_LIMIT_MAX_POSTS) {
-    ipBuckets.set(ip, next);
-    return true;
-  }
-  next.push(now);
-  ipBuckets.set(ip, next);
-  return false;
-}
-
 function allowedOrigins(env: Env, request: Request) {
   const values = new Set(
     (env.ALLOWED_ORIGINS || env.SITE_URL || "")
@@ -185,14 +173,6 @@ function withCors(response: Response, env: Env, request: Request) {
   });
 }
 
-function hasInvalidOrigin(env: Env, request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) {
-    return false;
-  }
-  return !allowedOrigins(env, request).has(origin);
-}
-
 function hasMissingOrInvalidOrigin(env: Env, request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) {
@@ -212,6 +192,28 @@ function assertAdmin(env: Env, request: Request) {
   return Boolean(expectedKey && requestKey && requestKey === expectedKey);
 }
 
+function buildLimiterIdentity(request: Request) {
+  const ip = getClientIp(request);
+  const key = getAdminKey(request).trim();
+  return `${ip}:${key || "public"}`;
+}
+
+async function checkLimiter(
+  limiter: Env["GLOBAL_LIMITER"] | Env["ROUTE_LIMITER"] | undefined,
+  key: string,
+) {
+  if (!limiter) {
+    return true;
+  }
+  try {
+    const result = await limiter.limit({ key });
+    return result.success;
+  } catch (error) {
+    console.error("Rate limiter check failed:", error);
+    return true;
+  }
+}
+
 async function handleMetrics(request: Request, env: Env) {
   if (request.method === "GET") {
     return json(publicMetrics(await readState(env)));
@@ -223,10 +225,6 @@ async function handleMetrics(request: Request, env: Env) {
 
   if (hasMissingOrInvalidOrigin(env, request)) {
     return json({ error: "Invalid origin" }, { status: 403 });
-  }
-
-  if (isRateLimited(getClientIp(request))) {
-    return json({ error: "Too many requests" }, { status: 429 });
   }
 
   const body = (await request.json().catch(() => ({}))) as {
@@ -360,6 +358,28 @@ export default {
     }
 
     const { pathname } = new URL(request.url);
+    const limiterIdentity = buildLimiterIdentity(request);
+    const globalRateKey = `global:${limiterIdentity}`;
+    const routeRateKey = `route:${limiterIdentity}:${pathname}`;
+
+    const globalAllowed = await checkLimiter(env.GLOBAL_LIMITER, globalRateKey);
+    if (!globalAllowed) {
+      return withCors(
+        json({ error: "Too many requests (global limiter)" }, { status: 429 }),
+        env,
+        request,
+      );
+    }
+
+    const routeAllowed = await checkLimiter(env.ROUTE_LIMITER, routeRateKey);
+    if (!routeAllowed) {
+      return withCors(
+        json({ error: "Too many requests (route limiter)" }, { status: 429 }),
+        env,
+        request,
+      );
+    }
+
     let response: Response;
 
     if (pathname === "/api/metrics") {

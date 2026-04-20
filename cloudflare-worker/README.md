@@ -20,6 +20,8 @@ Notes:
 ## Required binding
 
 - `METRICS_KV`: Cloudflare KV namespace for metrics and UI state.
+- `GLOBAL_LIMITER`: Worker Rate Limiting binding (global limiter).
+- `ROUTE_LIMITER`: Worker Rate Limiting binding (route-level limiter).
 
 ## Optional environment variables
 
@@ -50,6 +52,13 @@ BAIDU_PUSH_SITE=https://picbind.com
 ADMIN_KEY=<your-admin-key>
 BAIDU_PUSH_TOKEN=<your-baidu-token>
 ```
+
+Rate limit strategy:
+
+- Layer 1 (global): `ip + key` (key means admin key or `public`)
+- Layer 2 (per route): `ip + key + pathname`
+
+In `wrangler.toml`, replace the `namespace_id` placeholders with your real Rate Limiting namespace IDs.
 
 Quick check:
 

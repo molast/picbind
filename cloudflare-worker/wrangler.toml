@@ -11,6 +11,16 @@ SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
 ADMIN_KEY = "123456"
 
+[[ratelimits]]
+name = "GLOBAL_LIMITER"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "ROUTE_LIMITER"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }
+
 [env.preview.vars]
 SITE_URL = "https://preview.picbind.pages.dev"
 ALLOWED_ORIGINS = "*"
