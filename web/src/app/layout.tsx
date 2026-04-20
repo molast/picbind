@@ -1,12 +1,13 @@
-﻿import "./globals.css";
+import "./globals.css";
 import type { Metadata } from "next";
+import Script from "next/script";
 import { getSiteUrl } from "@/server/site-config";
 
 const siteUrl = getSiteUrl();
 const siteName = "PicBind";
-const title = "PicBind - 智能压缩 WebP、PNG、JPEG 和 AVIF 图片";
+const title = "PicBind - Smart image compression for WebP, PNG, JPEG and AVIF";
 const description =
-  "PicBind 提供在线图片智能压缩与格式转换服务，支持 PNG、JPEG、WebP、AVIF，支持批量压缩、质量对比和轻量交付。";
+  "PicBind provides online image compression and conversion for PNG, JPEG, WebP, and AVIF with batch processing and quality comparison.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -70,7 +71,7 @@ export const metadata: Metadata = {
     siteName,
     title,
     description,
-    locale: "zh_CN",
+    locale: "en_US",
     images: [
       {
         url: "/images/compare-original.png",
@@ -106,8 +107,50 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang="en">
+      <body>
+        <Script id="lang-title-bootstrap" strategy="beforeInteractive">
+          {`(() => {
+  try {
+    const key = "ai-translator-lang-v2";
+    const match = document.cookie.match(/(?:^|; )picbind-lang=([^;]+)/);
+    const cookieLang = match ? decodeURIComponent(match[1]) : "";
+    const localLang = localStorage.getItem(key) || "";
+    const lang = (localLang === "zh" || localLang === "en")
+      ? localLang
+      : ((cookieLang === "zh" || cookieLang === "en") ? cookieLang : "en");
+    const path = window.location.pathname;
+    const titles = {
+      "/": {
+        en: "PicBind - Smart image compression for WebP, PNG, JPEG and AVIF",
+        zh: "PicBind - 智能压缩 WebP、PNG、JPEG 和 AVIF 图片"
+      },
+      "/favicon-converter": {
+        en: "PicBind - Favicon Converter",
+        zh: "PicBind - Favicon 转换器"
+      },
+      "/favicon-generator": {
+        en: "PicBind - Favicon Generator",
+        zh: "PicBind - Favicon 生成器"
+      },
+      "/admin": {
+        en: "PicBind Admin",
+        zh: "PicBind 管理中心"
+      }
+    };
+
+    if (titles[path] && titles[path][lang]) {
+      document.title = titles[path][lang];
+    }
+
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  } catch (_) {
+    // no-op
+  }
+})();`}
+        </Script>
+        {children}
+      </body>
     </html>
   );
 }

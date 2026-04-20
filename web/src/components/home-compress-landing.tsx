@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   ReactCompareSlider,
   ReactCompareSliderImage,
@@ -302,6 +303,7 @@ export default function HomeCompressLanding({
   showCompressedCount = false,
   showCompareSection = false,
 }: HomeCompressLandingProps) {
+  const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const langMenuRef = React.useRef<HTMLDivElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
@@ -321,6 +323,7 @@ export default function HomeCompressLanding({
   const [homeShowCompareSection, setHomeShowCompareSection] = React.useState(
     showCompareSection,
   );
+  const [compareSectionReady, setCompareSectionReady] = React.useState(false);
   const [totalCompressedCount, setTotalCompressedCount] = React.useState(0);
   const [displayedCompressedCount, setDisplayedCompressedCount] =
     React.useState(0);
@@ -454,6 +457,31 @@ export default function HomeCompressLanding({
   }, []);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const preload = () => {
+      router.prefetch("/favicon-converter");
+      router.prefetch("/favicon-generator");
+    };
+
+    const idleApi = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idleApi.requestIdleCallback === "function") {
+      const handle = idleApi.requestIdleCallback(preload, { timeout: 1800 });
+      return () => idleApi.cancelIdleCallback?.(handle);
+    }
+
+    const timer = window.setTimeout(preload, 250);
+    return () => window.clearTimeout(timer);
+  }, [router]);
+
+  React.useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
       if (!langMenuRef.current) {
         return;
@@ -550,12 +578,55 @@ export default function HomeCompressLanding({
 
   React.useEffect(() => {
     if (!homeShowCompareSection) {
+      setCompareSectionReady(false);
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      setCompareSectionReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    const activate = () => {
+      if (!cancelled) {
+        setCompareSectionReady(true);
+      }
+    };
+
+    const idleApi = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idleApi.requestIdleCallback === "function") {
+      const handle = idleApi.requestIdleCallback(activate, { timeout: 1400 });
+      return () => {
+        cancelled = true;
+        idleApi.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const timer = window.setTimeout(activate, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [homeShowCompareSection]);
+
+  React.useEffect(() => {
+    if (!homeShowCompareSection) {
       if (compareCompressedUrlRef.current?.startsWith("blob:")) {
         URL.revokeObjectURL(compareCompressedUrlRef.current);
         compareCompressedUrlRef.current = null;
       }
       setCompareCompressedSrc(COMPARE_IMAGE_SOURCE_PATH);
       setCompareSizes({ original: "--", compressed: "--" });
+      return;
+    }
+    if (!compareSectionReady) {
       return;
     }
 
@@ -605,7 +676,7 @@ export default function HomeCompressLanding({
         compareCompressedUrlRef.current = null;
       }
     };
-  }, [homeShowCompareSection]);
+  }, [compareSectionReady, homeShowCompareSection]);
 
   React.useEffect(() => {
     itemsRef.current = items;
@@ -1657,31 +1728,35 @@ export default function HomeCompressLanding({
 
             <div className="relative mt-5 sm:mt-6">
               <div className="relative overflow-hidden rounded-[24px] border border-slate-200">
-                <ReactCompareSlider
-                  className="h-[265px] w-full sm:h-[360px] md:h-[520px]"
-                  itemOne={
-                    <ReactCompareSliderImage
-                      src={COMPARE_IMAGE_SOURCE_PATH}
-                      alt="Original mountain image"
-                      style={{ objectFit: "cover" }}
-                    />
-                  }
-                  itemTwo={
-                    <ReactCompareSliderImage
-                      src={compareCompressedSrc}
-                      alt="Compressed mountain image"
-                      style={{ objectFit: "cover" }}
-                    />
-                  }
-                  handle={
-                    <div className="flex h-full items-center">
-                      <div className="h-full w-[2px] bg-white/85 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]" />
-                      <div className="-ml-[14px] flex h-7 w-7 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-600 shadow-md">
-                        <>↔</>
+                {compareSectionReady ? (
+                  <ReactCompareSlider
+                    className="h-[265px] w-full sm:h-[360px] md:h-[520px]"
+                    itemOne={
+                      <ReactCompareSliderImage
+                        src={COMPARE_IMAGE_SOURCE_PATH}
+                        alt="Original mountain image"
+                        style={{ objectFit: "cover" }}
+                      />
+                    }
+                    itemTwo={
+                      <ReactCompareSliderImage
+                        src={compareCompressedSrc}
+                        alt="Compressed mountain image"
+                        style={{ objectFit: "cover" }}
+                      />
+                    }
+                    handle={
+                      <div className="flex h-full items-center">
+                        <div className="h-full w-[2px] bg-white/85 shadow-[0_0_0_1px_rgba(0,0,0,0.15)]" />
+                        <div className="-ml-[14px] flex h-7 w-7 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-600 shadow-md">
+                          <>↔</>
+                        </div>
                       </div>
-                    </div>
-                  }
-                />
+                    }
+                  />
+                ) : (
+                  <div className="h-[265px] w-full animate-pulse bg-[linear-gradient(110deg,#e5edf9_8%,#f4f8ff_18%,#e5edf9_33%)] bg-[length:220%_100%] sm:h-[360px] md:h-[520px]" />
+                )}
                 <div className="pointer-events-none absolute bottom-4 left-[9%] text-xs text-white [text-shadow:0_3px_12px_rgba(0,0,0,0.72)] sm:bottom-5 sm:left-[13%]">
                   <div className="text-[10px] font-semibold tracking-[0.12em] sm:text-sm md:text-base">
                     {compareCopy.original}

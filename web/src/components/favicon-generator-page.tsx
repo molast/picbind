@@ -509,6 +509,16 @@ export default function FaviconGeneratorPage({
         : initialMode;
 
   const copy = React.useMemo(() => getFaviconGeneratorCopy(lang), [lang]);
+  const pageTitle = React.useMemo(() => {
+    if (mode === "text") {
+      return lang === "zh"
+        ? "PicBind - Favicon 生成器"
+        : "PicBind - Favicon Generator";
+    }
+    return lang === "zh"
+      ? "PicBind - Favicon 转换器"
+      : "PicBind - Favicon Converter";
+  }, [lang, mode]);
   const htmlSnippet = React.useMemo(() => getFaviconHtmlSnippet(), []);
   const isFontListReady = fontOptions.length > 0;
   const selectedFont =
@@ -541,6 +551,33 @@ export default function FaviconGeneratorPage({
   );
 
   React.useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const preload = () => {
+      router.prefetch("/favicon-converter");
+      router.prefetch("/favicon-generator");
+    };
+    const idleApi = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idleApi.requestIdleCallback === "function") {
+      const handle = idleApi.requestIdleCallback(preload, { timeout: 1800 });
+      return () => idleApi.cancelIdleCallback?.(handle);
+    }
+    const timer = window.setTimeout(preload, 250);
+    return () => window.clearTimeout(timer);
+  }, [router]);
+
+  React.useEffect(() => {
     return () => {
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
@@ -549,6 +586,10 @@ export default function FaviconGeneratorPage({
   }, [previewUrl]);
 
   React.useEffect(() => {
+    if (mode !== "text") {
+      return;
+    }
+
     let canceled = false;
     (async () => {
       const options = await loadGoogleFontOptions();
@@ -570,7 +611,7 @@ export default function FaviconGeneratorPage({
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [mode]);
 
   React.useEffect(() => {
     if (mode !== "text") {
