@@ -15,6 +15,7 @@ import {
 } from "@/locales";
 import {
   flushCompressedCountNow,
+  loadHomeDisplayConfig,
   loadTotalCompressedCount,
   reportCompressionResult,
   reportCompressedCount,
@@ -313,6 +314,12 @@ export default function HomeCompressLanding({
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isCompressing, setIsCompressing] = React.useState(false);
+  const [homeShowCompressedCount, setHomeShowCompressedCount] = React.useState(
+    showCompressedCount,
+  );
+  const [homeShowCompareSection, setHomeShowCompareSection] = React.useState(
+    showCompareSection,
+  );
   const [totalCompressedCount, setTotalCompressedCount] = React.useState(0);
   const [displayedCompressedCount, setDisplayedCompressedCount] =
     React.useState(0);
@@ -443,7 +450,26 @@ export default function HomeCompressLanding({
   }, []);
 
   React.useEffect(() => {
-    if (!showCompressedCount) {
+    let cancelled = false;
+
+    void loadHomeDisplayConfig({
+      showCompressedCount,
+      showCompareSection,
+    }).then((config) => {
+      if (cancelled) {
+        return;
+      }
+      setHomeShowCompressedCount(config.showCompressedCount);
+      setHomeShowCompareSection(config.showCompareSection);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showCompareSection, showCompressedCount]);
+
+  React.useEffect(() => {
+    if (!homeShowCompressedCount) {
       setTotalCompressedCount(0);
       setDisplayedCompressedCount(0);
       return;
@@ -452,7 +478,7 @@ export default function HomeCompressLanding({
     void loadTotalCompressedCount().then((total) => {
       setTotalCompressedCount(total);
     });
-  }, [showCompressedCount]);
+  }, [homeShowCompressedCount]);
 
   React.useEffect(() => {
     displayedCountRef.current = displayedCompressedCount;
@@ -495,7 +521,7 @@ export default function HomeCompressLanding({
   }, [copy.pageTitle]);
 
   React.useEffect(() => {
-    if (!showCompareSection) {
+    if (!homeShowCompareSection) {
       if (compareCompressedUrlRef.current?.startsWith("blob:")) {
         URL.revokeObjectURL(compareCompressedUrlRef.current);
         compareCompressedUrlRef.current = null;
@@ -551,7 +577,7 @@ export default function HomeCompressLanding({
         compareCompressedUrlRef.current = null;
       }
     };
-  }, [showCompareSection]);
+  }, [homeShowCompareSection]);
 
   React.useEffect(() => {
     itemsRef.current = items;
@@ -1547,7 +1573,7 @@ export default function HomeCompressLanding({
             </p>
           </div>
 
-          {showCompareSection ? (
+          {homeShowCompareSection ? (
           <div className="mx-auto w-full max-w-[1180px] rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_16px_45px_rgba(148,163,184,0.12)] sm:rounded-[28px] sm:p-5 md:p-8">
             <div className="mx-auto max-w-[820px] text-center">
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-600 sm:text-xs sm:tracking-[0.24em]">
@@ -1674,7 +1700,7 @@ export default function HomeCompressLanding({
             ))}
           </div>
 
-          {showCompressedCount ? (
+          {homeShowCompressedCount ? (
           <div className="mx-auto flex w-full justify-center pt-2">
             <div
               className={`inline-flex items-end gap-3 rounded-2xl border border-sky-200/70 bg-white px-8 py-5 shadow-[0_16px_40px_rgba(56,118,185,0.14)] transition-all duration-300 ${

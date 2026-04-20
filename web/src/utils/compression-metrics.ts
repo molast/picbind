@@ -17,6 +17,12 @@ let flushing = false;
 let totalCompressedCache: number | null = null;
 let retryDelayMs = FLUSH_DELAY_MS;
 
+type MetricsReadResponse = {
+  totalCompressed?: number;
+  showCompressedCount?: boolean;
+  showCompareSection?: boolean;
+};
+
 async function writeMetrics(
   payload:
     | { delta: number }
@@ -48,14 +54,17 @@ async function writeMetrics(
 
 async function readTotalCount() {
   if (!METRICS_API_PATH) {
-    return 0;
+    return {
+      totalCompressed: 0,
+      showCompressedCount: true,
+      showCompareSection: true,
+    };
   }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
   if (!response.ok) {
     throw new Error(`Metrics read failed with status ${response.status}`);
   }
-  const data = (await response.json()) as { totalCompressed?: number };
-  return Number(data.totalCompressed || 0);
+  return (await response.json()) as MetricsReadResponse;
 }
 
 async function flushPending() {
@@ -164,11 +173,38 @@ export async function loadTotalCompressedCount() {
   }
 
   try {
-    const total = await readTotalCount();
+    const data = await readTotalCount();
+    const total = Number(data.totalCompressed || 0);
     totalCompressedCache = total;
     return total;
   } catch (error) {
     console.error("Compression metrics read failed:", error);
     return totalCompressedCache ?? 0;
+  }
+}
+
+export async function loadHomeDisplayConfig(defaults: {
+  showCompressedCount: boolean;
+  showCompareSection: boolean;
+}) {
+  if (!METRICS_API_PATH) {
+    return defaults;
+  }
+
+  try {
+    const data = await readTotalCount();
+    return {
+      showCompressedCount:
+        typeof data.showCompressedCount === "boolean"
+          ? data.showCompressedCount
+          : defaults.showCompressedCount,
+      showCompareSection:
+        typeof data.showCompareSection === "boolean"
+          ? data.showCompareSection
+          : defaults.showCompareSection,
+    };
+  } catch (error) {
+    console.error("Home display config read failed:", error);
+    return defaults;
   }
 }

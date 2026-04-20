@@ -57,7 +57,6 @@ export default function AdminDashboard() {
   const [statusText, setStatusText] = React.useState<string>("");
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [showAdminKey, setShowAdminKey] = React.useState(false);
 
   const stateUrl = React.useMemo(() => {
     if (!adminStateApiPath || !activeAdminKey.trim()) {
@@ -192,22 +191,14 @@ export default function AdminDashboard() {
                 : "未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH"}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex min-w-[260px] flex-1 items-center rounded-xl border border-slate-300 bg-white pr-2 ring-sky-300 transition focus-within:ring">
+              <div className="min-w-[260px] flex-1 rounded-xl border border-slate-300 bg-white ring-sky-300 transition focus-within:ring">
                 <input
                   value={adminKeyInput}
                   onChange={(event) => setAdminKeyInput(event.currentTarget.value)}
-                  type={showAdminKey ? "text" : "password"}
+                  type="password"
                   placeholder="请输入 Admin Key"
                   className="w-full rounded-xl bg-transparent px-4 py-2 text-sm outline-none"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowAdminKey((value) => !value)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                  aria-label={showAdminKey ? "隐藏 Admin Key" : "显示 Admin Key"}
-                >
-                  {showAdminKey ? "隐藏" : "显示"}
-                </button>
               </div>
               <button
                 type="button"

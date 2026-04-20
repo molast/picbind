@@ -23,6 +23,8 @@ This Worker replaces the old Next.js API routes when deploying the web app to Cl
 - `BAIDU_PUSH_SITE`: Baidu site URL. Defaults to `SITE_URL`.
 - `BAIDU_PUSH_TOKEN`: Baidu push token.
 
+`ADMIN_KEY` is a Worker env variable/secret, not a KV entry.
+
 The current Pages app has API calls disabled by default. When this Worker is deployed, set the Pages env vars to point to it, for example:
 
 ```text

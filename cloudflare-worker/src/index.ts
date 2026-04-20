@@ -124,6 +124,8 @@ function publicMetrics(state: MetricsPayload) {
     totalCompressed: state.totalCompressed,
     totalSavedBytes: state.totalSavedBytes,
     formatStats: state.formatStats,
+    showCompressedCount: state.showCompressedCount,
+    showCompareSection: state.showCompareSection,
   };
 }
 
@@ -193,12 +195,7 @@ function hasInvalidOrigin(env: Env, request: Request) {
 
 function getAdminKey(request: Request) {
   const url = new URL(request.url);
-  return (
-    url.searchParams.get("key") ||
-    request.headers.get("x-admin-key") ||
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-    ""
-  );
+  return url.searchParams.get("key") || request.headers.get("x-admin-key") || "";
 }
 
 function assertAdmin(env: Env, request: Request) {
