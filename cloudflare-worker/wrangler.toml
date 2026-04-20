@@ -9,6 +9,7 @@ id = "ffd6a9e2ce924cf2a4b93b782d525810"
 [vars]
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
+ADMIN_KEY = "123456"
 
 [env.preview.vars]
 SITE_URL = "https://preview.picbind.pages.dev"

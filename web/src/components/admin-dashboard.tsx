@@ -44,9 +44,7 @@ function formatBytes(size: number) {
 
 export default function AdminDashboard() {
   const adminStateApiPath = process.env.NEXT_PUBLIC_ADMIN_STATE_API_PATH || "";
-
-  const [adminKeyInput, setAdminKeyInput] = React.useState("");
-  const [activeAdminKey, setActiveAdminKey] = React.useState("");
+  const adminKey = (process.env.NEXT_PUBLIC_ADMIN_KEY || "").trim();
   const [state, setState] = React.useState<AdminDashboardState>(EMPTY_STATE);
   const [showCompressedCount, setShowCompressedCount] = React.useState(
     EMPTY_STATE.showCompressedCount,
@@ -75,8 +73,8 @@ export default function AdminDashboard() {
     if (!stateUrl) {
       throw new Error("未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH");
     }
-    if (!activeAdminKey.trim()) {
-      throw new Error("请先输入有效的 Admin Key");
+    if (!adminKey) {
+      throw new Error("未配置 NEXT_PUBLIC_ADMIN_KEY");
     }
 
     setIsLoading(true);
@@ -84,7 +82,7 @@ export default function AdminDashboard() {
       const response = await fetch(stateUrl, {
         method: "GET",
         headers: {
-          "x-admin-key": activeAdminKey.trim(),
+          "x-admin-key": adminKey,
         },
       });
       if (!response.ok) {
@@ -99,15 +97,15 @@ export default function AdminDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeAdminKey, applyState, stateUrl]);
+  }, [adminKey, applyState, stateUrl]);
 
   const saveConfig = React.useCallback(async () => {
     if (!stateUrl) {
       setStatusText("未配置 NEXT_PUBLIC_ADMIN_STATE_API_PATH");
       return;
     }
-    if (!activeAdminKey.trim()) {
-      setStatusText("请先输入有效的 Admin Key");
+    if (!adminKey) {
+      setStatusText("未配置 NEXT_PUBLIC_ADMIN_KEY");
       return;
     }
 
@@ -118,7 +116,7 @@ export default function AdminDashboard() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-key": activeAdminKey.trim(),
+          "x-admin-key": adminKey,
         },
         body: JSON.stringify({
           showCompressedCount,
@@ -141,17 +139,7 @@ export default function AdminDashboard() {
     } finally {
       setIsSaving(false);
     }
-  }, [activeAdminKey, applyState, showCompareSection, showCompressedCount, stateUrl]);
-
-  const connectAdmin = React.useCallback(async () => {
-    const key = adminKeyInput.trim();
-    if (!key) {
-      setStatusText("请输入 Admin Key");
-      return;
-    }
-    setActiveAdminKey(key);
-    setStatusText("Admin Key 已设置，正在连接...");
-  }, [adminKeyInput]);
+  }, [adminKey, applyState, showCompareSection, showCompressedCount, stateUrl]);
 
   React.useEffect(() => {
     if (!stateUrl) {
@@ -173,28 +161,6 @@ export default function AdminDashboard() {
           <p className="mt-2 text-sm leading-6 text-slate-500">
             这里可以查看压缩统计、浏览次数，并控制首页数量组件和压缩对比组件的显示开关。
           </p>
-
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="mb-2 text-sm font-medium text-slate-700">Admin Key</div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-[260px] flex-1 rounded-xl border border-slate-300 bg-white ring-sky-300 transition focus-within:ring">
-                <input
-                  value={adminKeyInput}
-                  onChange={(event) => setAdminKeyInput(event.currentTarget.value)}
-                  type="password"
-                  placeholder="请输入 Admin Key"
-                  className="w-full rounded-xl bg-transparent px-4 py-2 text-sm outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => void connectAdmin()}
-                className="rounded-full bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                连接
-              </button>
-            </div>
-          </div>
         </header>
 
         <section className="grid gap-4 sm:grid-cols-3">
