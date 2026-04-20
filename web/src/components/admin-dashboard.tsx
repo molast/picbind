@@ -46,12 +46,19 @@ export default function AdminDashboard({
   const [statusText, setStatusText] = React.useState<string>("");
   const [isSaving, setIsSaving] = React.useState(false);
 
+  const adminStateApiPath = process.env.NEXT_PUBLIC_ADMIN_STATE_API_PATH || "";
   const stateUrl = React.useMemo(
-    () => `/api/admin/state?key=${encodeURIComponent(adminKey)}`,
-    [adminKey],
+    () =>
+      adminStateApiPath
+        ? `${adminStateApiPath}?key=${encodeURIComponent(adminKey)}`
+        : "",
+    [adminKey, adminStateApiPath],
   );
 
   const refreshState = React.useCallback(async () => {
+    if (!stateUrl) {
+      throw new Error("Admin state API is not configured");
+    }
     const response = await fetch(stateUrl, { method: "GET" });
     if (!response.ok) {
       throw new Error(`Failed to refresh admin state: ${response.status}`);
@@ -66,6 +73,9 @@ export default function AdminDashboard({
     setIsSaving(true);
     setStatusText("");
     try {
+      if (!stateUrl) {
+        throw new Error("Admin state API is not configured");
+      }
       const response = await fetch(stateUrl, {
         method: "POST",
         headers: {

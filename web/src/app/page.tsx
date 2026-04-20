@@ -1,5 +1,11 @@
-import { redirect } from "next/navigation";
+import HomeCompressLanding from "@/components/home-compress-landing";
 
 export default function Page() {
-  redirect("/img-compress");
+  return (
+    <HomeCompressLanding
+      initialLang="zh"
+      showCompressedCount={false}
+      showCompareSection
+    />
+  );
 }

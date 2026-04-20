@@ -1,10 +1,6 @@
-import webpack from "webpack";
-
 /** @type {import('next').NextConfig} */
-const enableStandalone = process.env.NEXT_OUTPUT_MODE === "standalone";
-
 const nextConfig = {
-  output: enableStandalone ? "standalone" : undefined,
+  output: "export",
   webpack(config) {
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
@@ -36,6 +32,7 @@ const nextConfig = {
   },
 
   images: {
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "https",

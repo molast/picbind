@@ -1,23 +1,11 @@
 import HomeCompressLanding from "@/components/home-compress-landing";
-import type { Lang } from "@/locales";
-import { getPublicUiConfig } from "@/server/metrics-store";
-import { cookies } from "next/headers";
-import { unstable_noStore as noStore } from "next/cache";
 
-export const dynamic = "force-dynamic";
-
-export default async function ImgCompressPage() {
-  noStore();
-  const cookieStore = await cookies();
-  const cookieLang = cookieStore.get("picbind-lang")?.value;
-  const initialLang: Lang = cookieLang === "en" ? "en" : "zh";
-  const uiConfig = await getPublicUiConfig();
-
+export default function ImgCompressPage() {
   return (
     <HomeCompressLanding
-      initialLang={initialLang}
-      showCompressedCount={uiConfig.showCompressedCount}
-      showCompareSection={uiConfig.showCompareSection}
+      initialLang="zh"
+      showCompressedCount={false}
+      showCompareSection
     />
   );
 }

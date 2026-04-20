@@ -1,10 +1,16 @@
 "use client";
 
-const PAGE_VIEW_API_PATH =
-  process.env.NEXT_PUBLIC_PAGE_VIEW_API_PATH || "/api/site/view";
+const PAGE_VIEW_ENABLED = process.env.NEXT_PUBLIC_PAGE_VIEW_ENABLED === "true";
+const PAGE_VIEW_API_PATH = process.env.NEXT_PUBLIC_PAGE_VIEW_API_PATH || "";
 const PAGE_VIEW_SESSION_KEY = "nanoimg-page-view-reported";
 
 export async function reportPageViewOnce() {
+  if (!PAGE_VIEW_ENABLED) {
+    return;
+  }
+  if (!PAGE_VIEW_API_PATH) {
+    return;
+  }
   if (typeof window === "undefined") {
     return;
   }

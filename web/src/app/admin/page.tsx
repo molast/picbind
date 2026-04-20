@@ -1,17 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { unstable_noStore as noStore } from "next/cache";
-import AdminDashboard from "@/components/admin-dashboard";
-import { getAdminDashboardState } from "@/server/metrics-store";
-import { isAdminConfigured, isAdminKeyValid } from "@/server/admin-auth";
 
-type AdminPageProps = {
-  searchParams?: Promise<{
-    key?: string;
-  }>;
-};
-
-export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Admin",
   robots: {
@@ -24,19 +12,21 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function AdminPage({ searchParams }: AdminPageProps) {
-  noStore();
-
-  if (!isAdminConfigured()) {
-    notFound();
-  }
-
-  const resolvedSearchParams = await searchParams;
-  const key = resolvedSearchParams?.key || "";
-  if (!isAdminKeyValid(key)) {
-    notFound();
-  }
-
-  const state = await getAdminDashboardState();
-  return <AdminDashboard adminKey={key} initialState={state} />;
+export default function AdminPage() {
+  return (
+    <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-800 sm:px-6">
+      <section className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-600">
+          PicBind Admin
+        </p>
+        <h1 className="mt-3 text-3xl font-semibold text-slate-900">
+          后台接口已迁移
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-slate-500">
+          当前 Cloudflare Pages 版本暂不直接调用站内 API。后台统计与配置接口将由独立
+          Cloudflare Worker 承接，接好 Worker 地址后再恢复这里的联动。
+        </p>
+      </section>
+    </main>
+  );
 }

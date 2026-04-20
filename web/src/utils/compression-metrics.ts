@@ -1,8 +1,7 @@
 "use client";
 
-const METRICS_ENABLED = process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
-const METRICS_API_PATH =
-  process.env.NEXT_PUBLIC_METRICS_API_PATH || "/api/metrics";
+const METRICS_ENABLED = process.env.NEXT_PUBLIC_METRICS_ENABLED === "true";
+const METRICS_API_PATH = process.env.NEXT_PUBLIC_METRICS_API_PATH || "";
 const MAX_DELTA_PER_REQUEST = 20;
 const MAX_EVENTS_PER_REQUEST = 20;
 const FLUSH_DELAY_MS = 1200;
@@ -28,6 +27,9 @@ async function writeMetrics(
         }>;
       },
 ) {
+  if (!METRICS_API_PATH) {
+    return 0;
+  }
   const response = await fetch(METRICS_API_PATH, {
     method: "POST",
     headers: {
@@ -45,6 +47,9 @@ async function writeMetrics(
 }
 
 async function readTotalCount() {
+  if (!METRICS_API_PATH) {
+    return 0;
+  }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
   if (!response.ok) {
     throw new Error(`Metrics read failed with status ${response.status}`);

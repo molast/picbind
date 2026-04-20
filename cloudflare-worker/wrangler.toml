@@ -1,0 +1,11 @@
+name = "picbind-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-20"
+
+[[kv_namespaces]]
+binding = "METRICS_KV"
+id = "replace-with-your-kv-namespace-id"
+
+[vars]
+SITE_URL = "https://example.com"
+ALLOWED_ORIGINS = "https://example.com"
