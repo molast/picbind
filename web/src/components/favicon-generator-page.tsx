@@ -476,7 +476,8 @@ export default function FaviconGeneratorPage({
   const router = useRouter();
   const pathname = usePathname();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const [lang, setLang] = React.useState<Lang>("zh");
+  const [lang, setLang] = React.useState<Lang>("en");
+  const [langReady, setLangReady] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -497,6 +498,7 @@ export default function FaviconGeneratorPage({
 
   React.useEffect(() => {
     setLang(getLang());
+    setLangReady(true);
   }, []);
 
   const mode: GeneratorMode =
@@ -720,6 +722,10 @@ export default function FaviconGeneratorPage({
       setError(err instanceof Error ? err.message : copy.errors.copyFailed);
     }
   };
+
+  if (!langReady) {
+    return <main className="min-h-screen w-full bg-[#efefef]" />;
+  }
 
   return (
     <main className="w-full bg-[#efefef] text-[#1f2328]">

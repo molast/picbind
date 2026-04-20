@@ -298,11 +298,12 @@ type HomeCompressLandingProps = {
 };
 
 export default function HomeCompressLanding({
-  initialLang = "zh",
+  initialLang = "en",
   showCompressedCount = false,
   showCompareSection = false,
 }: HomeCompressLandingProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const langMenuRef = React.useRef<HTMLDivElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
   const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
@@ -325,6 +326,8 @@ export default function HomeCompressLanding({
     React.useState(0);
   const [isCountBouncing, setIsCountBouncing] = React.useState(false);
   const [lang, setLang] = React.useState<Lang>(initialLang);
+  const [langReady, setLangReady] = React.useState(false);
+  const [isLangMenuOpen, setIsLangMenuOpen] = React.useState(false);
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
     [],
@@ -447,7 +450,32 @@ export default function HomeCompressLanding({
 
   React.useEffect(() => {
     setLang(getLang());
+    setLangReady(true);
   }, []);
+
+  React.useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!langMenuRef.current) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && !langMenuRef.current.contains(target)) {
+        setIsLangMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    setIsLangMenuOpen(false);
+  }, [lang]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -990,6 +1018,12 @@ export default function HomeCompressLanding({
     [],
   );
 
+  if (!langReady) {
+    return (
+      <main className="min-h-screen w-full bg-[#ececec]" />
+    );
+  }
+
   return (
     <main className="w-full bg-[#ececec] text-slate-800">
       <section className="relative min-h-[470px] overflow-hidden bg-[#c8d8f2] sm:min-h-[520px] lg:min-h-[560px]">
@@ -1027,29 +1061,63 @@ export default function HomeCompressLanding({
                   </Link>
                 </nav>
               </div>
-              <div className="flex items-center gap-2">
+              <div ref={langMenuRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => handleSwitchLang("zh")}
-                  className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition ${
-                    lang === "zh"
-                      ? "bg-[#0f2f75] text-white"
-                      : "bg-[#eef3ff] text-[#536689] hover:bg-white"
-                  }`}
+                  onClick={() => setIsLangMenuOpen((open) => !open)}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#c8d8f4] bg-[rgba(246,250,255,0.85)] px-4 py-1.5 text-[13px] font-semibold text-[#415c8a] shadow-[0_8px_20px_rgba(64,95,156,0.12)] backdrop-blur-sm transition hover:bg-white"
+                  aria-haspopup="menu"
+                  aria-expanded={isLangMenuOpen}
                 >
-                  中文
+                  <span>{lang === "zh" ? "中文" : "EN"}</span>
+                  <svg
+                    viewBox="0 0 20 20"
+                    className={`h-4 w-4 transition ${isLangMenuOpen ? "rotate-180" : ""}`}
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleSwitchLang("en")}
-                  className={`rounded-full px-4 py-1.5 text-[13px] font-semibold transition ${
-                    lang === "en"
-                      ? "bg-[#0f2f75] text-white"
-                      : "bg-[#eef3ff] text-[#536689] hover:bg-white"
+                <div
+                  className={`absolute right-0 top-[calc(100%+10px)] z-40 w-[130px] rounded-2xl border border-[#c4d7fb] bg-[rgba(244,249,255,0.95)] p-1.5 shadow-[0_18px_35px_rgba(55,84,142,0.2)] backdrop-blur-md transition-all duration-150 ${
+                    isLangMenuOpen
+                      ? "pointer-events-auto translate-y-0 opacity-100"
+                      : "pointer-events-none -translate-y-1 opacity-0"
                   }`}
+                  role="menu"
                 >
-                  EN
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchLang("en")}
+                    className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-[13px] font-semibold transition ${
+                      lang === "en"
+                        ? "bg-[#d8e8ff] text-[#2d5fc2]"
+                        : "text-[#52688e] hover:bg-white"
+                    }`}
+                    role="menuitem"
+                  >
+                    <span>EN</span>
+                    {lang === "en" ? <span className="text-[12px]">✓</span> : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchLang("zh")}
+                    className={`mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2 text-[13px] font-semibold transition ${
+                      lang === "zh"
+                        ? "bg-[#d8e8ff] text-[#2d5fc2]"
+                        : "text-[#52688e] hover:bg-white"
+                    }`}
+                    role="menuitem"
+                  >
+                    <span>中文</span>
+                    {lang === "zh" ? <span className="text-[12px]">✓</span> : null}
+                  </button>
+                </div>
               </div>
               </div>
             </div>

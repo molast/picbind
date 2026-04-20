@@ -26,19 +26,19 @@ export const AllLangs = Object.keys(ALL_LANGS) as Lang[];
 
 export const ALL_LANG_OPTIONS = [
   {
-    label: "中文",
-    value: "zh",
-  },
-  {
     label: "English",
     value: "en",
+  },
+  {
+    label: "中文",
+    value: "zh",
   },
 ];
 
 const LANG_KEY = "ai-translator-lang-v2";
 const LANG_COOKIE_KEY = "picbind-lang";
 const LEGACY_LANG_COOKIE_KEY = "picbind-lang";
-const DEFAULT_LANG = "zh";
+const DEFAULT_LANG = "en";
 
 const fallbackLang = zh;
 const targetLang = ALL_LANGS[getLang()] as LocaleType;
