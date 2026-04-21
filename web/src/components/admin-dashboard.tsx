@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { getAdminStateApiPath } from "@/utils/api-endpoints";
 
 type AdminDashboardState = {
   totalCompressed: number;
@@ -43,7 +44,7 @@ function formatBytes(size: number) {
 }
 
 export default function AdminDashboard() {
-  const adminStateApiPath = process.env.NEXT_PUBLIC_ADMIN_STATE_API_PATH || "";
+  const adminStateApiPath = getAdminStateApiPath();
   const adminKey = (process.env.NEXT_PUBLIC_ADMIN_KEY || "").trim();
   const [state, setState] = React.useState<AdminDashboardState>(EMPTY_STATE);
   const [showCompressedCount, setShowCompressedCount] = React.useState(
@@ -55,6 +56,7 @@ export default function AdminDashboard() {
   const [statusText, setStatusText] = React.useState<string>("");
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isMounted, setIsMounted] = React.useState(false);
 
   const stateUrl = React.useMemo(() => {
     if (!adminStateApiPath) {
@@ -159,6 +161,10 @@ export default function AdminDashboard() {
       setIsSaving(false);
     }
   }, [adminKey, applyState, showCompareSection, showCompressedCount, stateUrl]);
+
+  React.useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   React.useEffect(() => {
     if (!stateUrl) {
@@ -297,7 +303,13 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-6 text-xs text-slate-400">
-            最近更新时间：{new Date(state.updatedAt).toLocaleString("zh-CN")}
+            最近更新时间：
+            {isMounted
+              ? new Date(state.updatedAt).toLocaleString("zh-CN", {
+                  hour12: false,
+                  timeZone: "Asia/Shanghai",
+                })
+              : "--"}
           </div>
         </section>
       </div>

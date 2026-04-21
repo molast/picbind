@@ -1,6 +1,8 @@
 "use client";
 
-const METRICS_API_PATH = process.env.NEXT_PUBLIC_METRICS_API_PATH || "";
+import { getMetricsApiPath } from "@/utils/api-endpoints";
+
+const METRICS_API_PATH = getMetricsApiPath();
 const METRICS_ENABLED =
   Boolean(METRICS_API_PATH) &&
   process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
