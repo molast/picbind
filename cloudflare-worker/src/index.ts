@@ -37,6 +37,7 @@ type Env = {
 };
 
 const CONFIG_KEY = "metrics:config:v1";
+const LEGACY_METRICS_KEY = "metrics:v1";
 const BAIDU_PUSH_ENDPOINT = "http://data.zz.baidu.com/urls";
 const COUNTER_INSTANCE_NAME = "global";
 
@@ -119,6 +120,18 @@ function normalizeCounterState(input: Partial<MetricsCounterState> | null): Metr
 
 async function readCounterSummaryFromKv(env: Env) {
   const raw = await env.METRICS_KV.get(METRICS_SUMMARY_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return normalizeCounterState(JSON.parse(raw) as Partial<MetricsCounterState>);
+  } catch {
+    return null;
+  }
+}
+
+async function readLegacyCounterFromKv(env: Env) {
+  const raw = await env.METRICS_KV.get(LEGACY_METRICS_KEY);
   if (!raw) {
     return null;
   }
@@ -267,16 +280,108 @@ async function readCounterState(env: Env) {
   }
 }
 
+async function ensureCounterSeededFromLegacy(env: Env) {
+  const [counter, legacy] = await Promise.all([
+    readCounterState(env),
+    readLegacyCounterFromKv(env),
+  ]);
+  if (!legacy) {
+    return counter;
+  }
+
+  const shouldSeed =
+    legacy.totalCompressed > counter.totalCompressed ||
+    legacy.totalViews > counter.totalViews ||
+    legacy.totalSavedBytes > counter.totalSavedBytes;
+
+  if (!shouldSeed) {
+    return counter;
+  }
+
+  try {
+    const seeded = normalizeCounterState(
+      await counterFetch<MetricsCounterState>(env, "/seed", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(legacy),
+      }),
+    );
+    return seeded;
+  } catch (error) {
+    console.error("Seed DO from legacy metrics failed:", error);
+    return counter;
+  }
+}
+
 async function handleMetrics(request: Request, env: Env) {
   if (request.method === "GET") {
-    const [summary, config] = await Promise.all([
+    const [summary, legacy, config] = await Promise.all([
       readCounterSummaryFromKv(env),
+      readLegacyCounterFromKv(env),
       readConfig(env),
     ]);
-    const counter = summary ?? (await readCounterState(env));
+    let counter = summary ?? legacy ?? createInitialCounterState();
+    const summaryLooksEmpty =
+      !summary ||
+      (summary.totalCompressed === 0 &&
+        summary.totalViews === 0 &&
+        summary.totalSavedBytes === 0);
 
-    if (!summary) {
-      // Warm summary cache when KV is empty/corrupted.
+    if (summaryLooksEmpty) {
+      const live = await readCounterState(env);
+      counter = {
+        ...counter,
+        totalCompressed: Math.max(counter.totalCompressed, live.totalCompressed),
+        totalViews: Math.max(counter.totalViews, live.totalViews),
+        totalSavedBytes: Math.max(counter.totalSavedBytes, live.totalSavedBytes),
+        formatStats: {
+          jpeg: {
+            count: Math.max(counter.formatStats.jpeg.count, live.formatStats.jpeg.count),
+            totalSavedBytes: Math.max(
+              counter.formatStats.jpeg.totalSavedBytes,
+              live.formatStats.jpeg.totalSavedBytes,
+            ),
+          },
+          png: {
+            count: Math.max(counter.formatStats.png.count, live.formatStats.png.count),
+            totalSavedBytes: Math.max(
+              counter.formatStats.png.totalSavedBytes,
+              live.formatStats.png.totalSavedBytes,
+            ),
+          },
+          webp: {
+            count: Math.max(counter.formatStats.webp.count, live.formatStats.webp.count),
+            totalSavedBytes: Math.max(
+              counter.formatStats.webp.totalSavedBytes,
+              live.formatStats.webp.totalSavedBytes,
+            ),
+          },
+          avif: {
+            count: Math.max(counter.formatStats.avif.count, live.formatStats.avif.count),
+            totalSavedBytes: Math.max(
+              counter.formatStats.avif.totalSavedBytes,
+              live.formatStats.avif.totalSavedBytes,
+            ),
+          },
+        },
+        updatedAt:
+          new Date(
+            Math.max(
+              Date.parse(counter.updatedAt) || 0,
+              Date.parse(live.updatedAt) || 0,
+            ),
+          ).toISOString(),
+      };
+    }
+
+    const shouldRepairSummary =
+      !summary ||
+      counter.totalCompressed > summary.totalCompressed ||
+      counter.totalViews > summary.totalViews ||
+      counter.totalSavedBytes > summary.totalSavedBytes;
+
+    if (shouldRepairSummary) {
+      // Warm/repair summary cache when empty/stale.
       await env.METRICS_KV.put(METRICS_SUMMARY_KEY, JSON.stringify(counter));
     }
 
@@ -343,6 +448,10 @@ async function handleAdminState(request: Request, env: Env) {
   if (request.method === "GET") {
     if (url.searchParams.get("sync") === "1") {
       try {
+        const seeded = await ensureCounterSeededFromLegacy(env);
+        if (seeded.totalCompressed > 0 || seeded.totalViews > 0) {
+          await env.METRICS_KV.put(METRICS_SUMMARY_KEY, JSON.stringify(seeded));
+        }
         await counterFetch<MetricsCounterState>(env, "/sync-summary", {
           method: "POST",
         });
