@@ -143,6 +143,24 @@ function mergeRemoteWithLocal(remoteTotal: number) {
   return display;
 }
 
+function acknowledgeLocalCompression(ackCount: number, remoteTotal: number) {
+  if (typeof window === "undefined" || ackCount <= 0) {
+    return;
+  }
+  const state = getOrInitLocalMetricsState(remoteTotal);
+  const remainingDelta = Math.max(0, state.sessionDelta - ackCount);
+  const rebasedBase = Math.max(remoteTotal - remainingDelta, state.sessionBase);
+  const display = Math.max(remoteTotal, rebasedBase + remainingDelta);
+  const nextState: LocalMetricsState = {
+    ...state,
+    sessionBase: rebasedBase,
+    sessionDelta: remainingDelta,
+    lastDisplay: display,
+  };
+  writeLocalMetricsState(nextState);
+  totalCompressedCache = display;
+}
+
 async function writeMetrics(
   payload:
     | { delta: number }
@@ -210,7 +228,9 @@ async function flushPending() {
         const total = await writeMetrics(
           events.length ? { events } : { delta },
         );
-        totalCompressedCache = total;
+        const ackCount = events.length || delta;
+        acknowledgeLocalCompression(ackCount, total);
+        totalCompressedCache = Math.max(totalCompressedCache ?? 0, total);
         retryDelayMs = FLUSH_DELAY_MS;
       } catch (error) {
         if (events.length) {

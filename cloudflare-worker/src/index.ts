@@ -155,6 +155,50 @@ function publicMetrics(counter: MetricsCounterState, config: MetricsConfig) {
   };
 }
 
+function mergeCounterState(
+  base: MetricsCounterState,
+  incoming: MetricsCounterState,
+): MetricsCounterState {
+  return {
+    totalCompressed: Math.max(base.totalCompressed, incoming.totalCompressed),
+    totalViews: Math.max(base.totalViews, incoming.totalViews),
+    totalSavedBytes: Math.max(base.totalSavedBytes, incoming.totalSavedBytes),
+    formatStats: {
+      jpeg: {
+        count: Math.max(base.formatStats.jpeg.count, incoming.formatStats.jpeg.count),
+        totalSavedBytes: Math.max(
+          base.formatStats.jpeg.totalSavedBytes,
+          incoming.formatStats.jpeg.totalSavedBytes,
+        ),
+      },
+      png: {
+        count: Math.max(base.formatStats.png.count, incoming.formatStats.png.count),
+        totalSavedBytes: Math.max(
+          base.formatStats.png.totalSavedBytes,
+          incoming.formatStats.png.totalSavedBytes,
+        ),
+      },
+      webp: {
+        count: Math.max(base.formatStats.webp.count, incoming.formatStats.webp.count),
+        totalSavedBytes: Math.max(
+          base.formatStats.webp.totalSavedBytes,
+          incoming.formatStats.webp.totalSavedBytes,
+        ),
+      },
+      avif: {
+        count: Math.max(base.formatStats.avif.count, incoming.formatStats.avif.count),
+        totalSavedBytes: Math.max(
+          base.formatStats.avif.totalSavedBytes,
+          incoming.formatStats.avif.totalSavedBytes,
+        ),
+      },
+    },
+    updatedAt: new Date(
+      Math.max(Date.parse(base.updatedAt) || 0, Date.parse(incoming.updatedAt) || 0),
+    ).toISOString(),
+  };
+}
+
 function getClientIp(request: Request) {
   return request.headers.get("cf-connecting-ip") || "unknown";
 }
@@ -279,52 +323,13 @@ async function handleMetrics(request: Request, env: Env) {
       (summary.totalCompressed === 0 &&
         summary.totalViews === 0 &&
         summary.totalSavedBytes === 0);
+    const summaryAgeMs =
+      summary?.updatedAt ? Date.now() - (Date.parse(summary.updatedAt) || 0) : Infinity;
+    const summaryStale = summaryAgeMs > 65_000;
 
-    if (summaryLooksEmpty) {
+    if (summaryLooksEmpty || summaryStale) {
       const live = await readCounterState(env);
-      counter = {
-        ...counter,
-        totalCompressed: Math.max(counter.totalCompressed, live.totalCompressed),
-        totalViews: Math.max(counter.totalViews, live.totalViews),
-        totalSavedBytes: Math.max(counter.totalSavedBytes, live.totalSavedBytes),
-        formatStats: {
-          jpeg: {
-            count: Math.max(counter.formatStats.jpeg.count, live.formatStats.jpeg.count),
-            totalSavedBytes: Math.max(
-              counter.formatStats.jpeg.totalSavedBytes,
-              live.formatStats.jpeg.totalSavedBytes,
-            ),
-          },
-          png: {
-            count: Math.max(counter.formatStats.png.count, live.formatStats.png.count),
-            totalSavedBytes: Math.max(
-              counter.formatStats.png.totalSavedBytes,
-              live.formatStats.png.totalSavedBytes,
-            ),
-          },
-          webp: {
-            count: Math.max(counter.formatStats.webp.count, live.formatStats.webp.count),
-            totalSavedBytes: Math.max(
-              counter.formatStats.webp.totalSavedBytes,
-              live.formatStats.webp.totalSavedBytes,
-            ),
-          },
-          avif: {
-            count: Math.max(counter.formatStats.avif.count, live.formatStats.avif.count),
-            totalSavedBytes: Math.max(
-              counter.formatStats.avif.totalSavedBytes,
-              live.formatStats.avif.totalSavedBytes,
-            ),
-          },
-        },
-        updatedAt:
-          new Date(
-            Math.max(
-              Date.parse(counter.updatedAt) || 0,
-              Date.parse(live.updatedAt) || 0,
-            ),
-          ).toISOString(),
-      };
+      counter = mergeCounterState(counter, live);
     }
 
     const shouldRepairSummary =
@@ -400,13 +405,9 @@ async function handleAdminState(request: Request, env: Env) {
 
   if (request.method === "GET") {
     if (url.searchParams.get("sync") === "1") {
-      try {
-        await counterFetch<MetricsCounterState>(env, "/sync-summary", {
-          method: "POST",
-        });
-      } catch (error) {
-        console.error("Admin sync DO -> KV failed:", error);
-      }
+      await counterFetch<MetricsCounterState>(env, "/sync-summary", {
+        method: "POST",
+      });
     }
     const [counter, config] = await Promise.all([
       readCounterState(env),
