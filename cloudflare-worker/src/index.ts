@@ -37,7 +37,6 @@ type Env = {
 };
 
 const CONFIG_KEY = "metrics:config:v1";
-const LEGACY_METRICS_KEY = "metrics:v1";
 const BAIDU_PUSH_ENDPOINT = "http://data.zz.baidu.com/urls";
 const COUNTER_INSTANCE_NAME = "global";
 
@@ -120,18 +119,6 @@ function normalizeCounterState(input: Partial<MetricsCounterState> | null): Metr
 
 async function readCounterSummaryFromKv(env: Env) {
   const raw = await env.METRICS_KV.get(METRICS_SUMMARY_KEY);
-  if (!raw) {
-    return null;
-  }
-  try {
-    return normalizeCounterState(JSON.parse(raw) as Partial<MetricsCounterState>);
-  } catch {
-    return null;
-  }
-}
-
-async function readLegacyCounterFromKv(env: Env) {
-  const raw = await env.METRICS_KV.get(LEGACY_METRICS_KEY);
   if (!raw) {
     return null;
   }
@@ -280,47 +267,13 @@ async function readCounterState(env: Env) {
   }
 }
 
-async function ensureCounterSeededFromLegacy(env: Env) {
-  const [counter, legacy] = await Promise.all([
-    readCounterState(env),
-    readLegacyCounterFromKv(env),
-  ]);
-  if (!legacy) {
-    return counter;
-  }
-
-  const shouldSeed =
-    legacy.totalCompressed > counter.totalCompressed ||
-    legacy.totalViews > counter.totalViews ||
-    legacy.totalSavedBytes > counter.totalSavedBytes;
-
-  if (!shouldSeed) {
-    return counter;
-  }
-
-  try {
-    const seeded = normalizeCounterState(
-      await counterFetch<MetricsCounterState>(env, "/seed", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(legacy),
-      }),
-    );
-    return seeded;
-  } catch (error) {
-    console.error("Seed DO from legacy metrics failed:", error);
-    return counter;
-  }
-}
-
 async function handleMetrics(request: Request, env: Env) {
   if (request.method === "GET") {
-    const [summary, legacy, config] = await Promise.all([
+    const [summary, config] = await Promise.all([
       readCounterSummaryFromKv(env),
-      readLegacyCounterFromKv(env),
       readConfig(env),
     ]);
-    let counter = summary ?? legacy ?? createInitialCounterState();
+    let counter = summary ?? createInitialCounterState();
     const summaryLooksEmpty =
       !summary ||
       (summary.totalCompressed === 0 &&
@@ -448,10 +401,6 @@ async function handleAdminState(request: Request, env: Env) {
   if (request.method === "GET") {
     if (url.searchParams.get("sync") === "1") {
       try {
-        const seeded = await ensureCounterSeededFromLegacy(env);
-        if (seeded.totalCompressed > 0 || seeded.totalViews > 0) {
-          await env.METRICS_KV.put(METRICS_SUMMARY_KEY, JSON.stringify(seeded));
-        }
         await counterFetch<MetricsCounterState>(env, "/sync-summary", {
           method: "POST",
         });

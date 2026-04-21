@@ -206,65 +206,6 @@ export class MetricsCounter {
     return json(counter);
   }
 
-  private async handleSeed(request: Request, env: DurableEnv) {
-    if (request.method !== "POST") {
-      return json({ error: "Method not allowed" }, { status: 405 });
-    }
-
-    const incoming = normalizeState(
-      await parseBody<Partial<MetricsCounterState>>(request),
-    );
-    const current = await this.readState();
-
-    const merged: MetricsCounterState = {
-      totalCompressed: Math.max(current.totalCompressed, incoming.totalCompressed),
-      totalViews: Math.max(current.totalViews, incoming.totalViews),
-      totalSavedBytes: Math.max(current.totalSavedBytes, incoming.totalSavedBytes),
-      formatStats: {
-        jpeg: {
-          count: Math.max(current.formatStats.jpeg.count, incoming.formatStats.jpeg.count),
-          totalSavedBytes: Math.max(
-            current.formatStats.jpeg.totalSavedBytes,
-            incoming.formatStats.jpeg.totalSavedBytes,
-          ),
-        },
-        png: {
-          count: Math.max(current.formatStats.png.count, incoming.formatStats.png.count),
-          totalSavedBytes: Math.max(
-            current.formatStats.png.totalSavedBytes,
-            incoming.formatStats.png.totalSavedBytes,
-          ),
-        },
-        webp: {
-          count: Math.max(current.formatStats.webp.count, incoming.formatStats.webp.count),
-          totalSavedBytes: Math.max(
-            current.formatStats.webp.totalSavedBytes,
-            incoming.formatStats.webp.totalSavedBytes,
-          ),
-        },
-        avif: {
-          count: Math.max(current.formatStats.avif.count, incoming.formatStats.avif.count),
-          totalSavedBytes: Math.max(
-            current.formatStats.avif.totalSavedBytes,
-            incoming.formatStats.avif.totalSavedBytes,
-          ),
-        },
-      },
-      updatedAt:
-        new Date(
-          Math.max(
-            Date.parse(current.updatedAt) || 0,
-            Date.parse(incoming.updatedAt) || 0,
-            Date.now(),
-          ),
-        ).toISOString(),
-    };
-
-    await this.writeState(merged);
-    await this.syncSummaryToKv(env, merged, true);
-    return json(merged);
-  }
-
   async fetch(request: Request, env: DurableEnv): Promise<Response> {
     const { pathname } = new URL(request.url);
 
@@ -285,10 +226,6 @@ export class MetricsCounter {
 
     if (pathname === "/sync-summary") {
       return this.handleSyncSummary(request, env);
-    }
-
-    if (pathname === "/seed") {
-      return this.handleSeed(request, env);
     }
 
     return json({ error: "Not found" }, { status: 404 });
