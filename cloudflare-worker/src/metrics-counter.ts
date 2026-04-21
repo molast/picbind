@@ -91,7 +91,11 @@ async function parseBody<T extends object>(request: Request): Promise<T> {
 }
 
 export class MetricsCounter {
-  constructor(private readonly state: DurableObjectState) {}
+  private readonly env: DurableEnv;
+
+  constructor(private readonly state: DurableObjectState, env: DurableEnv) {
+    this.env = env;
+  }
 
   private async readState() {
     const raw = await this.state.storage.get<string>(STATE_KEY);
@@ -136,7 +140,7 @@ export class MetricsCounter {
     await this.state.storage.put(LAST_SYNC_KEY, now);
   }
 
-  private async handleMetrics(request: Request, env: DurableEnv) {
+  private async handleMetrics(request: Request) {
     if (request.method === "GET") {
       return json(await this.readState());
     }
@@ -171,7 +175,7 @@ export class MetricsCounter {
       counter.totalSavedBytes += totalSavedBytesDelta;
       counter.updatedAt = new Date().toISOString();
       await this.writeState(counter);
-      await this.syncSummaryToKv(env, counter);
+      await this.syncSummaryToKv(this.env, counter);
       return json(counter);
     }
 
@@ -185,7 +189,7 @@ export class MetricsCounter {
     return json({ error: "Invalid metrics payload" }, { status: 400 });
   }
 
-  private async handleView(request: Request, env: DurableEnv) {
+  private async handleView(request: Request) {
     if (request.method !== "POST") {
       return json({ error: "Method not allowed" }, { status: 405 });
     }
@@ -193,20 +197,20 @@ export class MetricsCounter {
     counter.totalViews += 1;
     counter.updatedAt = new Date().toISOString();
     await this.writeState(counter);
-    await this.syncSummaryToKv(env, counter);
+    await this.syncSummaryToKv(this.env, counter);
     return json(counter);
   }
 
-  private async handleSyncSummary(request: Request, env: DurableEnv) {
+  private async handleSyncSummary(request: Request) {
     if (request.method !== "POST") {
       return json({ error: "Method not allowed" }, { status: 405 });
     }
     const counter = await this.readState();
-    await this.syncSummaryToKv(env, counter, true);
+    await this.syncSummaryToKv(this.env, counter, true);
     return json(counter);
   }
 
-  async fetch(request: Request, env: DurableEnv): Promise<Response> {
+  async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     if (pathname === "/state") {
@@ -217,15 +221,15 @@ export class MetricsCounter {
     }
 
     if (pathname === "/metrics") {
-      return this.handleMetrics(request, env);
+      return this.handleMetrics(request);
     }
 
     if (pathname === "/view") {
-      return this.handleView(request, env);
+      return this.handleView(request);
     }
 
     if (pathname === "/sync-summary") {
-      return this.handleSyncSummary(request, env);
+      return this.handleSyncSummary(request);
     }
 
     return json({ error: "Not found" }, { status: 404 });
