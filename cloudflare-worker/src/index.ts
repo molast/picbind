@@ -342,9 +342,13 @@ async function handleAdminState(request: Request, env: Env) {
 
   if (request.method === "GET") {
     if (url.searchParams.get("sync") === "1") {
-      await counterFetch<MetricsCounterState>(env, "/sync-summary", {
-        method: "POST",
-      });
+      try {
+        await counterFetch<MetricsCounterState>(env, "/sync-summary", {
+          method: "POST",
+        });
+      } catch (error) {
+        console.error("Admin sync DO -> KV failed:", error);
+      }
     }
     const [counter, config] = await Promise.all([
       readCounterState(env),
@@ -446,21 +450,30 @@ const worker = {
       );
     }
 
-    let response: Response;
+    try {
+      let response: Response;
 
-    if (pathname === "/api/metrics") {
-      response = await handleMetrics(request, env);
-    } else if (pathname === "/api/site/view") {
-      response = await handlePageView(request, env);
-    } else if (pathname === "/api/admin/state") {
-      response = await handleAdminState(request, env);
-    } else if (pathname === "/api/seo/baidu/push") {
-      response = await handleBaiduPush(request, env);
-    } else {
-      response = json({ error: "Not found" }, { status: 404 });
+      if (pathname === "/api/metrics") {
+        response = await handleMetrics(request, env);
+      } else if (pathname === "/api/site/view") {
+        response = await handlePageView(request, env);
+      } else if (pathname === "/api/admin/state") {
+        response = await handleAdminState(request, env);
+      } else if (pathname === "/api/seo/baidu/push") {
+        response = await handleBaiduPush(request, env);
+      } else {
+        response = json({ error: "Not found" }, { status: 404 });
+      }
+
+      return withCors(response, env, request);
+    } catch (error) {
+      console.error("Worker request failed:", error);
+      return withCors(
+        json({ error: "Internal error" }, { status: 500 }),
+        env,
+        request,
+      );
     }
-
-    return withCors(response, env, request);
   },
 };
 
