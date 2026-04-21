@@ -6,6 +6,14 @@ compatibility_date = "2026-04-20"
 binding = "METRICS_KV"
 id = "ffd6a9e2ce924cf2a4b93b782d525810"
 
+[[durable_objects.bindings]]
+name = "METRICS_COUNTER"
+class_name = "MetricsCounter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MetricsCounter"]
+
 [vars]
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"

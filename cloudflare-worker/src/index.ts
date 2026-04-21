@@ -1,3 +1,9 @@
+import {
+  METRICS_SUMMARY_KEY,
+  MetricsCounter,
+  type MetricsCounterState,
+} from "./metrics-counter";
+
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
 type FormatMetrics = {
@@ -5,11 +11,7 @@ type FormatMetrics = {
   totalSavedBytes: number;
 };
 
-type MetricsPayload = {
-  totalCompressed: number;
-  totalViews: number;
-  totalSavedBytes: number;
-  formatStats: Record<CompressionFormat, FormatMetrics>;
+type MetricsConfig = {
   showCompressedCount: boolean;
   showCompareSection: boolean;
   updatedAt: string;
@@ -20,6 +22,7 @@ type Env = {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<void>;
   };
+  METRICS_COUNTER: DurableObjectNamespace;
   GLOBAL_LIMITER?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
@@ -33,10 +36,9 @@ type Env = {
   BAIDU_PUSH_TOKEN?: string;
 };
 
-const METRICS_KEY = "metrics:v1";
+const CONFIG_KEY = "metrics:config:v1";
 const BAIDU_PUSH_ENDPOINT = "http://data.zz.baidu.com/urls";
-const DELTA_MAX = 20;
-const EVENT_BATCH_MAX = 50;
+const COUNTER_INSTANCE_NAME = "global";
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
@@ -48,29 +50,46 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-function createInitialFormatStats(): Record<CompressionFormat, FormatMetrics> {
+function createInitialConfig(): MetricsConfig {
   return {
-    jpeg: { count: 0, totalSavedBytes: 0 },
-    png: { count: 0, totalSavedBytes: 0 },
-    webp: { count: 0, totalSavedBytes: 0 },
-    avif: { count: 0, totalSavedBytes: 0 },
-  };
-}
-
-function createInitialPayload(): MetricsPayload {
-  return {
-    totalCompressed: 0,
-    totalViews: 0,
-    totalSavedBytes: 0,
-    formatStats: createInitialFormatStats(),
     showCompressedCount: false,
     showCompareSection: false,
     updatedAt: new Date(0).toISOString(),
   };
 }
 
-function normalizePayload(input: Partial<MetricsPayload> | null): MetricsPayload {
-  const initial = createInitialPayload();
+function normalizeConfig(input: Partial<MetricsConfig> | null): MetricsConfig {
+  const initial = createInitialConfig();
+  return {
+    showCompressedCount:
+      typeof input?.showCompressedCount === "boolean"
+        ? input.showCompressedCount
+        : false,
+    showCompareSection:
+      typeof input?.showCompareSection === "boolean"
+        ? input.showCompareSection
+        : false,
+    updatedAt: input?.updatedAt || initial.updatedAt,
+  };
+}
+
+function createInitialCounterState(): MetricsCounterState {
+  return {
+    totalCompressed: 0,
+    totalViews: 0,
+    totalSavedBytes: 0,
+    formatStats: {
+      jpeg: { count: 0, totalSavedBytes: 0 },
+      png: { count: 0, totalSavedBytes: 0 },
+      webp: { count: 0, totalSavedBytes: 0 },
+      avif: { count: 0, totalSavedBytes: 0 },
+    },
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+function normalizeCounterState(input: Partial<MetricsCounterState> | null): MetricsCounterState {
+  const initial = createInitialCounterState();
   const stats = input?.formatStats || initial.formatStats;
   return {
     totalCompressed: Number(input?.totalCompressed || 0),
@@ -94,41 +113,45 @@ function normalizePayload(input: Partial<MetricsPayload> | null): MetricsPayload
         totalSavedBytes: Number(stats.avif?.totalSavedBytes || 0),
       },
     },
-    showCompressedCount:
-      typeof input?.showCompressedCount === "boolean"
-        ? input.showCompressedCount
-        : false,
-    showCompareSection:
-      typeof input?.showCompareSection === "boolean"
-        ? input.showCompareSection
-        : false,
     updatedAt: input?.updatedAt || initial.updatedAt,
   };
 }
 
-async function readState(env: Env) {
-  const raw = await env.METRICS_KV.get(METRICS_KEY);
+async function readCounterSummaryFromKv(env: Env) {
+  const raw = await env.METRICS_KV.get(METRICS_SUMMARY_KEY);
   if (!raw) {
-    return createInitialPayload();
+    return null;
   }
   try {
-    return normalizePayload(JSON.parse(raw) as Partial<MetricsPayload>);
+    return normalizeCounterState(JSON.parse(raw) as Partial<MetricsCounterState>);
   } catch {
-    return createInitialPayload();
+    return null;
   }
 }
 
-async function writeState(env: Env, state: MetricsPayload) {
-  await env.METRICS_KV.put(METRICS_KEY, JSON.stringify(state));
+async function readConfig(env: Env) {
+  const raw = await env.METRICS_KV.get(CONFIG_KEY);
+  if (!raw) {
+    return createInitialConfig();
+  }
+  try {
+    return normalizeConfig(JSON.parse(raw) as Partial<MetricsConfig>);
+  } catch {
+    return createInitialConfig();
+  }
 }
 
-function publicMetrics(state: MetricsPayload) {
+async function writeConfig(env: Env, state: MetricsConfig) {
+  await env.METRICS_KV.put(CONFIG_KEY, JSON.stringify(state));
+}
+
+function publicMetrics(counter: MetricsCounterState, config: MetricsConfig) {
   return {
-    totalCompressed: state.totalCompressed,
-    totalSavedBytes: state.totalSavedBytes,
-    formatStats: state.formatStats,
-    showCompressedCount: state.showCompressedCount,
-    showCompareSection: state.showCompareSection,
+    totalCompressed: counter.totalCompressed,
+    totalSavedBytes: counter.totalSavedBytes,
+    formatStats: counter.formatStats,
+    showCompressedCount: config.showCompressedCount,
+    showCompareSection: config.showCompareSection,
   };
 }
 
@@ -214,9 +237,50 @@ async function checkLimiter(
   }
 }
 
+function getCounterStub(env: Env) {
+  const id = env.METRICS_COUNTER.idFromName(COUNTER_INSTANCE_NAME);
+  return env.METRICS_COUNTER.get(id);
+}
+
+async function counterFetch<T>(env: Env, path: string, init?: RequestInit): Promise<T> {
+  const stub = getCounterStub(env);
+  const response = await stub.fetch(`https://metrics-counter${path}`, init);
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: string;
+  } & T;
+  if (!response.ok) {
+    const reason = payload?.error || `Counter request failed with ${response.status}`;
+    throw new Error(reason);
+  }
+  return payload;
+}
+
+async function readCounterState(env: Env) {
+  try {
+    const state = await counterFetch<MetricsCounterState>(env, "/state", {
+      method: "GET",
+    });
+    return normalizeCounterState(state);
+  } catch (error) {
+    console.error("Read counter state failed:", error);
+    return createInitialCounterState();
+  }
+}
+
 async function handleMetrics(request: Request, env: Env) {
   if (request.method === "GET") {
-    return json(publicMetrics(await readState(env)));
+    const [summary, config] = await Promise.all([
+      readCounterSummaryFromKv(env),
+      readConfig(env),
+    ]);
+    const counter = summary ?? (await readCounterState(env));
+
+    if (!summary) {
+      // Warm summary cache when KV is empty/corrupted.
+      await env.METRICS_KV.put(METRICS_SUMMARY_KEY, JSON.stringify(counter));
+    }
+
+    return json(publicMetrics(counter, config));
   }
 
   if (request.method !== "POST") {
@@ -231,39 +295,22 @@ async function handleMetrics(request: Request, env: Env) {
     delta?: number;
     events?: Array<{ format?: CompressionFormat; savedBytes?: number }>;
   };
-  const state = await readState(env);
 
-  if (Array.isArray(body.events)) {
-    if (!body.events.length || body.events.length > EVENT_BATCH_MAX) {
-      return json({ error: "Invalid events" }, { status: 400 });
-    }
-
-    let totalSavedBytesDelta = 0;
-    for (const event of body.events) {
-      if (!event.format || !["jpeg", "png", "webp", "avif"].includes(event.format)) {
-        continue;
-      }
-      const savedBytes = Math.round(Number(event.savedBytes || 0));
-      state.formatStats[event.format].count += 1;
-      state.formatStats[event.format].totalSavedBytes += savedBytes;
-      state.totalCompressed += 1;
-      totalSavedBytesDelta += savedBytes;
-    }
-    state.totalSavedBytes += totalSavedBytesDelta;
-    state.updatedAt = new Date().toISOString();
-    await writeState(env, state);
-    return json(publicMetrics(state));
+  try {
+    const counter = normalizeCounterState(
+      await counterFetch<MetricsCounterState>(env, "/metrics", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+    const config = await readConfig(env);
+    return json(publicMetrics(counter, config));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid metrics payload";
+    const status = message.toLowerCase().includes("invalid") ? 400 : 500;
+    return json({ error: message }, { status });
   }
-
-  const delta = Number(body.delta || 0);
-  if (!Number.isFinite(delta) || delta <= 0 || delta > DELTA_MAX) {
-    return json({ error: "Invalid delta" }, { status: 400 });
-  }
-
-  state.totalCompressed += Math.floor(delta);
-  state.updatedAt = new Date().toISOString();
-  await writeState(env, state);
-  return json({ totalCompressed: state.totalCompressed });
 }
 
 async function handlePageView(request: Request, env: Env) {
@@ -273,11 +320,18 @@ async function handlePageView(request: Request, env: Env) {
   if (hasMissingOrInvalidOrigin(env, request)) {
     return json({ error: "Invalid origin" }, { status: 403 });
   }
-  const state = await readState(env);
-  state.totalViews += 1;
-  state.updatedAt = new Date().toISOString();
-  await writeState(env, state);
-  return json({ totalViews: state.totalViews });
+
+  try {
+    const counter = normalizeCounterState(
+      await counterFetch<MetricsCounterState>(env, "/view", {
+        method: "POST",
+      }),
+    );
+    return json({ totalViews: counter.totalViews });
+  } catch (error) {
+    console.error("Page view counter failed:", error);
+    return json({ error: "Failed to update page view" }, { status: 500 });
+  }
 }
 
 async function handleAdminState(request: Request, env: Env) {
@@ -286,7 +340,11 @@ async function handleAdminState(request: Request, env: Env) {
   }
 
   if (request.method === "GET") {
-    return json(await readState(env));
+    const [counter, config] = await Promise.all([
+      readCounterState(env),
+      readConfig(env),
+    ]);
+    return json({ ...counter, ...config });
   }
 
   if (request.method !== "POST") {
@@ -297,16 +355,18 @@ async function handleAdminState(request: Request, env: Env) {
     showCompressedCount?: boolean;
     showCompareSection?: boolean;
   };
-  const state = await readState(env);
+  const config = await readConfig(env);
   if (typeof body.showCompressedCount === "boolean") {
-    state.showCompressedCount = body.showCompressedCount;
+    config.showCompressedCount = body.showCompressedCount;
   }
   if (typeof body.showCompareSection === "boolean") {
-    state.showCompareSection = body.showCompareSection;
+    config.showCompareSection = body.showCompareSection;
   }
-  state.updatedAt = new Date().toISOString();
-  await writeState(env, state);
-  return json(state);
+  config.updatedAt = new Date().toISOString();
+  await writeConfig(env, config);
+
+  const counter = await readCounterState(env);
+  return json({ ...counter, ...config });
 }
 
 function configuredSite(env: Env) {
@@ -348,7 +408,7 @@ async function handleBaiduPush(request: Request, env: Env) {
   return json({ site, submitted: urls.length, ...result });
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env) {
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -397,3 +457,6 @@ export default {
     return withCors(response, env, request);
   },
 };
+
+export default worker;
+export { MetricsCounter };

@@ -19,7 +19,8 @@ Notes:
 
 ## Required binding
 
-- `METRICS_KV`: Cloudflare KV namespace for metrics and UI state.
+- `METRICS_KV`: Cloudflare KV namespace for low-frequency admin display config.
+- `METRICS_COUNTER`: Durable Object for high-frequency counters (`totalCompressed`, `totalViews`, `totalSavedBytes`, `formatStats`).
 - `GLOBAL_LIMITER`: Worker Rate Limiting binding (global limiter).
 - `ROUTE_LIMITER`: Worker Rate Limiting binding (route-level limiter).
 
@@ -52,6 +53,19 @@ BAIDU_PUSH_SITE=https://picbind.com
 ADMIN_KEY=<your-admin-key>
 BAIDU_PUSH_TOKEN=<your-baidu-token>
 ```
+
+Storage strategy:
+
+- High-frequency writes (compression metrics + page view): Durable Object (`METRICS_COUNTER`)
+- Low-frequency config writes (admin display toggles): KV (`METRICS_KV`)
+- Summary cache sync (DO -> KV): dual trigger
+  - Count trigger: sync every `100` writes
+  - Time trigger: force sync every `60s`
+
+Read strategy:
+
+- Homepage `/api/metrics` GET: reads KV summary cache (fast path)
+- Admin `/api/admin/state` GET: reads Durable Object (accurate real-time counters)
 
 Rate limit strategy:
 
