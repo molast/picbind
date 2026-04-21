@@ -63,6 +63,25 @@ export default function AdminDashboard() {
     return adminStateApiPath;
   }, [adminStateApiPath]);
 
+  const buildStateUrl = React.useCallback(
+    (syncSummary: boolean) => {
+      if (!stateUrl) {
+        return "";
+      }
+      const url = new URL(
+        stateUrl,
+        typeof window !== "undefined" ? window.location.origin : "https://picbind.com",
+      );
+      if (syncSummary) {
+        url.searchParams.set("sync", "1");
+      } else {
+        url.searchParams.delete("sync");
+      }
+      return url.toString();
+    },
+    [stateUrl],
+  );
+
   const applyState = React.useCallback((next: AdminDashboardState) => {
     setState(next);
     setShowCompressedCount(next.showCompressedCount);
@@ -79,7 +98,7 @@ export default function AdminDashboard() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(stateUrl, {
+      const response = await fetch(buildStateUrl(true), {
         method: "GET",
         headers: {
           "x-admin-key": adminKey,
@@ -93,11 +112,11 @@ export default function AdminDashboard() {
       }
       const next = (await response.json()) as AdminDashboardState;
       applyState(next);
-      setStatusText("数据已刷新");
+      setStatusText("数据已刷新（已同步 DO -> KV）");
     } finally {
       setIsLoading(false);
     }
-  }, [adminKey, applyState, stateUrl]);
+  }, [adminKey, applyState, buildStateUrl, stateUrl]);
 
   const saveConfig = React.useCallback(async () => {
     if (!stateUrl) {

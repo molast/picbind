@@ -109,7 +109,11 @@ export class MetricsCounter {
     await this.state.storage.put(STATE_KEY, JSON.stringify(next));
   }
 
-  private async syncSummaryToKv(env: DurableEnv, summary: MetricsCounterState) {
+  private async syncSummaryToKv(
+    env: DurableEnv,
+    summary: MetricsCounterState,
+    force = false,
+  ) {
     const now = Date.now();
     const lastSync =
       (await this.state.storage.get<number>(LAST_SYNC_KEY)) ?? 0;
@@ -118,7 +122,9 @@ export class MetricsCounter {
 
     const nextPending = pending + 1;
     const shouldSync =
-      nextPending >= SYNC_PENDING_THRESHOLD || now - lastSync >= SYNC_INTERVAL_MS;
+      force ||
+      nextPending >= SYNC_PENDING_THRESHOLD ||
+      now - lastSync >= SYNC_INTERVAL_MS;
 
     if (!shouldSync) {
       await this.state.storage.put(PENDING_SYNC_KEY, nextPending);
@@ -170,15 +176,13 @@ export class MetricsCounter {
     }
 
     const delta = Number(body.delta || 0);
-    if (!Number.isFinite(delta) || delta <= 0 || delta > DELTA_MAX) {
-      return json({ error: "Invalid delta" }, { status: 400 });
+    if (Number.isFinite(delta) && delta > 0 && delta <= DELTA_MAX) {
+      // Keep backward compatibility for old clients but disable delta-based
+      // increments to avoid duplicate counting with event-based reporting.
+      return json(counter);
     }
 
-    counter.totalCompressed += Math.floor(delta);
-    counter.updatedAt = new Date().toISOString();
-    await this.writeState(counter);
-    await this.syncSummaryToKv(env, counter);
-    return json(counter);
+    return json({ error: "Invalid metrics payload" }, { status: 400 });
   }
 
   private async handleView(request: Request, env: DurableEnv) {
@@ -190,6 +194,15 @@ export class MetricsCounter {
     counter.updatedAt = new Date().toISOString();
     await this.writeState(counter);
     await this.syncSummaryToKv(env, counter);
+    return json(counter);
+  }
+
+  private async handleSyncSummary(request: Request, env: DurableEnv) {
+    if (request.method !== "POST") {
+      return json({ error: "Method not allowed" }, { status: 405 });
+    }
+    const counter = await this.readState();
+    await this.syncSummaryToKv(env, counter, true);
     return json(counter);
   }
 
@@ -209,6 +222,10 @@ export class MetricsCounter {
 
     if (pathname === "/view") {
       return this.handleView(request, env);
+    }
+
+    if (pathname === "/sync-summary") {
+      return this.handleSyncSummary(request, env);
     }
 
     return json({ error: "Not found" }, { status: 404 });

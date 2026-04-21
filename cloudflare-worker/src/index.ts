@@ -338,8 +338,14 @@ async function handleAdminState(request: Request, env: Env) {
   if (!assertAdmin(env, request)) {
     return json({ error: "Not found" }, { status: 404 });
   }
+  const url = new URL(request.url);
 
   if (request.method === "GET") {
+    if (url.searchParams.get("sync") === "1") {
+      await counterFetch<MetricsCounterState>(env, "/sync-summary", {
+        method: "POST",
+      });
+    }
     const [counter, config] = await Promise.all([
       readCounterState(env),
       readConfig(env),
