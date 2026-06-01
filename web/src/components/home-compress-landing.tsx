@@ -36,6 +36,7 @@ import {
 } from "@/utils/wasm";
 
 const MAX_FILES = 20;
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
@@ -304,6 +305,7 @@ export default function HomeCompressLanding({
   showCompareSection = false,
 }: HomeCompressLandingProps) {
   const router = useRouter();
+  const initialCopy = getHomeCompressLandingCopy(initialLang);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const langMenuRef = React.useRef<HTMLDivElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
@@ -334,6 +336,15 @@ export default function HomeCompressLanding({
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
     [],
+  );
+  const [uploadNotice, setUploadNotice] = React.useState<string | null>(null);
+  const [activeFaqCategoryId, setActiveFaqCategoryId] = React.useState(
+    initialCopy.faq.categories[0]?.id ?? "general",
+  );
+  const [openFaqItemKey, setOpenFaqItemKey] = React.useState(
+    initialCopy.faq.categories[0]
+      ? `${initialCopy.faq.categories[0].id}-0`
+      : null,
   );
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
   const [metricsVariantId, setMetricsVariantId] = React.useState<string | null>(
@@ -375,6 +386,48 @@ export default function HomeCompressLanding({
         },
     [lang],
   );
+  const faqCategories = copy.faq.categories;
+  const activeFaqCategory =
+    faqCategories.find((category) => category.id === activeFaqCategoryId) ||
+    faqCategories[0];
+  const footerGroups = copy.footer.groups;
+
+  React.useEffect(() => {
+    const firstCategory = copy.faq.categories[0];
+    if (!firstCategory) {
+      setActiveFaqCategoryId("general");
+      setOpenFaqItemKey(null);
+      return;
+    }
+
+    setActiveFaqCategoryId((prev) => {
+      if (copy.faq.categories.some((category) => category.id === prev)) {
+        return prev;
+      }
+      return firstCategory.id;
+    });
+  }, [copy.faq.categories]);
+
+  React.useEffect(() => {
+    if (!activeFaqCategory) {
+      setOpenFaqItemKey(null);
+      return;
+    }
+
+    setOpenFaqItemKey((prev) => {
+      if (
+        prev &&
+        activeFaqCategory.items.some(
+          (_, index) => `${activeFaqCategory.id}-${index}` === prev,
+        )
+      ) {
+        return prev;
+      }
+      return activeFaqCategory.items.length
+        ? `${activeFaqCategory.id}-0`
+        : null;
+    });
+  }, [activeFaqCategory]);
 
   const loadVariantMetrics = React.useCallback(
     async (item: HomeItem, variant: OutputVariant) => {
@@ -704,18 +757,45 @@ export default function HomeCompressLanding({
 
   const enqueueFiles = React.useCallback(
     (fileList: FileList | File[]) => {
-      const nextFiles = Array.from(fileList).filter((file) =>
-        ALLOWED_TYPES.has(file.type),
-      );
+      const inputFiles = Array.from(fileList);
+      let hasUnsupported = false;
+      let hasTooLarge = false;
+
+      const nextFiles = inputFiles.filter((file) => {
+        if (!ALLOWED_TYPES.has(file.type)) {
+          hasUnsupported = true;
+          return false;
+        }
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          hasTooLarge = true;
+          return false;
+        }
+        return true;
+      });
+
+      const notices: string[] = [];
+      if (hasUnsupported) {
+        notices.push(copy.uploadNotice.unsupportedFiles);
+      }
+      if (hasTooLarge) {
+        notices.push(copy.uploadNotice.fileTooLarge);
+      }
+
       if (!nextFiles.length) {
+        setUploadNotice(notices[0] ?? null);
         return;
       }
 
       setItems((prev) => {
         const remain = MAX_FILES - prev.length;
         if (remain <= 0) {
+          setUploadNotice(copy.uploadNotice.tooManyFiles);
           return prev;
         }
+        if (nextFiles.length > remain) {
+          notices.push(copy.uploadNotice.tooManyFiles);
+        }
+        setUploadNotice(notices.length ? notices.join(" ") : null);
         return [
           ...prev,
           ...nextFiles
@@ -724,7 +804,7 @@ export default function HomeCompressLanding({
         ];
       });
     },
-    [selectedFormats],
+    [copy.uploadNotice, selectedFormats],
   );
 
   React.useEffect(() => {
@@ -1244,6 +1324,11 @@ export default function HomeCompressLanding({
                   <p className="mt-2 text-[11px] font-medium text-[#5d6d95] sm:mt-3 sm:text-[13px] md:text-[14px]">
                     {copy.dropDesc}
                   </p>
+                  {uploadNotice ? (
+                    <p className="mt-3 max-w-[460px] text-[11px] font-semibold leading-5 text-[#d14332] sm:text-[12px] md:text-[13px]">
+                      {uploadNotice}
+                    </p>
+                  ) : null}
                 </button>
                 <div className="mt-3 overflow-hidden rounded-[18px] bg-[rgba(251,253,255,0.98)] sm:rounded-[20px]">
                   <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-[#5f6e90] sm:px-5 sm:text-[13px] md:text-[14px]">
@@ -1861,8 +1946,161 @@ export default function HomeCompressLanding({
             </div>
           </div>
           ) : null}
+
+          {activeFaqCategory ? (
+            <section
+              id="faq"
+              className="rounded-[28px] border border-slate-200 bg-white px-4 py-6 shadow-[0_16px_45px_rgba(148,163,184,0.12)] sm:px-6 sm:py-8 lg:px-8"
+            >
+              <div className="max-w-[720px]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-600 sm:text-sm sm:tracking-[0.28em]">
+                  {copy.faq.kicker}
+                </p>
+                <h2 className="mt-3 text-[30px] font-semibold leading-tight text-slate-700 sm:text-[38px]">
+                  {copy.faq.title}
+                </h2>
+              </div>
+
+              <div className="mt-8 grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-12">
+                <aside className="lg:sticky lg:top-6 lg:self-start">
+                  <div className="space-y-2">
+                    {faqCategories.map((category) => {
+                      const isActive = category.id === activeFaqCategory.id;
+                      return (
+                        <button
+                          key={category.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveFaqCategoryId(category.id);
+                            setOpenFaqItemKey(
+                              category.items.length ? `${category.id}-0` : null,
+                            );
+                          }}
+                          className={`flex w-full items-center rounded-[18px] px-5 py-3.5 text-left text-[18px] font-semibold transition ${
+                            isActive
+                              ? "bg-[linear-gradient(135deg,#36bfd3,#44afd8)] text-white shadow-[0_12px_24px_rgba(54,191,211,0.24)]"
+                              : "text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {category.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </aside>
+
+                <div>
+                  <h3 className="text-[44px] font-semibold leading-none text-slate-700">
+                    {activeFaqCategory.label}
+                  </h3>
+
+                  <div className="mt-6 divide-y divide-slate-200">
+                    {activeFaqCategory.items.map((item, index) => {
+                      const itemKey = `${activeFaqCategory.id}-${index}`;
+                      const isOpen = openFaqItemKey === itemKey;
+                      return (
+                        <div key={itemKey} className="py-5 sm:py-6">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenFaqItemKey((prev) =>
+                                prev === itemKey ? null : itemKey,
+                              )
+                            }
+                            className="flex w-full items-start justify-between gap-4 text-left"
+                            aria-expanded={isOpen}
+                          >
+                            <span className="text-[24px] font-semibold leading-tight text-slate-700 sm:text-[30px]">
+                              {item.question}
+                            </span>
+                            <span className="mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-600 text-lg font-bold leading-none text-white">
+                              {isOpen ? "−" : "+"}
+                            </span>
+                          </button>
+
+                          {isOpen ? (
+                            <div className="max-w-[980px] pt-5 text-[17px] leading-8 text-slate-500 sm:text-[18px]">
+                              {item.answer.map((paragraph) => (
+                                <p key={paragraph} className="mt-4 first:mt-0">
+                                  {paragraph}
+                                </p>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </div>
       </section>
+
+      <footer className="bg-[#171923] text-white">
+        <div className="mx-auto max-w-[1280px] px-6 py-14 sm:px-8 lg:px-10 lg:py-16">
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)] lg:gap-16">
+            <div className="max-w-[360px]">
+              <Link
+                href="/"
+                className="inline-flex items-center text-[28px] font-semibold tracking-[-0.03em] text-white"
+              >
+                {copy.footer.brandTitle}
+              </Link>
+              <p className="mt-4 text-[16px] leading-8 text-slate-400">
+                {copy.footer.brandDesc}
+              </p>
+              <a
+                href="mailto:loomchen@gmail.com"
+                className="mt-7 inline-flex items-center rounded-[18px] border border-white/12 bg-white/6 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-[#4dc0d9]/60 hover:bg-white/10 hover:text-white"
+              >
+                {copy.footer.contactSupport}
+              </a>
+            </div>
+
+            <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+              {footerGroups.map((group) => (
+                <div key={group.title}>
+                  <h3 className="text-[13px] font-semibold uppercase tracking-[0.16em] text-white">
+                    {group.title}
+                  </h3>
+                  <div className="mt-5 flex flex-col gap-4">
+                    {group.links.map((link) => {
+                      const isMail = link.href.startsWith("mailto:");
+                      const isHash = link.href.startsWith("#");
+                      const baseClass =
+                        "text-[16px] font-medium text-slate-400 transition hover:text-white";
+
+                      if (isMail) {
+                        return (
+                          <a key={link.href} href={link.href} className={baseClass}>
+                            {link.label}
+                          </a>
+                        );
+                      }
+
+                      if (isHash) {
+                        return (
+                          <a key={link.href} href={link.href} className={baseClass}>
+                            {link.label}
+                          </a>
+                        );
+                      }
+
+                      return (
+                        <Link key={link.href} href={link.href} className={baseClass}>
+                          {link.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }

@@ -7,8 +7,21 @@ use std::io::Cursor;
 
 mod core;
 
+pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
+pub const MAX_INPUT_MB_TEXT: &str = "5 MB";
+
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
+pub fn ensure_input_size_limit(input: &[u8]) -> Result<(), JsValue> {
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(JsValue::from_str(&format!(
+            "Each image must be {} or smaller",
+            MAX_INPUT_MB_TEXT
+        )));
+    }
+    Ok(())
+}
 
 #[wasm_bindgen]
 pub struct CompressionResult {
@@ -37,6 +50,7 @@ impl CompressionResult {
 
 #[wasm_bindgen]
 pub fn compress_image(input: &[u8], quality: u8) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
     core::pipeline::compress_image(input, quality)
 }
 
@@ -45,6 +59,7 @@ pub fn compress_png_with_deflate(
     input: &[u8],
     compression_level: u8,
 ) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
     core::pipeline::compress_png_with_deflate(input, compression_level)
 }
 
@@ -54,6 +69,7 @@ pub fn compress_image_to_format(
     quality: u8,
     target_format: &str,
 ) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
     core::pipeline::compress_image_to_format(input, quality, target_format)
 }
 
@@ -64,6 +80,7 @@ pub fn compress_image_to_format_with_options(
     target_format: &str,
     allow_alpha_loss: bool,
 ) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
     core::pipeline::compress_image_to_format_with_options(
         input,
         quality,
@@ -93,11 +110,14 @@ pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
 
 #[wasm_bindgen]
 pub fn compare_image_quality(original_input: &[u8], compressed_input: &[u8]) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(original_input)?;
+    ensure_input_size_limit(compressed_input)?;
     core::metrics::compare_image_quality(original_input, compressed_input)?.to_js_value()
 }
 
 #[wasm_bindgen]
 pub fn analyze_image_metrics(input: &[u8]) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(input)?;
     core::analysis::analyze_image_metrics(input)?.to_js_value()
 }
 
@@ -141,6 +161,7 @@ fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {
 
 #[wasm_bindgen]
 pub fn generate_favicon(input: &[u8]) -> Result<js_sys::Object, JsValue> {
+    ensure_input_size_limit(input)?;
     let decoded =
         image::load_from_memory(input).map_err(|err| JsValue::from_str(&format!("Decode failed: {err}")))?;
     let square = square_crop(decoded);

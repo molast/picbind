@@ -14,6 +14,11 @@ export type HomeCompressLandingCopy = {
   queued: string;
   transparencyBlocked: string;
   unsupportedFormat: string;
+  uploadNotice: {
+    tooManyFiles: string;
+    unsupportedFiles: string;
+    fileTooLarge: string;
+  };
   downloadZip: string;
   cards: Array<{ title: string; desc: string }>;
   errorOverlay: {
@@ -32,6 +37,30 @@ export type HomeCompressLandingCopy = {
     edgeRetention: string;
     blurLoss: string;
     loading: string;
+  };
+  faq: {
+    kicker: string;
+    title: string;
+    categories: Array<{
+      id: string;
+      label: string;
+      items: Array<{
+        question: string;
+        answer: string[];
+      }>;
+    }>;
+  };
+  footer: {
+    brandTitle: string;
+    brandDesc: string;
+    groups: Array<{
+      title: string;
+      links: Array<{
+        label: string;
+        href: string;
+      }>;
+    }>;
+    contactSupport: string;
   };
 };
 
@@ -111,6 +140,11 @@ const zh = {
     queued: "排队中",
     transparencyBlocked: "原图包含透明图层，不能直接转换为 JPEG",
     unsupportedFormat: "当前格式暂不支持",
+    uploadNotice: {
+      tooManyFiles: "最多只能同时处理 20 张图片。",
+      unsupportedFiles: "部分文件已跳过，目前仅支持 PNG、JPEG 和 WebP。",
+      fileTooLarge: "部分文件已跳过，单张图片不能超过 5 MB。",
+    },
     downloadZip: "打包下载 ZIP",
     cards: [
       {
@@ -142,6 +176,128 @@ const zh = {
       edgeRetention: "边缘保留",
       blurLoss: "模糊损失",
       loading: "分析中...",
+    },
+    faq: {
+      kicker: "常见问题",
+      title: "关于图片压缩，你可能还想知道这些",
+      categories: [
+        {
+          id: "general",
+          label: "通用问题",
+          items: [
+            {
+              question: "为什么要为网站压缩图片？",
+              answer: [
+                "压缩图片最直接的价值，是让网页资源更轻，页面打开更快，尤其适合首屏图片较多、移动网络访问较多的场景。",
+                "更小的图片体积通常也意味着更低的带宽消耗和更稳定的加载体验，对 SEO、转化率和整体可用性都有帮助。",
+              ],
+            },
+            {
+              question: "PicBind 主要做什么？",
+              answer: [
+                "PicBind 是一个浏览器端图片工具，当前重点提供图片压缩、多格式转换、批量下载以及 favicon 生成。",
+                "它尽量把处理放在本地浏览器里完成，减少等待时间，也降低把图片上传到服务端处理的依赖。",
+              ],
+            },
+            {
+              question: "图片隐私是否有保障？",
+              answer: [
+                "大多数核心处理流程都在浏览器本地完成，包括压缩、格式转换和 favicon 生成，因此你的原始图片通常不会被上传到服务端做主处理。",
+                "如果后续开启了统计接口，统计只用于产品计数和页面访问分析，不会把你的图片内容作为后台处理输入。",
+              ],
+            },
+          ],
+        },
+        {
+          id: "how-it-works",
+          label: "工作原理",
+          items: [
+            {
+              question: "PicBind 是怎么压缩图片的？",
+              answer: [
+                "上传图片后，页面会调用浏览器中的 Rust WASM 模块来执行编码、重压缩和格式转换逻辑，再把结果直接返回给当前页面下载。",
+                "这意味着你不需要等待服务器排队处理，大部分操作都发生在本机浏览器环境中。",
+              ],
+            },
+            {
+              question: "为什么有时会输出不同格式？",
+              answer: [
+                "PicBind 支持 PNG、JPEG、WebP 和 AVIF，不同图片内容在不同格式下的体积和质量表现并不相同。",
+                "你可以手动选择格式，也可以让工具根据当前流程输出更适合交付的结果，用更少的体积换取尽量稳定的视觉效果。",
+              ],
+            },
+            {
+              question: "为什么透明图片不能直接转成 JPEG？",
+              answer: [
+                "JPEG 本身不支持透明通道，所以带透明背景的 PNG、WebP 等图片不能无损地直接保留透明效果输出为 JPEG。",
+                "当你坚持转换为 JPEG 时，透明区域需要被替换成实色背景，目前页面会明确提示这个限制。",
+              ],
+            },
+          ],
+        },
+        {
+          id: "web-compressor",
+          label: "网页压缩",
+          items: [
+            {
+              question: "当前支持哪些图片格式？",
+              answer: [
+                "首页压缩流程当前支持上传 PNG、JPEG 和 WebP，并可输出 PNG、JPEG、WebP 与 AVIF。",
+                "favicon 工具另外支持 PNG、JPG、JPEG、BMP 和 WebP 作为输入来源。",
+              ],
+            },
+            {
+              question: "支持批量处理吗？",
+              answer: [
+                "支持。首页一次最多可以处理 20 张图片，压缩完成后既可以逐张下载，也可以直接打包成 ZIP 下载。",
+                "这对整理一批网页素材、文章配图或运营资源会更方便。",
+              ],
+            },
+            {
+              question: "压缩后如何判断质量是否还能接受？",
+              answer: [
+                "首页会展示压缩比例和结果体积，在开发调试流程里还预留了质量分析指标，例如 SSIM、MS-SSIM、边缘保留和模糊损失。",
+                "实际使用时，建议结合预览和最终用途一起判断，网页展示图和高精度设计素材对压缩容忍度并不相同。",
+              ],
+            },
+            {
+              question: "为什么有些图片压缩幅度不大？",
+              answer: [
+                "如果原图本身已经比较干净，或者已经被其他工具优化过，那么继续压缩的空间就会比较有限。",
+                "另外，像纯色块、透明边缘、细小文字和高频纹理较多的图片，也会限制激进压缩的幅度，因为工具需要在体积和清晰度之间做平衡。",
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    footer: {
+      brandTitle: "PicBind",
+      brandDesc:
+        "更轻、更快、更适合网页交付的图片压缩与 favicon 工具。",
+      groups: [
+        {
+          title: "工具",
+          links: [
+            { label: "图片压缩", href: "/" },
+            { label: "Favicon 转换器", href: "/favicon-converter" },
+            { label: "Favicon 生成器", href: "/favicon-generator" },
+          ],
+        },
+        {
+          title: "资源",
+          links: [
+            { label: "常见问题", href: "#faq" },
+            { label: "站点地图", href: "/sitemap.xml" },
+            { label: "Robots", href: "/robots.txt" },
+          ],
+        },
+        {
+          title: "支持",
+          links: [{ label: "联系支持", href: "mailto:loomchen@gmail.com" }],
+        },
+      ],
+      contactSupport: "联系支持",
     },
   } as HomeCompressLandingCopy,
   FaviconGenerator: {

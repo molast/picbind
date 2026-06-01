@@ -25,6 +25,11 @@ const en: LocaleType = {
     queued: "Queued",
     transparencyBlocked: "The source image contains transparency, so JPEG output is blocked.",
     unsupportedFormat: "This format is not supported yet",
+    uploadNotice: {
+      tooManyFiles: "You can process up to 20 images at a time.",
+      unsupportedFiles: "Some files were skipped. Only PNG, JPEG, and WebP are supported right now.",
+      fileTooLarge: "Some files were skipped. Each image must be 5 MB or smaller.",
+    },
     downloadZip: "Download ZIP",
     cards: [
       {
@@ -56,6 +61,128 @@ const en: LocaleType = {
       edgeRetention: "Edge retention",
       blurLoss: "Blur loss",
       loading: "Analyzing...",
+    },
+    faq: {
+      kicker: "FAQ",
+      title: "A few practical questions about image compression",
+      categories: [
+        {
+          id: "general",
+          label: "General",
+          items: [
+            {
+              question: "Why should I compress images for my website?",
+              answer: [
+                "Smaller image files usually mean faster page loads, lower bandwidth usage, and a smoother experience for visitors across desktop and mobile devices.",
+                "Image optimization can also support SEO and conversion performance because lighter pages are easier to load and keep responsive under real traffic.",
+              ],
+            },
+            {
+              question: "What does PicBind do?",
+              answer: [
+                "PicBind is a browser-first image tool focused on compression, format conversion, batch export, and favicon generation.",
+                "The goal is to keep the workflow simple: upload, optimize, compare, and download from one place without adding unnecessary server-side processing steps.",
+              ],
+            },
+            {
+              question: "Is the privacy of my images protected?",
+              answer: [
+                "Most core processing is handled directly in your browser, including compression, conversion, and favicon generation, so your image files are generally not sent to a backend for the main processing flow.",
+                "If metrics are enabled later, they are intended for product usage counts and page analytics rather than for processing your image content on a server.",
+              ],
+            },
+          ],
+        },
+        {
+          id: "how-it-works",
+          label: "How does it work",
+          items: [
+            {
+              question: "How does PicBind compress images?",
+              answer: [
+                "After you upload a file, the page uses a Rust WASM module running in the browser to perform encoding, recompression, and format conversion.",
+                "That keeps most work local to the current device and avoids waiting on a remote image queue for normal use.",
+              ],
+            },
+            {
+              question: "Why do I sometimes get a different output format?",
+              answer: [
+                "PicBind works with PNG, JPEG, WebP, and AVIF, and different images behave differently depending on transparency, detail, and texture.",
+                "You can choose formats manually, or use the current flow to produce a more suitable delivery format when size and quality need a better balance.",
+              ],
+            },
+            {
+              question: "Why can't transparent images be converted directly to JPEG?",
+              answer: [
+                "JPEG does not support transparency, so transparent areas from PNG or WebP images cannot be preserved in a JPEG output.",
+                "If you still choose JPEG, the transparent background must be replaced with a solid color, and the UI warns about that tradeoff.",
+              ],
+            },
+          ],
+        },
+        {
+          id: "web-compressor",
+          label: "Web compressor",
+          items: [
+            {
+              question: "Which image formats are supported right now?",
+              answer: [
+                "The homepage compressor currently accepts PNG, JPEG, and WebP uploads, and can output PNG, JPEG, WebP, and AVIF.",
+                "The favicon tools also support PNG, JPG, JPEG, BMP, and WebP as input sources.",
+              ],
+            },
+            {
+              question: "Can I compress multiple images at once?",
+              answer: [
+                "Yes. The homepage supports batch processing for up to 20 images at a time, and you can download each result separately or export everything as a ZIP file.",
+                "That makes it useful for cleaning up grouped web assets, article images, or content batches in one run.",
+              ],
+            },
+            {
+              question: "How can I tell whether the output quality is still acceptable?",
+              answer: [
+                "The homepage shows saved size and output size, and the project also includes quality-analysis hooks such as SSIM, MS-SSIM, edge retention, and blur loss for deeper evaluation.",
+                "In practice, the right balance depends on the final use case, since marketing images, thumbnails, and design source assets do not all tolerate compression the same way.",
+              ],
+            },
+            {
+              question: "Why do some images only shrink a little?",
+              answer: [
+                "Some files have already been optimized elsewhere, so there is simply less redundant data left to remove.",
+                "Images with transparency, fine text, repeated edges, or dense texture can also limit aggressive compression because the tool still needs to protect visual clarity.",
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    footer: {
+      brandTitle: "PicBind",
+      brandDesc:
+        "A browser-first image compressor and favicon toolkit for cleaner, lighter web assets.",
+      groups: [
+        {
+          title: "Tools",
+          links: [
+            { label: "Image Compress", href: "/" },
+            { label: "Favicon Converter", href: "/favicon-converter" },
+            { label: "Favicon Generator", href: "/favicon-generator" },
+          ],
+        },
+        {
+          title: "Resources",
+          links: [
+            { label: "FAQ", href: "#faq" },
+            { label: "Sitemap", href: "/sitemap.xml" },
+            { label: "Robots", href: "/robots.txt" },
+          ],
+        },
+        {
+          title: "Support",
+          links: [{ label: "Contact support", href: "mailto:loomchen@gmail.com" }],
+        },
+      ],
+      contactSupport: "Contact support",
     },
   } as HomeCompressLandingCopy,
   FaviconGenerator: {
