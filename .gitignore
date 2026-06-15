@@ -1,3 +1,4 @@
 /.idea/
 *.log
 .pnpm-store/
+.DS_Store
