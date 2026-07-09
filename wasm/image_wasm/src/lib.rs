@@ -1,9 +1,9 @@
-use wasm_bindgen::prelude::*;
-use js_sys::{Array, Reflect, Uint8Array};
 use image::codecs::ico::IcoEncoder;
 use image::imageops::FilterType;
 use image::{ColorType, DynamicImage, GenericImageView, ImageEncoder, ImageFormat};
+use js_sys::{Array, Reflect, Uint8Array};
 use std::io::Cursor;
+use wasm_bindgen::prelude::*;
 
 mod core;
 
@@ -109,10 +109,23 @@ pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn compare_image_quality(original_input: &[u8], compressed_input: &[u8]) -> Result<JsValue, JsValue> {
+pub fn compare_image_quality(
+    original_input: &[u8],
+    compressed_input: &[u8],
+) -> Result<JsValue, JsValue> {
     ensure_input_size_limit(original_input)?;
     ensure_input_size_limit(compressed_input)?;
     core::metrics::compare_image_quality(original_input, compressed_input)?.to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn calculate_image_quality_score(
+    original_input: &[u8],
+    assessed_input: &[u8],
+) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(original_input)?;
+    ensure_input_size_limit(assessed_input)?;
+    core::metrics::calculate_image_quality_score(original_input, assessed_input)?.to_js_value()
 }
 
 #[wasm_bindgen]
@@ -162,8 +175,8 @@ fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {
 #[wasm_bindgen]
 pub fn generate_favicon(input: &[u8]) -> Result<js_sys::Object, JsValue> {
     ensure_input_size_limit(input)?;
-    let decoded =
-        image::load_from_memory(input).map_err(|err| JsValue::from_str(&format!("Decode failed: {err}")))?;
+    let decoded = image::load_from_memory(input)
+        .map_err(|err| JsValue::from_str(&format!("Decode failed: {err}")))?;
     let square = square_crop(decoded);
 
     let favicon16 = generate_png_size(&square, 16)?;
@@ -174,12 +187,36 @@ pub fn generate_favicon(input: &[u8]) -> Result<js_sys::Object, JsValue> {
     let ico = generate_ico(&square)?;
 
     let output = js_sys::Object::new();
-    Reflect::set(&output, &JsValue::from_str("favicon16"), &Uint8Array::from(favicon16.as_slice()).into())?;
-    Reflect::set(&output, &JsValue::from_str("favicon32"), &Uint8Array::from(favicon32.as_slice()).into())?;
-    Reflect::set(&output, &JsValue::from_str("apple"), &Uint8Array::from(apple.as_slice()).into())?;
-    Reflect::set(&output, &JsValue::from_str("android192"), &Uint8Array::from(android192.as_slice()).into())?;
-    Reflect::set(&output, &JsValue::from_str("android512"), &Uint8Array::from(android512.as_slice()).into())?;
-    Reflect::set(&output, &JsValue::from_str("ico"), &Uint8Array::from(ico.as_slice()).into())?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("favicon16"),
+        &Uint8Array::from(favicon16.as_slice()).into(),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("favicon32"),
+        &Uint8Array::from(favicon32.as_slice()).into(),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("apple"),
+        &Uint8Array::from(apple.as_slice()).into(),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("android192"),
+        &Uint8Array::from(android192.as_slice()).into(),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("android512"),
+        &Uint8Array::from(android512.as_slice()).into(),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("ico"),
+        &Uint8Array::from(ico.as_slice()).into(),
+    )?;
 
     Ok(output)
 }

@@ -3,11 +3,15 @@ use wasm_bindgen::JsValue;
 
 use crate::CompressionResult;
 
-use super::super::candidate::{best_candidate, original_candidate, Candidate};
+use super::super::candidate::{Candidate, best_candidate, original_candidate};
 
 use super::to_format::compress_image_to_target_format;
 
-fn candidate_from_result(result: CompressionResult, mime: &'static str, ext: &'static str) -> Candidate {
+fn candidate_from_result(
+    result: CompressionResult,
+    mime: &'static str,
+    ext: &'static str,
+) -> Candidate {
     Candidate {
         bytes: result.bytes,
         mime,

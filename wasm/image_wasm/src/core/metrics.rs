@@ -10,6 +10,9 @@ const SSIM_L: f64 = 255.0;
 pub struct QualityComparison {
     pub width: u32,
     pub height: u32,
+    pub mse: f64,
+    pub rmse: f64,
+    pub psnr: f64,
     pub ssim: f64,
     pub ms_ssim: f64,
     pub edge_retention: f64,
@@ -26,6 +29,9 @@ impl QualityComparison {
         let obj = Object::new();
         set_number(&obj, "width", self.width as f64)?;
         set_number(&obj, "height", self.height as f64)?;
+        set_number(&obj, "mse", self.mse)?;
+        set_number(&obj, "rmse", self.rmse)?;
+        set_number(&obj, "psnr", self.psnr)?;
         set_number(&obj, "ssim", self.ssim)?;
         set_number(&obj, "msSsim", self.ms_ssim)?;
         set_number(&obj, "edgeRetention", self.edge_retention)?;
@@ -63,6 +69,13 @@ pub fn compare_image_quality(
     compare_dynamic_images(&original, &compressed)
 }
 
+pub fn calculate_image_quality_score(
+    original_input: &[u8],
+    assessed_input: &[u8],
+) -> Result<QualityComparison, JsValue> {
+    compare_image_quality(original_input, assessed_input)
+}
+
 pub fn compare_dynamic_images(
     original: &DynamicImage,
     compressed: &DynamicImage,
@@ -91,9 +104,14 @@ fn compare_dynamic_images_internal(
     }
 
     let aligned_compressed = align_to_dimensions(&compressed, width, height);
+    let original_rgb = original.to_rgb8();
+    let compressed_rgb = aligned_compressed.to_rgb8();
     let original_gray = original.to_luma8();
     let compressed_gray = aligned_compressed.to_luma8();
 
+    let mse = mean_squared_error_rgb(&original_rgb, &compressed_rgb);
+    let rmse = mse.sqrt();
+    let psnr = psnr_from_mse(mse);
     let original_edge_energy = sobel_edge_energy(&original_gray);
     let compressed_edge_energy = sobel_edge_energy(&compressed_gray);
     let edge_retention = if original_edge_energy <= f64::EPSILON {
@@ -111,17 +129,20 @@ fn compare_dynamic_images_internal(
     };
 
     let ssim = structural_similarity(&original_gray, &compressed_gray).clamp(0.0, 1.0);
-    let ms_ssim = multi_scale_structural_similarity(&original_gray, &compressed_gray).clamp(0.0, 1.0);
-    let blur_loss_percent = ((1.0 - (0.7 * edge_retention + 0.3 * laplacian_retention))
-        .clamp(0.0, 1.0))
-        * 100.0;
-    let overall_quality_score =
-        (100.0 * (0.44 * ssim + 0.24 * ms_ssim + 0.32 * (1.0 - blur_loss_percent / 100.0)))
-            .clamp(0.0, 100.0);
+    let ms_ssim =
+        multi_scale_structural_similarity(&original_gray, &compressed_gray).clamp(0.0, 1.0);
+    let blur_loss_percent =
+        ((1.0 - (0.7 * edge_retention + 0.3 * laplacian_retention)).clamp(0.0, 1.0)) * 100.0;
+    let overall_quality_score = (100.0
+        * (0.44 * ssim + 0.24 * ms_ssim + 0.32 * (1.0 - blur_loss_percent / 100.0)))
+        .clamp(0.0, 100.0);
 
     Ok(QualityComparison {
         width,
         height,
+        mse,
+        rmse,
+        psnr,
         ssim,
         ms_ssim,
         edge_retention,
@@ -132,6 +153,42 @@ fn compare_dynamic_images_internal(
         original_laplacian_variance,
         compressed_laplacian_variance,
     })
+}
+
+fn mean_squared_error_rgb(original: &image::RgbImage, compressed: &image::RgbImage) -> f64 {
+    let width = original.width().min(compressed.width());
+    let height = original.height().min(compressed.height());
+    if width == 0 || height == 0 {
+        return 0.0;
+    }
+
+    let mut squared_error_sum = 0.0f64;
+    let mut sample_count = 0usize;
+    for y in 0..height {
+        for x in 0..width {
+            let a = original.get_pixel(x, y).0;
+            let b = compressed.get_pixel(x, y).0;
+            for channel in 0..3 {
+                let diff = a[channel] as f64 - b[channel] as f64;
+                squared_error_sum += diff * diff;
+                sample_count += 1;
+            }
+        }
+    }
+
+    if sample_count == 0 {
+        0.0
+    } else {
+        squared_error_sum / sample_count as f64
+    }
+}
+
+fn psnr_from_mse(mse: f64) -> f64 {
+    if mse <= f64::EPSILON {
+        f64::INFINITY
+    } else {
+        10.0 * ((255.0 * 255.0) / mse).log10()
+    }
 }
 
 fn downscale_for_guardrail_metrics(img: &DynamicImage, max_dimension: u32) -> DynamicImage {
@@ -305,10 +362,18 @@ fn multi_scale_structural_similarity(original: &GrayImage, compressed: &GrayImag
 
         let next_width = (current_original.width() / 2).max(1);
         let next_height = (current_original.height() / 2).max(1);
-        current_original =
-            image::imageops::resize(&current_original, next_width, next_height, FilterType::Triangle);
-        current_compressed =
-            image::imageops::resize(&current_compressed, next_width, next_height, FilterType::Triangle);
+        current_original = image::imageops::resize(
+            &current_original,
+            next_width,
+            next_height,
+            FilterType::Triangle,
+        );
+        current_compressed = image::imageops::resize(
+            &current_compressed,
+            next_width,
+            next_height,
+            FilterType::Triangle,
+        );
         scales.push((current_original.clone(), current_compressed.clone()));
     }
 

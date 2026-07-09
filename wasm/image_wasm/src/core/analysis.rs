@@ -50,7 +50,11 @@ pub fn analyze_image_metrics(input: &[u8]) -> Result<ImageAnalysis, JsValue> {
     let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let img = image::load_from_memory_with_format(input, format)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    Ok(analyze_dynamic_image(&img, input.len(), &format_to_label(format)))
+    Ok(analyze_dynamic_image(
+        &img,
+        input.len(),
+        &format_to_label(format),
+    ))
 }
 
 pub fn analyze_dynamic_image(

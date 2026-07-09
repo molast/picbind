@@ -12,8 +12,7 @@ use super::super::{
     quality::{
         avif_bit_depth_for_pixels, avif_quality_candidates, avif_speed_for_pixels,
         jpeg_to_jpeg_quality_candidates, jpeg_to_jpeg_quality_thresholds,
-        jpeg_to_jpeg_rescue_qualities,
-        png_to_jpeg_quality_candidates, quality_candidates,
+        jpeg_to_jpeg_rescue_qualities, png_to_jpeg_quality_candidates, quality_candidates,
     },
 };
 
@@ -54,54 +53,57 @@ fn encode_candidate_for_format(
                 None
             };
             let min_candidate_quality = candidate_qualities.iter().copied().min().unwrap_or(60);
-            let try_candidate = |candidate_quality: u8,
-                                 evaluate_guardrails: bool,
-                                 best_bytes: &mut Option<Vec<u8>>,
-                                 best_guarded_bytes: &mut Option<Vec<u8>>| {
-                let encoded = if allow_alpha_loss {
-                    encode_jpeg_from_image_with_white_background(img, candidate_quality)
-                } else {
-                    encode_jpeg_from_image(img, candidate_quality)
-                };
-                if let Ok(bytes) = encoded {
-                    if is_jpeg_to_jpeg && bytes.len() >= input_len {
-                        return;
-                    }
+            let try_candidate =
+                |candidate_quality: u8,
+                 evaluate_guardrails: bool,
+                 best_bytes: &mut Option<Vec<u8>>,
+                 best_guarded_bytes: &mut Option<Vec<u8>>| {
+                    let encoded = if allow_alpha_loss {
+                        encode_jpeg_from_image_with_white_background(img, candidate_quality)
+                    } else {
+                        encode_jpeg_from_image(img, candidate_quality)
+                    };
+                    if let Ok(bytes) = encoded {
+                        if is_jpeg_to_jpeg && bytes.len() >= input_len {
+                            return;
+                        }
 
-                    let should_replace_best = best_bytes
-                        .as_ref()
-                        .map(|current| bytes.len() < current.len())
-                        .unwrap_or(true);
-                    if should_replace_best {
-                        *best_bytes = Some(bytes.clone());
-                    }
+                        let should_replace_best = best_bytes
+                            .as_ref()
+                            .map(|current| bytes.len() < current.len())
+                            .unwrap_or(true);
+                        if should_replace_best {
+                            *best_bytes = Some(bytes.clone());
+                        }
 
-                    if evaluate_guardrails {
-                        if let Some((min_ms_ssim, max_blur_loss_percent)) = jpeg_guardrails {
-                            if let Ok(decoded_candidate) = image::load_from_memory_with_format(
-                                bytes.as_slice(),
-                                image::ImageFormat::Jpeg,
-                            ) {
-                                if let Ok(comparison) =
-                                    compare_dynamic_images_for_guardrails(img, &decoded_candidate)
-                                {
-                                    let passes_guardrails = comparison.ms_ssim >= min_ms_ssim
-                                        && comparison.blur_loss_percent <= max_blur_loss_percent;
-                                    if passes_guardrails {
-                                        let should_replace_guarded = best_guarded_bytes
-                                            .as_ref()
-                                            .map(|current| bytes.len() < current.len())
-                                            .unwrap_or(true);
-                                        if should_replace_guarded {
-                                            *best_guarded_bytes = Some(bytes);
+                        if evaluate_guardrails {
+                            if let Some((min_ms_ssim, max_blur_loss_percent)) = jpeg_guardrails {
+                                if let Ok(decoded_candidate) = image::load_from_memory_with_format(
+                                    bytes.as_slice(),
+                                    image::ImageFormat::Jpeg,
+                                ) {
+                                    if let Ok(comparison) = compare_dynamic_images_for_guardrails(
+                                        img,
+                                        &decoded_candidate,
+                                    ) {
+                                        let passes_guardrails = comparison.ms_ssim >= min_ms_ssim
+                                            && comparison.blur_loss_percent
+                                                <= max_blur_loss_percent;
+                                        if passes_guardrails {
+                                            let should_replace_guarded = best_guarded_bytes
+                                                .as_ref()
+                                                .map(|current| bytes.len() < current.len())
+                                                .unwrap_or(true);
+                                            if should_replace_guarded {
+                                                *best_guarded_bytes = Some(bytes);
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            };
+                };
 
             for (index, candidate_quality) in candidate_qualities.iter().copied().enumerate() {
                 let evaluate_guardrails = !is_jpeg_to_jpeg || index < 4;
@@ -143,7 +145,9 @@ fn encode_candidate_for_format(
             mime: "image/png",
             ext: "png",
         }),
-        "webp" => Err(JsValue::from_str("WebP compression is handled outside WASM")),
+        "webp" => Err(JsValue::from_str(
+            "WebP compression is handled outside WASM",
+        )),
         "avif" => {
             let rgba = img.to_rgba8();
             let (width, height) = rgba.dimensions();

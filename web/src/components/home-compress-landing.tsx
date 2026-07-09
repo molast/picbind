@@ -26,6 +26,11 @@ import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
 import {
+  deleteQueuedImageFile,
+  getQueuedImageFile,
+  storeQueuedImageFile,
+} from "@/utils/image-file-store";
+import {
   compressWithWasmWorker,
   terminateCompressionWorker,
 } from "@/utils/wasm-worker";
@@ -68,7 +73,12 @@ type MetricsRequestState = {
 
 type HomeItem = {
   id: string;
-  file: File;
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  fileLastModified: number;
+  sourceFormat: OutputFormat;
   previewUrl: string;
   variants: OutputVariant[];
   updatedAt: number;
@@ -120,20 +130,14 @@ function createVariant(format: OutputFormat): OutputVariant {
   };
 }
 
-function getDesiredFormats(file: File, selectedFormats: OutputFormat[]) {
-  if (selectedFormats.length > 0) {
-    return Array.from(new Set(selectedFormats));
-  }
-
-  return [normalizeSourceFormat(file)];
-}
-
 function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   if (!selectedFormats.length) {
     return item;
   }
 
-  const wantedFormats = getDesiredFormats(item.file, selectedFormats);
+  const wantedFormats = selectedFormats.length
+    ? Array.from(new Set(selectedFormats))
+    : [item.sourceFormat];
   const existingFormats = new Set(
     item.variants.map((variant) => variant.format),
   );
@@ -151,13 +155,71 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   };
 }
 
-function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
+async function createPreviewUrl(file: File) {
+  if (
+    typeof document === "undefined" ||
+    typeof createImageBitmap === "undefined"
+  ) {
+    return URL.createObjectURL(file);
+  }
+
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    const edge = 96;
+    const canvas = document.createElement("canvas");
+    canvas.width = edge;
+    canvas.height = edge;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return URL.createObjectURL(file);
+    }
+
+    const sourceEdge = Math.min(bitmap.width, bitmap.height);
+    const sourceX = (bitmap.width - sourceEdge) / 2;
+    const sourceY = (bitmap.height - sourceEdge) / 2;
+    context.drawImage(
+      bitmap,
+      sourceX,
+      sourceY,
+      sourceEdge,
+      sourceEdge,
+      0,
+      0,
+      edge,
+      edge,
+    );
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.72),
+    );
+    return blob ? URL.createObjectURL(blob) : URL.createObjectURL(file);
+  } catch (_error) {
+    return URL.createObjectURL(file);
+  } finally {
+    bitmap?.close();
+  }
+}
+
+async function createItem(
+  file: File,
+  selectedFormats: OutputFormat[],
+): Promise<HomeItem> {
   const now = Date.now();
+  const fileId = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
+  const sourceFormat = normalizeSourceFormat(file);
+  await storeQueuedImageFile(fileId, file);
+  const previewUrl = await createPreviewUrl(file);
   const variants = selectedFormats.length
     ? ensureVariants(
         {
-          id: "",
-          file,
+          id: fileId,
+          fileId,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          fileLastModified: file.lastModified,
+          sourceFormat,
           previewUrl: "",
           updatedAt: now,
           variants: [],
@@ -167,9 +229,14 @@ function createItem(file: File, selectedFormats: OutputFormat[]): HomeItem {
     : [createVariant(normalizeSourceFormat(file))];
 
   return {
-    id: `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`,
-    file,
-    previewUrl: URL.createObjectURL(file),
+    id: fileId,
+    fileId,
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type,
+    fileLastModified: file.lastModified,
+    sourceFormat,
+    previewUrl,
     updatedAt: now,
     variants,
   };
@@ -184,9 +251,9 @@ function getActiveVariant(item: HomeItem) {
 
 function isHeavyJpegRecompress(item: HomeItem, variant: OutputVariant) {
   return (
-    normalizeSourceFormat(item.file) === "jpeg" &&
+    item.sourceFormat === "jpeg" &&
     variant.format === "jpeg" &&
-    item.file.size >= HEAVY_JPEG_RECOMPRESS_SIZE_BYTES
+    item.fileSize >= HEAVY_JPEG_RECOMPRESS_SIZE_BYTES
   );
 }
 
@@ -444,10 +511,14 @@ export default function HomeCompressLanding({
       metricsRequestsRef.current[requestKey] = { status: "loading" };
 
       try {
+        const sourceFile = await getQueuedImageFile(item.fileId);
+        if (!sourceFile) {
+          throw new Error("Source image is no longer available");
+        }
         const compressedResponse = await fetch(variant.outputUrl);
         const compressedBlob = await compressedResponse.blob();
         const analysis = await analyzeCompressionInWorker(
-          item.file,
+          sourceFile,
           compressedBlob,
         );
 
@@ -475,7 +546,7 @@ export default function HomeCompressLanding({
 
         if (!metricsRequestsRef.current[requestKey]?.logged) {
           await logCompressionAnalysis(
-            item.file,
+            sourceFile,
             variant.format,
             analysis.sourceMetrics,
             analysis.compressedMetrics,
@@ -491,7 +562,7 @@ export default function HomeCompressLanding({
         delete metricsRequestsRef.current[requestKey];
         if (IS_DEV) {
           console.warn(
-            `[PicBind][${variant.format.toUpperCase()}] Failed to analyze hover metrics for ${item.file.name}`,
+            `[PicBind][${variant.format.toUpperCase()}] Failed to analyze hover metrics for ${item.fileName}`,
             error,
           );
         }
@@ -746,6 +817,7 @@ export default function HomeCompressLanding({
       terminateCompressionWorker();
       itemsRef.current.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
+        void deleteQueuedImageFile(item.fileId);
         item.variants.forEach((variant) => {
           if (variant.outputUrl?.startsWith("blob:")) {
             URL.revokeObjectURL(variant.outputUrl);
@@ -756,7 +828,7 @@ export default function HomeCompressLanding({
   }, []);
 
   const enqueueFiles = React.useCallback(
-    (fileList: FileList | File[]) => {
+    async (fileList: FileList | File[]) => {
       const inputFiles = Array.from(fileList);
       let hasUnsupported = false;
       let hasTooLarge = false;
@@ -786,23 +858,27 @@ export default function HomeCompressLanding({
         return;
       }
 
-      setItems((prev) => {
-        const remain = MAX_FILES - prev.length;
-        if (remain <= 0) {
-          setUploadNotice(copy.uploadNotice.tooManyFiles);
-          return prev;
-        }
-        if (nextFiles.length > remain) {
-          notices.push(copy.uploadNotice.tooManyFiles);
-        }
-        setUploadNotice(notices.length ? notices.join(" ") : null);
-        return [
-          ...prev,
-          ...nextFiles
+      const remain = MAX_FILES - itemsRef.current.length;
+      if (remain <= 0) {
+        setUploadNotice(copy.uploadNotice.tooManyFiles);
+        return;
+      }
+      if (nextFiles.length > remain) {
+        notices.push(copy.uploadNotice.tooManyFiles);
+      }
+
+      try {
+        const nextItems = await Promise.all(
+          nextFiles
             .slice(0, remain)
             .map((file) => createItem(file, selectedFormats)),
-        ];
-      });
+        );
+        setUploadNotice(notices.length ? notices.join(" ") : null);
+        setItems((prev) => [...prev, ...nextItems].slice(0, MAX_FILES));
+      } catch (error) {
+        console.error("Failed to enqueue images:", error);
+        setUploadNotice(copy.uploadNotice.unsupportedFiles);
+      }
     },
     [copy.uploadNotice, selectedFormats],
   );
@@ -873,6 +949,7 @@ export default function HomeCompressLanding({
 
     const claimed = new Set<string>();
     const running = new Map<string, Promise<void>>();
+    const runningFileIds = new Set<string>();
     const heavyRunning = new Set<string>();
 
     const runOne = (currentItem: HomeItem, currentVariant: OutputVariant) =>
@@ -900,9 +977,15 @@ export default function HomeCompressLanding({
         );
         startFakeProgress(currentItem.id, currentVariant.id);
 
+        let sourceFile: File | null = null;
         try {
+          sourceFile = await getQueuedImageFile(currentItem.fileId);
+          if (!sourceFile) {
+            throw new Error("Source image is no longer available");
+          }
+
           const compressed = await compressWithWasmWorker(
-            currentItem.file,
+            sourceFile,
             80,
             currentVariant.format,
             Boolean(currentVariant.allowAlphaLoss),
@@ -916,13 +999,13 @@ export default function HomeCompressLanding({
           const outputSize = compressed.blob.size;
           const percent =
             Math.round(
-              (((outputSize - currentItem.file.size) / currentItem.file.size) *
+              (((outputSize - currentItem.fileSize) / currentItem.fileSize) *
                 100 *
                 10),
             ) / 10;
           reportCompressionResult(
             normalizeOutputFormat(compressed.ext),
-            currentItem.file.size,
+            currentItem.fileSize,
             outputSize,
           );
           setTotalCompressedCount((prev) => prev + 1);
@@ -955,7 +1038,14 @@ export default function HomeCompressLanding({
             ),
           );
         } catch (error) {
-          logCompressionFailure(currentItem.file, currentVariant.format, error);
+          if (sourceFile) {
+            logCompressionFailure(sourceFile, currentVariant.format, error);
+          } else if (IS_DEV) {
+            console.error(
+              `[PicBind][${currentVariant.format.toUpperCase()}][FAILED] ${currentItem.fileName}`,
+              error,
+            );
+          }
           stopFakeProgress(currentItem.id, currentVariant.id);
           const failedAt = Date.now();
           setItems((prev) =>
@@ -995,13 +1085,16 @@ export default function HomeCompressLanding({
             .flatMap((item) =>
               item.variants.map((variant) => ({ item, variant })),
             )
-            .sort((left, right) => left.item.file.size - right.item.file.size)
+            .sort((left, right) => left.item.fileSize - right.item.fileSize)
             .find(({ item, variant }) => {
               if (variant.status !== "queued") {
                 return false;
               }
               const key = `${item.id}:${variant.id}`;
               if (claimed.has(key) || running.has(key)) {
+                return false;
+              }
+              if (runningFileIds.has(item.fileId)) {
                 return false;
               }
               if (isHeavyJpegRecompress(item, variant) && heavyRunning.size > 0) {
@@ -1020,12 +1113,14 @@ export default function HomeCompressLanding({
             nextTask.variant,
           );
           claimed.add(key);
+          runningFileIds.add(nextTask.item.fileId);
           if (isHeavyTask) {
             heavyRunning.add(key);
           }
           const job = runOne(nextTask.item, nextTask.variant).finally(() => {
             running.delete(key);
             claimed.delete(key);
+            runningFileIds.delete(nextTask.item.fileId);
             if (isHeavyTask) {
               heavyRunning.delete(key);
             }
@@ -1069,12 +1164,12 @@ export default function HomeCompressLanding({
   );
   const completedCount = completedItems.length;
   const totalOriginalSize = completedItems.reduce(
-    (sum, item) => sum + item.file.size,
+    (sum, item) => sum + item.fileSize,
     0,
   );
   const totalCompressedSize = completedItems.reduce(
     (sum, item) =>
-      sum + (getBestDoneVariant(item)?.outputSize || item.file.size),
+      sum + (getBestDoneVariant(item)?.outputSize || item.fileSize),
     0,
   );
   const totalSavedBytes = Math.max(0, totalOriginalSize - totalCompressedSize);
@@ -1494,7 +1589,7 @@ export default function HomeCompressLanding({
                     <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-[#eaf1ff] ring-1 ring-[#cdddf7]">
                       <img
                         src={item.previewUrl}
-                        alt={item.file.name}
+                        alt={item.fileName}
                         className="h-full w-full object-cover"
                       />
                     </div>
@@ -1502,13 +1597,13 @@ export default function HomeCompressLanding({
                       <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between md:gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-[15px] font-semibold leading-none text-[#41557a]">
-                            {item.file.name}
+                            {item.fileName}
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#6c7f9f]">
                             <span className="inline-flex rounded-md bg-[#e2eeff] px-2 py-0.5 text-[12px] font-semibold uppercase leading-none text-[#2f6ccc]">
-                              {normalizeSourceFormat(item.file).toUpperCase()}
+                              {item.sourceFormat.toUpperCase()}
                             </span>
-                            <span>{formatSize(item.file.size)}</span>
+                            <span>{formatSize(item.fileSize)}</span>
                           </div>
                         </div>
                         <div className="flex flex-row-reverse flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
@@ -1593,7 +1688,7 @@ export default function HomeCompressLanding({
                                         <a
                                           href={variant.outputUrl}
                                           download={
-                                            variant.outputName || item.file.name
+                                            variant.outputName || item.fileName
                                           }
                                           className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
                                         >

@@ -205,10 +205,7 @@ pub fn jpeg_to_jpeg_quality_candidates(
     candidates
 }
 
-pub fn jpeg_to_jpeg_quality_thresholds(
-    img: &DynamicImage,
-    source_size_bytes: usize,
-) -> (f64, f64) {
+pub fn jpeg_to_jpeg_quality_thresholds(img: &DynamicImage, source_size_bytes: usize) -> (f64, f64) {
     let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
     let min_ms_ssim = if analysis.detail_coverage >= 0.30 || analysis.edge_strength >= 0.38 {
         0.982

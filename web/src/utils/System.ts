@@ -1,9 +1,101 @@
-import { initWasm } from "@/utils/wasm-runtime";
-
 type ZipItem = {
   name: string;
-  blob: Blob;
+  url: string;
 };
+
+type ZipCentralRecord = {
+  name: Uint8Array;
+  crc32: number;
+  size: number;
+  offset: number;
+};
+
+const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50;
+const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
+const ZIP_VERSION = 20;
+const ZIP_UTF8_FLAG = 0x0800;
+
+const crc32Table = new Uint32Array(256);
+for (let i = 0; i < crc32Table.length; i += 1) {
+  let crc = i;
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  crc32Table[i] = crc >>> 0;
+}
+
+function pushU16Le(target: number[], value: number) {
+  target.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
+function pushU32Le(target: number[], value: number) {
+  target.push(
+    value & 0xff,
+    (value >>> 8) & 0xff,
+    (value >>> 16) & 0xff,
+    (value >>> 24) & 0xff,
+  );
+}
+
+function createLocalFileHeader(name: Uint8Array, crc32: number, size: number) {
+  const header: number[] = [];
+  pushU32Le(header, ZIP_LOCAL_FILE_HEADER_SIGNATURE);
+  pushU16Le(header, ZIP_VERSION);
+  pushU16Le(header, ZIP_UTF8_FLAG);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU32Le(header, crc32);
+  pushU32Le(header, size);
+  pushU32Le(header, size);
+  pushU16Le(header, name.byteLength);
+  pushU16Le(header, 0);
+  return new Uint8Array([...header, ...name]);
+}
+
+function createCentralDirectoryHeader(record: ZipCentralRecord) {
+  const header: number[] = [];
+  pushU32Le(header, ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE);
+  pushU16Le(header, ZIP_VERSION);
+  pushU16Le(header, ZIP_VERSION);
+  pushU16Le(header, ZIP_UTF8_FLAG);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU32Le(header, record.crc32);
+  pushU32Le(header, record.size);
+  pushU32Le(header, record.size);
+  pushU16Le(header, record.name.byteLength);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU32Le(header, 0);
+  pushU32Le(header, record.offset);
+  return new Uint8Array([...header, ...record.name]);
+}
+
+function createEndOfCentralDirectory(fileCount: number, centralSize: number, centralOffset: number) {
+  const header: number[] = [];
+  pushU32Le(header, ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE);
+  pushU16Le(header, 0);
+  pushU16Le(header, 0);
+  pushU16Le(header, fileCount);
+  pushU16Le(header, fileCount);
+  pushU32Le(header, centralSize);
+  pushU32Le(header, centralOffset);
+  pushU16Le(header, 0);
+  return new Uint8Array(header);
+}
+
+function calculateCrc32(bytes: Uint8Array) {
+  let crc = 0xffffffff;
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    crc = crc32Table[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
 
 export default class SystemManager {
   static mergeData = (target: any, source: any) => {
@@ -88,14 +180,7 @@ export default class SystemManager {
     if (!validItems.length) return;
 
     try {
-      const blobs = await Promise.all(
-        validItems.map(async (item) => ({
-          name: item.name,
-          blob: await fetch(item.url).then((response) => response.blob()),
-        })),
-      );
-
-      const zipBlob = await SystemManager.createZipBlob(blobs);
+      const zipBlob = await SystemManager.createZipBlob(validItems);
       const link = document.createElement("a");
       const objectUrl = URL.createObjectURL(zipBlob);
       link.href = objectUrl;
@@ -111,24 +196,53 @@ export default class SystemManager {
   };
 
   private static async createZipBlob(items: ZipItem[]) {
-    const mod = await initWasm();
-    if (!mod || typeof mod.create_zip_from_items !== "function") {
-      throw new Error("WASM module does not expose create_zip_from_items");
+    const encoder = new TextEncoder();
+    const parts: BlobPart[] = [];
+    const centralRecords: ZipCentralRecord[] = [];
+    let offset = 0;
+
+    for (const item of items) {
+      const name = encoder.encode(item.name);
+      if (name.byteLength > 0xffff) {
+        throw new Error(`File name is too long for ZIP: ${item.name}`);
+      }
+
+      const blob = await fetch(item.url).then((response) => response.blob());
+      const size = blob.size;
+      if (size > 0xffffffff || offset > 0xffffffff) {
+        throw new Error("ZIP is too large for ZIP32");
+      }
+
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const crc32 = calculateCrc32(bytes);
+      const localHeader = createLocalFileHeader(name, crc32, size);
+
+      parts.push(localHeader, blob);
+      centralRecords.push({
+        name,
+        crc32,
+        size,
+        offset,
+      });
+      offset += localHeader.byteLength + size;
     }
 
-    const payload = await Promise.all(
-      items.map(async (item) => ({
-        name: item.name,
-        bytes: new Uint8Array(await item.blob.arrayBuffer()),
-      })),
-    );
-    try {
-      const zipBytes = mod.create_zip_from_items(payload) as Uint8Array | ArrayLike<number>;
-      return new Blob([new Uint8Array(zipBytes)], { type: "application/zip" });
-    } catch (error) {
-      throw new Error(
-        `WASM zip creation failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    const centralOffset = offset;
+    for (const record of centralRecords) {
+      const centralHeader = createCentralDirectoryHeader(record);
+      parts.push(centralHeader);
+      offset += centralHeader.byteLength;
     }
+
+    const centralSize = offset - centralOffset;
+    if (centralRecords.length > 0xffff || centralSize > 0xffffffff || centralOffset > 0xffffffff) {
+      throw new Error("ZIP is too large for ZIP32");
+    }
+
+    parts.push(
+      createEndOfCentralDirectory(centralRecords.length, centralSize, centralOffset),
+    );
+
+    return new Blob(parts, { type: "application/zip" });
   }
 }

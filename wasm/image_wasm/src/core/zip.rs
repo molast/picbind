@@ -99,7 +99,8 @@ pub fn create_zip(entries: Vec<ZipEntry>) -> Result<Vec<u8>, String> {
     let central_size = u32::try_from(output.len())
         .map_err(|_| "ZIP too large for ZIP32")?
         .saturating_sub(central_offset);
-    let file_count = u16::try_from(central_records.len()).map_err(|_| "Too many files for ZIP32")?;
+    let file_count =
+        u16::try_from(central_records.len()).map_err(|_| "Too many files for ZIP32")?;
 
     push_u32_le(&mut output, ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE);
     push_u16_le(&mut output, 0);

@@ -1,5 +1,7 @@
 use image::RgbaImage;
-use ravif::{BitDepth as RavifBitDepth, Encoder as RavifEncoder, Img as RavifImg, RGBA8 as RavifRgba8};
+use ravif::{
+    BitDepth as RavifBitDepth, Encoder as RavifEncoder, Img as RavifImg, RGBA8 as RavifRgba8,
+};
 use wasm_bindgen::JsValue;
 
 pub fn is_opaque_rgba(rgba: &RgbaImage) -> bool {

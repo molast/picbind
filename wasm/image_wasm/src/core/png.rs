@@ -19,7 +19,10 @@ pub fn encode_deflated_png_from_image(
         .map_err(|e| JsValue::from_str(&format!("PNG deflate encode failed: {}", e)))
 }
 
-pub fn encode_quantized_png_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, JsValue> {
+pub fn encode_quantized_png_from_image(
+    img: &DynamicImage,
+    quality: u8,
+) -> Result<Vec<u8>, JsValue> {
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
@@ -41,7 +44,9 @@ pub fn encode_quantized_png_from_image(img: &DynamicImage, quality: u8) -> Resul
 
     let mut quant_image = attr
         .new_image(pixels, width as usize, height as usize, 0.0)
-        .map_err(|e| JsValue::from_str(&format!("PNG quantization image creation failed: {}", e)))?;
+        .map_err(|e| {
+            JsValue::from_str(&format!("PNG quantization image creation failed: {}", e))
+        })?;
     let mut quant_result = attr
         .quantize(&mut quant_image)
         .map_err(|e| JsValue::from_str(&format!("PNG quantization failed: {}", e)))?;

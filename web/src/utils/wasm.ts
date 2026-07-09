@@ -10,6 +10,9 @@ export { buildCompressedFileName, initWasm };
 export type ImageQualityComparison = {
   width: number;
   height: number;
+  mse: number;
+  rmse: number;
+  psnr: number;
   ssim: number;
   msSsim: number;
   edgeRetention: number;
@@ -62,6 +65,20 @@ export async function compareImageQuality(
   const originalBytes = new Uint8Array(await original.arrayBuffer());
   const compressedBytes = new Uint8Array(await compressed.arrayBuffer());
   return mod.compare_image_quality(originalBytes, compressedBytes) as ImageQualityComparison;
+}
+
+export async function calculateImageQualityScore(
+  original: Blob | File,
+  assessed: Blob | File,
+): Promise<ImageQualityComparison> {
+  const mod = await initWasm();
+  if (!mod || typeof mod.calculate_image_quality_score !== "function") {
+    throw new Error("WASM module does not expose calculate_image_quality_score");
+  }
+
+  const originalBytes = new Uint8Array(await original.arrayBuffer());
+  const assessedBytes = new Uint8Array(await assessed.arrayBuffer());
+  return mod.calculate_image_quality_score(originalBytes, assessedBytes) as ImageQualityComparison;
 }
 
 export async function analyzeImageMetrics(
