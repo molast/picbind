@@ -29,6 +29,7 @@ new_sqlite_classes = ["ShareRoomObject"]
 [vars]
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
+REALTIME_APP_ID = "d86e02296a29d5398965b9f2f921dfbe"
 
 [[ratelimits]]
 name = "GLOBAL_LIMITER"
