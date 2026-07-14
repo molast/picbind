@@ -98,3 +98,4 @@ curl -i https://api.picbind.com/api/metrics
 curl -i -X POST https://api.picbind.com/api/site/view
 curl -i "https://api.picbind.com/api/admin/state?key=<your-admin-key>"
 ```
+## update
