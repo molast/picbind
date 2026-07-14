@@ -83,11 +83,23 @@ async function realtimeRequest(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
   );
-  const result = (await response.json().catch(() => null)) as RealtimeApiResponse | null;
-  if (!response.ok || result?.errorCode) {
-    throw new Error(result?.errorDescription || "Cloudflare Realtime request failed");
+  const raw = await response.text();
+  let result: RealtimeApiResponse = {};
+  if (raw) {
+    try {
+      result = JSON.parse(raw) as RealtimeApiResponse;
+    } catch {
+      throw new Error(
+        `Cloudflare Realtime returned a non-JSON response (${response.status}): ${raw.slice(0, 240)}`,
+      );
+    }
   }
-  return result || {};
+  if (!response.ok || result.errorCode) {
+    throw new Error(
+      result.errorDescription || `Cloudflare Realtime request failed (${response.status})`,
+    );
+  }
+  return result;
 }
 
 function validRoomId(value: unknown): value is string {
