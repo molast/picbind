@@ -79,6 +79,17 @@ Build output directory: out
 
 Worker 服务位于 `cloudflare-worker/`，用于替代旧的 Next API 路由。
 
+Cloudflare Git 部署必须使用以下设置：
+
+```text
+Root directory: cloudflare-worker
+Deploy command: npx wrangler deploy
+Configuration file: wrangler.toml
+```
+
+不要在仓库根目录生成 `wrangler.jsonc`。从仓库根目录执行自动配置会把
+整个项目误部署为静态 Assets Worker，并覆盖同名的 API Worker。
+
 当前 Worker 兼容这些接口：
 
 ```text
@@ -88,6 +99,7 @@ POST /api/site/view
 GET  /api/admin/state?key=...
 POST /api/admin/state?key=...
 POST /api/seo/baidu/push?key=...
+POST /api/realtime/room/create
 ```
 
 Worker 使用 Cloudflare KV 保存统计和页面配置。需要绑定：

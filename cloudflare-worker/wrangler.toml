@@ -29,7 +29,6 @@ new_sqlite_classes = ["ShareRoomObject"]
 [vars]
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
-ADMIN_KEY = "123456"
 
 [[ratelimits]]
 name = "GLOBAL_LIMITER"
