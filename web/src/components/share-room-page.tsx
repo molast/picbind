@@ -9,6 +9,14 @@ import { getLang, type Lang } from "@/locales";
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
 function readRoomId() {
+  const roomIdFromQuery = new URLSearchParams(window.location.search).get(
+    "roomId",
+  );
+  if (roomIdFromQuery !== null) {
+    return roomIdFromQuery;
+  }
+
+  // Preserve compatibility with links generated before query-based share URLs.
   const segments = window.location.pathname.split("/").filter(Boolean);
   return segments[0] === "share" ? segments[1] || "" : "";
 }

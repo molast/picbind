@@ -74,7 +74,7 @@ Room ID
 以及分享链接：
 
 ```
-https://picbind.com/share/{roomId}
+https://picbind.com/share?roomId={roomId}
 ```
 
 用户可以复制链接发送给其他人。

@@ -94,7 +94,7 @@ export async function handleCreateShareRoom(
     {
       roomId,
       ownerToken,
-      shareUrl: `${siteUrl(env, request)}/share/${roomId}`,
+      shareUrl: `${siteUrl(env, request)}/share?roomId=${encodeURIComponent(roomId)}`,
       createdAt: room.createdAt,
       expiresAt: room.expiresAt,
     },
