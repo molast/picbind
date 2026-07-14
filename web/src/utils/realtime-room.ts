@@ -14,13 +14,31 @@ type TransportResult = {
 };
 
 async function roomRequest<T>(action: string, body: Record<string, unknown>) {
-  const response = await fetch(getShareRoomRealtimeApiPath(action), {
+  const url = getShareRoomRealtimeApiPath(action);
+  console.info("[PicBind Realtime] request", { action, url, body });
+  const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  const result = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!response.ok || !result) throw new Error(result?.error || "Realtime request failed");
+  const raw = await response.text();
+  console.info("[PicBind Realtime] response", {
+    action,
+    status: response.status,
+    statusText: response.statusText,
+    raw,
+  });
+  let result: (T & { error?: string; stage?: string }) | null = null;
+  try {
+    result = raw ? (JSON.parse(raw) as T & { error?: string; stage?: string }) : null;
+  } catch (error) {
+    console.error("[PicBind Realtime] response JSON parse failed", { action, raw, error });
+    throw new Error(`Realtime ${action} returned invalid JSON: ${raw}`);
+  }
+  if (!response.ok || !result) {
+    console.error("[PicBind Realtime] request failed", { action, status: response.status, result });
+    throw new Error(result?.error || `Realtime ${action} failed (${response.status})`);
+  }
   return result;
 }
 

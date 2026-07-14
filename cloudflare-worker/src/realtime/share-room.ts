@@ -81,18 +81,37 @@ async function realtimeRequest(
   method = "POST",
   body?: unknown,
 ) {
-  const response = await fetch(
-    `https://rtc.live.cloudflare.com/v1/apps/${env.REALTIME_APP_ID}${path}`,
-    {
+  const url = `https://rtc.live.cloudflare.com/v1/apps/${env.REALTIME_APP_ID}${path}`;
+  const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+  console.log("Realtime SFU request", { url, method, body: serializedBody });
+  let response: Response;
+  try {
+    response = await fetch(url, {
       method,
       headers: {
         authorization: `Bearer ${env.REALTIME_API_TOKEN}`,
         "content-type": "application/json",
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    },
-  );
-  const raw = await response.text();
+      ...(serializedBody === undefined ? {} : { body: serializedBody }),
+    });
+  } catch (error) {
+    console.error("Realtime SFU fetch failed before a response was received", { url, error });
+    throw error;
+  }
+  console.log("Realtime SFU response headers", {
+    url,
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    contentLength: response.headers.get("content-length"),
+  });
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch (error) {
+    console.error("Realtime SFU response body read failed", { url, status: response.status, error });
+    throw error;
+  }
+  console.log("Realtime SFU response body", { url, status: response.status, raw });
   let result: RealtimeApiResponse = {};
   if (raw) {
     try {
