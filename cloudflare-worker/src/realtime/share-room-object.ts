@@ -6,6 +6,8 @@ export type ShareRoomState = {
   createdAt: string;
   expiresAt: string;
   status: "waiting";
+  ownerSessionId?: string;
+  guestSessionId?: string;
 };
 
 function json(data: unknown, init?: ResponseInit) {
@@ -50,6 +52,29 @@ export class ShareRoomObject {
       if (!room || Date.parse(room.expiresAt) <= Date.now()) {
         return json({ error: "Room not found" }, { status: 404 });
       }
+      return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/join") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      if (!room || Date.parse(room.expiresAt) <= Date.now()) {
+        return json({ error: "Room not found" }, { status: 404 });
+      }
+
+      const body = (await request.json()) as {
+        role?: "owner" | "guest";
+        sessionId?: string;
+      };
+      if (!body.sessionId || (body.role !== "owner" && body.role !== "guest")) {
+        return json({ error: "Invalid join request" }, { status: 400 });
+      }
+      if (body.role === "guest" && room.guestSessionId) {
+        return json({ error: "Room already has a guest" }, { status: 409 });
+      }
+
+      if (body.role === "owner") room.ownerSessionId = body.sessionId;
+      else room.guestSessionId = body.sessionId;
+      await this.state.storage.put("room", room);
       return json(room);
     }
 

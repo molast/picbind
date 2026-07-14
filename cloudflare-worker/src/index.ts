@@ -3,7 +3,7 @@ import {
   MetricsCounter,
   type MetricsCounterState,
 } from "./metrics-counter";
-import { handleCreateShareRoom } from "./realtime/share-room";
+import { handleCreateShareRoom, handleShareRoomRealtime } from "./realtime/share-room";
 import { ShareRoomObject } from "./realtime/share-room-object";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
@@ -548,6 +548,10 @@ const worker = {
         response = hasMissingOrInvalidOrigin(env, request)
           ? json({ error: "Invalid origin" }, { status: 403 })
           : await handleCreateShareRoom(request, env);
+      } else if (pathname.startsWith("/api/realtime/room/")) {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? json({ error: "Invalid origin" }, { status: 403 })
+          : await handleShareRoomRealtime(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }

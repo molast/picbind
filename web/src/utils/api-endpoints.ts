@@ -46,3 +46,7 @@ export function getShareRoomApiPath() {
     joinUrl(API_BASE_URL, "/api/realtime/room/create")
   );
 }
+
+export function getShareRoomRealtimeApiPath(action: string) {
+  return joinUrl(API_BASE_URL, `/api/realtime/room/${action}`);
+}
