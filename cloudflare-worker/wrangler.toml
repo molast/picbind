@@ -10,9 +10,17 @@ id = "ffd6a9e2ce924cf2a4b93b782d525810"
 name = "METRICS_COUNTER"
 class_name = "MetricsCounter"
 
+[[durable_objects.bindings]]
+name = "REALTIME_ROOMS"
+class_name = "ShareRoomObject"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MetricsCounter"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ShareRoomObject"]
 
 [vars]
 SITE_URL = "https://picbind.com"

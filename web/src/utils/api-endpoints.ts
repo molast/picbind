@@ -40,3 +40,9 @@ export function getAdminStateApiPath() {
   );
 }
 
+export function getShareRoomApiPath() {
+  return (
+    process.env.NEXT_PUBLIC_SHARE_ROOM_API_PATH ||
+    joinUrl(API_BASE_URL, "/api/realtime/room/create")
+  );
+}

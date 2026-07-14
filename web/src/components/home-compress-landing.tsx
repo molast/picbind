@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import ShareRoomDialog from "@/components/share-room-dialog";
 import {
   ReactCompareSlider,
   ReactCompareSliderImage,
@@ -1305,6 +1306,7 @@ export default function HomeCompressLanding({
                   >
                     {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
                   </Link>
+                  <ShareRoomDialog lang={lang} />
                 </nav>
               </div>
               <div ref={langMenuRef} className="relative">
@@ -1377,6 +1379,7 @@ export default function HomeCompressLanding({
               <Link href="/favicon-converter" className="rounded-full px-3 py-1">
                 {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
               </Link>
+              <ShareRoomDialog lang={lang} mobile />
             </div>
           </header>
 

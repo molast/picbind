@@ -3,6 +3,8 @@ import {
   MetricsCounter,
   type MetricsCounterState,
 } from "./metrics-counter";
+import { handleCreateShareRoom } from "./realtime/share-room";
+import { ShareRoomObject } from "./realtime/share-room-object";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -23,6 +25,7 @@ type Env = {
     put(key: string, value: string): Promise<void>;
   };
   METRICS_COUNTER: DurableObjectNamespace;
+  REALTIME_ROOMS: DurableObjectNamespace;
   GLOBAL_LIMITER?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
@@ -34,6 +37,8 @@ type Env = {
   ALLOWED_ORIGINS?: string;
   BAIDU_PUSH_SITE?: string;
   BAIDU_PUSH_TOKEN?: string;
+  REALTIME_APP_ID?: string;
+  REALTIME_API_TOKEN?: string;
 };
 
 const CONFIG_KEY = "metrics:config:v1";
@@ -539,6 +544,10 @@ const worker = {
         response = await handleAdminState(request, env);
       } else if (pathname === "/api/seo/baidu/push") {
         response = await handleBaiduPush(request, env);
+      } else if (pathname === "/api/realtime/room/create") {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? json({ error: "Invalid origin" }, { status: 403 })
+          : await handleCreateShareRoom(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }
@@ -556,4 +565,4 @@ const worker = {
 };
 
 export default worker;
-export { MetricsCounter };
+export { MetricsCounter, ShareRoomObject };
