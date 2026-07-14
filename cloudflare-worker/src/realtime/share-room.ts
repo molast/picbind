@@ -63,7 +63,14 @@ async function roomState(env: RealtimeRoomEnv, roomId: string) {
   const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(roomId));
   const response = await object.fetch("https://share-room/state");
   if (!response.ok) return null;
-  return (await response.json()) as ShareRoomState;
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw) as ShareRoomState;
+  } catch {
+    throw new Error(
+      `Share room state returned invalid JSON (${response.status}): ${raw.slice(0, 240)}`,
+    );
+  }
 }
 
 async function realtimeRequest(
