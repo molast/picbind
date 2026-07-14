@@ -142,7 +142,7 @@ export async function handleShareRoomRealtime(
       const ownerToken = typeof body.ownerToken === "string" ? body.ownerToken : "";
       const isOwner = ownerToken && (await hashToken(ownerToken)) === room.ownerTokenHash;
       const role = isOwner ? "owner" : "guest";
-      if (role === "guest" && room.guestSessionId) {
+      if (role === "guest" && room.guestSessionId && room.guestReady) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
       const session = await realtimeRequest(env, "/sessions/new");
@@ -173,6 +173,12 @@ export async function handleShareRoomRealtime(
       const result = await realtimeRequest(env, `/sessions/${sessionId}/datachannels/establish`, "POST", {
         dataChannel: { location: "remote", dataChannelName: "picbind-handshake" },
         sessionDescription: sdp,
+      });
+      const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(room.roomId));
+      await object.fetch("https://share-room/ready", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: isOwnerSession ? "owner" : "guest", sessionId }),
       });
       return json(result);
     }

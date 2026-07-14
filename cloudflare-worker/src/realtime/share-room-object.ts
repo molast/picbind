@@ -8,6 +8,8 @@ export type ShareRoomState = {
   status: "waiting";
   ownerSessionId?: string;
   guestSessionId?: string;
+  ownerReady?: boolean;
+  guestReady?: boolean;
 };
 
 function json(data: unknown, init?: ResponseInit) {
@@ -68,12 +70,30 @@ export class ShareRoomObject {
       if (!body.sessionId || (body.role !== "owner" && body.role !== "guest")) {
         return json({ error: "Invalid join request" }, { status: 400 });
       }
-      if (body.role === "guest" && room.guestSessionId) {
+      if (body.role === "guest" && room.guestSessionId && room.guestReady) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
 
-      if (body.role === "owner") room.ownerSessionId = body.sessionId;
-      else room.guestSessionId = body.sessionId;
+      if (body.role === "owner") {
+        room.ownerSessionId = body.sessionId;
+        room.ownerReady = false;
+      } else {
+        room.guestSessionId = body.sessionId;
+        room.guestReady = false;
+      }
+      await this.state.storage.put("room", room);
+      return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/ready") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as { role?: "owner" | "guest"; sessionId?: string };
+      if (!room || !body.sessionId || (body.role !== "owner" && body.role !== "guest")) {
+        return json({ error: "Invalid ready request" }, { status: 400 });
+      }
+      if (body.role === "owner" && room.ownerSessionId === body.sessionId) room.ownerReady = true;
+      else if (body.role === "guest" && room.guestSessionId === body.sessionId) room.guestReady = true;
+      else return json({ error: "Session not found" }, { status: 404 });
       await this.state.storage.put("room", room);
       return json(room);
     }
