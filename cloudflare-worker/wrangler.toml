@@ -2,6 +2,10 @@ name = "picbind-worker"
 main = "src/index.ts"
 compatibility_date = "2026-04-20"
 
+routes = [
+  { pattern = "api.picbind.com", custom_domain = true }
+]
+
 [[kv_namespaces]]
 binding = "METRICS_KV"
 id = "ffd6a9e2ce924cf2a4b93b782d525810"
