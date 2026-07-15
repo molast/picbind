@@ -188,7 +188,7 @@ export default function ShareRoomPage() {
           send: "发送图片",
           waitingToSend: "等待发送",
           waitingForSender: "等待对方发送",
-          preparingPreview: "正在生成预览",
+          preparingPreview: "正在生成占位信息",
           previewFailed: "图片占位信息生成失败",
           previewOnly: "32×32 预览",
           download: "下载图片",
@@ -242,7 +242,7 @@ export default function ShareRoomPage() {
           send: "Send image",
           waitingToSend: "Waiting to send",
           waitingForSender: "Waiting for sender",
-          preparingPreview: "Preparing preview",
+          preparingPreview: "Preparing placeholder",
           previewFailed: "Placeholder generation failed",
           previewOnly: "32×32 preview",
           download: "Download image",
@@ -1316,37 +1316,68 @@ export default function ShareRoomPage() {
           continue;
         }
 
-        try {
-          const meta = createImageTransferMeta(file);
-          const placeholder = await generateSharePlaceholder(file);
-          const image: CachedRoomImage = {
-            id: meta.id,
-            roomId: roomId!,
-            name: meta.name,
-            type: meta.type,
-            size: meta.size,
-            blob: file,
-            direction: "sent",
-            transferStatus: "waiting",
-            progress: 0,
-            previewOnly: false,
-            placeholderOnly: false,
-            placeholder,
-            createdAt: Date.now(),
-          };
-          await storeRoomImage(image);
-          addRoomImage(image);
-          sendImagePlaceholder(channel, meta, placeholder);
-        } catch (error) {
-          upsertActivity({
-            id: `error-${Date.now()}-${file.name}`,
-            kind: "error",
-            title: file.name,
-            detail:
-              error instanceof Error ? error.message : labels.previewFailed,
-            createdAt: Date.now(),
-          });
-        }
+        const meta = createImageTransferMeta(file);
+        const image: CachedRoomImage = {
+          id: meta.id,
+          roomId: roomId!,
+          name: meta.name,
+          type: meta.type,
+          size: meta.size,
+          blob: file,
+          direction: "sent",
+          transferStatus: "waiting",
+          progress: 0,
+          previewOnly: false,
+          placeholderOnly: false,
+          createdAt: Date.now(),
+        };
+        addRoomImage(image);
+        const initialPersist = storeRoomImage(image).catch((error) => {
+          console.warn("Failed to cache pending image", error);
+        });
+        window.setTimeout(() => {
+          void (async () => {
+            try {
+              const placeholder = await generateSharePlaceholder(file);
+              if (
+                deletedImageIdsRef.current.has(meta.id) ||
+                !imagesRef.current.some((current) => current.id === meta.id)
+              ) {
+                return;
+              }
+              updateRoomImage(meta.id, { placeholder });
+              const activeChannel = outgoingChannelRef.current;
+              if (activeChannel?.readyState === "open") {
+                sendImagePlaceholder(activeChannel, meta, placeholder);
+              }
+              await initialPersist;
+              if (
+                !deletedImageIdsRef.current.has(meta.id) &&
+                imagesRef.current.some((current) => current.id === meta.id)
+              ) {
+                updateRoomImage(meta.id, { placeholder }, true);
+              }
+            } catch (error) {
+              if (!deletedImageIdsRef.current.has(meta.id)) {
+                updateRoomImage(meta.id, { transferStatus: "failed" });
+                await initialPersist;
+                if (imagesRef.current.some((current) => current.id === meta.id)) {
+                  updateRoomImage(meta.id, { transferStatus: "failed" }, true);
+                }
+                upsertActivity({
+                  id: `error-${Date.now()}-${file.name}`,
+                  kind: "error",
+                  title: file.name,
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : labels.previewFailed,
+                  createdAt: Date.now(),
+                });
+              }
+            }
+          })();
+        }, 0);
       }
     } finally {
       if (inputRef.current) {
@@ -1361,6 +1392,7 @@ export default function ShareRoomPage() {
       image.direction !== "sent" ||
       image.previewOnly ||
       image.placeholderOnly ||
+      !image.placeholder ||
       image.transferStatus === "sending" ||
       isSending ||
       connection !== "connected" ||
@@ -1423,6 +1455,7 @@ export default function ShareRoomPage() {
       return;
     }
     sendImageDelete(channel, image.id);
+    deletedImageIdsRef.current.add(image.id);
     removeRoomImage(image.id);
     try {
       await deleteRoomImage(image.id);
@@ -1698,7 +1731,9 @@ export default function ShareRoomPage() {
                     const statusLabel =
                       status === "waiting"
                         ? image.direction === "sent"
-                          ? labels.waitingToSend
+                          ? image.placeholder
+                            ? labels.waitingToSend
+                            : labels.preparingPreview
                           : labels.waitingForSender
                         : status === "sending"
                           ? `${labels.sending} ${progress}%`
@@ -1724,6 +1759,7 @@ export default function ShareRoomPage() {
                     const isLocalImage = image.direction === "sent";
                     const sendReady =
                       isLocalImage &&
+                      Boolean(image.placeholder) &&
                       (status === "waiting" || status === "failed");
                     const sendComplete = isLocalImage && status === "sent";
                     const canDelete =
