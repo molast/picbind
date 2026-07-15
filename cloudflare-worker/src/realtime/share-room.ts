@@ -147,12 +147,14 @@ export async function handleShareRoomRealtime(
       }
       const requester = memberForSession(room, sessionId);
       return json({
-        members: roomMembers(room).map(({ clientId, role, status, leftAt }) => ({
-          clientId,
-          role,
-          status: status === "online" ? "online" : "offline",
-          leftAt,
-        })),
+        members: roomMembers(room)
+          .filter((member) => member.status !== "kicked")
+          .map(({ clientId, role, status, leftAt }) => ({
+            clientId,
+            role,
+            status: status === "online" ? "online" : "offline",
+            leftAt,
+          })),
         ownerKnown: roomMembers(room).some((member) => member.role === "owner"),
         guestKnown: roomMembers(room).some((member) => member.role === "guest"),
         ownerJoined: Boolean(owner),

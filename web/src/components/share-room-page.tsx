@@ -1546,11 +1546,7 @@ export default function ShareRoomPage() {
     try {
       await kickRealtimeRoomMember(roomId, sessionId, targetClientId);
       setMembers((current) =>
-        current.map((member) =>
-          member.clientId === targetClientId
-            ? { ...member, status: "offline", leftAt: Date.now() }
-            : member,
-        ),
+        current.filter((member) => member.clientId !== targetClientId),
       );
     } catch (error) {
       upsertActivity({
