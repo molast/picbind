@@ -1,5 +1,7 @@
 "use client";
 
+import type { ImagePlaceholderMetadata } from "./share-placeholder";
+
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES = 64 * 1024;
@@ -16,12 +18,17 @@ export type ImageTransferMeta = {
 
 type TransferControlMessage =
   | {
+      type: "IMAGE_PLACEHOLDER";
+      payload: ImageTransferMeta & { placeholder: ImagePlaceholderMetadata };
+    }
+  | {
       type: "IMAGE_PREVIEW";
       payload: ImageTransferMeta & { thumbnailBase64: string };
     }
   | { type: "IMAGE_START"; payload: ImageTransferMeta }
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
   | { type: "IMAGE_RECEIVED"; payload: { id: string } }
+  | { type: "IMAGE_DELETE"; payload: { id: string } }
   | { type: "IMAGE_FAILED"; payload: { id: string; reason: string } };
 
 type IncomingTransfer = {
@@ -38,11 +45,16 @@ export type TransferProgress = ImageTransferMeta & {
 
 export type ImageReceiverCallbacks = {
   onStart(meta: ImageTransferMeta): void;
+  onPlaceholder?(
+    meta: ImageTransferMeta,
+    placeholder: ImagePlaceholderMetadata,
+  ): void | Promise<void>;
   onPreview?(meta: ImageTransferMeta, thumbnail: Blob): void | Promise<void>;
   onProgress(progress: TransferProgress): void;
   onComplete(meta: ImageTransferMeta, blob: Blob): void | Promise<void>;
   onError(meta: ImageTransferMeta | null, reason: string): void;
   onReceipt?(id: string): void;
+  onDelete?(id: string): void | Promise<void>;
 };
 
 function createTransferId() {
@@ -109,9 +121,47 @@ function isValidMeta(value: unknown): value is ImageTransferMeta {
   );
 }
 
+function isValidPlaceholder(value: unknown): value is ImagePlaceholderMetadata {
+  if (!value || typeof value !== "object") return false;
+  const placeholder = value as Partial<ImagePlaceholderMetadata>;
+  return (
+    Number.isInteger(placeholder.width) &&
+    Number(placeholder.width) > 0 &&
+    Number(placeholder.width) <= 100_000 &&
+    Number.isInteger(placeholder.height) &&
+    Number(placeholder.height) > 0 &&
+    Number(placeholder.height) <= 100_000 &&
+    typeof placeholder.dominantColor === "string" &&
+    /^#[0-9a-f]{6}$/i.test(placeholder.dominantColor) &&
+    typeof placeholder.blurHash === "string" &&
+    placeholder.blurHash.length >= 6 &&
+    placeholder.blurHash.length <= 100
+  );
+}
+
 export function sendImageReceipt(channel: RTCDataChannel, id: string) {
   if (channel.readyState === "open") {
     sendControl(channel, { type: "IMAGE_RECEIVED", payload: { id } });
+  }
+}
+
+export function sendImagePlaceholder(
+  channel: RTCDataChannel,
+  meta: ImageTransferMeta,
+  placeholder: ImagePlaceholderMetadata,
+) {
+  if (channel.readyState !== "open") {
+    throw new Error("DataChannel is not open");
+  }
+  sendControl(channel, {
+    type: "IMAGE_PLACEHOLDER",
+    payload: { ...meta, placeholder },
+  });
+}
+
+export function sendImageDelete(channel: RTCDataChannel, id: string) {
+  if (channel.readyState === "open") {
+    sendControl(channel, { type: "IMAGE_DELETE", payload: { id } });
   }
 }
 
@@ -211,6 +261,21 @@ export class RealtimeImageReceiver {
     }
     const message = parsed as TransferControlMessage;
 
+    if (message.type === "IMAGE_PLACEHOLDER") {
+      if (
+        !isValidMeta(message.payload) ||
+        !isValidPlaceholder(message.payload.placeholder)
+      ) {
+        this.callbacks.onError(null, "Received invalid placeholder metadata");
+        return;
+      }
+      void this.callbacks.onPlaceholder?.(
+        message.payload,
+        message.payload.placeholder,
+      );
+      return;
+    }
+
     if (message.type === "IMAGE_PREVIEW") {
       if (!isValidMeta(message.payload)) {
         this.callbacks.onError(null, "Received invalid image preview metadata");
@@ -268,6 +333,16 @@ export class RealtimeImageReceiver {
       if (typeof message.payload?.id === "string") {
         this.callbacks.onReceipt?.(message.payload.id);
       }
+      return;
+    }
+
+    if (message.type === "IMAGE_DELETE") {
+      const id = message.payload?.id;
+      if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) return;
+      if (this.incoming?.meta.id === id) {
+        this.incoming = null;
+      }
+      void this.callbacks.onDelete?.(id);
     }
   }
 

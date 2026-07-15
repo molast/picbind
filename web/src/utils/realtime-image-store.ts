@@ -1,5 +1,7 @@
 "use client";
 
+import type { ImagePlaceholderMetadata } from "./share-placeholder";
+
 const DB_NAME = "picbind-realtime-images";
 const DB_VERSION = 1;
 const STORE_NAME = "images";
@@ -23,6 +25,8 @@ export type CachedRoomImage = {
     | "failed";
   progress?: number;
   previewOnly?: boolean;
+  placeholderOnly?: boolean;
+  placeholder?: ImagePlaceholderMetadata;
   createdAt: number;
 };
 
@@ -82,5 +86,18 @@ export async function listRoomImages(roomId: string) {
     };
     request.onerror = () =>
       reject(request.error ?? new Error("Image cache read failed"));
+  });
+}
+
+export async function deleteRoomImage(id: string) {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Image cache delete failed"));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error("Image cache delete aborted"));
   });
 }

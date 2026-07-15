@@ -6,6 +6,7 @@ use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
 mod core;
+mod share_placeholder;
 
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_INPUT_MB_TEXT: &str = "5 MB";
@@ -167,6 +168,38 @@ pub fn generate_share_thumbnail(input: &[u8]) -> Result<Vec<u8>, JsValue> {
     let decoded = image::load_from_memory(input)
         .map_err(|err| JsValue::from_str(&format!("Thumbnail decode failed: {err}")))?;
     generate_png_size(&square_crop(decoded), 32)
+}
+
+#[wasm_bindgen]
+pub fn generate_share_placeholder(input: &[u8]) -> Result<js_sys::Object, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Share image must be 50 MB or smaller"));
+    }
+    let decoded = image::load_from_memory(input)
+        .map_err(|err| JsValue::from_str(&format!("Placeholder decode failed: {err}")))?;
+    let placeholder = share_placeholder::generate(&decoded);
+    let output = js_sys::Object::new();
+    Reflect::set(
+        &output,
+        &JsValue::from_str("width"),
+        &JsValue::from_f64(f64::from(placeholder.width)),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("height"),
+        &JsValue::from_f64(f64::from(placeholder.height)),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("dominantColor"),
+        &JsValue::from_str(&placeholder.dominant_color),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("blurHash"),
+        &JsValue::from_str(&placeholder.blur_hash),
+    )?;
+    Ok(output)
 }
 
 fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {

@@ -228,6 +228,20 @@ export function generate_favicon(input) {
 
 /**
  * @param {Uint8Array} input
+ * @returns {object}
+ */
+export function generate_share_placeholder(input) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.generate_share_placeholder(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
  * @returns {Uint8Array}
  */
 export function generate_share_thumbnail(input) {

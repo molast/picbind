@@ -50,6 +50,8 @@ export function create_zip_from_items(items: Array<any>): Uint8Array;
 
 export function generate_favicon(input: Uint8Array): object;
 
+export function generate_share_placeholder(input: Uint8Array): object;
+
 export function generate_share_thumbnail(input: Uint8Array): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -68,6 +70,7 @@ export interface InitOutput {
     readonly compressionresult_mime: (a: number) => [number, number];
     readonly create_zip_from_items: (a: any) => [number, number, number, number];
     readonly generate_favicon: (a: number, b: number) => [number, number, number];
+    readonly generate_share_placeholder: (a: number, b: number) => [number, number, number];
     readonly generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
     readonly lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_add_text: (a: number, b: number, c: number) => number;

@@ -16,11 +16,13 @@ import {
   FiMessageCircle,
   FiMinimize2,
   FiSend,
+  FiTrash2,
   FiUploadCloud,
   FiUsers,
   FiWifi,
 } from "react-icons/fi";
 import RoomImagePreviewDialog from "@/components/room-image-preview-dialog";
+import RoomImageMedia from "@/components/room-image-media";
 import { getLang, type Lang } from "@/locales";
 import {
   clearOwnedShareRoom,
@@ -47,12 +49,14 @@ import {
   RealtimeImageReceiver,
   MAX_IMAGE_TRANSFER_SIZE,
   createImageTransferMeta,
+  sendImageDelete,
+  sendImagePlaceholder,
   sendImageReceipt,
   sendImageFile,
-  sendImagePreview,
   type TransferProgress,
 } from "@/utils/realtime-image-transfer";
 import {
+  deleteRoomImage,
   listRoomImages,
   storeRoomImage,
   type CachedRoomImage,
@@ -63,7 +67,7 @@ import {
   sendPeerMessage,
   TEST_EMOJIS,
 } from "@/utils/realtime-peer-messages";
-import { generateShareThumbnail } from "@/utils/share-thumbnail";
+import { generateSharePlaceholder } from "@/utils/share-placeholder";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -133,6 +137,7 @@ export default function ShareRoomPage() {
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
+  const deletedImageIdsRef = React.useRef(new Set<string>());
   const imagesRef = React.useRef<RoomImage[]>([]);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
@@ -184,9 +189,10 @@ export default function ShareRoomPage() {
           waitingToSend: "等待发送",
           waitingForSender: "等待对方发送",
           preparingPreview: "正在生成预览",
-          previewFailed: "缩略图生成失败",
+          previewFailed: "图片占位信息生成失败",
           previewOnly: "32×32 预览",
           download: "下载图片",
+          deleteImage: "删除图片",
           participants: "匿名成员",
           owner: "匿名 Owner",
           guest: "匿名 Guest",
@@ -237,9 +243,10 @@ export default function ShareRoomPage() {
           waitingToSend: "Waiting to send",
           waitingForSender: "Waiting for sender",
           preparingPreview: "Preparing preview",
-          previewFailed: "Thumbnail generation failed",
+          previewFailed: "Placeholder generation failed",
           previewOnly: "32×32 preview",
           download: "Download image",
+          deleteImage: "Delete image",
           participants: "Anonymous members",
           owner: "Anonymous Owner",
           guest: "Anonymous Guest",
@@ -279,6 +286,7 @@ export default function ShareRoomPage() {
   const previewImages = images.filter(
     (image) =>
       !image.previewOnly &&
+      !image.placeholderOnly &&
       (image.direction === "sent" ||
         image.transferStatus === "sent" ||
         image.transferStatus === "received"),
@@ -408,9 +416,22 @@ export default function ShareRoomPage() {
     [],
   );
 
+  const removeRoomImage = React.useCallback((id: string) => {
+    const image = imagesRef.current.find((current) => current.id === id);
+    if (!image) return;
+    URL.revokeObjectURL(image.url);
+    objectUrlsRef.current.delete(image.url);
+    imageIdsRef.current.delete(id);
+    const next = imagesRef.current.filter((current) => current.id !== id);
+    imagesRef.current = next;
+    setImages(next);
+    setPreviewImageId((current) => (current === id ? null : current));
+  }, []);
+
   React.useEffect(() => {
     const objectUrls = objectUrlsRef.current;
     const imageIds = imageIdsRef.current;
+    const deletedImageIds = deletedImageIdsRef.current;
     setLang(getLang());
     setRoomId(readRoomId());
     return () => {
@@ -419,6 +440,7 @@ export default function ShareRoomPage() {
       }
       objectUrls.clear();
       imageIds.clear();
+      deletedImageIds.clear();
       imagesRef.current = [];
     };
   }, []);
@@ -462,7 +484,7 @@ export default function ShareRoomPage() {
     let handshakeId = "";
     let handshakeAttempts = 0;
     let handshakeAcknowledged = false;
-    let previewsPublished = false;
+    let placeholdersPublished = false;
 
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
@@ -487,6 +509,34 @@ export default function ShareRoomPage() {
     };
 
     const receiver = new RealtimeImageReceiver({
+      async onPlaceholder(meta, placeholder) {
+        if (deletedImageIdsRef.current.has(meta.id)) return;
+        const current = imagesRef.current.find((image) => image.id === meta.id);
+        if (current && !current.previewOnly && !current.placeholderOnly) {
+          return;
+        }
+        const image: CachedRoomImage = {
+          id: meta.id,
+          roomId,
+          name: meta.name,
+          type: meta.type,
+          size: meta.size,
+          blob: new Blob([], { type: meta.type }),
+          direction: "received",
+          transferStatus: "waiting",
+          progress: 0,
+          previewOnly: false,
+          placeholderOnly: true,
+          placeholder,
+          createdAt: current?.createdAt || Date.now(),
+        };
+        if (!disposed) addRoomImage(image);
+        try {
+          await storeRoomImage(image);
+        } catch (error) {
+          console.warn("Failed to cache image placeholder", error);
+        }
+      },
       async onPreview(meta, thumbnail) {
         const current = imagesRef.current.find((image) => image.id === meta.id);
         if (current && !current.previewOnly) {
@@ -503,6 +553,7 @@ export default function ShareRoomPage() {
           transferStatus: "waiting",
           progress: 0,
           previewOnly: true,
+          placeholderOnly: false,
           createdAt: current?.createdAt || Date.now(),
         };
         try {
@@ -544,6 +595,7 @@ export default function ShareRoomPage() {
         });
       },
       async onComplete(meta, blob) {
+        const current = imagesRef.current.find((image) => image.id === meta.id);
         const image: CachedRoomImage = {
           id: meta.id,
           roomId,
@@ -555,7 +607,9 @@ export default function ShareRoomPage() {
           transferStatus: "received",
           progress: 1,
           previewOnly: false,
-          createdAt: Date.now(),
+          placeholderOnly: false,
+          placeholder: current?.placeholder,
+          createdAt: current?.createdAt || Date.now(),
         };
         try {
           await storeRoomImage(image);
@@ -619,6 +673,15 @@ export default function ShareRoomPage() {
           ),
         );
       },
+      async onDelete(id) {
+        deletedImageIdsRef.current.add(id);
+        removeRoomImage(id);
+        try {
+          await deleteRoomImage(id);
+        } catch (error) {
+          console.warn("Failed to delete remote image placeholder", error);
+        }
+      },
     });
 
     const setConnectionActivity = (
@@ -649,19 +712,20 @@ export default function ShareRoomPage() {
       }
     };
 
-    const publishWaitingPreviews = async () => {
+    const publishWaitingPlaceholders = async () => {
       const activeChannel = outgoingChannelRef.current;
       if (
-        previewsPublished ||
+        placeholdersPublished ||
         activeChannel?.readyState !== "open"
       ) {
         return;
       }
-      previewsPublished = true;
+      placeholdersPublished = true;
       for (const image of imagesRef.current) {
         if (
           image.direction !== "sent" ||
           image.previewOnly ||
+          image.placeholderOnly ||
           (image.transferStatus !== "waiting" &&
             image.transferStatus !== "failed")
         ) {
@@ -670,13 +734,14 @@ export default function ShareRoomPage() {
         try {
           const file = new File([image.blob], image.name, { type: image.type });
           const meta = createImageTransferMeta(file, image.id);
-          sendImagePreview(
-            activeChannel,
-            meta,
-            await generateShareThumbnail(file),
-          );
+          const placeholder =
+            image.placeholder || (await generateSharePlaceholder(file));
+          if (!image.placeholder) {
+            updateRoomImage(image.id, { placeholder }, true);
+          }
+          sendImagePlaceholder(activeChannel, meta, placeholder);
         } catch (error) {
-          console.warn("Failed to publish queued image preview", error);
+          console.warn("Failed to publish queued image placeholder", error);
         }
       }
     };
@@ -755,7 +820,7 @@ export default function ShareRoomPage() {
         setConnection("connected");
         setConnectionError(null);
         setConnectionActivity("connected");
-        void publishWaitingPreviews();
+        void publishWaitingPlaceholders();
         return;
       }
       if (peerMessage?.type === "EMOJI") {
@@ -810,7 +875,7 @@ export default function ShareRoomPage() {
       handshakeAttempts = 0;
       handshakeAcknowledged = false;
       handshakeAttempts = 0;
-      previewsPublished = false;
+      placeholdersPublished = false;
       channel.onmessage = handleChannelMessage;
       channel.onopen = () => {
         outgoingChannelRef.current = channel;
@@ -819,7 +884,7 @@ export default function ShareRoomPage() {
       channel.onclose = () => {
         stopHandshake();
         handshakeAcknowledged = false;
-        previewsPublished = false;
+        placeholdersPublished = false;
         outgoingChannelRef.current = null;
         if (!disposed) {
           setConnection("waiting");
@@ -851,7 +916,7 @@ export default function ShareRoomPage() {
       currentOfferSdp = null;
       appliedRemoteCandidates.clear();
       handshakeAcknowledged = false;
-      previewsPublished = false;
+      placeholdersPublished = false;
       negotiating = false;
     };
 
@@ -1189,6 +1254,7 @@ export default function ShareRoomPage() {
   }, [
     addRoomImage,
     labels,
+    removeRoomImage,
     roomId,
     showFloatingEmoji,
     updateRoomImage,
@@ -1252,6 +1318,7 @@ export default function ShareRoomPage() {
 
         try {
           const meta = createImageTransferMeta(file);
+          const placeholder = await generateSharePlaceholder(file);
           const image: CachedRoomImage = {
             id: meta.id,
             roomId: roomId!,
@@ -1263,12 +1330,13 @@ export default function ShareRoomPage() {
             transferStatus: "waiting",
             progress: 0,
             previewOnly: false,
+            placeholderOnly: false,
+            placeholder,
             createdAt: Date.now(),
           };
           await storeRoomImage(image);
           addRoomImage(image);
-          const thumbnail = await generateShareThumbnail(file);
-          sendImagePreview(channel, meta, thumbnail);
+          sendImagePlaceholder(channel, meta, placeholder);
         } catch (error) {
           upsertActivity({
             id: `error-${Date.now()}-${file.name}`,
@@ -1292,6 +1360,7 @@ export default function ShareRoomPage() {
     if (
       image.direction !== "sent" ||
       image.previewOnly ||
+      image.placeholderOnly ||
       image.transferStatus === "sending" ||
       isSending ||
       connection !== "connected" ||
@@ -1339,6 +1408,26 @@ export default function ShareRoomPage() {
       });
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleDeleteImage = async (image: RoomImage) => {
+    const status = image.transferStatus || "waiting";
+    const channel = outgoingChannelRef.current;
+    if (
+      image.direction !== "sent" ||
+      (status !== "waiting" && status !== "failed") ||
+      connection !== "connected" ||
+      channel?.readyState !== "open"
+    ) {
+      return;
+    }
+    sendImageDelete(channel, image.id);
+    removeRoomImage(image.id);
+    try {
+      await deleteRoomImage(image.id);
+    } catch (error) {
+      console.warn("Failed to delete local pending image", error);
     }
   };
 
@@ -1628,6 +1717,7 @@ export default function ShareRoomPage() {
                       status === "awaiting-receipt";
                     const canPreview =
                       !image.previewOnly &&
+                      !image.placeholderOnly &&
                       (image.direction === "sent" ||
                         status === "sent" ||
                         status === "received");
@@ -1636,12 +1726,15 @@ export default function ShareRoomPage() {
                       isLocalImage &&
                       (status === "waiting" || status === "failed");
                     const sendComplete = isLocalImage && status === "sent";
+                    const canDelete =
+                      isLocalImage &&
+                      (status === "waiting" || status === "failed");
                     const downloadReady =
                       status === "sent" || status === "received";
                     return (
                     <article
                       key={image.id}
-                      className="overflow-hidden rounded-md border border-slate-200 bg-white"
+                      className="relative overflow-hidden rounded-md border border-slate-200 bg-white"
                     >
                       <button
                         type="button"
@@ -1649,21 +1742,48 @@ export default function ShareRoomPage() {
                           if (canPreview) setPreviewImageId(image.id);
                         }}
                         disabled={!canPreview}
-                        className="block aspect-square w-full overflow-hidden bg-slate-100 disabled:cursor-default"
+                        className="block w-full overflow-hidden bg-slate-100 disabled:cursor-default"
+                        style={{
+                          aspectRatio: image.placeholder
+                            ? `${image.placeholder.width} / ${image.placeholder.height}`
+                            : "1 / 1",
+                        }}
                         aria-label={`${image.name} preview`}
                       >
-                        {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={image.url}
-                          alt={image.name}
-                          className={`h-full w-full transition duration-200 hover:scale-[1.02] ${
-                            image.previewOnly
-                              ? "object-contain [image-rendering:auto]"
-                              : "object-cover"
-                          }`}
-                        />
+                        {image.placeholder ? (
+                          <RoomImageMedia
+                            alt={image.name}
+                            src={image.placeholderOnly ? undefined : image.url}
+                            placeholder={image.placeholder}
+                          />
+                        ) : (
+                          <>
+                            {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={image.url}
+                              alt={image.name}
+                              className={`h-full w-full transition duration-200 hover:scale-[1.02] ${
+                                image.previewOnly
+                                  ? "object-contain [image-rendering:auto]"
+                                  : "object-cover"
+                              }`}
+                            />
+                          </>
+                        )}
                       </button>
+                      {canDelete ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteImage(image)}
+                          disabled={connection !== "connected"}
+                          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45"
+                          aria-label={labels.deleteImage}
+                          title={labels.deleteImage}
+                        >
+                          <FiTrash2 className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      ) : null}
                       <div className="p-3">
                         <div
                           className="truncate text-sm font-semibold text-slate-800"
