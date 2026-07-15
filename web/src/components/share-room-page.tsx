@@ -127,6 +127,7 @@ function middleEllipsisFileName(name: string, maxLength = 28) {
 export default function ShareRoomPage() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const activityListRef = React.useRef<HTMLDivElement | null>(null);
+  const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
   const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
   const sessionIdRef = React.useRef<string | null>(null);
@@ -328,6 +329,29 @@ export default function ShareRoomPage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activities]);
+
+  React.useEffect(() => {
+    const scroller = emojiScrollerRef.current;
+    if (!scroller) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (scroller.scrollWidth <= scroller.clientWidth) return;
+      const delta =
+        Math.abs(event.deltaX) > Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+      const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+      const nextScrollLeft = Math.max(
+        0,
+        Math.min(maxScrollLeft, scroller.scrollLeft + delta),
+      );
+      if (nextScrollLeft !== scroller.scrollLeft) {
+        scroller.scrollLeft = nextScrollLeft;
+        event.preventDefault();
+      }
+    };
+    scroller.addEventListener("wheel", handleWheel, { passive: false });
+    return () => scroller.removeEventListener("wheel", handleWheel);
+  }, []);
 
   const addRoomImage = React.useCallback((image: CachedRoomImage) => {
     const normalized: CachedRoomImage = {
@@ -1385,13 +1409,6 @@ export default function ShareRoomPage() {
     window.setTimeout(() => {
       setPressedEmoji((current) => (current === emoji ? null : current));
     }, 280);
-    upsertActivity({
-      id: `message-${id}`,
-      kind: "message",
-      title: emoji,
-      detail: labels.messageSending,
-      createdAt: Date.now(),
-    });
   };
 
   const handleTextMessage = () => {
@@ -1743,7 +1760,7 @@ export default function ShareRoomPage() {
           </div>
         </section>
 
-        <aside className="grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
+        <aside className="grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <FiWifi className="h-4 w-4" aria-hidden="true" />
@@ -1815,7 +1832,7 @@ export default function ShareRoomPage() {
             </div>
           </div>
 
-          <div className="border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0 overflow-hidden border-b border-slate-200 px-4 py-3">
             <div className="mb-2 text-xs font-semibold uppercase text-slate-500">
               {labels.testMessage}
             </div>
@@ -1847,7 +1864,10 @@ export default function ShareRoomPage() {
             <div className="mb-2 mt-3 text-[11px] font-semibold uppercase text-slate-400">
               {labels.quickReactions}
             </div>
-            <div className="grid max-w-full grid-flow-col grid-rows-2 auto-cols-[2.5rem] gap-2 overflow-x-auto pb-1">
+            <div
+              ref={emojiScrollerRef}
+              className="grid w-full min-w-0 max-w-full grid-flow-col grid-rows-2 auto-cols-[2.5rem] gap-2 overflow-x-auto overscroll-x-contain pb-1"
+            >
               {TEST_EMOJIS.map((emoji) => (
                 <button
                   key={emoji}
