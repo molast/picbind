@@ -9,6 +9,7 @@ mod core;
 
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_INPUT_MB_TEXT: &str = "5 MB";
+const MAX_SHARE_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -158,6 +159,16 @@ fn generate_png_size(base: &DynamicImage, size: u32) -> Result<Vec<u8>, JsValue>
     encode_png(&resized)
 }
 
+#[wasm_bindgen]
+pub fn generate_share_thumbnail(input: &[u8]) -> Result<Vec<u8>, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Share image must be 50 MB or smaller"));
+    }
+    let decoded = image::load_from_memory(input)
+        .map_err(|err| JsValue::from_str(&format!("Thumbnail decode failed: {err}")))?;
+    generate_png_size(&square_crop(decoded), 32)
+}
+
 fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {
     let resized = base.resize_exact(32, 32, FilterType::Lanczos3).to_rgba8();
     let mut out = Vec::new();
@@ -219,4 +230,20 @@ pub fn generate_favicon(input: &[u8]) -> Result<js_sys::Object, JsValue> {
     )?;
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn share_thumbnail_is_a_32_pixel_png() {
+        let source = DynamicImage::new_rgba8(80, 40);
+        let input = encode_png(&source).expect("encode source");
+        let thumbnail = generate_share_thumbnail(&input).expect("generate thumbnail");
+        let decoded = image::load_from_memory_with_format(&thumbnail, ImageFormat::Png)
+            .expect("decode thumbnail");
+
+        assert_eq!(decoded.dimensions(), (32, 32));
+    }
 }

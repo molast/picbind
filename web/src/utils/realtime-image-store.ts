@@ -13,6 +13,16 @@ export type CachedRoomImage = {
   size: number;
   blob: Blob;
   direction: "sent" | "received";
+  transferStatus?:
+    | "waiting"
+    | "sending"
+    | "awaiting-receipt"
+    | "receiving"
+    | "sent"
+    | "received"
+    | "failed";
+  progress?: number;
+  previewOnly?: boolean;
   createdAt: number;
 };
 

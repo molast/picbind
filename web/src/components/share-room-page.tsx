@@ -15,10 +15,12 @@ import {
   FiLogOut,
   FiMessageCircle,
   FiMinimize2,
+  FiSend,
   FiUploadCloud,
   FiUsers,
   FiWifi,
 } from "react-icons/fi";
+import RoomImagePreviewDialog from "@/components/room-image-preview-dialog";
 import { getLang, type Lang } from "@/locales";
 import {
   clearOwnedShareRoom,
@@ -44,8 +46,10 @@ import {
 import {
   RealtimeImageReceiver,
   MAX_IMAGE_TRANSFER_SIZE,
+  createImageTransferMeta,
   sendImageReceipt,
   sendImageFile,
+  sendImagePreview,
   type TransferProgress,
 } from "@/utils/realtime-image-transfer";
 import {
@@ -59,6 +63,7 @@ import {
   sendPeerMessage,
   TEST_EMOJIS,
 } from "@/utils/realtime-peer-messages";
+import { generateShareThumbnail } from "@/utils/share-thumbnail";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -117,6 +122,7 @@ export default function ShareRoomPage() {
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
+  const imagesRef = React.useRef<RoomImage[]>([]);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
@@ -129,6 +135,7 @@ export default function ShareRoomPage() {
   const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
   const [images, setImages] = React.useState<RoomImage[]>([]);
+  const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [isSending, setIsSending] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
@@ -152,6 +159,12 @@ export default function ShareRoomPage() {
           cached: "图片保存在当前浏览器",
           sent: "已发送",
           received: "已接收",
+          send: "发送图片",
+          waitingToSend: "等待发送",
+          waitingForSender: "等待对方发送",
+          preparingPreview: "正在生成预览",
+          previewFailed: "缩略图生成失败",
+          previewOnly: "32×32 预览",
           download: "下载图片",
           participants: "匿名成员",
           owner: "匿名 Owner",
@@ -196,6 +209,12 @@ export default function ShareRoomPage() {
           cached: "Images are stored in this browser",
           sent: "Sent",
           received: "Received",
+          send: "Send image",
+          waitingToSend: "Waiting to send",
+          waitingForSender: "Waiting for sender",
+          preparingPreview: "Preparing preview",
+          previewFailed: "Thumbnail generation failed",
+          previewOnly: "32×32 preview",
           download: "Download image",
           participants: "Anonymous members",
           owner: "Anonymous Owner",
@@ -230,6 +249,7 @@ export default function ShareRoomPage() {
   );
 
   const validRoomId = Boolean(roomId && ROOM_ID_PATTERN.test(roomId));
+  const previewImage = images.find((image) => image.id === previewImageId) || null;
 
   const upsertActivity = React.useCallback((activity: ActivityItem) => {
     setActivities((current) => {
@@ -244,14 +264,59 @@ export default function ShareRoomPage() {
   }, []);
 
   const addRoomImage = React.useCallback((image: CachedRoomImage) => {
-    if (imageIdsRef.current.has(image.id)) {
-      return;
-    }
-    imageIdsRef.current.add(image.id);
+    const normalized: CachedRoomImage = {
+      ...image,
+      transferStatus:
+        image.transferStatus ||
+        (image.direction === "sent" ? "sent" : "received"),
+      progress:
+        image.progress ??
+        (image.direction === "sent" || image.direction === "received" ? 1 : 0),
+    };
     const url = URL.createObjectURL(image.blob);
     objectUrlsRef.current.add(url);
-    setImages((current) => [...current, { ...image, url }]);
+    const nextImage = { ...normalized, url };
+    const existingIndex = imagesRef.current.findIndex(
+      (current) => current.id === image.id,
+    );
+    let next: RoomImage[];
+    if (existingIndex === -1) {
+      imageIdsRef.current.add(image.id);
+      next = [...imagesRef.current, nextImage];
+    } else {
+      const existing = imagesRef.current[existingIndex];
+      URL.revokeObjectURL(existing.url);
+      objectUrlsRef.current.delete(existing.url);
+      next = [...imagesRef.current];
+      next[existingIndex] = nextImage;
+    }
+    imagesRef.current = next;
+    setImages(next);
   }, []);
+
+  const updateRoomImage = React.useCallback(
+    (
+      id: string,
+      patch: Partial<Omit<RoomImage, "id" | "url">>,
+      persist = false,
+    ) => {
+      const index = imagesRef.current.findIndex((image) => image.id === id);
+      if (index === -1) {
+        return;
+      }
+      const next = [...imagesRef.current];
+      next[index] = { ...next[index], ...patch };
+      imagesRef.current = next;
+      setImages(next);
+      if (persist) {
+        const { url: _url, ...cached } = next[index];
+        void storeRoomImage(cached).catch((error) => {
+          console.warn("Failed to persist image transfer state", error);
+        });
+      }
+    },
+    [],
+  );
 
   React.useEffect(() => {
     const objectUrls = objectUrlsRef.current;
@@ -264,6 +329,7 @@ export default function ShareRoomPage() {
       }
       objectUrls.clear();
       imageIds.clear();
+      imagesRef.current = [];
     };
   }, []);
 
@@ -328,7 +394,39 @@ export default function ShareRoomPage() {
     };
 
     const receiver = new RealtimeImageReceiver({
+      async onPreview(meta, thumbnail) {
+        const current = imagesRef.current.find((image) => image.id === meta.id);
+        if (current && !current.previewOnly) {
+          return;
+        }
+        const image: CachedRoomImage = {
+          id: meta.id,
+          roomId,
+          name: meta.name,
+          type: meta.type,
+          size: meta.size,
+          blob: thumbnail,
+          direction: "received",
+          transferStatus: "waiting",
+          progress: 0,
+          previewOnly: true,
+          createdAt: current?.createdAt || Date.now(),
+        };
+        try {
+          await storeRoomImage(image);
+          if (!disposed) {
+            addRoomImage(image);
+          }
+        } catch (error) {
+          console.warn("Failed to cache image preview", error);
+        }
+      },
       onStart(meta) {
+        updateRoomImage(
+          meta.id,
+          { transferStatus: "receiving", progress: 0 },
+          true,
+        );
         upsertActivity({
           id: `transfer-${meta.id}`,
           kind: "receiving",
@@ -339,6 +437,10 @@ export default function ShareRoomPage() {
         });
       },
       onProgress(progress) {
+        updateRoomImage(progress.id, {
+          transferStatus: "receiving",
+          progress: progress.progress,
+        });
         upsertActivity({
           id: `transfer-${progress.id}`,
           kind: "receiving",
@@ -357,6 +459,9 @@ export default function ShareRoomPage() {
           size: meta.size,
           blob,
           direction: "received",
+          transferStatus: "received",
+          progress: 1,
+          previewOnly: false,
           createdAt: Date.now(),
         };
         try {
@@ -386,6 +491,13 @@ export default function ShareRoomPage() {
         }
       },
       onError(meta, reason) {
+        if (meta) {
+          updateRoomImage(
+            meta.id,
+            { transferStatus: "failed" },
+            true,
+          );
+        }
         upsertActivity({
           id: meta ? `transfer-${meta.id}` : `error-${Date.now()}`,
           kind: "error",
@@ -395,6 +507,11 @@ export default function ShareRoomPage() {
         });
       },
       onReceipt(id) {
+        updateRoomImage(
+          id,
+          { transferStatus: "sent", progress: 1 },
+          true,
+        );
         setActivities((current) =>
           current.map((activity) =>
             activity.id === `transfer-${id}`
@@ -510,6 +627,7 @@ export default function ShareRoomPage() {
         let outgoingOpen = false;
         let incomingOpen = false;
         let handshakeAcknowledged = false;
+        let previewsPublished = false;
 
         const stopHandshake = () => {
           if (handshakeTimer) {
@@ -558,6 +676,38 @@ export default function ShareRoomPage() {
           }
         };
 
+        const publishWaitingPreviews = async () => {
+          const channel = outgoingChannelRef.current;
+          if (
+            previewsPublished ||
+            joined.role !== "owner" ||
+            channel?.readyState !== "open"
+          ) {
+            return;
+          }
+          previewsPublished = true;
+          for (const image of imagesRef.current) {
+            if (
+              image.direction !== "sent" ||
+              image.previewOnly ||
+              (image.transferStatus !== "waiting" &&
+                image.transferStatus !== "failed")
+            ) {
+              continue;
+            }
+            try {
+              const file = new File([image.blob], image.name, {
+                type: image.type,
+              });
+              const meta = createImageTransferMeta(file, image.id);
+              const thumbnail = await generateShareThumbnail(file);
+              sendImagePreview(channel, meta, thumbnail);
+            } catch (error) {
+              console.warn("Failed to publish queued image preview", error);
+            }
+          }
+        };
+
         outgoing.onopen = () => {
           outgoingChannelRef.current = outgoing;
           outgoingOpen = true;
@@ -571,6 +721,7 @@ export default function ShareRoomPage() {
         outgoing.onclose = () => {
           outgoingOpen = false;
           handshakeAcknowledged = false;
+          previewsPublished = false;
           stopHandshake();
           outgoingChannelRef.current = null;
           if (!disposed) {
@@ -589,6 +740,7 @@ export default function ShareRoomPage() {
           attachedPeerId = null;
           incomingOpen = false;
           handshakeAcknowledged = false;
+          previewsPublished = false;
           stopHandshake();
         };
 
@@ -644,6 +796,7 @@ export default function ShareRoomPage() {
                   setConnection("connected");
                   setConnectionError(null);
                   setConnectionActivity("connected");
+                  void publishWaitingPreviews();
                   return;
                 }
                 if (peerMessage?.type === "EMOJI") {
@@ -786,10 +939,14 @@ export default function ShareRoomPage() {
       sessionIdRef.current = null;
       pc.close();
     };
-  }, [addRoomImage, labels, roomId, upsertActivity]);
+  }, [addRoomImage, labels, roomId, updateRoomImage, upsertActivity]);
 
   const updateSendingActivity = React.useCallback(
     (progress: TransferProgress) => {
+      updateRoomImage(progress.id, {
+        transferStatus: "sending",
+        progress: progress.progress,
+      });
       upsertActivity({
         id: `transfer-${progress.id}`,
         kind: "sending",
@@ -799,11 +956,11 @@ export default function ShareRoomPage() {
         createdAt: Date.now(),
       });
     },
-    [labels.sending, upsertActivity],
+    [labels.sending, updateRoomImage, upsertActivity],
   );
 
   const handleFiles = async (fileList: FileList | File[]) => {
-    if (role !== "owner" || isSending) {
+    if (role !== "owner") {
       return;
     }
     const channel = outgoingChannelRef.current;
@@ -819,7 +976,6 @@ export default function ShareRoomPage() {
     }
 
     const files = Array.from(fileList);
-    setIsSending(true);
     try {
       for (const file of files) {
         if (!file.type.startsWith("image/")) {
@@ -844,7 +1000,7 @@ export default function ShareRoomPage() {
         }
 
         try {
-          const meta = await sendImageFile(channel, file, updateSendingActivity);
+          const meta = createImageTransferMeta(file);
           const image: CachedRoomImage = {
             id: meta.id,
             roomId: roomId!,
@@ -853,34 +1009,86 @@ export default function ShareRoomPage() {
             size: meta.size,
             blob: file,
             direction: "sent",
+            transferStatus: "waiting",
+            progress: 0,
+            previewOnly: false,
             createdAt: Date.now(),
           };
           await storeRoomImage(image);
           addRoomImage(image);
-          upsertActivity({
-            id: `transfer-${meta.id}`,
-            kind: "sending",
-            title: meta.name,
-            detail: `${labels.awaitingReceipt} · ${formatBytes(meta.size)}`,
-            progress: 1,
-            createdAt: Date.now(),
-          });
+          const thumbnail = await generateShareThumbnail(file);
+          sendImagePreview(channel, meta, thumbnail);
         } catch (error) {
           upsertActivity({
             id: `error-${Date.now()}-${file.name}`,
             kind: "error",
             title: file.name,
             detail:
-              error instanceof Error ? error.message : labels.transferFailed,
+              error instanceof Error ? error.message : labels.previewFailed,
             createdAt: Date.now(),
           });
         }
       }
     } finally {
-      setIsSending(false);
       if (inputRef.current) {
         inputRef.current.value = "";
       }
+    }
+  };
+
+  const handleSendImage = async (image: RoomImage) => {
+    const channel = outgoingChannelRef.current;
+    if (
+      role !== "owner" ||
+      image.direction !== "sent" ||
+      image.previewOnly ||
+      image.transferStatus === "sending" ||
+      isSending ||
+      connection !== "connected" ||
+      channel?.readyState !== "open"
+    ) {
+      return;
+    }
+
+    setIsSending(true);
+    updateRoomImage(
+      image.id,
+      { transferStatus: "sending", progress: 0 },
+      true,
+    );
+    try {
+      const file = new File([image.blob], image.name, { type: image.type });
+      const meta = await sendImageFile(
+        channel,
+        file,
+        updateSendingActivity,
+        image.id,
+      );
+      updateRoomImage(
+        image.id,
+        { transferStatus: "awaiting-receipt", progress: 1 },
+        true,
+      );
+      upsertActivity({
+        id: `transfer-${meta.id}`,
+        kind: "sending",
+        title: meta.name,
+        detail: `${labels.awaitingReceipt} · ${formatBytes(meta.size)}`,
+        progress: 1,
+        createdAt: Date.now(),
+      });
+    } catch (error) {
+      updateRoomImage(image.id, { transferStatus: "failed" }, true);
+      upsertActivity({
+        id: `transfer-${image.id}`,
+        kind: "error",
+        title: image.name,
+        detail:
+          error instanceof Error ? error.message : labels.transferFailed,
+        createdAt: Date.now(),
+      });
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -1130,43 +1338,108 @@ export default function ShareRoomPage() {
             >
               {images.length ? (
                 <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 xl:grid-cols-4 2xl:grid-cols-5">
-                  {images.map((image) => (
+                  {images.map((image) => {
+                    const status = image.transferStatus ||
+                      (image.direction === "sent" ? "sent" : "received");
+                    const progress = Math.round((image.progress || 0) * 100);
+                    const statusLabel =
+                      status === "waiting"
+                        ? image.direction === "sent"
+                          ? labels.waitingToSend
+                          : labels.waitingForSender
+                        : status === "sending"
+                          ? `${labels.sending} ${progress}%`
+                          : status === "receiving"
+                            ? `${labels.receiving} ${progress}%`
+                            : status === "awaiting-receipt"
+                              ? labels.awaitingReceipt
+                              : status === "failed"
+                                ? labels.transferFailed
+                                : status === "sent"
+                                  ? labels.sent
+                                  : labels.received;
+                    const showProgress =
+                      status === "sending" ||
+                      status === "receiving" ||
+                      status === "awaiting-receipt";
+                    return (
                     <article
                       key={image.id}
                       className="overflow-hidden rounded-md border border-slate-200 bg-white"
                     >
-                      <div className="aspect-square bg-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImageId(image.id)}
+                        className="block aspect-square w-full overflow-hidden bg-slate-100"
+                        aria-label={`${image.name} preview`}
+                      >
                         {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={image.url}
                           alt={image.name}
-                          className="h-full w-full object-cover"
+                          className={`h-full w-full transition duration-200 hover:scale-[1.02] ${
+                            image.previewOnly
+                              ? "object-contain [image-rendering:auto]"
+                              : "object-cover"
+                          }`}
                         />
-                      </div>
+                      </button>
                       <div className="p-3">
                         <div className="truncate text-sm font-semibold text-slate-800">
                           {image.name}
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
                           <span>{formatBytes(image.size)}</span>
-                          <span>
-                            {image.direction === "sent"
-                              ? labels.sent
-                              : labels.received}
-                          </span>
+                          <span>{statusLabel}</span>
                         </div>
-                        <a
-                          href={image.url}
-                          download={image.name}
-                          className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                        >
-                          <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span>{labels.download}</span>
-                        </a>
+                        {image.previewOnly ? (
+                          <div className="mt-2 text-[11px] text-slate-400">
+                            {labels.previewOnly}
+                          </div>
+                        ) : null}
+                        {image.direction === "sent" &&
+                        (status === "waiting" || status === "failed") ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleSendImage(image)}
+                            disabled={isSending || connection !== "connected"}
+                            className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-45"
+                          >
+                            <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>{labels.send}</span>
+                          </button>
+                        ) : showProgress ? (
+                          <div className="mt-3 rounded-md border border-slate-200 px-3 py-2.5">
+                            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
+                              <span className="truncate">{statusLabel}</span>
+                              <span>{progress}%</span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className="h-full rounded-full bg-[#2f65cf] transition-[width] duration-150"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : status === "waiting" ? (
+                          <div className="mt-3 flex h-9 items-center justify-center rounded-md border border-slate-200 text-xs font-semibold text-slate-500">
+                            {labels.waitingForSender}
+                          </div>
+                        ) : (
+                          <a
+                            href={image.url}
+                            download={image.name}
+                            className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                          >
+                            <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
+                            <span>{labels.download}</span>
+                          </a>
+                        )}
                       </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <button
@@ -1365,6 +1638,16 @@ export default function ShareRoomPage() {
           </div>
         </aside>
       </div>
+      {previewImage ? (
+        <RoomImagePreviewDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPreviewImageId(null);
+          }}
+          src={previewImage.url}
+          name={previewImage.name}
+        />
+      ) : null}
     </main>
   );
 }

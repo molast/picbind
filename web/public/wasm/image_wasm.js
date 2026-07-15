@@ -99,6 +99,23 @@ export function analyze_image_metrics(input) {
 
 /**
  * @param {Uint8Array} original_input
+ * @param {Uint8Array} assessed_input
+ * @returns {any}
+ */
+export function calculate_image_quality_score(original_input, assessed_input) {
+    const ptr0 = passArray8ToWasm0(original_input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(assessed_input, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.calculate_image_quality_score(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} original_input
  * @param {Uint8Array} compressed_input
  * @returns {any}
  */
@@ -207,6 +224,22 @@ export function generate_favicon(input) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
+ * @returns {Uint8Array}
+ */
+export function generate_share_thumbnail(input) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.generate_share_thumbnail(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
 }
 
 function __wbg_get_imports() {

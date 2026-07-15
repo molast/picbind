@@ -34,6 +34,8 @@ export class CompressionResult {
 
 export function analyze_image_metrics(input: Uint8Array): any;
 
+export function calculate_image_quality_score(original_input: Uint8Array, assessed_input: Uint8Array): any;
+
 export function compare_image_quality(original_input: Uint8Array, compressed_input: Uint8Array): any;
 
 export function compress_image(input: Uint8Array, quality: number): CompressionResult;
@@ -48,13 +50,15 @@ export function create_zip_from_items(items: Array<any>): Uint8Array;
 
 export function generate_favicon(input: Uint8Array): object;
 
+export function generate_share_thumbnail(input: Uint8Array): Uint8Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressionresult_free: (a: number, b: number) => void;
     readonly analyze_image_metrics: (a: number, b: number) => [number, number, number];
-    readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly calculate_image_quality_score: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compress_image: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
@@ -64,6 +68,7 @@ export interface InitOutput {
     readonly compressionresult_mime: (a: number) => [number, number];
     readonly create_zip_from_items: (a: any) => [number, number, number, number];
     readonly generate_favicon: (a: number, b: number) => [number, number, number];
+    readonly generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
     readonly lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_add_text: (a: number, b: number, c: number) => number;
     readonly lodepng_auto_choose_color: (a: number, b: number, c: number, d: number, e: number) => number;
@@ -141,6 +146,7 @@ export interface InitOutput {
     readonly zlib_compress: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly zlib_decompress: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_chunk_next_const: (a: number) => number;
+    readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

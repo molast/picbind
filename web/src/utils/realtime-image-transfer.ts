@@ -1,7 +1,8 @@
 "use client";
 
-export const IMAGE_CHUNK_SIZE = 32 * 1024;
+export const IMAGE_CHUNK_SIZE = 16 * 1024;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
+const MAX_THUMBNAIL_BYTES = 64 * 1024;
 const MAX_BUFFERED_BYTES = 512 * 1024;
 const BUFFER_DRAIN_TIMEOUT_MS = 60_000;
 
@@ -14,6 +15,10 @@ export type ImageTransferMeta = {
 };
 
 type TransferControlMessage =
+  | {
+      type: "IMAGE_PREVIEW";
+      payload: ImageTransferMeta & { thumbnailBase64: string };
+    }
   | { type: "IMAGE_START"; payload: ImageTransferMeta }
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
   | { type: "IMAGE_RECEIVED"; payload: { id: string } }
@@ -33,6 +38,7 @@ export type TransferProgress = ImageTransferMeta & {
 
 export type ImageReceiverCallbacks = {
   onStart(meta: ImageTransferMeta): void;
+  onPreview?(meta: ImageTransferMeta, thumbnail: Blob): void | Promise<void>;
   onProgress(progress: TransferProgress): void;
   onComplete(meta: ImageTransferMeta, blob: Blob): void | Promise<void>;
   onError(meta: ImageTransferMeta | null, reason: string): void;
@@ -41,6 +47,40 @@ export type ImageReceiverCallbacks = {
 
 function createTransferId() {
   return crypto.randomUUID().replace(/-/g, "");
+}
+
+export function createImageTransferMeta(file: Blob & { name?: string }, id = createTransferId()) {
+  return {
+    id,
+    name: file.name || "shared-image",
+    type: file.type,
+    size: file.size,
+    totalChunks: Math.ceil(file.size / IMAGE_CHUNK_SIZE),
+  } satisfies ImageTransferMeta;
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+function decodeThumbnail(value: unknown) {
+  if (typeof value !== "string" || value.length > MAX_THUMBNAIL_BYTES * 2) {
+    return null;
+  }
+  try {
+    const binary = atob(value);
+    if (binary.length > MAX_THUMBNAIL_BYTES) {
+      return null;
+    }
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new Blob([bytes], { type: "image/png" });
+  } catch {
+    return null;
+  }
 }
 
 function sendControl(channel: RTCDataChannel, message: TransferControlMessage) {
@@ -75,6 +115,23 @@ export function sendImageReceipt(channel: RTCDataChannel, id: string) {
   }
 }
 
+export function sendImagePreview(
+  channel: RTCDataChannel,
+  meta: ImageTransferMeta,
+  thumbnail: Uint8Array,
+) {
+  if (channel.readyState !== "open") {
+    throw new Error("DataChannel is not open");
+  }
+  if (thumbnail.byteLength > MAX_THUMBNAIL_BYTES) {
+    throw new Error("Generated thumbnail is too large");
+  }
+  sendControl(channel, {
+    type: "IMAGE_PREVIEW",
+    payload: { ...meta, thumbnailBase64: bytesToBase64(thumbnail) },
+  });
+}
+
 async function waitForWritableBuffer(channel: RTCDataChannel) {
   const startedAt = Date.now();
   while (channel.bufferedAmount > MAX_BUFFERED_BYTES) {
@@ -92,18 +149,13 @@ export async function sendImageFile(
   channel: RTCDataChannel,
   file: File,
   onProgress: (progress: TransferProgress) => void,
+  transferId?: string,
 ) {
   if (channel.readyState !== "open") {
     throw new Error("DataChannel is not open");
   }
 
-  const meta: ImageTransferMeta = {
-    id: createTransferId(),
-    name: file.name,
-    type: file.type || "application/octet-stream",
-    size: file.size,
-    totalChunks: Math.ceil(file.size / IMAGE_CHUNK_SIZE),
-  };
+  const meta = createImageTransferMeta(file, transferId);
   sendControl(channel, { type: "IMAGE_START", payload: meta });
   onProgress({ ...meta, transferredBytes: 0, progress: 0 });
 
@@ -158,6 +210,20 @@ export class RealtimeImageReceiver {
       return;
     }
     const message = parsed as TransferControlMessage;
+
+    if (message.type === "IMAGE_PREVIEW") {
+      if (!isValidMeta(message.payload)) {
+        this.callbacks.onError(null, "Received invalid image preview metadata");
+        return;
+      }
+      const thumbnail = decodeThumbnail(message.payload.thumbnailBase64);
+      if (!thumbnail) {
+        this.callbacks.onError(message.payload, "Received an invalid image preview");
+        return;
+      }
+      void this.callbacks.onPreview?.(message.payload, thumbnail);
+      return;
+    }
 
     if (message.type === "IMAGE_START") {
       if (!isValidMeta(message.payload)) {
