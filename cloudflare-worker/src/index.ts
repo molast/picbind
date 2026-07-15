@@ -5,6 +5,7 @@ import {
 } from "./metrics-counter";
 import { handleCreateShareRoom, handleShareRoomRealtime } from "./realtime/share-room";
 import { ShareRoomObject } from "./realtime/share-room-object";
+import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -19,7 +20,7 @@ type MetricsConfig = {
   updatedAt: string;
 };
 
-type Env = {
+type Env = RuntimeLogEnv & {
   METRICS_KV: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<void>;
@@ -229,6 +230,7 @@ function corsHeaders(env: Env, request: Request) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
       "access-control-allow-headers": "content-type,x-admin-key",
+      "access-control-expose-headers": "x-picbind-dev-mode",
       "access-control-max-age": "86400",
     };
   }
@@ -237,6 +239,7 @@ function corsHeaders(env: Env, request: Request) {
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type,x-admin-key",
+    "access-control-expose-headers": "x-picbind-dev-mode",
     "access-control-max-age": "86400",
   };
   if (origin && allowedOrigins(env, request).has(origin)) {
@@ -248,6 +251,7 @@ function corsHeaders(env: Env, request: Request) {
 
 function withCors(response: Response, env: Env, request: Request) {
   const headers = new Headers(response.headers);
+  headers.set("x-picbind-dev-mode", isDevMode(env) ? "1" : "0");
   for (const [key, value] of Object.entries(corsHeaders(env, request))) {
     headers.set(key, value);
   }
@@ -290,6 +294,7 @@ function buildLimiterIdentity(request: Request) {
 }
 
 async function checkLimiter(
+  env: Env,
   limiter: Env["GLOBAL_LIMITER"] | Env["ROUTE_LIMITER"] | undefined,
   key: string,
 ) {
@@ -300,7 +305,7 @@ async function checkLimiter(
     const result = await limiter.limit({ key });
     return result.success;
   } catch (error) {
-    console.error("Rate limiter check failed:", error);
+    devError(env, "Rate limiter check failed:", error);
     return true;
   }
 }
@@ -330,7 +335,7 @@ async function readCounterState(env: Env) {
     });
     return normalizeCounterState(state);
   } catch (error) {
-    console.error("Read counter state failed:", error);
+    devError(env, "Read counter state failed:", error);
     return createInitialCounterState();
   }
 }
@@ -416,7 +421,7 @@ async function handlePageView(request: Request, env: Env) {
     );
     return json({ totalViews: counter.totalViews });
   } catch (error) {
-    console.error("Page view counter failed:", error);
+    devError(env, "Page view counter failed:", error);
     return json({ error: "Failed to update page view" }, { status: 500 });
   }
 }
@@ -515,7 +520,7 @@ const worker = {
     const globalRateKey = `global:${limiterIdentity}`;
     const routeRateKey = `route:${limiterIdentity}:${pathname}`;
 
-    const globalAllowed = await checkLimiter(env.GLOBAL_LIMITER, globalRateKey);
+    const globalAllowed = await checkLimiter(env, env.GLOBAL_LIMITER, globalRateKey);
     if (!globalAllowed) {
       return withCors(
         json({ error: "Too many requests (global limiter)" }, { status: 429 }),
@@ -524,7 +529,7 @@ const worker = {
       );
     }
 
-    const routeAllowed = await checkLimiter(env.ROUTE_LIMITER, routeRateKey);
+    const routeAllowed = await checkLimiter(env, env.ROUTE_LIMITER, routeRateKey);
     if (!routeAllowed) {
       return withCors(
         json({ error: "Too many requests (route limiter)" }, { status: 429 }),
@@ -558,7 +563,7 @@ const worker = {
 
       return withCors(response, env, request);
     } catch (error) {
-      console.error("Worker request failed:", error);
+      devError(env, "Worker request failed:", error);
       return withCors(
         json({ error: "Internal error" }, { status: 500 }),
         env,

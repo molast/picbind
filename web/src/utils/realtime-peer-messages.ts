@@ -9,6 +9,10 @@ export type PeerMessage =
       type: "EMOJI";
       payload: { id: string; emoji: string; sentAt: number };
     }
+  | {
+      type: "TEXT";
+      payload: { id: string; text: string; sentAt: number };
+    }
   | { type: "MESSAGE_ACK"; payload: { replyTo: string } };
 
 export function createPeerMessageId() {
@@ -66,6 +70,23 @@ export function parsePeerMessage(data: string): PeerMessage | null {
       payload: {
         id: message.payload.id,
         emoji: message.payload.emoji,
+        sentAt: message.payload.sentAt,
+      },
+    };
+  }
+  if (
+    message.type === "TEXT" &&
+    typeof message.payload?.id === "string" &&
+    typeof message.payload?.text === "string" &&
+    message.payload.text.trim().length > 0 &&
+    message.payload.text.length <= 200 &&
+    typeof message.payload?.sentAt === "number"
+  ) {
+    return {
+      type: "TEXT",
+      payload: {
+        id: message.payload.id,
+        text: message.payload.text,
         sentAt: message.payload.sentAt,
       },
     };

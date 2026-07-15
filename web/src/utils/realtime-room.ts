@@ -40,7 +40,6 @@ async function roomRequest<T>(
   keepalive = false,
 ) {
   const url = getShareRoomRealtimeApiPath(action);
-  console.info("[PicBind Realtime] request", { action, url, body });
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -48,21 +47,37 @@ async function roomRequest<T>(
     keepalive,
   });
   const raw = await response.text();
-  console.info("[PicBind Realtime] response", {
-    action,
-    status: response.status,
-    statusText: response.statusText,
-    raw,
-  });
+  const debug = response.headers.get("x-picbind-dev-mode") === "1";
+  if (debug) {
+    console.info("[PicBind Realtime] request", { action, url, body });
+    console.info("[PicBind Realtime] response", {
+      action,
+      status: response.status,
+      statusText: response.statusText,
+      raw,
+    });
+  }
   let result: (T & { error?: string; stage?: string }) | null = null;
   try {
     result = raw ? (JSON.parse(raw) as T & { error?: string; stage?: string }) : null;
   } catch (error) {
-    console.error("[PicBind Realtime] response JSON parse failed", { action, raw, error });
+    if (debug) {
+      console.error("[PicBind Realtime] response JSON parse failed", {
+        action,
+        raw,
+        error,
+      });
+    }
     throw new Error(`Realtime ${action} returned invalid JSON: ${raw}`);
   }
   if (!response.ok || !result) {
-    console.error("[PicBind Realtime] request failed", { action, status: response.status, result });
+    if (debug) {
+      console.error("[PicBind Realtime] request failed", {
+        action,
+        status: response.status,
+        result,
+      });
+    }
     throw new RealtimeRoomRequestError(
       result?.error || `Realtime ${action} failed (${response.status})`,
       response.status,

@@ -116,6 +116,14 @@ function formatTime(timestamp: number) {
   }).format(timestamp);
 }
 
+function middleEllipsisFileName(name: string, maxLength = 28) {
+  if (name.length <= maxLength) return name;
+  const dotIndex = name.lastIndexOf(".");
+  const extension = dotIndex > 0 ? name.slice(dotIndex) : "";
+  const availablePrefix = Math.max(6, maxLength - extension.length - 3);
+  return `${name.slice(0, availablePrefix)}...${extension}`;
+}
+
 export default function ShareRoomPage() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
@@ -139,6 +147,10 @@ export default function ShareRoomPage() {
   const [isSending, setIsSending] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
+  const [textMessage, setTextMessage] = React.useState("");
+  const [floatingEmojis, setFloatingEmojis] = React.useState<
+    Array<{ id: string; emoji: string }>
+  >([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
 
   const labels = React.useMemo(
@@ -174,7 +186,10 @@ export default function ShareRoomPage() {
           offline: "离线",
           activity: "传输消息",
           noActivity: "暂无传输消息",
-          testMessage: "测试消息",
+          testMessage: "发送文本消息",
+          textPlaceholder: "输入消息",
+          sendMessage: "发送",
+          quickReactions: "快捷表情",
           messageSending: "等待对方确认",
           messageSent: "对方已接收",
           messageReceived: "收到普通消息",
@@ -224,7 +239,10 @@ export default function ShareRoomPage() {
           offline: "Offline",
           activity: "Transfer messages",
           noActivity: "No transfer messages yet",
-          testMessage: "Test message",
+          testMessage: "Send a text message",
+          textPlaceholder: "Type a message",
+          sendMessage: "Send",
+          quickReactions: "Quick reactions",
           messageSending: "Waiting for peer confirmation",
           messageSent: "Received by peer",
           messageReceived: "Regular message received",
@@ -249,7 +267,14 @@ export default function ShareRoomPage() {
   );
 
   const validRoomId = Boolean(roomId && ROOM_ID_PATTERN.test(roomId));
-  const previewImage = images.find((image) => image.id === previewImageId) || null;
+  const previewImages = images.filter(
+    (image) =>
+      !image.previewOnly &&
+      (image.transferStatus === "sent" ||
+        image.transferStatus === "received"),
+  );
+  const previewImage =
+    previewImages.find((image) => image.id === previewImageId) || null;
 
   const upsertActivity = React.useCallback((activity: ActivityItem) => {
     setActivities((current) => {
@@ -261,6 +286,15 @@ export default function ShareRoomPage() {
       next[index] = { ...next[index], ...activity };
       return next;
     });
+  }, []);
+
+  const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
+    setFloatingEmojis((current) => [...current, { id, emoji }].slice(-6));
+    window.setTimeout(() => {
+      setFloatingEmojis((current) =>
+        current.filter((item) => item.id !== id),
+      );
+    }, 2200);
   }, []);
 
   const addRoomImage = React.useCallback((image: CachedRoomImage) => {
@@ -670,10 +704,21 @@ export default function ShareRoomPage() {
         return;
       }
       if (peerMessage?.type === "EMOJI") {
+        showFloatingEmoji(
+          peerMessage.payload.id,
+          peerMessage.payload.emoji,
+        );
+        sendWhenReady({
+          type: "MESSAGE_ACK",
+          payload: { replyTo: peerMessage.payload.id },
+        });
+        return;
+      }
+      if (peerMessage?.type === "TEXT") {
         upsertActivity({
           id: `message-${peerMessage.payload.id}`,
           kind: "message",
-          title: peerMessage.payload.emoji,
+          title: peerMessage.payload.text,
           detail: `${labels.messageReceived} · ${
             connectedRole === "owner" ? labels.guest : labels.owner
           }`,
@@ -1086,7 +1131,14 @@ export default function ShareRoomPage() {
       closePeerConnection();
       sessionIdRef.current = null;
     };
-  }, [addRoomImage, labels, roomId, updateRoomImage, upsertActivity]);
+  }, [
+    addRoomImage,
+    labels,
+    roomId,
+    showFloatingEmoji,
+    updateRoomImage,
+    upsertActivity,
+  ]);
 
   const updateSendingActivity = React.useCallback(
     (progress: TransferProgress) => {
@@ -1314,6 +1366,28 @@ export default function ShareRoomPage() {
     });
   };
 
+  const handleTextMessage = () => {
+    const text = textMessage.trim().slice(0, 200);
+    if (!text || connection !== "connected") return;
+    const id = createPeerMessageId();
+    if (
+      !sendPeerMessage(outgoingChannelRef.current, {
+        type: "TEXT",
+        payload: { id, text, sentAt: Date.now() },
+      })
+    ) {
+      return;
+    }
+    setTextMessage("");
+    upsertActivity({
+      id: `message-${id}`,
+      kind: "message",
+      title: text,
+      detail: labels.messageSending,
+      createdAt: Date.now(),
+    });
+  };
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -1509,6 +1583,9 @@ export default function ShareRoomPage() {
                       status === "sending" ||
                       status === "receiving" ||
                       status === "awaiting-receipt";
+                    const canPreview =
+                      !image.previewOnly &&
+                      (status === "sent" || status === "received");
                     return (
                     <article
                       key={image.id}
@@ -1516,8 +1593,11 @@ export default function ShareRoomPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => setPreviewImageId(image.id)}
-                        className="block aspect-square w-full overflow-hidden bg-slate-100"
+                        onClick={() => {
+                          if (canPreview) setPreviewImageId(image.id);
+                        }}
+                        disabled={!canPreview}
+                        className="block aspect-square w-full overflow-hidden bg-slate-100 disabled:cursor-default"
                         aria-label={`${image.name} preview`}
                       >
                         {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
@@ -1533,8 +1613,11 @@ export default function ShareRoomPage() {
                         />
                       </button>
                       <div className="p-3">
-                        <div className="truncate text-sm font-semibold text-slate-800">
-                          {image.name}
+                        <div
+                          className="truncate text-sm font-semibold text-slate-800"
+                          title={image.name}
+                        >
+                          {middleEllipsisFileName(image.name)}
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
                           <span>{formatBytes(image.size)}</span>
@@ -1655,7 +1738,7 @@ export default function ShareRoomPage() {
                   key={member.clientId}
                   className="flex items-center justify-between gap-3"
                 >
-                  <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold uppercase text-slate-600">
                       {member.role === "owner" ? "O" : "G"}
                     </span>
@@ -1668,11 +1751,15 @@ export default function ShareRoomPage() {
                       ) : null}
                     </span>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-                    <span
-                      className={`h-2 w-2 rounded-full ${online ? "bg-emerald-500" : "bg-slate-300"}`}
-                    />
-                    {online ? labels.online : labels.offline}
+                  <span
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white ${online ? "bg-emerald-500" : "bg-slate-300"}`}
+                    title={online ? labels.online : labels.offline}
+                    role="img"
+                    aria-label={online ? labels.online : labels.offline}
+                  >
+                    <span className="sr-only">
+                      {online ? labels.online : labels.offline}
+                    </span>
                   </span>
                 </div>
                 );
@@ -1683,6 +1770,34 @@ export default function ShareRoomPage() {
           <div className="border-b border-slate-200 px-4 py-3">
             <div className="mb-2 text-xs font-semibold uppercase text-slate-500">
               {labels.testMessage}
+            </div>
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleTextMessage();
+              }}
+            >
+              <input
+                value={textMessage}
+                onChange={(event) => setTextMessage(event.target.value)}
+                maxLength={200}
+                disabled={connection !== "connected"}
+                placeholder={labels.textPlaceholder}
+                className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
+              />
+              <button
+                type="submit"
+                disabled={connection !== "connected" || !textMessage.trim()}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#2f65cf] text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={labels.sendMessage}
+                title={labels.sendMessage}
+              >
+                <FiSend className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </form>
+            <div className="mb-2 mt-3 text-[11px] font-semibold uppercase text-slate-400">
+              {labels.quickReactions}
             </div>
             <div className="flex items-center gap-2">
               {TEST_EMOJIS.map((emoji) => (
@@ -1696,8 +1811,8 @@ export default function ShareRoomPage() {
                       ? "-translate-y-1 scale-125 border-blue-400 bg-blue-50 shadow-md"
                       : "scale-100"
                   }`}
-                  aria-label={`${labels.testMessage} ${emoji}`}
-                  title={`${labels.testMessage} ${emoji}`}
+                  aria-label={`${labels.quickReactions} ${emoji}`}
+                  title={`${labels.quickReactions} ${emoji}`}
                 >
                   {emoji}
                 </button>
@@ -1748,8 +1863,11 @@ export default function ShareRoomPage() {
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <span className="truncate text-sm font-semibold text-slate-800">
-                              {activity.title}
+                            <span
+                              className="min-w-0 truncate text-sm font-semibold text-slate-800"
+                              title={activity.title}
+                            >
+                              {middleEllipsisFileName(activity.title, 32)}
                             </span>
                             <span className="shrink-0 text-[11px] text-slate-400">
                               {formatTime(activity.createdAt)}
@@ -1791,10 +1909,38 @@ export default function ShareRoomPage() {
           onOpenChange={(open) => {
             if (!open) setPreviewImageId(null);
           }}
-          src={previewImage.url}
-          name={previewImage.name}
+          images={previewImages.map((image) => ({
+            id: image.id,
+            src: image.url,
+            name: image.name,
+          }))}
+          activeId={previewImage.id}
+          onActiveChange={setPreviewImageId}
         />
       ) : null}
+      <div className="pointer-events-none fixed inset-0 z-[105] overflow-hidden" aria-hidden="true">
+        {floatingEmojis.map((item, index) => (
+          <span
+            key={item.id}
+            className="absolute left-1/2 top-[58%] text-5xl"
+            style={{
+              animation: `picbind-emoji-float 2.2s cubic-bezier(0.2,0.75,0.25,1) forwards`,
+              animationDelay: `${index * 45}ms`,
+            }}
+          >
+            {item.emoji}
+          </span>
+        ))}
+      </div>
+      <style jsx global>{`
+        @keyframes picbind-emoji-float {
+          0% { opacity: 0; transform: translate(-50%, 20px) scale(0.35) rotate(-8deg); }
+          18% { opacity: 1; transform: translate(calc(-50% + 38px), -28px) scale(0.9) rotate(6deg); }
+          48% { opacity: 1; transform: translate(calc(-50% - 46px), -120px) scale(1.45) rotate(-5deg); }
+          76% { opacity: 0.9; transform: translate(calc(-50% + 25px), -220px) scale(1.9) rotate(4deg); }
+          100% { opacity: 0; transform: translate(calc(-50% - 18px), -330px) scale(2.35) rotate(0deg); }
+        }
+      `}</style>
     </main>
   );
 }

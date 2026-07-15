@@ -3,8 +3,9 @@ import {
   type ShareRoomMember,
   type ShareRoomState,
 } from "./share-room-object";
+import { devError, type RuntimeLogEnv } from "../runtime-log";
 
-export type RealtimeRoomEnv = {
+export type RealtimeRoomEnv = RuntimeLogEnv & {
   REALTIME_ROOMS: DurableObjectNamespace;
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
@@ -337,7 +338,7 @@ export async function handleShareRoomRealtime(
     return json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Realtime request failed";
-    console.error("Share room realtime request failed", { stage, message });
+    devError(env, "Share room realtime request failed", { stage, message });
     const status = /not found|expired/i.test(message) ? 404 : 400;
     return json({ error: message, stage }, { status });
   }
@@ -379,7 +380,7 @@ export async function handleCreateShareRoom(
     body: JSON.stringify(room),
   });
   if (!initialized.ok) {
-    console.error("Failed to initialize share room", await initialized.text());
+    devError(env, "Failed to initialize share room", await initialized.text());
     return json({ error: "Failed to create room" }, { status: 500 });
   }
 

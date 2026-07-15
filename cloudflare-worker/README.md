@@ -28,6 +28,7 @@ Notes:
 
 ## Optional environment variables
 
+- `DEV_MODE`: set to `1` to enable Worker and browser Realtime logs; use `0` in production.
 - `ADMIN_KEY`: enables admin endpoints.
 - `SITE_URL`: canonical site URL.
 - `ALLOWED_ORIGINS`: comma-separated allowed origins.

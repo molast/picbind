@@ -27,6 +27,7 @@ tag = "v2"
 new_sqlite_classes = ["ShareRoomObject"]
 
 [vars]
+DEV_MODE = "0"
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
@@ -42,6 +43,7 @@ namespace_id = "1002"
 simple = { limit = 60, period = 60 }
 
 [env.preview.vars]
+DEV_MODE = "1"
 SITE_URL = "https://preview.picbind.pages.dev"
 ALLOWED_ORIGINS = "*"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
