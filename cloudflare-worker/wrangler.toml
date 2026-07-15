@@ -10,6 +10,10 @@ routes = [
 binding = "METRICS_KV"
 id = "ffd6a9e2ce924cf2a4b93b782d525810"
 
+[[r2_buckets]]
+binding = "SHARE_IMAGES_R2"
+bucket_name = "picbind-bucket"
+
 [[durable_objects.bindings]]
 name = "METRICS_COUNTER"
 class_name = "MetricsCounter"
