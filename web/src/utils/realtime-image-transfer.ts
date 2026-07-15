@@ -5,7 +5,10 @@ import type { ImagePlaceholderMetadata } from "./share-placeholder";
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
 const MAX_THUMBNAIL_BYTES = 64 * 1024;
-const MAX_BUFFERED_BYTES = 512 * 1024;
+// Keep the SCTP queue deliberately small for mobile and Wi-Fi connections.
+// Pause at the high-water mark, then wait for a real drain before resuming.
+const BUFFER_HIGH_WATER_BYTES = 256 * 1024;
+const BUFFER_LOW_WATER_BYTES = 64 * 1024;
 const BUFFER_DRAIN_TIMEOUT_MS = 60_000;
 
 export type ImageTransferMeta = {
@@ -183,16 +186,41 @@ export function sendImagePreview(
 }
 
 async function waitForWritableBuffer(channel: RTCDataChannel) {
-  const startedAt = Date.now();
-  while (channel.bufferedAmount > MAX_BUFFERED_BYTES) {
-    if (channel.readyState !== "open") {
-      throw new Error("DataChannel closed during transfer");
-    }
-    if (Date.now() - startedAt >= BUFFER_DRAIN_TIMEOUT_MS) {
-      throw new Error("The peer stopped receiving image data");
-    }
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+  if (channel.readyState !== "open") {
+    throw new Error("DataChannel closed during transfer");
   }
+  if (channel.bufferedAmount <= BUFFER_HIGH_WATER_BYTES) {
+    return;
+  }
+
+  channel.bufferedAmountLowThreshold = BUFFER_LOW_WATER_BYTES;
+  await new Promise<void>((resolve, reject) => {
+    let timeoutId: number | undefined;
+    const cleanUp = () => {
+      channel.removeEventListener("bufferedamountlow", onBufferedAmountLow);
+      channel.removeEventListener("close", onClose);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+    const onBufferedAmountLow = () => {
+      if (channel.bufferedAmount <= BUFFER_LOW_WATER_BYTES) {
+        cleanUp();
+        resolve();
+      }
+    };
+    const onClose = () => {
+      cleanUp();
+      reject(new Error("DataChannel closed during transfer"));
+    };
+
+    channel.addEventListener("bufferedamountlow", onBufferedAmountLow);
+    channel.addEventListener("close", onClose, { once: true });
+    timeoutId = window.setTimeout(() => {
+      cleanUp();
+      reject(new Error("The peer stopped receiving image data"));
+    }, BUFFER_DRAIN_TIMEOUT_MS);
+    // The buffer can drain between the first check and listener registration.
+    onBufferedAmountLow();
+  });
 }
 
 export async function sendImageFile(

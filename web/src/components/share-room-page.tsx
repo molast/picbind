@@ -164,6 +164,7 @@ export default function ShareRoomPage() {
   const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
   const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
@@ -516,7 +517,8 @@ export default function ShareRoomPage() {
     let statsTimer: number | undefined;
     let connectedRole: RoomRole | null = null;
     let connection: RTCPeerConnection | null = null;
-    let channel: RTCDataChannel | null = null;
+    let controlChannel: RTCDataChannel | null = null;
+    let fileChannel: RTCDataChannel | null = null;
     let iceServers: RTCIceServer[] = [];
     let currentPeerSessionId: string | null = null;
     let currentOfferSdp: string | null = null;
@@ -805,7 +807,7 @@ export default function ShareRoomPage() {
         return;
       }
       handshakeAttempts += 1;
-      sendPeerMessage(outgoingChannelRef.current, {
+      sendPeerMessage(controlChannelRef.current, {
         type: "HELLO",
         payload: { id: handshakeId },
       });
@@ -813,7 +815,7 @@ export default function ShareRoomPage() {
 
     const startHandshake = () => {
       if (
-        channel?.readyState !== "open" ||
+        controlChannel?.readyState !== "open" ||
         handshakeAcknowledged ||
         handshakeTimer ||
         disposed
@@ -836,7 +838,7 @@ export default function ShareRoomPage() {
       if (disposed) {
         return;
       }
-      if (sendPeerMessage(outgoingChannelRef.current, message)) {
+      if (sendPeerMessage(controlChannelRef.current, message)) {
         return;
       }
       if (attempt < 100) {
@@ -844,13 +846,8 @@ export default function ShareRoomPage() {
       }
     };
 
-    const handleChannelMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "string") {
-        if (event.data instanceof ArrayBuffer) {
-          receiver.handle(event.data);
-        }
-        return;
-      }
+    const handleControlMessage = (event: MessageEvent) => {
+      if (typeof event.data !== "string") return;
       const peerMessage = parsePeerMessage(event.data);
       if (peerMessage?.type === "HELLO") {
         sendWhenReady({
@@ -914,35 +911,53 @@ export default function ShareRoomPage() {
         );
         return;
       }
-      receiver.handle(event.data);
     };
 
-    const attachChannel = (nextChannel: RTCDataChannel) => {
-      channel = nextChannel;
-      channel.binaryType = "arraybuffer";
+    const attachControlChannel = (nextChannel: RTCDataChannel) => {
+      controlChannel = nextChannel;
       handshakeId = createPeerMessageId();
       handshakeAttempts = 0;
       handshakeAcknowledged = false;
       handshakeAttempts = 0;
       placeholdersPublished = false;
-      channel.onmessage = handleChannelMessage;
-      channel.onopen = () => {
-        outgoingChannelRef.current = channel;
+      controlChannel.onmessage = handleControlMessage;
+      controlChannel.onopen = () => {
+        controlChannelRef.current = controlChannel;
         startHandshake();
       };
-      channel.onclose = () => {
+      controlChannel.onclose = () => {
         stopHandshake();
         handshakeAcknowledged = false;
         placeholdersPublished = false;
+        controlChannelRef.current = null;
+        if (!disposed) {
+          setConnection("waiting");
+          setConnectionActivity("waiting");
+        }
+      };
+      if (controlChannel.readyState === "open") {
+        controlChannelRef.current = controlChannel;
+        startHandshake();
+      }
+    };
+
+    const attachFileChannel = (nextChannel: RTCDataChannel) => {
+      fileChannel = nextChannel;
+      fileChannel.binaryType = "arraybuffer";
+      fileChannel.onmessage = (event) => receiver.handle(event.data);
+      fileChannel.onopen = () => {
+        outgoingChannelRef.current = fileChannel;
+        if (handshakeAcknowledged) void publishWaitingPlaceholders();
+      };
+      fileChannel.onclose = () => {
         outgoingChannelRef.current = null;
         if (!disposed) {
           setConnection("waiting");
           setConnectionActivity("waiting");
         }
       };
-      if (channel.readyState === "open") {
-        outgoingChannelRef.current = channel;
-        startHandshake();
+      if (fileChannel.readyState === "open") {
+        outgoingChannelRef.current = fileChannel;
       }
     };
 
@@ -953,9 +968,13 @@ export default function ShareRoomPage() {
         statsTimer = undefined;
       }
       if (!disposed) setNetworkLatencyMs(null);
-      if (channel) {
-        channel.onclose = null;
-        channel.close();
+      if (controlChannel) {
+        controlChannel.onclose = null;
+        controlChannel.close();
+      }
+      if (fileChannel) {
+        fileChannel.onclose = null;
+        fileChannel.close();
       }
       if (connection) {
         connection.ondatachannel = null;
@@ -963,9 +982,11 @@ export default function ShareRoomPage() {
         connection.onicecandidate = null;
         connection.close();
       }
-      channel = null;
+      controlChannel = null;
+      fileChannel = null;
       connection = null;
       outgoingChannelRef.current = null;
+      controlChannelRef.current = null;
       currentPeerSessionId = null;
       currentOfferSdp = null;
       appliedRemoteCandidates.clear();
@@ -992,7 +1013,10 @@ export default function ShareRoomPage() {
           setConnectionActivity("waiting");
         }
       };
-      peer.ondatachannel = (event) => attachChannel(event.channel);
+      peer.ondatachannel = (event) => {
+        if (event.channel.label === "picbind-control") attachControlChannel(event.channel);
+        else if (event.channel.label === "picbind-files") attachFileChannel(event.channel);
+      };
       connection = peer;
       const updateStats = () => {
         void readWebRtcLatency(peer)
@@ -1086,7 +1110,10 @@ export default function ShareRoomPage() {
           peer,
           sessionId,
         );
-        attachChannel(
+        attachControlChannel(
+          peer.createDataChannel("picbind-control", { ordered: true }),
+        );
+        attachFileChannel(
           peer.createDataChannel("picbind-files", { ordered: true }),
         );
         try {
@@ -1616,7 +1643,7 @@ export default function ShareRoomPage() {
       return;
     }
     const id = createPeerMessageId();
-    const sent = sendPeerMessage(outgoingChannelRef.current, {
+    const sent = sendPeerMessage(controlChannelRef.current, {
       type: "EMOJI",
       payload: { id, emoji, sentAt: Date.now() },
     });
@@ -1635,7 +1662,7 @@ export default function ShareRoomPage() {
     if (!text || connection !== "connected") return;
     const id = createPeerMessageId();
     if (
-      !sendPeerMessage(outgoingChannelRef.current, {
+      !sendPeerMessage(controlChannelRef.current, {
         type: "TEXT",
         payload: { id, text, sentAt: Date.now() },
       })
