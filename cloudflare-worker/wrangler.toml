@@ -42,12 +42,6 @@ name = "ROUTE_LIMITER"
 namespace_id = "1002"
 simple = { limit = 60, period = 60 }
 
-[env.preview.vars]
-DEV_MODE = "1"
-SITE_URL = "https://preview.picbind.pages.dev"
-ALLOWED_ORIGINS = "*"
-TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
-
 [observability]
 enabled = false
 head_sampling_rate = 1
@@ -62,3 +56,9 @@ invocation_logs = true
 enabled = false
 persist = true
 head_sampling_rate = 1
+
+[env.preview.vars]
+DEV_MODE = "1"
+SITE_URL = "https://preview.picbind.pages.dev"
+ALLOWED_ORIGINS = "*"
+TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
