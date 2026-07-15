@@ -33,11 +33,13 @@ import {
   establishRealtimeTransport,
   getRealtimeRoomStatus,
   heartbeatRealtimeRoom,
+  leaveRealtimeRoom,
   leaveRealtimeRoomTemporarily,
   joinRealtimeRoom,
   renegotiateRealtimeTransport,
   RealtimeRoomRequestError,
   type RoomRole,
+  type RoomMemberPresence,
 } from "@/utils/realtime-room";
 import {
   RealtimeImageReceiver,
@@ -124,7 +126,7 @@ export default function ShareRoomPage() {
   const [connectionError, setConnectionError] = React.useState<string | null>(
     null,
   );
-  const [presence, setPresence] = React.useState({ owner: false, guest: false });
+  const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [isSending, setIsSending] = React.useState(false);
@@ -156,7 +158,7 @@ export default function ShareRoomPage() {
           guest: "匿名 Guest",
           you: "你",
           online: "在线",
-          offline: "等待加入",
+          offline: "离线",
           activity: "传输消息",
           noActivity: "暂无传输消息",
           testMessage: "测试消息",
@@ -200,7 +202,7 @@ export default function ShareRoomPage() {
           guest: "Anonymous Guest",
           you: "You",
           online: "Online",
-          offline: "Waiting",
+          offline: "Offline",
           activity: "Transfer messages",
           noActivity: "No transfer messages yet",
           testMessage: "Test message",
@@ -296,6 +298,8 @@ export default function ShareRoomPage() {
     let incomingChannel: RTCDataChannel | null = null;
     let attached = false;
     let attaching = false;
+    let attachedPeerId: string | null = null;
+    let connectedRole: RoomRole | null = null;
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
       bundlePolicy: "max-bundle",
@@ -441,11 +445,23 @@ export default function ShareRoomPage() {
           return;
         }
         sessionIdRef.current = joined.sessionId;
+        connectedRole = joined.role;
         setRole(joined.role);
         if (joined.role === "owner") {
           clearTemporaryShareRoom(roomId);
         }
-        setPresence((current) => ({ ...current, [joined.role]: true }));
+        setMembers((current) => {
+          const clientId = getShareRoomClientId(roomId);
+          const member = current.find((item) => item.clientId === clientId);
+          if (member) {
+            return current.map((item) =>
+              item.clientId === clientId
+                ? { ...item, role: joined.role, status: "online" }
+                : item,
+            );
+          }
+          return [...current, { clientId, role: joined.role, status: "online" }];
+        });
         heartbeatTimer = window.setInterval(() => {
           void heartbeatRealtimeRoom(roomId, joined.sessionId).catch((error) => {
             if (redirectIfRoomClosed(error)) {
@@ -563,9 +579,37 @@ export default function ShareRoomPage() {
           }
         };
 
+        const detachPeer = () => {
+          if (incomingChannel) {
+            incomingChannel.onclose = null;
+            incomingChannel.close();
+          }
+          incomingChannel = null;
+          attached = false;
+          attachedPeerId = null;
+          incomingOpen = false;
+          handshakeAcknowledged = false;
+          stopHandshake();
+        };
+
         const attachPeer = async (peerId?: string) => {
-          if (!peerId || attached || attaching || disposed) {
+          if (!peerId) {
+            detachPeer();
+            if (!disposed) {
+              setConnection("waiting");
+              setConnectionActivity("waiting");
+            }
             return;
+          }
+          if (
+            (attached && attachedPeerId === peerId) ||
+            attaching ||
+            disposed
+          ) {
+            return;
+          }
+          if (attachedPeerId !== peerId) {
+            detachPeer();
           }
           attaching = true;
           try {
@@ -650,6 +694,7 @@ export default function ShareRoomPage() {
               handshakeAcknowledged = false;
               stopHandshake();
               attached = false;
+              attachedPeerId = null;
               incomingChannel = null;
               if (!disposed) {
                 setConnection("waiting");
@@ -658,6 +703,7 @@ export default function ShareRoomPage() {
             };
             incomingChannel = incoming;
             attached = true;
+            attachedPeerId = peerId;
           } finally {
             attaching = false;
           }
@@ -668,10 +714,7 @@ export default function ShareRoomPage() {
           if (disposed) {
             return;
           }
-          setPresence({
-            owner: status.ownerJoined,
-            guest: status.guestJoined,
-          });
+          setMembers(status.members);
           const peerId =
             joined.role === "owner"
               ? status.guestSessionId
@@ -717,8 +760,17 @@ export default function ShareRoomPage() {
     });
 
     void connect();
+    const leaveGuest = () => {
+      const sessionId = sessionIdRef.current;
+      if (sessionId && connectedRole === "guest") {
+        void leaveRealtimeRoom(roomId, sessionId, true).catch(() => undefined);
+      }
+    };
+    window.addEventListener("pagehide", leaveGuest);
     return () => {
       disposed = true;
+      window.removeEventListener("pagehide", leaveGuest);
+      leaveGuest();
       if (pollTimer) {
         window.clearInterval(pollTimer);
       }
@@ -1165,25 +1217,31 @@ export default function ShareRoomPage() {
               <span>{labels.participants}</span>
             </div>
             <div className="space-y-2">
-              {(
-                [
-                  ["owner", labels.owner, presence.owner],
-                  ["guest", labels.guest, presence.guest],
-                ] as const
-              )
-                .filter(([, , online]) => online)
-                .map(([memberRole, name, online]) => (
+              {members.map((member, index) => {
+                const online = member.status === "online";
+                const isCurrentUser =
+                  roomId !== null &&
+                  member.clientId === getShareRoomClientId(roomId);
+                const name =
+                  member.role === "owner"
+                    ? labels.owner
+                    : `${labels.guest} ${
+                        members
+                          .slice(0, index + 1)
+                          .filter((item) => item.role === "guest").length
+                      }`;
+                return (
                 <div
-                  key={memberRole}
+                  key={member.clientId}
                   className="flex items-center justify-between gap-3"
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold uppercase text-slate-600">
-                      {memberRole === "owner" ? "O" : "G"}
+                      {member.role === "owner" ? "O" : "G"}
                     </span>
                     <span className="truncate text-sm font-medium text-slate-700">
                       {name}
-                      {role === memberRole ? (
+                      {isCurrentUser ? (
                         <span className="ml-1 text-xs text-[#2f65cf]">
                           ({labels.you})
                         </span>
@@ -1197,7 +1255,8 @@ export default function ShareRoomPage() {
                     {online ? labels.online : labels.offline}
                   </span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

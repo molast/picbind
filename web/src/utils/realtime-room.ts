@@ -13,6 +13,13 @@ type TransportResult = {
   requiresImmediateRenegotiation?: boolean;
 };
 
+export type RoomMemberPresence = {
+  clientId: string;
+  role: RoomRole;
+  status: "online" | "offline";
+  leftAt?: number;
+};
+
 export class RealtimeRoomRequestError extends Error {
   constructor(
     message: string,
@@ -23,13 +30,18 @@ export class RealtimeRoomRequestError extends Error {
   }
 }
 
-async function roomRequest<T>(action: string, body: Record<string, unknown>) {
+async function roomRequest<T>(
+  action: string,
+  body: Record<string, unknown>,
+  keepalive = false,
+) {
   const url = getShareRoomRealtimeApiPath(action);
   console.info("[PicBind Realtime] request", { action, url, body });
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
+    keepalive,
   });
   const raw = await response.text();
   console.info("[PicBind Realtime] response", {
@@ -64,7 +76,15 @@ export function joinRealtimeRoom(
 }
 
 export function getRealtimeRoomStatus(roomId: string) {
-  return roomRequest<{ ownerJoined: boolean; guestJoined: boolean; ownerSessionId?: string; guestSessionId?: string }>("status", { roomId });
+  return roomRequest<{
+    members: RoomMemberPresence[];
+    ownerKnown: boolean;
+    guestKnown: boolean;
+    ownerJoined: boolean;
+    guestJoined: boolean;
+    ownerSessionId?: string;
+    guestSessionId?: string;
+  }>("status", { roomId });
 }
 
 export function heartbeatRealtimeRoom(roomId: string, sessionId: string) {
@@ -76,6 +96,14 @@ export function leaveRealtimeRoomTemporarily(
   sessionId: string,
 ) {
   return roomRequest<{ ok: true }>("temporary-away", { roomId, sessionId });
+}
+
+export function leaveRealtimeRoom(
+  roomId: string,
+  sessionId: string,
+  keepalive = false,
+) {
+  return roomRequest<{ ok: true }>("leave", { roomId, sessionId }, keepalive);
 }
 
 export function closeRealtimeRoom(roomId: string, sessionId: string) {

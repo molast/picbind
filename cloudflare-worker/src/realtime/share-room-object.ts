@@ -1,12 +1,30 @@
 export const SHARE_ROOM_TTL_MS = 30 * 60 * 1000;
 export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 90 * 1000;
 
+export type ShareRoomRole = "owner" | "guest";
+
+export type ShareRoomMember = {
+  clientId: string;
+  sessionId: string;
+  role: ShareRoomRole;
+  ready: boolean;
+  lastSeen: number;
+  status: "online" | "offline";
+  leftAt?: number;
+};
+
 export type ShareRoomState = {
   roomId: string;
   ownerTokenHash: string;
   createdAt: string;
   expiresAt: string;
   status: "waiting";
+  members?: ShareRoomMember[];
+  hadParticipant?: boolean;
+  hadOwner?: boolean;
+  ownerTemporarilyAway?: boolean;
+
+  // Legacy V1 fields are migrated into members on first access.
   ownerSessionId?: string;
   guestSessionId?: string;
   ownerClientId?: string;
@@ -15,50 +33,70 @@ export type ShareRoomState = {
   guestReady?: boolean;
   ownerLastSeen?: number;
   guestLastSeen?: number;
-  hadParticipant?: boolean;
-  hadOwner?: boolean;
-  ownerTemporarilyAway?: boolean;
 };
 
-function clearOwner(room: ShareRoomState) {
-  delete room.ownerSessionId;
-  delete room.ownerClientId;
-  delete room.ownerReady;
-  delete room.ownerLastSeen;
-}
-
-function clearGuest(room: ShareRoomState) {
-  delete room.guestSessionId;
-  delete room.guestClientId;
-  delete room.guestReady;
-  delete room.guestLastSeen;
-}
-
-function pruneStalePresence(room: ShareRoomState, now = Date.now()) {
-  let changed = false;
-  let ownerTimedOut = false;
-  if (
-    room.ownerSessionId &&
-    (!room.ownerLastSeen ||
-      now - room.ownerLastSeen > SHARE_ROOM_PRESENCE_TIMEOUT_MS)
-  ) {
-    clearOwner(room);
-    changed = true;
-    ownerTimedOut = true;
+function normalizeMembers(room: ShareRoomState) {
+  if (!room.members) {
+    room.members = [];
   }
-  if (
-    room.guestSessionId &&
-    (!room.guestLastSeen ||
-      now - room.guestLastSeen > SHARE_ROOM_PRESENCE_TIMEOUT_MS)
-  ) {
-    clearGuest(room);
-    changed = true;
+  if (!room.members.length) {
+    if (room.ownerSessionId) {
+      room.members.push({
+        clientId: room.ownerClientId || crypto.randomUUID().replace(/-/g, ""),
+        sessionId: room.ownerSessionId,
+        role: "owner",
+        ready: Boolean(room.ownerReady),
+        lastSeen: room.ownerLastSeen || 0,
+        status: "online",
+      });
+      room.hadOwner = true;
+    }
+    if (room.guestSessionId) {
+      room.members.push({
+        clientId: room.guestClientId || crypto.randomUUID().replace(/-/g, ""),
+        sessionId: room.guestSessionId,
+        role: "guest",
+        ready: Boolean(room.guestReady),
+        lastSeen: room.guestLastSeen || 0,
+        status: "online",
+      });
+    }
+  }
+
+  delete room.ownerSessionId;
+  delete room.guestSessionId;
+  delete room.ownerClientId;
+  delete room.guestClientId;
+  delete room.ownerReady;
+  delete room.guestReady;
+  delete room.ownerLastSeen;
+  delete room.guestLastSeen;
+  return room.members;
+}
+
+function pruneStaleMembers(room: ShareRoomState, now = Date.now()) {
+  const members = normalizeMembers(room);
+  let ownerTimedOut = false;
+  let changed = false;
+  for (const member of members) {
+    const timedOut =
+      member.status === "online" &&
+      now - member.lastSeen > SHARE_ROOM_PRESENCE_TIMEOUT_MS;
+    if (timedOut) {
+      member.status = "offline";
+      member.ready = false;
+      member.leftAt = now;
+      changed = true;
+      if (member.role === "owner") {
+        ownerTimedOut = true;
+      }
+    }
   }
   return { changed, ownerTimedOut };
 }
 
-function hasParticipants(room: ShareRoomState) {
-  return Boolean(room.ownerSessionId || room.guestSessionId);
+function onlineMembers(room: ShareRoomState) {
+  return normalizeMembers(room).filter((member) => member.status === "online");
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -74,33 +112,33 @@ function json(data: unknown, init?: ResponseInit) {
 export class ShareRoomObject {
   constructor(private readonly state: DurableObjectState) {}
 
+  private async destroy() {
+    await this.state.storage.deleteAll();
+    await this.state.storage.deleteAlarm();
+  }
+
   private async persistAndSchedule(room: ShareRoomState) {
+    const activeMembers = onlineMembers(room);
+    const hasOwner = activeMembers.some((member) => member.role === "owner");
     const ownerLeftPermanently =
-      room.hadOwner &&
-      !room.ownerSessionId &&
+      room.hadOwner && !hasOwner && !room.ownerTemporarilyAway;
+    const roomBecameEmpty =
+      room.hadParticipant &&
+      activeMembers.length === 0 &&
       !room.ownerTemporarilyAway;
-    if (
-      ownerLeftPermanently ||
-      (room.hadParticipant &&
-        !hasParticipants(room) &&
-        !room.ownerTemporarilyAway)
-    ) {
-      await this.state.storage.deleteAll();
+    if (ownerLeftPermanently || roomBecameEmpty) {
+      await this.destroy();
       return false;
     }
 
     await this.state.storage.put("room", room);
-    const deadlines = [Date.parse(room.expiresAt)];
-    if (room.ownerLastSeen) {
-      deadlines.push(
-        room.ownerLastSeen + SHARE_ROOM_PRESENCE_TIMEOUT_MS + 1,
-      );
-    }
-    if (room.guestLastSeen) {
-      deadlines.push(
-        room.guestLastSeen + SHARE_ROOM_PRESENCE_TIMEOUT_MS + 1,
-      );
-    }
+    const deadlines = [
+      Date.parse(room.expiresAt),
+      ...activeMembers.map(
+        (member) =>
+          member.lastSeen + SHARE_ROOM_PRESENCE_TIMEOUT_MS + 1,
+      ),
+    ];
     await this.state.storage.setAlarm(Math.min(...deadlines));
     return true;
   }
@@ -123,7 +161,7 @@ export class ShareRoomObject {
       ) {
         return json({ error: "Invalid room metadata" }, { status: 400 });
       }
-
+      room.members = [];
       await this.state.storage.put("room", room);
       await this.state.storage.setAlarm(Date.parse(room.expiresAt));
       return json(room, { status: 201 });
@@ -134,7 +172,12 @@ export class ShareRoomObject {
       if (!room || Date.parse(room.expiresAt) <= Date.now()) {
         return json({ error: "Room not found" }, { status: 404 });
       }
-      if (pruneStalePresence(room).changed) {
+      const presence = pruneStaleMembers(room);
+      if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
+        await this.destroy();
+        return json({ error: "Room not found" }, { status: 404 });
+      }
+      if (presence.changed) {
         const retained = await this.persistAndSchedule(room);
         if (!retained) {
           return json({ error: "Room not found" }, { status: 404 });
@@ -150,7 +193,7 @@ export class ShareRoomObject {
       }
 
       const body = (await request.json()) as {
-        role?: "owner" | "guest";
+        role?: ShareRoomRole;
         sessionId?: string;
         clientId?: string;
       };
@@ -162,40 +205,125 @@ export class ShareRoomObject {
       ) {
         return json({ error: "Invalid join request" }, { status: 400 });
       }
-      const presence = pruneStalePresence(room);
+
+      const presence = pruneStaleMembers(room);
       if (
         presence.ownerTimedOut &&
         room.hadOwner &&
         !room.ownerTemporarilyAway
       ) {
-        await this.state.storage.deleteAll();
+        await this.destroy();
         return json({ error: "Room not found" }, { status: 404 });
       }
+
+      const members = normalizeMembers(room);
       if (
         body.role === "guest" &&
-        room.guestSessionId &&
-        room.guestClientId !== body.clientId
+        members.some(
+          (member) =>
+            member.role === "guest" &&
+            member.status === "online" &&
+            member.clientId !== body.clientId,
+        )
       ) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
 
       const now = Date.now();
+      const existingMember = members.find(
+        (member) =>
+          member.role === body.role && member.clientId === body.clientId,
+      );
+      if (existingMember) {
+        existingMember.sessionId = body.sessionId;
+        existingMember.ready = false;
+        existingMember.lastSeen = now;
+        existingMember.status = "online";
+        delete existingMember.leftAt;
+      } else {
+        members.push({
+          clientId: body.clientId,
+          sessionId: body.sessionId,
+          role: body.role,
+          ready: false,
+          lastSeen: now,
+          status: "online",
+        });
+      }
       room.hadParticipant = true;
       if (body.role === "owner") {
         room.hadOwner = true;
         room.ownerTemporarilyAway = false;
-        room.ownerSessionId = body.sessionId;
-        room.ownerClientId = body.clientId;
-        room.ownerReady = false;
-        room.ownerLastSeen = now;
-      } else {
-        room.guestSessionId = body.sessionId;
-        room.guestClientId = body.clientId;
-        room.guestReady = false;
-        room.guestLastSeen = now;
       }
       await this.persistAndSchedule(room);
       return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/ready") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        role?: ShareRoomRole;
+        sessionId?: string;
+      };
+      if (!room) {
+        return json({ error: "Room not found" }, { status: 404 });
+      }
+      const member = normalizeMembers(room).find(
+        (candidate) =>
+          candidate.role === body.role && candidate.sessionId === body.sessionId,
+      );
+      if (!member) {
+        return json({ error: "Session not found" }, { status: 404 });
+      }
+      member.ready = true;
+      member.lastSeen = Date.now();
+      member.status = "online";
+      delete member.leftAt;
+      await this.persistAndSchedule(room);
+      return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/heartbeat") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        role?: ShareRoomRole;
+        sessionId?: string;
+      };
+      if (!room) {
+        return json({ error: "Room not found" }, { status: 404 });
+      }
+      const member = normalizeMembers(room).find(
+        (candidate) =>
+          candidate.role === body.role && candidate.sessionId === body.sessionId,
+      );
+      if (!member) {
+        return json({ error: "Session not found" }, { status: 404 });
+      }
+      member.lastSeen = Date.now();
+      member.status = "online";
+      delete member.leftAt;
+      await this.persistAndSchedule(room);
+      return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/leave") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as { sessionId?: string };
+      if (!room || !body.sessionId) {
+        return json({ error: "Room not found" }, { status: 404 });
+      }
+      const members = normalizeMembers(room);
+      const leavingMember = members.find(
+        (member) => member.sessionId === body.sessionId,
+      );
+      if (!leavingMember) {
+        return json({ ok: true });
+      }
+      leavingMember.status = "offline";
+      leavingMember.ready = false;
+      leavingMember.leftAt = Date.now();
+      const retained = await this.persistAndSchedule(room);
+      return json({ ok: true, roomRetained: retained });
     }
 
     if (request.method === "POST" && pathname === "/temporary-away") {
@@ -204,10 +332,17 @@ export class ShareRoomObject {
       if (!room || !body.sessionId) {
         return json({ error: "Room not found" }, { status: 404 });
       }
-      if (room.ownerSessionId !== body.sessionId) {
+      const members = normalizeMembers(room);
+      const owner = members.find(
+        (member) =>
+          member.role === "owner" && member.sessionId === body.sessionId,
+      );
+      if (!owner) {
         return json({ error: "Owner session not found" }, { status: 403 });
       }
-      clearOwner(room);
+      owner.status = "offline";
+      owner.ready = false;
+      owner.leftAt = Date.now();
       room.hadOwner = true;
       room.ownerTemporarilyAway = true;
       await this.persistAndSchedule(room);
@@ -217,57 +352,17 @@ export class ShareRoomObject {
     if (request.method === "POST" && pathname === "/close") {
       const room = await this.state.storage.get<ShareRoomState>("room");
       const body = (await request.json()) as { sessionId?: string };
-      if (!room || !body.sessionId) {
-        return json({ error: "Room not found" }, { status: 404 });
-      }
-      if (room.ownerSessionId !== body.sessionId) {
+      const owner = room
+        ? normalizeMembers(room).find(
+            (member) =>
+              member.role === "owner" && member.sessionId === body.sessionId,
+          )
+        : null;
+      if (!room || !owner) {
         return json({ error: "Only the Owner can close the room" }, { status: 403 });
       }
-      await this.state.storage.deleteAll();
-      await this.state.storage.deleteAlarm();
+      await this.destroy();
       return json({ ok: true });
-    }
-
-    if (request.method === "POST" && pathname === "/ready") {
-      const room = await this.state.storage.get<ShareRoomState>("room");
-      const body = (await request.json()) as { role?: "owner" | "guest"; sessionId?: string };
-      if (!room || !body.sessionId || (body.role !== "owner" && body.role !== "guest")) {
-        return json({ error: "Invalid ready request" }, { status: 400 });
-      }
-      if (body.role === "owner" && room.ownerSessionId === body.sessionId) {
-        room.ownerReady = true;
-        room.ownerLastSeen = Date.now();
-      }
-      else if (body.role === "guest" && room.guestSessionId === body.sessionId) {
-        room.guestReady = true;
-        room.guestLastSeen = Date.now();
-      }
-      else return json({ error: "Session not found" }, { status: 404 });
-      await this.persistAndSchedule(room);
-      return json(room);
-    }
-
-    if (request.method === "POST" && pathname === "/heartbeat") {
-      const room = await this.state.storage.get<ShareRoomState>("room");
-      const body = (await request.json()) as {
-        role?: "owner" | "guest";
-        sessionId?: string;
-      };
-      if (!room || !body.sessionId) {
-        return json({ error: "Room not found" }, { status: 404 });
-      }
-      if (body.role === "owner" && room.ownerSessionId === body.sessionId) {
-        room.ownerLastSeen = Date.now();
-      } else if (
-        body.role === "guest" &&
-        room.guestSessionId === body.sessionId
-      ) {
-        room.guestLastSeen = Date.now();
-      } else {
-        return json({ error: "Session not found" }, { status: 404 });
-      }
-      await this.persistAndSchedule(room);
-      return json(room);
     }
 
     return json({ error: "Not found" }, { status: 404 });
@@ -276,10 +371,14 @@ export class ShareRoomObject {
   async alarm() {
     const room = await this.state.storage.get<ShareRoomState>("room");
     if (!room || Date.parse(room.expiresAt) <= Date.now()) {
-      await this.state.storage.deleteAll();
+      await this.destroy();
       return;
     }
-    pruneStalePresence(room);
+    const presence = pruneStaleMembers(room);
+    if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
+      await this.destroy();
+      return;
+    }
     await this.persistAndSchedule(room);
   }
 }

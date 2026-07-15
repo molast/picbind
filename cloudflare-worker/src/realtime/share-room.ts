@@ -1,5 +1,6 @@
 import {
   SHARE_ROOM_TTL_MS,
+  type ShareRoomMember,
   type ShareRoomState,
 } from "./share-room-object";
 
@@ -143,6 +144,23 @@ async function requireRoom(env: RealtimeRoomEnv, roomId: unknown) {
   return room;
 }
 
+function roomMembers(room: ShareRoomState) {
+  return room.members || [];
+}
+
+function memberForSession(room: ShareRoomState, sessionId: string) {
+  return roomMembers(room).find(
+    (member) => member.sessionId === sessionId && member.status === "online",
+  );
+}
+
+function readyMember(room: ShareRoomState, role: ShareRoomMember["role"]) {
+  return roomMembers(room).find(
+    (member) =>
+      member.role === role && member.status === "online" && member.ready,
+  );
+}
+
 export async function handleShareRoomRealtime(
   request: Request,
   env: RealtimeRoomEnv,
@@ -160,11 +178,21 @@ export async function handleShareRoomRealtime(
     const action = new URL(request.url).pathname.split("/").pop();
 
     if (action === "status") {
+      const owner = readyMember(room, "owner");
+      const guest = readyMember(room, "guest");
       return json({
-        ownerJoined: Boolean(room.ownerSessionId && room.ownerReady),
-        guestJoined: Boolean(room.guestSessionId && room.guestReady),
-        ownerSessionId: room.ownerReady ? room.ownerSessionId : undefined,
-        guestSessionId: room.guestReady ? room.guestSessionId : undefined,
+        members: roomMembers(room).map(({ clientId, role, status, leftAt }) => ({
+          clientId,
+          role,
+          status,
+          leftAt,
+        })),
+        ownerKnown: roomMembers(room).some((member) => member.role === "owner"),
+        guestKnown: roomMembers(room).some((member) => member.role === "guest"),
+        ownerJoined: Boolean(owner),
+        guestJoined: Boolean(guest),
+        ownerSessionId: owner?.sessionId,
+        guestSessionId: guest?.sessionId,
       });
     }
 
@@ -179,8 +207,12 @@ export async function handleShareRoomRealtime(
       const role = isOwner ? "owner" : "guest";
       if (
         role === "guest" &&
-        room.guestSessionId &&
-        room.guestClientId !== clientId
+        roomMembers(room).some(
+          (member) =>
+            member.role === "guest" &&
+            member.status === "online" &&
+            member.clientId !== clientId,
+        )
       ) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
@@ -195,24 +227,19 @@ export async function handleShareRoomRealtime(
       });
       const updated = await readJson<ShareRoomState | { error?: string }>(claimed, "Share room join response");
       if (!claimed.ok) throw new Error((updated as { error?: string }).error || "Could not join room");
+      const updatedRoom = updated as ShareRoomState;
+      const peer = readyMember(updatedRoom, role === "owner" ? "guest" : "owner");
       return json({
         role,
         sessionId: session.sessionId,
-        peerSessionId:
-          role === "owner"
-            ? updated.guestReady
-              ? updated.guestSessionId
-              : undefined
-            : updated.ownerReady
-              ? updated.ownerSessionId
-              : undefined,
+        peerSessionId: peer?.sessionId,
       });
     }
 
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    const isOwnerSession = room.ownerSessionId === sessionId;
-    const isGuestSession = room.guestSessionId === sessionId;
-    if (!isOwnerSession && !isGuestSession) return json({ error: "Invalid room session" }, { status: 403 });
+    const member = memberForSession(room, sessionId);
+    if (!member) return json({ error: "Invalid room session" }, { status: 403 });
+    const isOwnerSession = member.role === "owner";
 
     if (action === "heartbeat") {
       stage = "heartbeat";
@@ -248,6 +275,28 @@ export async function handleShareRoomRealtime(
       });
       if (!response.ok) {
         throw new Error("Could not leave the room temporarily");
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "leave") {
+      if (isOwnerSession) {
+        return json(
+          { error: "The Owner must temporarily leave or close the room" },
+          { status: 400 },
+        );
+      }
+      stage = "leave-room";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/leave", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!response.ok) {
+        throw new Error("Could not leave the room");
       }
       return json({ ok: true });
     }
@@ -302,7 +351,10 @@ export async function handleShareRoomRealtime(
       const name = typeof body.name === "string" ? body.name : "";
       const direction = body.direction === "remote" ? "remote" : "local";
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error("Invalid DataChannel name");
-      const peerSessionId = isOwnerSession ? room.guestSessionId : room.ownerSessionId;
+      const peerSessionId = readyMember(
+        room,
+        isOwnerSession ? "guest" : "owner",
+      )?.sessionId;
       if (direction === "remote" && !peerSessionId) return json({ error: "Peer has not joined" }, { status: 409 });
       const channel = direction === "local"
         ? { location: "local", dataChannelName: name }
