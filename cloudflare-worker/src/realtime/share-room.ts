@@ -227,6 +227,34 @@ export async function handleShareRoomRealtime(
         : json({ error: result.error || "Signaling failed" }, { status: response.status });
     }
 
+    if (action === "candidate") {
+      const candidate = body.candidate as RTCIceCandidateInit | undefined;
+      if (
+        typeof candidate?.candidate !== "string" ||
+        candidate.candidate.length > 4096
+      ) {
+        return json({ error: "Invalid ICE candidate" }, { status: 400 });
+      }
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/candidate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, candidate }),
+      });
+      const result = await readJson<{ ok?: boolean; error?: string }>(
+        response,
+        `Share room candidate (${response.status})`,
+      );
+      return response.ok
+        ? json({ ok: true })
+        : json(
+            { error: result.error || "ICE candidate signaling failed" },
+            { status: response.status },
+          );
+    }
+
     if (action === "heartbeat") {
       stage = "heartbeat";
       const object = env.REALTIME_ROOMS.get(

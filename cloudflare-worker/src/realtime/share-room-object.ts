@@ -18,6 +18,8 @@ export type ShareRoomSignal = {
   guestSessionId: string;
   offer?: RTCSessionDescriptionInit;
   answer?: RTCSessionDescriptionInit;
+  ownerCandidates?: RTCIceCandidateInit[];
+  guestCandidates?: RTCIceCandidateInit[];
 };
 
 export type ShareRoomState = {
@@ -302,6 +304,8 @@ export class ShareRoomObject {
           ownerSessionId: owner.sessionId,
           guestSessionId: guest.sessionId,
           offer: body.description,
+          ownerCandidates: [],
+          guestCandidates: [],
         };
       } else if (
         sender.role === "guest" &&
@@ -313,6 +317,57 @@ export class ShareRoomObject {
         room.signal.answer = body.description;
       } else {
         return json({ error: "Unexpected session description" }, { status: 409 });
+      }
+      sender.lastSeen = Date.now();
+      await this.persistAndSchedule(room);
+      return json({ ok: true });
+    }
+
+    if (request.method === "POST" && pathname === "/candidate") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        sessionId?: string;
+        candidate?: RTCIceCandidateInit;
+      };
+      if (
+        !room ||
+        !body.sessionId ||
+        typeof body.candidate?.candidate !== "string" ||
+        body.candidate.candidate.length > 4096
+      ) {
+        return json({ error: "Invalid ICE candidate" }, { status: 400 });
+      }
+      const members = normalizeMembers(room);
+      const sender = members.find(
+        (member) =>
+          member.sessionId === body.sessionId && member.status === "online",
+      );
+      const owner = members.find(
+        (member) => member.role === "owner" && member.status === "online",
+      );
+      const guest = members.find(
+        (member) => member.role === "guest" && member.status === "online",
+      );
+      if (
+        !sender ||
+        !owner ||
+        !guest ||
+        room.signal?.ownerSessionId !== owner.sessionId ||
+        room.signal.guestSessionId !== guest.sessionId
+      ) {
+        return json({ error: "Signaling session is not ready" }, { status: 409 });
+      }
+      const candidates =
+        sender.role === "owner"
+          ? (room.signal.ownerCandidates ||= [])
+          : (room.signal.guestCandidates ||= []);
+      if (
+        candidates.length < 64 &&
+        !candidates.some(
+          (candidate) => candidate.candidate === body.candidate?.candidate,
+        )
+      ) {
+        candidates.push(body.candidate);
       }
       sender.lastSeen = Date.now();
       await this.persistAndSchedule(room);

@@ -13,6 +13,8 @@ export type RoomSignal = {
   guestSessionId: string;
   offer?: RTCSessionDescriptionInit;
   answer?: RTCSessionDescriptionInit;
+  ownerCandidates?: RTCIceCandidateInit[];
+  guestCandidates?: RTCIceCandidateInit[];
 };
 
 export type RoomMemberPresence = {
@@ -106,6 +108,18 @@ export function publishRealtimeSignal(
     roomId,
     sessionId,
     description,
+  });
+}
+
+export function publishRealtimeCandidate(
+  roomId: string,
+  sessionId: string,
+  candidate: RTCIceCandidateInit,
+) {
+  return roomRequest<{ ok: true }>("candidate", {
+    roomId,
+    sessionId,
+    candidate,
   });
 }
 

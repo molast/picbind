@@ -37,12 +37,12 @@ import {
   leaveRealtimeRoom,
   leaveRealtimeRoomTemporarily,
   joinRealtimeRoom,
+  publishRealtimeCandidate,
   publishRealtimeSignal,
   RealtimeRoomRequestError,
   type RoomRole,
   type RoomMemberPresence,
 } from "@/utils/realtime-room";
-import { waitForIceGatheringComplete } from "@/utils/realtime-p2p";
 import {
   RealtimeImageReceiver,
   MAX_IMAGE_TRANSFER_SIZE,
@@ -367,6 +367,7 @@ export default function ShareRoomPage() {
     let iceServers: RTCIceServer[] = [];
     let currentPeerSessionId: string | null = null;
     let currentOfferSdp: string | null = null;
+    const appliedRemoteCandidates = new Set<string>();
     let negotiating = false;
     let handshakeId = "";
     let handshakeAttempts = 0;
@@ -740,6 +741,7 @@ export default function ShareRoomPage() {
       if (connection) {
         connection.ondatachannel = null;
         connection.onconnectionstatechange = null;
+        connection.onicecandidate = null;
         connection.close();
       }
       channel = null;
@@ -747,6 +749,7 @@ export default function ShareRoomPage() {
       outgoingChannelRef.current = null;
       currentPeerSessionId = null;
       currentOfferSdp = null;
+      appliedRemoteCandidates.clear();
       handshakeAcknowledged = false;
       previewsPublished = false;
       negotiating = false;
@@ -775,6 +778,57 @@ export default function ShareRoomPage() {
       return peer;
     };
 
+    const configureCandidatePublishing = (
+      peer: RTCPeerConnection,
+      sessionId: string,
+    ) => {
+      const pending: RTCIceCandidateInit[] = [];
+      let signalReady = false;
+      const publish = (candidate: RTCIceCandidateInit) => {
+        void publishRealtimeCandidate(roomId, sessionId, candidate).catch(
+          (error) => {
+            console.warn("Failed to publish ICE candidate", error);
+          },
+        );
+      };
+      peer.onicecandidate = (event) => {
+        if (!event.candidate) {
+          return;
+        }
+        const candidate = event.candidate.toJSON();
+        if (signalReady) {
+          publish(candidate);
+        } else {
+          pending.push(candidate);
+        }
+      };
+      return () => {
+        signalReady = true;
+        pending.splice(0).forEach(publish);
+      };
+    };
+
+    const addRemoteCandidates = async (
+      candidates: RTCIceCandidateInit[] | undefined,
+    ) => {
+      if (!connection?.remoteDescription) {
+        return;
+      }
+      for (const candidate of candidates || []) {
+        const key = JSON.stringify([
+          candidate.candidate,
+          candidate.sdpMid,
+          candidate.sdpMLineIndex,
+          candidate.usernameFragment,
+        ]);
+        if (appliedRemoteCandidates.has(key)) {
+          continue;
+        }
+        await connection.addIceCandidate(candidate);
+        appliedRemoteCandidates.add(key);
+      }
+    };
+
     const ensureOwnerConnection = async (
       sessionId: string,
       status: Awaited<ReturnType<typeof getRealtimeRoomStatus>>,
@@ -798,12 +852,15 @@ export default function ShareRoomPage() {
         setConnectionActivity("connecting");
         currentPeerSessionId = peerSessionId;
         const peer = createPeerConnection();
+        const enableCandidatePublishing = configureCandidatePublishing(
+          peer,
+          sessionId,
+        );
         attachChannel(
           peer.createDataChannel("picbind-files", { ordered: true }),
         );
         try {
           await peer.setLocalDescription(await peer.createOffer());
-          await waitForIceGatheringComplete(peer);
           const description = peer.localDescription;
           if (!description || peer.connectionState === "closed") {
             return;
@@ -813,6 +870,7 @@ export default function ShareRoomPage() {
             sessionId,
             description.toJSON(),
           );
+          enableCandidatePublishing();
         } catch (error) {
           if (connection === peer) {
             closePeerConnection();
@@ -838,6 +896,7 @@ export default function ShareRoomPage() {
       ) {
         await connection.setRemoteDescription(signal.answer);
       }
+      await addRemoteCandidates(signal?.guestCandidates);
     };
 
     const ensureGuestConnection = async (
@@ -863,6 +922,7 @@ export default function ShareRoomPage() {
         currentPeerSessionId === peerSessionId &&
         currentOfferSdp === offer.sdp
       ) {
+        await addRemoteCandidates(signal?.ownerCandidates);
         return;
       }
       if (negotiating) {
@@ -875,10 +935,14 @@ export default function ShareRoomPage() {
       currentPeerSessionId = peerSessionId;
       currentOfferSdp = offer.sdp;
       const peer = createPeerConnection();
+      const enableCandidatePublishing = configureCandidatePublishing(
+        peer,
+        sessionId,
+      );
       try {
         await peer.setRemoteDescription(offer);
+        await addRemoteCandidates(signal?.ownerCandidates);
         await peer.setLocalDescription(await peer.createAnswer());
-        await waitForIceGatheringComplete(peer);
         const description = peer.localDescription;
         if (!description || peer.connectionState === "closed") {
           return;
@@ -888,6 +952,7 @@ export default function ShareRoomPage() {
           sessionId,
           description.toJSON(),
         );
+        enableCandidatePublishing();
       } catch (error) {
         if (connection === peer) {
           closePeerConnection();
