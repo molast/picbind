@@ -9,7 +9,7 @@ export type ShareRoomMember = {
   role: ShareRoomRole;
   ready: boolean;
   lastSeen: number;
-  status: "online" | "offline";
+  status: "online" | "offline" | "kicked";
   leftAt?: number;
 };
 
@@ -230,6 +230,15 @@ export class ShareRoomObject {
       }
 
       const members = normalizeMembers(room);
+      const blockedMember = members.find(
+        (member) =>
+          member.role === body.role &&
+          member.clientId === body.clientId &&
+          member.status === "kicked",
+      );
+      if (blockedMember) {
+        return json({ error: "You were removed from this room" }, { status: 403 });
+      }
       if (
         body.role === "guest" &&
         members.some(
@@ -390,6 +399,9 @@ export class ShareRoomObject {
       if (!member) {
         return json({ error: "Session not found" }, { status: 404 });
       }
+      if (member.status === "kicked") {
+        return json({ error: "Room access was revoked" }, { status: 403 });
+      }
       member.ready = true;
       member.lastSeen = Date.now();
       member.status = "online";
@@ -413,6 +425,9 @@ export class ShareRoomObject {
       );
       if (!member) {
         return json({ error: "Session not found" }, { status: 404 });
+      }
+      if (member.status === "kicked") {
+        return json({ error: "Room access was revoked" }, { status: 403 });
       }
       member.lastSeen = Date.now();
       member.status = "online";
@@ -440,6 +455,41 @@ export class ShareRoomObject {
       delete room.signal;
       const retained = await this.persistAndSchedule(room);
       return json({ ok: true, roomRetained: retained });
+    }
+
+    if (request.method === "POST" && pathname === "/kick") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        ownerSessionId?: string;
+        targetClientId?: string;
+      };
+      if (!room || !body.ownerSessionId || !body.targetClientId) {
+        return json({ error: "Invalid kick request" }, { status: 400 });
+      }
+      const members = normalizeMembers(room);
+      const owner = members.find(
+        (member) =>
+          member.role === "owner" &&
+          member.sessionId === body.ownerSessionId &&
+          member.status === "online",
+      );
+      if (!owner) {
+        return json({ error: "Only the Owner can remove members" }, { status: 403 });
+      }
+      const target = members.find(
+        (member) =>
+          member.role === "guest" && member.clientId === body.targetClientId,
+      );
+      if (!target) {
+        return json({ error: "Guest not found" }, { status: 404 });
+      }
+      target.status = "kicked";
+      target.ready = false;
+      target.lastSeen = Date.now();
+      target.leftAt = Date.now();
+      delete room.signal;
+      await this.persistAndSchedule(room);
+      return json({ ok: true });
     }
 
     if (request.method === "POST" && pathname === "/temporary-away") {

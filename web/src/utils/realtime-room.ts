@@ -142,6 +142,18 @@ export function heartbeatRealtimeRoom(roomId: string, sessionId: string) {
   return roomRequest<{ ok: true }>("heartbeat", { roomId, sessionId });
 }
 
+export function kickRealtimeRoomMember(
+  roomId: string,
+  sessionId: string,
+  targetClientId: string,
+) {
+  return roomRequest<{ ok: true }>("kick", {
+    roomId,
+    sessionId,
+    targetClientId,
+  });
+}
+
 export function leaveRealtimeRoomTemporarily(
   roomId: string,
   sessionId: string,

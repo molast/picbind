@@ -139,12 +139,18 @@ export async function handleShareRoomRealtime(
       const owner = readyMember(room, "owner");
       const guest = readyMember(room, "guest");
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const sessionMember = roomMembers(room).find(
+        (member) => member.sessionId === sessionId,
+      );
+      if (sessionMember?.status === "kicked") {
+        return json({ error: "You were removed from this room" }, { status: 403 });
+      }
       const requester = memberForSession(room, sessionId);
       return json({
         members: roomMembers(room).map(({ clientId, role, status, leftAt }) => ({
           clientId,
           role,
-          status,
+          status: status === "online" ? "online" : "offline",
           leftAt,
         })),
         ownerKnown: roomMembers(room).some((member) => member.role === "owner"),
@@ -171,6 +177,17 @@ export async function handleShareRoomRealtime(
         roomMembers(room).some(
           (member) =>
             member.role === "guest" &&
+            member.clientId === clientId &&
+            member.status === "kicked",
+        )
+      ) {
+        return json({ error: "You were removed from this room" }, { status: 403 });
+      }
+      if (
+        role === "guest" &&
+        roomMembers(room).some(
+          (member) =>
+            member.role === "guest" &&
             member.status === "online" &&
             member.clientId !== clientId,
         )
@@ -186,7 +203,12 @@ export async function handleShareRoomRealtime(
         body: JSON.stringify({ role, sessionId, clientId }),
       });
       const updated = await readJson<ShareRoomState | { error?: string }>(claimed, "Share room join response");
-      if (!claimed.ok) throw new Error((updated as { error?: string }).error || "Could not join room");
+      if (!claimed.ok) {
+        return json(
+          { error: (updated as { error?: string }).error || "Could not join room" },
+          { status: claimed.status },
+        );
+      }
       const updatedRoom = updated as ShareRoomState;
       const peer = readyMember(updatedRoom, role === "owner" ? "guest" : "owner");
       return json({
@@ -273,6 +295,39 @@ export async function handleShareRoomRealtime(
         throw new Error("Room heartbeat was rejected");
       }
       return json({ ok: true });
+    }
+
+    if (action === "kick") {
+      if (!isOwnerSession) {
+        return json({ error: "Only the Owner can remove members" }, { status: 403 });
+      }
+      const targetClientId =
+        typeof body.targetClientId === "string" ? body.targetClientId : "";
+      if (!/^[a-f0-9]{32}$/.test(targetClientId)) {
+        return json({ error: "Invalid room member" }, { status: 400 });
+      }
+      stage = "kick-member";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/kick", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ownerSessionId: sessionId,
+          targetClientId,
+        }),
+      });
+      const result = await readJson<{ ok?: boolean; error?: string }>(
+        response,
+        `Share room kick (${response.status})`,
+      );
+      return response.ok
+        ? json({ ok: true })
+        : json(
+            { error: result.error || "Could not remove member" },
+            { status: response.status },
+          );
     }
 
     if (action === "temporary-away") {
