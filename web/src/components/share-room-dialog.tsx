@@ -67,7 +67,10 @@ export default function ShareRoomDialog({
     setError(null);
     setCopied(false);
     try {
-      setRoom(await createShareRoom());
+      const createdRoom = await createShareRoom();
+      setRoom(createdRoom);
+      const target = new URL(createdRoom.shareUrl);
+      window.location.assign(`${target.pathname}${target.search}${target.hash}`);
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Failed to create share room",
