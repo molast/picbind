@@ -1786,7 +1786,7 @@ export default function ShareRoomPage() {
                         }}
                         aria-label={`${image.name} preview`}
                       >
-                        {image.placeholder ? (
+                        {image.placeholder && image.direction === "received" ? (
                           <RoomImageMedia
                             alt={image.name}
                             src={image.placeholderOnly ? undefined : image.url}
