@@ -3,7 +3,8 @@
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
-export const WEAK_NETWORK_CHUNK_SIZE = 1200;
+const CHUNK_INDEX_BYTES = 4;
+export const WEAK_NETWORK_CHUNK_SIZE = 1200 - CHUNK_INDEX_BYTES;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
 const MAX_DATA_CHANNEL_PAYLOAD_BYTES = 1200;
 const MAX_THUMBNAIL_BYTES = 256;
@@ -39,9 +40,10 @@ type TransferControlMessage =
 
 type IncomingTransfer = {
   meta: ImageTransferMeta;
-  chunks: ArrayBuffer[];
+  chunks: Map<number, ArrayBuffer>;
   receivedBytes: number;
   reportedPercent: number;
+  completeRequested: boolean;
 };
 
 export type TransferProgress = ImageTransferMeta & {
@@ -260,7 +262,10 @@ export async function sendImageFile(
     for (let offset = 0; offset < file.size; offset += meta.chunkSize) {
       await waitForWritableBuffer(channel);
       const chunk = await file.slice(offset, offset + meta.chunkSize).arrayBuffer();
-      channel.send(chunk);
+      const frame = new Uint8Array(CHUNK_INDEX_BYTES + chunk.byteLength);
+      new DataView(frame.buffer).setUint32(0, offset / meta.chunkSize);
+      frame.set(new Uint8Array(chunk), CHUNK_INDEX_BYTES);
+      channel.send(frame.buffer);
       transferredBytes += chunk.byteLength;
       const progress = file.size ? transferredBytes / file.size : 1;
       const percent = Math.floor(progress * 100);
@@ -348,9 +353,10 @@ export class RealtimeImageReceiver {
       }
       this.incoming = {
         meta: message.payload,
-        chunks: [],
+        chunks: new Map(),
         receivedBytes: 0,
         reportedPercent: 0,
+        completeRequested: false,
       };
       this.callbacks.onStart(message.payload);
       return;
@@ -391,13 +397,21 @@ export class RealtimeImageReceiver {
     }
   }
 
-  private handleChunk(chunk: ArrayBuffer) {
+  private handleChunk(frame: ArrayBuffer) {
     if (!this.incoming) {
       this.callbacks.onError(null, "Received an image chunk without metadata");
       return;
     }
+    if (frame.byteLength <= CHUNK_INDEX_BYTES) {
+      this.callbacks.onError(this.incoming.meta, "Received an invalid image chunk frame");
+      return;
+    }
+    const index = new DataView(frame).getUint32(0);
+    const chunk = frame.slice(CHUNK_INDEX_BYTES);
     const incomingMeta = this.incoming.meta;
     if (
+      index >= incomingMeta.totalChunks ||
+      this.incoming.chunks.has(index) ||
       chunk.byteLength > incomingMeta.chunkSize ||
       this.incoming.receivedBytes + chunk.byteLength > this.incoming.meta.size
     ) {
@@ -406,7 +420,7 @@ export class RealtimeImageReceiver {
       this.callbacks.onError(meta, "Received an invalid image chunk");
       return;
     }
-    this.incoming.chunks.push(chunk);
+    this.incoming.chunks.set(index, chunk);
     this.incoming.receivedBytes += chunk.byteLength;
     const { meta, receivedBytes } = this.incoming;
     const progress = meta.size ? Math.min(receivedBytes / meta.size, 1) : 1;
@@ -422,27 +436,35 @@ export class RealtimeImageReceiver {
         progress,
       });
     }
+    if (this.incoming.completeRequested && receivedBytes === meta.size) {
+      this.complete(meta.id);
+    }
   }
 
   private complete(id: string) {
     const transfer = this.incoming;
-    this.incoming = null;
     if (!transfer || transfer.meta.id !== id) {
       this.callbacks.onError(null, "Image completion did not match the active transfer");
       return;
     }
     if (transfer.receivedBytes !== transfer.meta.size) {
+      transfer.completeRequested = true;
+      return;
+    }
+    this.incoming = null;
+    if (transfer.chunks.size !== transfer.meta.totalChunks) {
       this.callbacks.onError(
         transfer.meta,
-        `Image size mismatch: expected ${transfer.meta.size}, received ${transfer.receivedBytes}`,
+        "Image chunk count mismatch",
       );
       return;
     }
-    if (transfer.chunks.length !== transfer.meta.totalChunks) {
-      this.callbacks.onError(transfer.meta, "Image chunk count mismatch");
+    const chunks = Array.from({ length: transfer.meta.totalChunks }, (_, index) => transfer.chunks.get(index));
+    if (chunks.some((chunk) => !chunk)) {
+      this.callbacks.onError(transfer.meta, "Image chunks are incomplete");
       return;
     }
-    const blob = new Blob(transfer.chunks, { type: transfer.meta.type });
+    const blob = new Blob(chunks as BlobPart[], { type: transfer.meta.type });
     void this.callbacks.onComplete(transfer.meta, blob);
   }
 }

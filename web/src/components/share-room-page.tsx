@@ -1137,7 +1137,7 @@ export default function ShareRoomPage() {
           peer.createDataChannel("picbind-control", { ordered: true }),
         );
         attachFileChannel(
-          peer.createDataChannel("picbind-files", { ordered: true }),
+          peer.createDataChannel("picbind-files", { ordered: false }),
         );
         try {
           await peer.setLocalDescription(await peer.createOffer());
