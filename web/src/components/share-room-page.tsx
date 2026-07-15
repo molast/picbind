@@ -94,16 +94,9 @@ type RoomImage = CachedRoomImage & {
   url: string;
 };
 
-type WebRtcNetworkStats = {
-  latencyMs: number | null;
-  lossPercent: number | null;
-  availableOutgoingMbps: number | null;
-  route: "direct" | "relay";
-};
-
-async function readWebRtcNetworkStats(
+async function readWebRtcLatency(
   peer: RTCPeerConnection,
-): Promise<WebRtcNetworkStats | null> {
+): Promise<number | null> {
   const report = await peer.getStats();
   const entries = new Map<string, Record<string, unknown>>();
   report.forEach((value) => {
@@ -123,42 +116,10 @@ async function readWebRtcNetworkStats(
     );
   if (!selectedPair) return null;
 
-  const localCandidate =
-    typeof selectedPair.localCandidateId === "string"
-      ? entries.get(selectedPair.localCandidateId)
-      : null;
-  const remoteCandidate =
-    typeof selectedPair.remoteCandidateId === "string"
-      ? entries.get(selectedPair.remoteCandidateId)
-      : null;
-  const discarded = Number(selectedPair.packetsDiscardedOnSend || 0);
-  const packetsSent = Number(transport?.packetsSent || 0);
-  const totalPackets = Math.max(0, packetsSent) + Math.max(0, discarded);
-  const bitrate = Number(selectedPair.availableOutgoingBitrate);
   const roundTripTime = Number(selectedPair.currentRoundTripTime);
-  const hasLossStats =
-    typeof selectedPair.packetsDiscardedOnSend === "number" &&
-    typeof transport?.packetsSent === "number";
-
-  return {
-    latencyMs:
-      Number.isFinite(roundTripTime) && roundTripTime >= 0
-        ? Math.round(roundTripTime * 1000)
-        : null,
-    lossPercent:
-      hasLossStats && totalPackets > 0
-        ? Math.min(100, (Math.max(0, discarded) / totalPackets) * 100)
-        : hasLossStats
-          ? 0
-          : null,
-    availableOutgoingMbps:
-      Number.isFinite(bitrate) && bitrate >= 0 ? bitrate / 1_000_000 : null,
-    route:
-      localCandidate?.candidateType === "relay" ||
-      remoteCandidate?.candidateType === "relay"
-        ? "relay"
-        : "direct",
-  };
+  return Number.isFinite(roundTripTime) && roundTripTime >= 0
+    ? Math.round(roundTripTime * 1000)
+    : null;
 }
 
 function readRoomId() {
@@ -217,7 +178,7 @@ export default function ShareRoomPage() {
   const [connectionError, setConnectionError] = React.useState<string | null>(
     null,
   );
-  const [networkStats, setNetworkStats] = React.useState<WebRtcNetworkStats | null>(
+  const [networkLatencyMs, setNetworkLatencyMs] = React.useState<number | null>(
     null,
   );
   const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
@@ -276,10 +237,6 @@ export default function ShareRoomPage() {
           offline: "离线",
           kickMember: "移出房间",
           latency: "延迟",
-          packetLoss: "丢包",
-          bandwidth: "上行",
-          directRoute: "直连",
-          relayRoute: "中继",
           activity: "传输消息",
           noActivity: "暂无传输消息",
           testMessage: "发送文本消息",
@@ -336,10 +293,6 @@ export default function ShareRoomPage() {
           offline: "Offline",
           kickMember: "Remove from room",
           latency: "RTT",
-          packetLoss: "Loss",
-          bandwidth: "Up",
-          directRoute: "Direct",
-          relayRoute: "Relay",
           activity: "Transfer messages",
           noActivity: "No transfer messages yet",
           testMessage: "Send a text message",
@@ -999,7 +952,7 @@ export default function ShareRoomPage() {
         window.clearInterval(statsTimer);
         statsTimer = undefined;
       }
-      if (!disposed) setNetworkStats(null);
+      if (!disposed) setNetworkLatencyMs(null);
       if (channel) {
         channel.onclose = null;
         channel.close();
@@ -1042,9 +995,11 @@ export default function ShareRoomPage() {
       peer.ondatachannel = (event) => attachChannel(event.channel);
       connection = peer;
       const updateStats = () => {
-        void readWebRtcNetworkStats(peer)
-          .then((stats) => {
-            if (!disposed && connection === peer) setNetworkStats(stats);
+        void readWebRtcLatency(peer)
+          .then((latencyMs) => {
+            if (!disposed && connection === peer) {
+              setNetworkLatencyMs(latencyMs);
+            }
           })
           .catch(() => undefined);
       };
@@ -2071,30 +2026,11 @@ export default function ShareRoomPage() {
                       : labels.waiting}
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium text-slate-500">
+            <div className="mt-2 text-[11px] font-medium text-slate-500">
               <span>
                 {labels.latency}{" "}
-                {networkStats?.latencyMs != null
-                  ? `${networkStats.latencyMs} ms`
-                  : "--"}
-              </span>
-              <span>
-                {labels.packetLoss}{" "}
-                {networkStats?.lossPercent != null
-                  ? `${networkStats.lossPercent.toFixed(1)}%`
-                  : "--"}
-              </span>
-              <span>
-                {labels.bandwidth}{" "}
-                {networkStats?.availableOutgoingMbps != null
-                  ? `${networkStats.availableOutgoingMbps.toFixed(1)} Mbps`
-                  : "--"}
-              </span>
-              <span>
-                {networkStats
-                  ? networkStats.route === "relay"
-                    ? labels.relayRoute
-                    : labels.directRoute
+                {networkLatencyMs != null
+                  ? `${networkLatencyMs} ms`
                   : "--"}
               </span>
             </div>
