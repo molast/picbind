@@ -161,10 +161,10 @@ export async function handleShareRoomRealtime(
 
     if (action === "status") {
       return json({
-        ownerJoined: Boolean(room.ownerSessionId),
-        guestJoined: Boolean(room.guestSessionId),
-        ownerSessionId: room.ownerSessionId,
-        guestSessionId: room.guestSessionId,
+        ownerJoined: Boolean(room.ownerSessionId && room.ownerReady),
+        guestJoined: Boolean(room.guestSessionId && room.guestReady),
+        ownerSessionId: room.ownerReady ? room.ownerSessionId : undefined,
+        guestSessionId: room.guestReady ? room.guestSessionId : undefined,
       });
     }
 
@@ -190,7 +190,14 @@ export async function handleShareRoomRealtime(
       return json({
         role,
         sessionId: session.sessionId,
-        peerSessionId: role === "owner" ? updated.guestSessionId : updated.ownerSessionId,
+        peerSessionId:
+          role === "owner"
+            ? updated.guestReady
+              ? updated.guestSessionId
+              : undefined
+            : updated.ownerReady
+              ? updated.ownerSessionId
+              : undefined,
       });
     }
 
@@ -205,7 +212,7 @@ export async function handleShareRoomRealtime(
       if (!sdp?.sdp || sdp.type !== "offer") throw new Error("Missing SDP offer");
       stage = "sfu-establish";
       const result = await realtimeRequest(env, `/sessions/${sessionId}/datachannels/establish`, "POST", {
-        dataChannel: { location: "remote", dataChannelName: "picbind-handshake" },
+        dataChannel: { location: "remote", dataChannelName: "server-events" },
         sessionDescription: sdp,
       });
       stage = "mark-room-ready";

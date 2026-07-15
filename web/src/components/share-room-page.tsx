@@ -80,7 +80,7 @@ export default function ShareRoomPage() {
         const joined = await joinRealtimeRoom(roomId, getShareRoomOwnerToken(roomId));
         if (disposed) return;
         setRole(joined.role);
-        pc.createDataChannel("picbind-handshake");
+        pc.createDataChannel("server-events");
         await pc.setLocalDescription(await pc.createOffer());
         const transport = await establishRealtimeTransport(roomId, joined.sessionId, pc.localDescription!);
         if (!transport.sessionDescription) throw new Error("Realtime did not return SDP");
@@ -97,9 +97,9 @@ export default function ShareRoomPage() {
         let attached = false;
         const attachPeer = async (peerId?: string) => {
           if (!peerId || attached || disposed) return;
-          attached = true;
           const remoteId = await createRealtimeDataChannel(roomId, joined.sessionId, "remote", remoteName);
           const incoming = pc.createDataChannel(`${remoteName}-subscribed`, { negotiated: true, id: remoteId });
+          attached = true;
           incoming.onopen = () => { incoming.send("ack"); setConnection("connected"); };
           incoming.onmessage = (event) => { if (typeof event.data !== "string") return; try { const m = JSON.parse(event.data); if (m.type === "EMOJI") setRemoteEmoji(m.payload?.emoji || null); } catch {} };
         };
