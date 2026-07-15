@@ -1778,12 +1778,7 @@ export default function ShareRoomPage() {
                           if (canPreview) setPreviewImageId(image.id);
                         }}
                         disabled={!canPreview}
-                        className="block w-full overflow-hidden bg-slate-100 disabled:cursor-default"
-                        style={{
-                          aspectRatio: image.placeholder
-                            ? `${image.placeholder.width} / ${image.placeholder.height}`
-                            : "1 / 1",
-                        }}
+                        className="block aspect-square w-full overflow-hidden bg-slate-100 disabled:cursor-default"
                         aria-label={`${image.name} preview`}
                       >
                         {image.placeholder && image.direction === "received" ? (
