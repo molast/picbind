@@ -29,7 +29,7 @@ new_sqlite_classes = ["ShareRoomObject"]
 [vars]
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
-REALTIME_APP_ID = "d86e02296a29d5398965b9f2f921dfbe"
+TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
 
 [[ratelimits]]
 name = "GLOBAL_LIMITER"
@@ -44,6 +44,7 @@ simple = { limit = 60, period = 60 }
 [env.preview.vars]
 SITE_URL = "https://preview.picbind.pages.dev"
 ALLOWED_ORIGINS = "*"
+TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
 
 [observability]
 enabled = false

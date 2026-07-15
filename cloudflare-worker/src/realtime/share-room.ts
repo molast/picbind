@@ -6,8 +6,8 @@ import {
 
 export type RealtimeRoomEnv = {
   REALTIME_ROOMS: DurableObjectNamespace;
-  REALTIME_APP_ID?: string;
-  REALTIME_API_TOKEN?: string;
+  TURN_TOKEN_ID?: string;
+  TURN_API_TOKEN?: string;
   SITE_URL?: string;
 };
 
@@ -60,15 +60,6 @@ async function readJson<T>(response: Response | Request, label: string) {
   }
 }
 
-type RealtimeApiResponse = {
-  errorCode?: string;
-  errorDescription?: string;
-  sessionId?: string;
-  sessionDescription?: RTCSessionDescriptionInit;
-  requiresImmediateRenegotiation?: boolean;
-  dataChannels?: Array<{ id?: number; errorCode?: string; errorDescription?: string }>;
-};
-
 async function roomState(env: RealtimeRoomEnv, roomId: string) {
   const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(roomId));
   const response = await object.fetch("https://share-room/state");
@@ -76,59 +67,29 @@ async function roomState(env: RealtimeRoomEnv, roomId: string) {
   return readJson<ShareRoomState>(response, `Share room state (${response.status})`);
 }
 
-async function realtimeRequest(
-  env: RealtimeRoomEnv,
-  path: string,
-  method = "POST",
-  body?: unknown,
-) {
-  const url = `https://rtc.live.cloudflare.com/v1/apps/${env.REALTIME_APP_ID}${path}`;
-  const serializedBody = body === undefined ? undefined : JSON.stringify(body);
-  console.log("Realtime SFU request", { url, method, body: serializedBody });
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method,
+async function generateTurnIceServers(env: RealtimeRoomEnv) {
+  if (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim()) {
+    throw new Error("Cloudflare TURN is not configured");
+  }
+  const response = await fetch(
+    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_TOKEN_ID)}/credentials/generate-ice-servers`,
+    {
+      method: "POST",
       headers: {
-        authorization: `Bearer ${env.REALTIME_API_TOKEN}`,
+        authorization: `Bearer ${env.TURN_API_TOKEN}`,
         "content-type": "application/json",
       },
-      ...(serializedBody === undefined ? {} : { body: serializedBody }),
-    });
-  } catch (error) {
-    console.error("Realtime SFU fetch failed before a response was received", { url, error });
-    throw error;
+      body: JSON.stringify({ ttl: 3600 }),
+    },
+  );
+  const result = await readJson<{ iceServers?: RTCIceServer[]; error?: string }>(
+    response,
+    `Cloudflare TURN credentials (${response.status})`,
+  );
+  if (!response.ok || !Array.isArray(result.iceServers)) {
+    throw new Error(result.error || "Could not generate TURN credentials");
   }
-  console.log("Realtime SFU response headers", {
-    url,
-    status: response.status,
-    contentType: response.headers.get("content-type"),
-    contentLength: response.headers.get("content-length"),
-  });
-  let raw: string;
-  try {
-    raw = await response.text();
-  } catch (error) {
-    console.error("Realtime SFU response body read failed", { url, status: response.status, error });
-    throw error;
-  }
-  console.log("Realtime SFU response body", { url, status: response.status, raw });
-  let result: RealtimeApiResponse = {};
-  if (raw) {
-    try {
-      result = JSON.parse(raw) as RealtimeApiResponse;
-    } catch {
-      throw new Error(
-        `Cloudflare Realtime returned a non-JSON response (${response.status}): ${raw.slice(0, 240)}`,
-      );
-    }
-  }
-  if (!response.ok || result.errorCode) {
-    throw new Error(
-      result.errorDescription || `Cloudflare Realtime request failed (${response.status})`,
-    );
-  }
-  return result;
+  return result.iceServers;
 }
 
 function validRoomId(value: unknown): value is string {
@@ -166,10 +127,6 @@ export async function handleShareRoomRealtime(
   env: RealtimeRoomEnv,
 ) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, { status: 405 });
-  if (!env.REALTIME_APP_ID?.trim() || !env.REALTIME_API_TOKEN?.trim()) {
-    return json({ error: "Cloudflare Realtime is not configured" }, { status: 503 });
-  }
-
   let stage = "read-request";
   try {
     const body = await readJson<Record<string, unknown>>(request, "Realtime request body");
@@ -180,6 +137,8 @@ export async function handleShareRoomRealtime(
     if (action === "status") {
       const owner = readyMember(room, "owner");
       const guest = readyMember(room, "guest");
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+      const requester = memberForSession(room, sessionId);
       return json({
         members: roomMembers(room).map(({ clientId, role, status, leftAt }) => ({
           clientId,
@@ -191,8 +150,9 @@ export async function handleShareRoomRealtime(
         guestKnown: roomMembers(room).some((member) => member.role === "guest"),
         ownerJoined: Boolean(owner),
         guestJoined: Boolean(guest),
-        ownerSessionId: owner?.sessionId,
-        guestSessionId: guest?.sessionId,
+        ownerSessionId: requester ? owner?.sessionId : undefined,
+        guestSessionId: requester ? guest?.sessionId : undefined,
+        signal: requester ? room.signal : undefined,
       });
     }
 
@@ -216,14 +176,13 @@ export async function handleShareRoomRealtime(
       ) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
-      const session = await realtimeRequest(env, "/sessions/new");
-      if (!session.sessionId) throw new Error("Realtime did not return a session ID");
+      const sessionId = randomBase64Url(24);
       const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(room.roomId));
       stage = "claim-room";
       const claimed = await object.fetch("https://share-room/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role, sessionId: session.sessionId, clientId }),
+        body: JSON.stringify({ role, sessionId, clientId }),
       });
       const updated = await readJson<ShareRoomState | { error?: string }>(claimed, "Share room join response");
       if (!claimed.ok) throw new Error((updated as { error?: string }).error || "Could not join room");
@@ -231,7 +190,7 @@ export async function handleShareRoomRealtime(
       const peer = readyMember(updatedRoom, role === "owner" ? "guest" : "owner");
       return json({
         role,
-        sessionId: session.sessionId,
+        sessionId,
         peerSessionId: peer?.sessionId,
       });
     }
@@ -240,6 +199,33 @@ export async function handleShareRoomRealtime(
     const member = memberForSession(room, sessionId);
     if (!member) return json({ error: "Invalid room session" }, { status: 403 });
     const isOwnerSession = member.role === "owner";
+
+    if (action === "ice-servers") {
+      stage = "generate-turn-credentials";
+      return json({ iceServers: await generateTurnIceServers(env) });
+    }
+
+    if (action === "signal") {
+      const description = body.description as RTCSessionDescriptionInit | undefined;
+      if (!description?.sdp || !["offer", "answer"].includes(description.type)) {
+        return json({ error: "Invalid session description" }, { status: 400 });
+      }
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/signal", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, description }),
+      });
+      const result = await readJson<{ ok?: boolean; error?: string }>(
+        response,
+        `Share room signal (${response.status})`,
+      );
+      return response.ok
+        ? json({ ok: true })
+        : json({ error: result.error || "Signaling failed" }, { status: response.status });
+    }
 
     if (action === "heartbeat") {
       stage = "heartbeat";
@@ -320,51 +306,6 @@ export async function handleShareRoomRealtime(
       return json({ ok: true });
     }
 
-    if (action === "transport") {
-      stage = "validate-transport";
-      const sdp = body.sessionDescription as RTCSessionDescriptionInit | undefined;
-      if (!sdp?.sdp || sdp.type !== "offer") throw new Error("Missing SDP offer");
-      stage = "sfu-establish";
-      const result = await realtimeRequest(env, `/sessions/${sessionId}/datachannels/establish`, "POST", {
-        dataChannel: { location: "remote", dataChannelName: "server-events" },
-        sessionDescription: sdp,
-      });
-      stage = "mark-room-ready";
-      const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(room.roomId));
-      await object.fetch("https://share-room/ready", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role: isOwnerSession ? "owner" : "guest", sessionId }),
-      });
-      return json(result);
-    }
-
-    if (action === "renegotiate") {
-      stage = "sfu-renegotiate";
-      const sdp = body.sessionDescription as RTCSessionDescriptionInit | undefined;
-      if (!sdp?.sdp || sdp.type !== "answer") throw new Error("Missing SDP answer");
-      return json(await realtimeRequest(env, `/sessions/${sessionId}/renegotiate`, "PUT", { sessionDescription: sdp }));
-    }
-
-    if (action === "datachannel") {
-      stage = "sfu-datachannel";
-      const name = typeof body.name === "string" ? body.name : "";
-      const direction = body.direction === "remote" ? "remote" : "local";
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) throw new Error("Invalid DataChannel name");
-      const peerSessionId = readyMember(
-        room,
-        isOwnerSession ? "guest" : "owner",
-      )?.sessionId;
-      if (direction === "remote" && !peerSessionId) return json({ error: "Peer has not joined" }, { status: 409 });
-      const channel = direction === "local"
-        ? { location: "local", dataChannelName: name }
-        : { location: "remote", sessionId: peerSessionId, dataChannelName: name, waitForAck: true };
-      const result = await realtimeRequest(env, `/sessions/${sessionId}/datachannels/new`, "POST", { dataChannels: [channel] });
-      const id = result.dataChannels?.[0]?.id;
-      if (typeof id !== "number") throw new Error("Realtime did not return a DataChannel ID");
-      return json({ id });
-    }
-
     return json({ error: "Not found" }, { status: 404 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Realtime request failed";
@@ -382,9 +323,9 @@ export async function handleCreateShareRoom(
     return json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  if (!env.REALTIME_APP_ID?.trim() || !env.REALTIME_API_TOKEN?.trim()) {
+  if (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim()) {
     return json(
-      { error: "Cloudflare Realtime is not configured" },
+      { error: "Cloudflare TURN is not configured" },
       { status: 503 },
     );
   }

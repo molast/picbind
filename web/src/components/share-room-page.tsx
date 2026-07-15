@@ -31,18 +31,18 @@ import {
 } from "@/utils/share-room";
 import {
   closeRealtimeRoom,
-  createRealtimeDataChannel,
-  establishRealtimeTransport,
+  getRealtimeIceServers,
   getRealtimeRoomStatus,
   heartbeatRealtimeRoom,
   leaveRealtimeRoom,
   leaveRealtimeRoomTemporarily,
   joinRealtimeRoom,
-  renegotiateRealtimeTransport,
+  publishRealtimeSignal,
   RealtimeRoomRequestError,
   type RoomRole,
   type RoomMemberPresence,
 } from "@/utils/realtime-room";
+import { waitForIceGatheringComplete } from "@/utils/realtime-p2p";
 import {
   RealtimeImageReceiver,
   MAX_IMAGE_TRANSFER_SIZE,
@@ -361,15 +361,16 @@ export default function ShareRoomPage() {
     let pollTimer: number | undefined;
     let heartbeatTimer: number | undefined;
     let handshakeTimer: number | undefined;
-    let incomingChannel: RTCDataChannel | null = null;
-    let attached = false;
-    let attaching = false;
-    let attachedPeerId: string | null = null;
     let connectedRole: RoomRole | null = null;
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
-      bundlePolicy: "max-bundle",
-    });
+    let connection: RTCPeerConnection | null = null;
+    let channel: RTCDataChannel | null = null;
+    let iceServers: RTCIceServer[] = [];
+    let currentPeerSessionId: string | null = null;
+    let currentOfferSdp: string | null = null;
+    let negotiating = false;
+    let handshakeId = "";
+    let handshakeAcknowledged = false;
+    let previewsPublished = false;
 
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
@@ -549,6 +550,326 @@ export default function ShareRoomPage() {
       });
     };
 
+    const stopHandshake = () => {
+      if (handshakeTimer) {
+        window.clearInterval(handshakeTimer);
+        handshakeTimer = undefined;
+      }
+    };
+
+    const publishWaitingPreviews = async () => {
+      const activeChannel = outgoingChannelRef.current;
+      if (
+        previewsPublished ||
+        connectedRole !== "owner" ||
+        activeChannel?.readyState !== "open"
+      ) {
+        return;
+      }
+      previewsPublished = true;
+      for (const image of imagesRef.current) {
+        if (
+          image.direction !== "sent" ||
+          image.previewOnly ||
+          (image.transferStatus !== "waiting" &&
+            image.transferStatus !== "failed")
+        ) {
+          continue;
+        }
+        try {
+          const file = new File([image.blob], image.name, { type: image.type });
+          const meta = createImageTransferMeta(file, image.id);
+          sendImagePreview(
+            activeChannel,
+            meta,
+            await generateShareThumbnail(file),
+          );
+        } catch (error) {
+          console.warn("Failed to publish queued image preview", error);
+        }
+      }
+    };
+
+    const sendHello = () => {
+      sendPeerMessage(outgoingChannelRef.current, {
+        type: "HELLO",
+        payload: { id: handshakeId },
+      });
+    };
+
+    const startHandshake = () => {
+      if (
+        channel?.readyState !== "open" ||
+        handshakeAcknowledged ||
+        handshakeTimer ||
+        disposed
+      ) {
+        return;
+      }
+      setConnection("connecting");
+      setConnectionActivity("connecting");
+      sendHello();
+      handshakeTimer = window.setInterval(sendHello, 500);
+    };
+
+    const sendWhenReady = (
+      message:
+        | { type: "HELLO_ACK"; payload: { replyTo: string } }
+        | { type: "MESSAGE_ACK"; payload: { replyTo: string } },
+      attempt = 0,
+    ) => {
+      if (disposed) {
+        return;
+      }
+      if (sendPeerMessage(outgoingChannelRef.current, message)) {
+        return;
+      }
+      if (attempt < 100) {
+        window.setTimeout(() => sendWhenReady(message, attempt + 1), 100);
+      }
+    };
+
+    const handleChannelMessage = (event: MessageEvent) => {
+      if (typeof event.data !== "string") {
+        if (event.data instanceof ArrayBuffer) {
+          receiver.handle(event.data);
+        }
+        return;
+      }
+      const peerMessage = parsePeerMessage(event.data);
+      if (peerMessage?.type === "HELLO") {
+        sendWhenReady({
+          type: "HELLO_ACK",
+          payload: { replyTo: peerMessage.payload.id },
+        });
+        startHandshake();
+        return;
+      }
+      if (
+        peerMessage?.type === "HELLO_ACK" &&
+        peerMessage.payload.replyTo === handshakeId
+      ) {
+        handshakeAcknowledged = true;
+        stopHandshake();
+        setConnection("connected");
+        setConnectionError(null);
+        setConnectionActivity("connected");
+        void publishWaitingPreviews();
+        return;
+      }
+      if (peerMessage?.type === "EMOJI") {
+        upsertActivity({
+          id: `message-${peerMessage.payload.id}`,
+          kind: "message",
+          title: peerMessage.payload.emoji,
+          detail: `${labels.messageReceived} · ${
+            connectedRole === "owner" ? labels.guest : labels.owner
+          }`,
+          createdAt: Date.now(),
+        });
+        sendWhenReady({
+          type: "MESSAGE_ACK",
+          payload: { replyTo: peerMessage.payload.id },
+        });
+        return;
+      }
+      if (peerMessage?.type === "MESSAGE_ACK") {
+        setActivities((current) =>
+          current.map((activity) =>
+            activity.id === `message-${peerMessage.payload.replyTo}`
+              ? {
+                  ...activity,
+                  kind: "complete",
+                  detail: labels.messageSent,
+                  createdAt: Date.now(),
+                }
+              : activity,
+          ),
+        );
+        return;
+      }
+      receiver.handle(event.data);
+    };
+
+    const attachChannel = (nextChannel: RTCDataChannel) => {
+      channel = nextChannel;
+      channel.binaryType = "arraybuffer";
+      handshakeId = createPeerMessageId();
+      handshakeAcknowledged = false;
+      previewsPublished = false;
+      channel.onmessage = handleChannelMessage;
+      channel.onopen = () => {
+        outgoingChannelRef.current = channel;
+        startHandshake();
+      };
+      channel.onclose = () => {
+        stopHandshake();
+        handshakeAcknowledged = false;
+        previewsPublished = false;
+        outgoingChannelRef.current = null;
+        if (!disposed) {
+          setConnection("waiting");
+          setConnectionActivity("waiting");
+        }
+      };
+      if (channel.readyState === "open") {
+        outgoingChannelRef.current = channel;
+        startHandshake();
+      }
+    };
+
+    const closePeerConnection = () => {
+      stopHandshake();
+      if (channel) {
+        channel.onclose = null;
+        channel.close();
+      }
+      if (connection) {
+        connection.ondatachannel = null;
+        connection.onconnectionstatechange = null;
+        connection.close();
+      }
+      channel = null;
+      connection = null;
+      outgoingChannelRef.current = null;
+      currentPeerSessionId = null;
+      currentOfferSdp = null;
+      handshakeAcknowledged = false;
+      previewsPublished = false;
+      negotiating = false;
+    };
+
+    const createPeerConnection = () => {
+      const peer = new RTCPeerConnection({
+        iceServers,
+        bundlePolicy: "max-bundle",
+      });
+      peer.onconnectionstatechange = () => {
+        if (disposed) {
+          return;
+        }
+        if (peer.connectionState === "failed") {
+          setConnection("error");
+          setConnectionActivity("error", "P2P connection failed");
+          closePeerConnection();
+        } else if (peer.connectionState === "disconnected") {
+          setConnection("waiting");
+          setConnectionActivity("waiting");
+        }
+      };
+      peer.ondatachannel = (event) => attachChannel(event.channel);
+      connection = peer;
+      return peer;
+    };
+
+    const ensureOwnerConnection = async (
+      sessionId: string,
+      status: Awaited<ReturnType<typeof getRealtimeRoomStatus>>,
+    ) => {
+      const peerSessionId = status.guestSessionId;
+      if (!peerSessionId) {
+        if (currentPeerSessionId) {
+          closePeerConnection();
+        }
+        setConnection("waiting");
+        setConnectionActivity("waiting");
+        return;
+      }
+
+      if (currentPeerSessionId !== peerSessionId) {
+        closePeerConnection();
+      }
+      if (!connection && !negotiating) {
+        negotiating = true;
+        setConnection("connecting");
+        setConnectionActivity("connecting");
+        currentPeerSessionId = peerSessionId;
+        const peer = createPeerConnection();
+        attachChannel(
+          peer.createDataChannel("picbind-files", { ordered: true }),
+        );
+        try {
+          await peer.setLocalDescription(await peer.createOffer());
+          await waitForIceGatheringComplete(peer);
+          const description = peer.localDescription;
+          if (!description || peer.connectionState === "closed") {
+            return;
+          }
+          await publishRealtimeSignal(
+            roomId,
+            sessionId,
+            description.toJSON(),
+          );
+        } finally {
+          negotiating = false;
+        }
+      }
+
+      const signal = status.signal;
+      if (
+        connection &&
+        signal?.ownerSessionId === sessionId &&
+        signal.guestSessionId === peerSessionId &&
+        signal.answer &&
+        connection.signalingState === "have-local-offer"
+      ) {
+        await connection.setRemoteDescription(signal.answer);
+      }
+    };
+
+    const ensureGuestConnection = async (
+      sessionId: string,
+      status: Awaited<ReturnType<typeof getRealtimeRoomStatus>>,
+    ) => {
+      const peerSessionId = status.ownerSessionId;
+      const signal = status.signal;
+      const offer =
+        signal?.ownerSessionId === peerSessionId &&
+        signal?.guestSessionId === sessionId
+          ? signal.offer
+          : undefined;
+      if (!peerSessionId || !offer?.sdp) {
+        if (!peerSessionId && currentPeerSessionId) {
+          closePeerConnection();
+        }
+        setConnection("waiting");
+        setConnectionActivity("waiting");
+        return;
+      }
+      if (
+        currentPeerSessionId === peerSessionId &&
+        currentOfferSdp === offer.sdp
+      ) {
+        return;
+      }
+      if (negotiating) {
+        return;
+      }
+      closePeerConnection();
+      negotiating = true;
+      setConnection("connecting");
+      setConnectionActivity("connecting");
+      currentPeerSessionId = peerSessionId;
+      currentOfferSdp = offer.sdp;
+      const peer = createPeerConnection();
+      try {
+        await peer.setRemoteDescription(offer);
+        await peer.setLocalDescription(await peer.createAnswer());
+        await waitForIceGatheringComplete(peer);
+        const description = peer.localDescription;
+        if (!description || peer.connectionState === "closed") {
+          return;
+        }
+        await publishRealtimeSignal(
+          roomId,
+          sessionId,
+          description.toJSON(),
+        );
+      } finally {
+        negotiating = false;
+      }
+    };
+
     const connect = async () => {
       try {
         setConnection("connecting");
@@ -588,297 +909,24 @@ export default function ShareRoomPage() {
           });
         }, 15_000);
 
-        const serverEvents = pc.createDataChannel("server-events");
-        serverEvents.onmessage = () => undefined;
-        await pc.setLocalDescription(await pc.createOffer());
-        const transport = await establishRealtimeTransport(
-          roomId,
-          joined.sessionId,
-          pc.localDescription!,
-        );
-        if (!transport.sessionDescription) {
-          throw new Error("Realtime did not return SDP");
-        }
-        await pc.setRemoteDescription(transport.sessionDescription);
-        if (transport.requiresImmediateRenegotiation) {
-          await pc.setLocalDescription(await pc.createAnswer());
-          await renegotiateRealtimeTransport(
-            roomId,
-            joined.sessionId,
-            pc.localDescription!,
-          );
-        }
-
-        const localName =
-          joined.role === "owner" ? "owner-to-guest" : "guest-to-owner";
-        const remoteName =
-          joined.role === "owner" ? "guest-to-owner" : "owner-to-guest";
-        const localId = await createRealtimeDataChannel(
-          roomId,
-          joined.sessionId,
-          "local",
-          localName,
-        );
-        const outgoing = pc.createDataChannel(localName, {
-          negotiated: true,
-          id: localId,
-        });
-        const handshakeId = createPeerMessageId();
-        let outgoingOpen = false;
-        let incomingOpen = false;
-        let handshakeAcknowledged = false;
-        let previewsPublished = false;
-
-        const stopHandshake = () => {
-          if (handshakeTimer) {
-            window.clearInterval(handshakeTimer);
-            handshakeTimer = undefined;
-          }
-        };
-
-        const sendHello = () => {
-          sendPeerMessage(outgoingChannelRef.current, {
-            type: "HELLO",
-            payload: { id: handshakeId },
-          });
-        };
-
-        const startHandshake = () => {
-          if (
-            !outgoingOpen ||
-            !incomingOpen ||
-            handshakeAcknowledged ||
-            handshakeTimer ||
-            disposed
-          ) {
-            return;
-          }
-          setConnection("connecting");
-          setConnectionActivity("connecting");
-          sendHello();
-          handshakeTimer = window.setInterval(sendHello, 500);
-        };
-
-        const sendWhenReady = (
-          message:
-            | { type: "HELLO_ACK"; payload: { replyTo: string } }
-            | { type: "MESSAGE_ACK"; payload: { replyTo: string } },
-          attempt = 0,
-        ) => {
-          if (disposed) {
-            return;
-          }
-          if (sendPeerMessage(outgoingChannelRef.current, message)) {
-            return;
-          }
-          if (attempt < 100) {
-            window.setTimeout(() => sendWhenReady(message, attempt + 1), 100);
-          }
-        };
-
-        const publishWaitingPreviews = async () => {
-          const channel = outgoingChannelRef.current;
-          if (
-            previewsPublished ||
-            joined.role !== "owner" ||
-            channel?.readyState !== "open"
-          ) {
-            return;
-          }
-          previewsPublished = true;
-          for (const image of imagesRef.current) {
-            if (
-              image.direction !== "sent" ||
-              image.previewOnly ||
-              (image.transferStatus !== "waiting" &&
-                image.transferStatus !== "failed")
-            ) {
-              continue;
-            }
-            try {
-              const file = new File([image.blob], image.name, {
-                type: image.type,
-              });
-              const meta = createImageTransferMeta(file, image.id);
-              const thumbnail = await generateShareThumbnail(file);
-              sendImagePreview(channel, meta, thumbnail);
-            } catch (error) {
-              console.warn("Failed to publish queued image preview", error);
-            }
-          }
-        };
-
-        outgoing.onopen = () => {
-          outgoingChannelRef.current = outgoing;
-          outgoingOpen = true;
-          if (incomingOpen) {
-            startHandshake();
-          } else {
-            setConnection("waiting");
-            setConnectionActivity("waiting");
-          }
-        };
-        outgoing.onclose = () => {
-          outgoingOpen = false;
-          handshakeAcknowledged = false;
-          previewsPublished = false;
-          stopHandshake();
-          outgoingChannelRef.current = null;
-          if (!disposed) {
-            setConnection("waiting");
-            setConnectionActivity("waiting");
-          }
-        };
-
-        const detachPeer = () => {
-          if (incomingChannel) {
-            incomingChannel.onclose = null;
-            incomingChannel.close();
-          }
-          incomingChannel = null;
-          attached = false;
-          attachedPeerId = null;
-          incomingOpen = false;
-          handshakeAcknowledged = false;
-          previewsPublished = false;
-          stopHandshake();
-        };
-
-        const attachPeer = async (peerId?: string) => {
-          if (!peerId) {
-            detachPeer();
-            if (!disposed) {
-              setConnection("waiting");
-              setConnectionActivity("waiting");
-            }
-            return;
-          }
-          if (
-            (attached && attachedPeerId === peerId) ||
-            attaching ||
-            disposed
-          ) {
-            return;
-          }
-          if (attachedPeerId !== peerId) {
-            detachPeer();
-          }
-          attaching = true;
-          try {
-            const remoteId = await createRealtimeDataChannel(
-              roomId,
-              joined.sessionId,
-              "remote",
-              remoteName,
-            );
-            const incoming = pc.createDataChannel(
-              `${remoteName}-subscribed`,
-              { negotiated: true, id: remoteId },
-            );
-            incoming.binaryType = "arraybuffer";
-            incoming.onmessage = (event) => {
-              if (typeof event.data === "string") {
-                const peerMessage = parsePeerMessage(event.data);
-                if (peerMessage?.type === "HELLO") {
-                  sendWhenReady({
-                    type: "HELLO_ACK",
-                    payload: { replyTo: peerMessage.payload.id },
-                  });
-                  startHandshake();
-                  return;
-                }
-                if (
-                  peerMessage?.type === "HELLO_ACK" &&
-                  peerMessage.payload.replyTo === handshakeId
-                ) {
-                  handshakeAcknowledged = true;
-                  stopHandshake();
-                  setConnection("connected");
-                  setConnectionError(null);
-                  setConnectionActivity("connected");
-                  void publishWaitingPreviews();
-                  return;
-                }
-                if (peerMessage?.type === "EMOJI") {
-                  upsertActivity({
-                    id: `message-${peerMessage.payload.id}`,
-                    kind: "message",
-                    title: peerMessage.payload.emoji,
-                    detail: `${labels.messageReceived} · ${
-                      joined.role === "owner" ? labels.guest : labels.owner
-                    }`,
-                    createdAt: Date.now(),
-                  });
-                  sendWhenReady({
-                    type: "MESSAGE_ACK",
-                    payload: { replyTo: peerMessage.payload.id },
-                  });
-                  return;
-                }
-                if (peerMessage?.type === "MESSAGE_ACK") {
-                  setActivities((current) =>
-                    current.map((activity) =>
-                      activity.id === `message-${peerMessage.payload.replyTo}`
-                        ? {
-                            ...activity,
-                            kind: "complete",
-                            detail: labels.messageSent,
-                            createdAt: Date.now(),
-                          }
-                        : activity,
-                    ),
-                  );
-                  return;
-                }
-                receiver.handle(event.data);
-                return;
-              }
-              if (event.data instanceof ArrayBuffer) {
-                receiver.handle(event.data);
-              }
-            };
-            incoming.onopen = () => {
-              incoming.send("ack");
-              incomingOpen = true;
-              startHandshake();
-            };
-            incoming.onclose = () => {
-              incomingOpen = false;
-              handshakeAcknowledged = false;
-              stopHandshake();
-              attached = false;
-              attachedPeerId = null;
-              incomingChannel = null;
-              if (!disposed) {
-                setConnection("waiting");
-                setConnectionActivity("waiting");
-              }
-            };
-            incomingChannel = incoming;
-            attached = true;
-            attachedPeerId = peerId;
-          } finally {
-            attaching = false;
-          }
-        };
-
         const refreshStatus = async () => {
-          const status = await getRealtimeRoomStatus(roomId);
+          const status = await getRealtimeRoomStatus(roomId, joined.sessionId);
           if (disposed) {
             return;
           }
           setMembers(status.members);
-          const peerId =
-            joined.role === "owner"
-              ? status.guestSessionId
-              : status.ownerSessionId;
-          try {
-            await attachPeer(peerId);
-          } catch (error) {
-            console.warn("Failed to attach peer DataChannel", error);
+          if (joined.role === "owner") {
+            await ensureOwnerConnection(joined.sessionId, status);
+          } else {
+            await ensureGuestConnection(joined.sessionId, status);
           }
         };
 
+        const credentials = await getRealtimeIceServers(
+          roomId,
+          joined.sessionId,
+        );
+        iceServers = credentials.iceServers;
         await refreshStatus();
         pollTimer = window.setInterval(() => {
           void refreshStatus().catch((error) => {
@@ -887,7 +935,7 @@ export default function ShareRoomPage() {
             }
             console.warn("Failed to refresh room presence", error);
           });
-        }, 3000);
+        }, 1000);
       } catch (error) {
         if (!disposed) {
           if (redirectIfRoomClosed(error)) {
@@ -901,16 +949,6 @@ export default function ShareRoomPage() {
         }
       }
     };
-
-    pc.addEventListener("connectionstatechange", () => {
-      if (disposed) {
-        return;
-      }
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-        setConnection("error");
-        setConnectionActivity("error", pc.connectionState);
-      }
-    });
 
     void connect();
     const leaveGuest = () => {
@@ -933,11 +971,8 @@ export default function ShareRoomPage() {
       if (handshakeTimer) {
         window.clearInterval(handshakeTimer);
       }
-      incomingChannel?.close();
-      outgoingChannelRef.current?.close();
-      outgoingChannelRef.current = null;
+      closePeerConnection();
       sessionIdRef.current = null;
-      pc.close();
     };
   }, [addRoomImage, labels, roomId, updateRoomImage, upsertActivity]);
 

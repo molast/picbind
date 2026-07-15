@@ -37,8 +37,8 @@ type Env = {
   ALLOWED_ORIGINS?: string;
   BAIDU_PUSH_SITE?: string;
   BAIDU_PUSH_TOKEN?: string;
-  REALTIME_APP_ID?: string;
-  REALTIME_API_TOKEN?: string;
+  TURN_TOKEN_ID?: string;
+  TURN_API_TOKEN?: string;
 };
 
 const CONFIG_KEY = "metrics:config:v1";

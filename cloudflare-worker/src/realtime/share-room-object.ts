@@ -13,6 +13,13 @@ export type ShareRoomMember = {
   leftAt?: number;
 };
 
+export type ShareRoomSignal = {
+  ownerSessionId: string;
+  guestSessionId: string;
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
+};
+
 export type ShareRoomState = {
   roomId: string;
   ownerTokenHash: string;
@@ -23,6 +30,7 @@ export type ShareRoomState = {
   hadParticipant?: boolean;
   hadOwner?: boolean;
   ownerTemporarilyAway?: boolean;
+  signal?: ShareRoomSignal;
 
   // Legacy V1 fields are migrated into members on first access.
   ownerSessionId?: string;
@@ -91,6 +99,9 @@ function pruneStaleMembers(room: ShareRoomState, now = Date.now()) {
         ownerTimedOut = true;
       }
     }
+  }
+  if (changed) {
+    delete room.signal;
   }
   return { changed, ownerTimedOut };
 }
@@ -236,7 +247,7 @@ export class ShareRoomObject {
       );
       if (existingMember) {
         existingMember.sessionId = body.sessionId;
-        existingMember.ready = false;
+        existingMember.ready = true;
         existingMember.lastSeen = now;
         existingMember.status = "online";
         delete existingMember.leftAt;
@@ -245,7 +256,7 @@ export class ShareRoomObject {
           clientId: body.clientId,
           sessionId: body.sessionId,
           role: body.role,
-          ready: false,
+          ready: true,
           lastSeen: now,
           status: "online",
         });
@@ -255,8 +266,57 @@ export class ShareRoomObject {
         room.hadOwner = true;
         room.ownerTemporarilyAway = false;
       }
+      delete room.signal;
       await this.persistAndSchedule(room);
       return json(room);
+    }
+
+    if (request.method === "POST" && pathname === "/signal") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        sessionId?: string;
+        description?: RTCSessionDescriptionInit;
+      };
+      if (!room || !body.sessionId || !body.description?.sdp) {
+        return json({ error: "Invalid signaling request" }, { status: 400 });
+      }
+      if (body.description.sdp.length > 1024 * 1024) {
+        return json({ error: "Session description is too large" }, { status: 413 });
+      }
+      const members = normalizeMembers(room);
+      const sender = members.find(
+        (member) =>
+          member.sessionId === body.sessionId && member.status === "online",
+      );
+      const owner = members.find(
+        (member) => member.role === "owner" && member.status === "online",
+      );
+      const guest = members.find(
+        (member) => member.role === "guest" && member.status === "online",
+      );
+      if (!sender || !owner || !guest) {
+        return json({ error: "Peer is not available" }, { status: 409 });
+      }
+      if (sender.role === "owner" && body.description.type === "offer") {
+        room.signal = {
+          ownerSessionId: owner.sessionId,
+          guestSessionId: guest.sessionId,
+          offer: body.description,
+        };
+      } else if (
+        sender.role === "guest" &&
+        body.description.type === "answer" &&
+        room.signal?.ownerSessionId === owner.sessionId &&
+        room.signal.guestSessionId === guest.sessionId &&
+        room.signal.offer
+      ) {
+        room.signal.answer = body.description;
+      } else {
+        return json({ error: "Unexpected session description" }, { status: 409 });
+      }
+      sender.lastSeen = Date.now();
+      await this.persistAndSchedule(room);
+      return json({ ok: true });
     }
 
     if (request.method === "POST" && pathname === "/ready") {
@@ -322,6 +382,7 @@ export class ShareRoomObject {
       leavingMember.status = "offline";
       leavingMember.ready = false;
       leavingMember.leftAt = Date.now();
+      delete room.signal;
       const retained = await this.persistAndSchedule(room);
       return json({ ok: true, roomRetained: retained });
     }
@@ -345,6 +406,7 @@ export class ShareRoomObject {
       owner.leftAt = Date.now();
       room.hadOwner = true;
       room.ownerTemporarilyAway = true;
+      delete room.signal;
       await this.persistAndSchedule(room);
       return json({ ok: true });
     }

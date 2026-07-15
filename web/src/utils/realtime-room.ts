@@ -8,9 +8,11 @@ type JoinResult = {
   peerSessionId?: string;
 };
 
-type TransportResult = {
-  sessionDescription?: RTCSessionDescriptionInit;
-  requiresImmediateRenegotiation?: boolean;
+export type RoomSignal = {
+  ownerSessionId: string;
+  guestSessionId: string;
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
 };
 
 export type RoomMemberPresence = {
@@ -75,7 +77,7 @@ export function joinRealtimeRoom(
   return roomRequest<JoinResult>("join", { roomId, ownerToken, clientId });
 }
 
-export function getRealtimeRoomStatus(roomId: string) {
+export function getRealtimeRoomStatus(roomId: string, sessionId?: string) {
   return roomRequest<{
     members: RoomMemberPresence[];
     ownerKnown: boolean;
@@ -84,7 +86,27 @@ export function getRealtimeRoomStatus(roomId: string) {
     guestJoined: boolean;
     ownerSessionId?: string;
     guestSessionId?: string;
-  }>("status", { roomId });
+    signal?: RoomSignal;
+  }>("status", { roomId, sessionId });
+}
+
+export function getRealtimeIceServers(roomId: string, sessionId: string) {
+  return roomRequest<{ iceServers: RTCIceServer[] }>("ice-servers", {
+    roomId,
+    sessionId,
+  });
+}
+
+export function publishRealtimeSignal(
+  roomId: string,
+  sessionId: string,
+  description: RTCSessionDescriptionInit,
+) {
+  return roomRequest<{ ok: true }>("signal", {
+    roomId,
+    sessionId,
+    description,
+  });
 }
 
 export function heartbeatRealtimeRoom(roomId: string, sessionId: string) {
@@ -108,22 +130,4 @@ export function leaveRealtimeRoom(
 
 export function closeRealtimeRoom(roomId: string, sessionId: string) {
   return roomRequest<{ ok: true }>("close", { roomId, sessionId });
-}
-
-export function establishRealtimeTransport(roomId: string, sessionId: string, sessionDescription: RTCSessionDescriptionInit) {
-  return roomRequest<TransportResult>("transport", { roomId, sessionId, sessionDescription });
-}
-
-export function renegotiateRealtimeTransport(roomId: string, sessionId: string, sessionDescription: RTCSessionDescriptionInit) {
-  return roomRequest<Record<string, never>>("renegotiate", { roomId, sessionId, sessionDescription });
-}
-
-export async function createRealtimeDataChannel(
-  roomId: string,
-  sessionId: string,
-  direction: "local" | "remote",
-  name: string,
-) {
-  const result = await roomRequest<{ id: number }>("datachannel", { roomId, sessionId, direction, name });
-  return result.id;
 }

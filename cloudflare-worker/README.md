@@ -33,22 +33,23 @@ Notes:
 - `ALLOWED_ORIGINS`: comma-separated allowed origins.
 - `BAIDU_PUSH_SITE`: Baidu site URL. Defaults to `SITE_URL`.
 - `BAIDU_PUSH_TOKEN`: Baidu push token.
-- `REALTIME_APP_ID`: Cloudflare Realtime application ID. Required for room creation.
-- `REALTIME_API_TOKEN`: Cloudflare Realtime API token. Required for room creation and kept Worker-side.
+- `TURN_TOKEN_ID`: Cloudflare TURN token ID. Kept Worker-side.
+- `TURN_API_TOKEN`: Cloudflare TURN API token used to generate short-lived ICE credentials.
 
 `ADMIN_KEY` is a Worker env variable/secret, not a KV entry.
 
-For local development, copy `.env.example` to `.env` and fill in the Realtime
+For local development, copy `.env.example` to `.env` and fill in the TURN
 values. Do not prefix either value with `NEXT_PUBLIC_`. For production, store the
-token as a Worker secret:
+API token as a Worker secret:
 
 ```bash
-npx wrangler secret put REALTIME_API_TOKEN
+npx wrangler secret put TURN_API_TOKEN
 ```
 
-Set `REALTIME_APP_ID` as a Worker environment variable. The room endpoint creates
-a PicBind logical room; the Realtime session itself is created later, once the
-browser supplies an SDP offer for its DataChannel peer connection.
+Set `TURN_TOKEN_ID` as a Worker environment variable. The Worker generates
+one-hour ICE credentials and relays SDP signaling through the room Durable
+Object. Image bytes travel over a browser-to-browser WebRTC DataChannel; TURN is
+used only when a direct ICE candidate pair cannot connect.
 
 The current Pages app has API calls disabled by default. When this Worker is deployed, set the Pages env vars to point to it, for example:
 
@@ -69,6 +70,7 @@ ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com
 BAIDU_PUSH_SITE=https://picbind.com
 ADMIN_KEY=<your-admin-key>
 BAIDU_PUSH_TOKEN=<your-baidu-token>
+TURN_TOKEN_ID=<your-cloudflare-turn-token-id>
 ```
 
 Storage strategy:
