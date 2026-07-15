@@ -369,6 +369,7 @@ export default function ShareRoomPage() {
     let currentOfferSdp: string | null = null;
     let negotiating = false;
     let handshakeId = "";
+    let handshakeAttempts = 0;
     let handshakeAcknowledged = false;
     let previewsPublished = false;
 
@@ -591,6 +592,15 @@ export default function ShareRoomPage() {
     };
 
     const sendHello = () => {
+      if (handshakeAttempts >= 20) {
+        const message = "P2P DataChannel handshake timed out";
+        setConnection("error");
+        setConnectionError(message);
+        setConnectionActivity("error", message);
+        closePeerConnection();
+        return;
+      }
+      handshakeAttempts += 1;
       sendPeerMessage(outgoingChannelRef.current, {
         type: "HELLO",
         payload: { id: handshakeId },
@@ -608,6 +618,7 @@ export default function ShareRoomPage() {
       }
       setConnection("connecting");
       setConnectionActivity("connecting");
+      handshakeAttempts = 0;
       sendHello();
       handshakeTimer = window.setInterval(sendHello, 500);
     };
@@ -695,7 +706,9 @@ export default function ShareRoomPage() {
       channel = nextChannel;
       channel.binaryType = "arraybuffer";
       handshakeId = createPeerMessageId();
+      handshakeAttempts = 0;
       handshakeAcknowledged = false;
+      handshakeAttempts = 0;
       previewsPublished = false;
       channel.onmessage = handleChannelMessage;
       channel.onopen = () => {
@@ -800,6 +813,16 @@ export default function ShareRoomPage() {
             sessionId,
             description.toJSON(),
           );
+        } catch (error) {
+          if (connection === peer) {
+            closePeerConnection();
+          }
+          const message =
+            error instanceof Error ? error.message : "P2P offer failed";
+          setConnection("error");
+          setConnectionError(message);
+          setConnectionActivity("error", message);
+          throw error;
         } finally {
           negotiating = false;
         }
@@ -865,6 +888,16 @@ export default function ShareRoomPage() {
           sessionId,
           description.toJSON(),
         );
+      } catch (error) {
+        if (connection === peer) {
+          closePeerConnection();
+        }
+        const message =
+          error instanceof Error ? error.message : "P2P answer failed";
+        setConnection("error");
+        setConnectionError(message);
+        setConnectionActivity("error", message);
+        throw error;
       } finally {
         negotiating = false;
       }
@@ -928,14 +961,28 @@ export default function ShareRoomPage() {
         );
         iceServers = credentials.iceServers;
         await refreshStatus();
-        pollTimer = window.setInterval(() => {
-          void refreshStatus().catch((error) => {
+        const pollStatus = async () => {
+          let nextDelay = 3000;
+          try {
+            await refreshStatus();
+          } catch (error) {
             if (redirectIfRoomClosed(error)) {
               return;
             }
+            if (
+              error instanceof RealtimeRoomRequestError &&
+              error.status === 429
+            ) {
+              nextDelay = 10_000;
+            }
             console.warn("Failed to refresh room presence", error);
-          });
-        }, 1000);
+          } finally {
+            if (!disposed) {
+              pollTimer = window.setTimeout(pollStatus, nextDelay);
+            }
+          }
+        };
+        pollTimer = window.setTimeout(pollStatus, 3000);
       } catch (error) {
         if (!disposed) {
           if (redirectIfRoomClosed(error)) {
@@ -963,7 +1010,7 @@ export default function ShareRoomPage() {
       window.removeEventListener("pagehide", leaveGuest);
       leaveGuest();
       if (pollTimer) {
-        window.clearInterval(pollTimer);
+        window.clearTimeout(pollTimer);
       }
       if (heartbeatTimer) {
         window.clearInterval(heartbeatTimer);
