@@ -1,6 +1,23 @@
 "use client";
 
-export const TEST_EMOJIS = ["👋", "👍", "🎉", "❤️"] as const;
+export const TEST_EMOJIS = [
+  "👋",
+  "👍",
+  "🎉",
+  "❤️",
+  "🔥",
+  "👏",
+  "😂",
+  "😍",
+  "🥳",
+  "🤩",
+  "💯",
+  "✨",
+  "🙌",
+  "😎",
+  "🤝",
+  "🚀",
+] as const;
 
 export type PeerMessage =
   | { type: "HELLO"; payload: { id: string } }

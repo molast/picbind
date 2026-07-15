@@ -126,6 +126,8 @@ function middleEllipsisFileName(name: string, maxLength = 28) {
 
 export default function ShareRoomPage() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const activityListRef = React.useRef<HTMLDivElement | null>(null);
+  const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
@@ -149,7 +151,13 @@ export default function ShareRoomPage() {
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
   const [textMessage, setTextMessage] = React.useState("");
   const [floatingEmojis, setFloatingEmojis] = React.useState<
-    Array<{ id: string; emoji: string }>
+    Array<{
+      id: string;
+      emoji: string;
+      startX: number;
+      path: string;
+      duration: number;
+    }>
   >([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
 
@@ -167,7 +175,7 @@ export default function ShareRoomPage() {
           uploading: "正在发送",
           drop: "拖入图片开始传输",
           dropHint: "支持常见图片格式，单张最大 50 MB",
-          guestEmpty: "等待 Owner 发送图片",
+          guestEmpty: "选择或拖入图片",
           cached: "图片保存在当前浏览器",
           sent: "已发送",
           received: "已接收",
@@ -220,7 +228,7 @@ export default function ShareRoomPage() {
           uploading: "Sending",
           drop: "Drop images to transfer",
           dropHint: "Common image formats, up to 50 MB each",
-          guestEmpty: "Waiting for the Owner to send images",
+          guestEmpty: "Choose or drop images",
           cached: "Images are stored in this browser",
           sent: "Sent",
           received: "Received",
@@ -270,7 +278,8 @@ export default function ShareRoomPage() {
   const previewImages = images.filter(
     (image) =>
       !image.previewOnly &&
-      (image.transferStatus === "sent" ||
+      (image.direction === "sent" ||
+        image.transferStatus === "sent" ||
         image.transferStatus === "received"),
   );
   const previewImage =
@@ -289,13 +298,36 @@ export default function ShareRoomPage() {
   }, []);
 
   const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
-    setFloatingEmojis((current) => [...current, { id, emoji }].slice(-6));
+    const sequence = emojiSequenceRef.current++;
+    const direction = sequence % 2 === 0 ? 1 : -1;
+    const startX = ((sequence % 5) - 2) * 24;
+    const firstBend = direction * (74 + (sequence % 3) * 16);
+    const secondBend = direction * -(42 + (sequence % 4) * 13);
+    const endX = direction * (18 + (sequence % 3) * 12);
+    const path = `path("M 0 0 C ${firstBend} -120 ${secondBend} -310 ${endX} -520")`;
+    const item = {
+      id,
+      emoji,
+      startX,
+      path,
+      duration: 3200 + (sequence % 3) * 180,
+    };
+    setFloatingEmojis((current) => [...current, item].slice(-60));
     window.setTimeout(() => {
       setFloatingEmojis((current) =>
         current.filter((item) => item.id !== id),
       );
-    }, 2200);
+    }, item.duration + 150);
   }, []);
+
+  React.useEffect(() => {
+    const list = activityListRef.current;
+    if (!list) return;
+    const frame = window.requestAnimationFrame(() => {
+      list.scrollTop = list.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activities]);
 
   const addRoomImage = React.useCallback((image: CachedRoomImage) => {
     const normalized: CachedRoomImage = {
@@ -597,7 +629,6 @@ export default function ShareRoomPage() {
       const activeChannel = outgoingChannelRef.current;
       if (
         previewsPublished ||
-        connectedRole !== "owner" ||
         activeChannel?.readyState !== "open"
       ) {
         return;
@@ -1159,9 +1190,6 @@ export default function ShareRoomPage() {
   );
 
   const handleFiles = async (fileList: FileList | File[]) => {
-    if (role !== "owner") {
-      return;
-    }
     const channel = outgoingChannelRef.current;
     if (connection !== "connected" || channel?.readyState !== "open") {
       upsertActivity({
@@ -1238,7 +1266,6 @@ export default function ShareRoomPage() {
   const handleSendImage = async (image: RoomImage) => {
     const channel = outgoingChannelRef.current;
     if (
-      role !== "owner" ||
       image.direction !== "sent" ||
       image.previewOnly ||
       image.transferStatus === "sending" ||
@@ -1354,6 +1381,7 @@ export default function ShareRoomPage() {
       return;
     }
     setPressedEmoji(emoji);
+    showFloatingEmoji(`local-${id}`, emoji);
     window.setTimeout(() => {
       setPressedEmoji((current) => (current === emoji ? null : current));
     }, 280);
@@ -1508,21 +1536,19 @@ export default function ShareRoomPage() {
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">{labels.cached}</p>
               </div>
-              {role === "owner" ? (
-                <button
-                  type="button"
-                  onClick={() => inputRef.current?.click()}
-                  disabled={isSending || connection !== "connected"}
-                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSending ? (
-                    <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <FiUploadCloud className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  <span>{isSending ? labels.uploading : labels.upload}</span>
-                </button>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={isSending || connection !== "connected"}
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSending ? (
+                  <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <FiUploadCloud className="h-4 w-4" aria-hidden="true" />
+                )}
+                <span>{isSending ? labels.uploading : labels.upload}</span>
+              </button>
               <input
                 ref={inputRef}
                 type="file"
@@ -1545,14 +1571,14 @@ export default function ShareRoomPage() {
               }`}
               onDragEnter={(event) => {
                 event.preventDefault();
-                if (role === "owner") setIsDragging(true);
+                if (connection === "connected") setIsDragging(true);
               }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={() => setIsDragging(false)}
               onDrop={(event) => {
                 event.preventDefault();
                 setIsDragging(false);
-                if (role === "owner") {
+                if (connection === "connected") {
                   void handleFiles(event.dataTransfer.files);
                 }
               }}
@@ -1585,7 +1611,16 @@ export default function ShareRoomPage() {
                       status === "awaiting-receipt";
                     const canPreview =
                       !image.previewOnly &&
-                      (status === "sent" || status === "received");
+                      (image.direction === "sent" ||
+                        status === "sent" ||
+                        status === "received");
+                    const isLocalImage = image.direction === "sent";
+                    const sendReady =
+                      isLocalImage &&
+                      (status === "waiting" || status === "failed");
+                    const sendComplete = isLocalImage && status === "sent";
+                    const downloadReady =
+                      status === "sent" || status === "received";
                     return (
                     <article
                       key={image.id}
@@ -1619,52 +1654,67 @@ export default function ShareRoomPage() {
                         >
                           {middleEllipsisFileName(image.name)}
                         </div>
-                        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+                        <div className="mt-1 flex min-h-6 items-center justify-between gap-2 text-xs text-slate-500">
                           <span>{formatBytes(image.size)}</span>
-                          <span>{statusLabel}</span>
+                          {isLocalImage ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleSendImage(image)}
+                              disabled={
+                                !sendReady ||
+                                isSending ||
+                                connection !== "connected"
+                              }
+                              className={`shrink-0 font-semibold transition ${
+                                sendReady
+                                  ? "text-[#2f65cf] hover:text-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
+                                  : sendComplete
+                                    ? "cursor-default text-emerald-600"
+                                    : "cursor-default text-slate-400"
+                              }`}
+                            >
+                              {sendReady
+                                ? labels.send
+                                : sendComplete
+                                  ? labels.sent
+                                  : statusLabel}
+                            </button>
+                          ) : (
+                            <span className="shrink-0">{statusLabel}</span>
+                          )}
                         </div>
                         {image.previewOnly ? (
                           <div className="mt-2 text-[11px] text-slate-400">
                             {labels.previewOnly}
                           </div>
                         ) : null}
-                        {image.direction === "sent" &&
-                        (status === "waiting" || status === "failed") ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleSendImage(image)}
-                            disabled={isSending || connection !== "connected"}
-                            className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-45"
-                          >
-                            <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span>{labels.send}</span>
-                          </button>
-                        ) : showProgress ? (
-                          <div className="mt-3 rounded-md border border-slate-200 px-3 py-2.5">
-                            <div className="mb-2 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
-                              <span className="truncate">{statusLabel}</span>
-                              <span>{progress}%</span>
-                            </div>
-                            <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className="h-full rounded-full bg-[#2f65cf] transition-[width] duration-150"
-                                style={{ width: `${progress}%` }}
-                              />
-                            </div>
-                          </div>
-                        ) : status === "waiting" ? (
-                          <div className="mt-3 flex h-9 items-center justify-center rounded-md border border-slate-200 text-xs font-semibold text-slate-500">
-                            {labels.waitingForSender}
-                          </div>
-                        ) : (
+                        {downloadReady ? (
                           <a
                             href={image.url}
                             download={image.name}
-                            className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                            className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                           >
                             <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
                             <span>{labels.download}</span>
                           </a>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="relative mt-3 flex h-9 w-full cursor-not-allowed items-center justify-center gap-2 overflow-hidden rounded-md border border-slate-200 text-xs font-semibold text-slate-400"
+                          >
+                            {showProgress ? (
+                              <span
+                                className="absolute inset-y-0 left-0 bg-blue-100/70 transition-[width] duration-150"
+                                style={{ width: `${progress}%` }}
+                              />
+                            ) : null}
+                            <FiDownload className="relative h-3.5 w-3.5" aria-hidden="true" />
+                            <span className="relative">
+                              {labels.download}
+                              {showProgress ? ` · ${progress}%` : ""}
+                            </span>
+                          </button>
                         )}
                       </div>
                     </article>
@@ -1674,7 +1724,7 @@ export default function ShareRoomPage() {
               ) : (
                 <button
                   type="button"
-                  disabled={role !== "owner" || connection !== "connected"}
+                  disabled={connection !== "connected"}
                   onClick={() => inputRef.current?.click()}
                   className="flex h-full min-h-[260px] w-full flex-col items-center justify-center px-6 text-center disabled:cursor-default"
                 >
@@ -1682,13 +1732,11 @@ export default function ShareRoomPage() {
                     <FiImage className="h-7 w-7" aria-hidden="true" />
                   </span>
                   <span className="mt-4 text-base font-semibold text-slate-800">
-                    {role === "owner" ? labels.drop : labels.guestEmpty}
+                    {labels.guestEmpty}
                   </span>
-                  {role === "owner" ? (
-                    <span className="mt-1 text-sm text-slate-500">
-                      {labels.dropHint}
-                    </span>
-                  ) : null}
+                  <span className="mt-1 text-sm text-slate-500">
+                    {labels.dropHint}
+                  </span>
                 </button>
               )}
             </div>
@@ -1799,7 +1847,7 @@ export default function ShareRoomPage() {
             <div className="mb-2 mt-3 text-[11px] font-semibold uppercase text-slate-400">
               {labels.quickReactions}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="grid max-w-full grid-flow-col grid-rows-2 auto-cols-[2.5rem] gap-2 overflow-x-auto pb-1">
               {TEST_EMOJIS.map((emoji) => (
                 <button
                   key={emoji}
@@ -1824,7 +1872,10 @@ export default function ShareRoomPage() {
             <div className="shrink-0 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
               {labels.activity}
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+            <div
+              ref={activityListRef}
+              className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-2"
+            >
               {activities.length ? (
                 activities.map((activity) => {
                   const Icon =
@@ -1842,7 +1893,7 @@ export default function ShareRoomPage() {
                   return (
                     <div
                       key={activity.id}
-                      className={`rounded-md px-3 py-3 ${
+                      className={`relative min-h-[42px] overflow-hidden rounded-md px-2 py-1.5 ${
                         activity.kind === "error"
                           ? "bg-red-50"
                           : activity.kind === "complete"
@@ -1850,47 +1901,51 @@ export default function ShareRoomPage() {
                             : "bg-slate-50"
                       }`}
                     >
-                      <div className="flex items-start gap-2.5">
-                        <Icon
-                          className={`mt-0.5 h-4 w-4 shrink-0 ${
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
                             activity.kind === "error"
-                              ? "text-red-600"
+                              ? "bg-red-100 text-red-600"
                               : activity.kind === "complete"
-                                ? "text-emerald-600"
-                                : "text-[#2f65cf]"
+                                ? "bg-emerald-100 text-emerald-600"
+                                : "bg-blue-100 text-[#2f65cf]"
                           }`}
-                          aria-hidden="true"
-                        />
+                        >
+                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center justify-between gap-2 leading-4">
                             <span
-                              className="min-w-0 truncate text-sm font-semibold text-slate-800"
+                              className="min-w-0 truncate text-xs font-semibold text-slate-800"
                               title={activity.title}
                             >
                               {middleEllipsisFileName(activity.title, 32)}
                             </span>
-                            <span className="shrink-0 text-[11px] text-slate-400">
+                            <span className="shrink-0 text-[10px] text-slate-400">
                               {formatTime(activity.createdAt)}
                             </span>
                           </div>
                           {activity.detail ? (
-                            <p className="mt-1 break-words text-xs leading-5 text-slate-500">
+                            <p
+                              className="truncate text-[11px] leading-4 text-slate-500"
+                              title={activity.detail}
+                            >
                               {activity.detail}
                             </p>
                           ) : null}
-                          {typeof activity.progress === "number" &&
-                          activity.progress < 1 ? (
-                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className="h-full rounded-full bg-[#2f65cf] transition-[width] duration-150"
-                                style={{
-                                  width: `${Math.round(activity.progress * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          ) : null}
                         </div>
                       </div>
+                      {typeof activity.progress === "number" &&
+                      activity.progress < 1 ? (
+                        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-slate-200">
+                          <div
+                            className="h-full bg-[#2f65cf] transition-[width] duration-150"
+                            style={{
+                              width: `${Math.round(activity.progress * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })
@@ -1919,26 +1974,50 @@ export default function ShareRoomPage() {
         />
       ) : null}
       <div className="pointer-events-none fixed inset-0 z-[105] overflow-hidden" aria-hidden="true">
-        {floatingEmojis.map((item, index) => (
+        {floatingEmojis.map((item) => (
           <span
             key={item.id}
-            className="absolute left-1/2 top-[58%] text-5xl"
+            className="picbind-live-emoji-motion absolute top-[72%]"
             style={{
-              animation: `picbind-emoji-float 2.2s cubic-bezier(0.2,0.75,0.25,1) forwards`,
-              animationDelay: `${index * 45}ms`,
+              left: `calc(50% + ${item.startX}px)`,
+              offsetPath: item.path,
+              animationDuration: `${item.duration}ms`,
             }}
           >
-            {item.emoji}
+            <span
+              className="picbind-live-emoji-visual block text-5xl"
+              style={{ animationDuration: `${item.duration}ms` }}
+            >
+              {item.emoji}
+            </span>
           </span>
         ))}
       </div>
       <style jsx global>{`
-        @keyframes picbind-emoji-float {
-          0% { opacity: 0; transform: translate(-50%, 20px) scale(0.35) rotate(-8deg); }
-          18% { opacity: 1; transform: translate(calc(-50% + 38px), -28px) scale(0.9) rotate(6deg); }
-          48% { opacity: 1; transform: translate(calc(-50% - 46px), -120px) scale(1.45) rotate(-5deg); }
-          76% { opacity: 0.9; transform: translate(calc(-50% + 25px), -220px) scale(1.9) rotate(4deg); }
-          100% { opacity: 0; transform: translate(calc(-50% - 18px), -330px) scale(2.35) rotate(0deg); }
+        .picbind-live-emoji-motion {
+          offset-distance: 0%;
+          offset-rotate: 0deg;
+          animation-name: picbind-emoji-motion;
+          animation-timing-function: cubic-bezier(0.18, 0.7, 0.22, 1);
+          animation-fill-mode: forwards;
+          will-change: offset-distance;
+        }
+        .picbind-live-emoji-visual {
+          animation-name: picbind-emoji-visual;
+          animation-timing-function: linear;
+          animation-fill-mode: forwards;
+          will-change: transform, opacity, filter;
+        }
+        @keyframes picbind-emoji-motion {
+          from { offset-distance: 0%; }
+          to { offset-distance: 100%; }
+        }
+        @keyframes picbind-emoji-visual {
+          0% { opacity: 0; filter: blur(1px); transform: scale(0.45) rotate(-6deg); }
+          10% { opacity: 1; filter: blur(0); transform: scale(0.7) rotate(2deg); }
+          55% { opacity: 0.95; filter: blur(0); transform: scale(1.35) rotate(-2deg); }
+          78% { opacity: 0.72; filter: blur(1.5px); transform: scale(1.75) rotate(2deg); }
+          100% { opacity: 0; filter: blur(9px); transform: scale(2.35) rotate(0deg); }
         }
       `}</style>
     </main>
