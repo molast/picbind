@@ -18,11 +18,8 @@ export default function RoomImageMedia({
   placeholder,
 }: RoomImageMediaProps) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-  const [loaded, setLoaded] = React.useState(false);
-
-  React.useEffect(() => {
-    setLoaded(false);
-  }, [src]);
+  const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null);
+  const loaded = Boolean(src && loadedSrc === src);
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -65,7 +62,7 @@ export default function RoomImageMedia({
         <img
           src={src}
           alt={alt}
-          onLoad={() => setLoaded(true)}
+          onLoad={() => setLoadedSrc(src)}
           className={`absolute inset-0 h-full w-full object-cover transition duration-300 hover:scale-[1.02] ${loaded ? "opacity-100" : "opacity-0"}`}
         />
       ) : null}
