@@ -75,8 +75,8 @@ export default function ShareRoomDialog({
         disabled={isCreating}
         className={
           mobile
-            ? "inline-flex items-center gap-1.5 rounded-full px-2 py-1 transition hover:bg-white/35 sm:px-3"
-            : "inline-flex items-center gap-1.5 rounded-full px-3 py-1 transition hover:bg-white/35"
+            ? "relative inline-flex items-center gap-1.5 rounded-full px-2 py-1 transition hover:bg-white/35 sm:px-3"
+            : "relative inline-flex items-center gap-1.5 rounded-full px-3 py-1 transition hover:bg-white/35"
         }
       >
         {isCreating ? (
@@ -85,6 +85,12 @@ export default function ShareRoomDialog({
           <FiShare2 className="h-4 w-4" aria-hidden="true" />
         )}
         <span>{isCreating ? labels.creating : labels.trigger}</span>
+        <span
+          className="pointer-events-none absolute -right-2 -top-2 rounded bg-[#2f65cf] px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
+          aria-hidden="true"
+        >
+          BETA
+        </span>
       </button>
 
       {isOpen ? (
