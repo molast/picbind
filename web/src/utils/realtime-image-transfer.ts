@@ -3,8 +3,10 @@
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
+export const WEAK_NETWORK_CHUNK_SIZE = 1200;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
-const MAX_THUMBNAIL_BYTES = 64 * 1024;
+const MAX_DATA_CHANNEL_PAYLOAD_BYTES = 1200;
+const MAX_THUMBNAIL_BYTES = 256;
 // Keep the SCTP queue deliberately small for mobile and Wi-Fi connections.
 // Pause at the high-water mark, then wait for a real drain before resuming.
 const BUFFER_HIGH_WATER_BYTES = 256 * 1024;
@@ -16,6 +18,7 @@ export type ImageTransferMeta = {
   name: string;
   type: string;
   size: number;
+  chunkSize: number;
   totalChunks: number;
 };
 
@@ -64,13 +67,18 @@ function createTransferId() {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
-export function createImageTransferMeta(file: Blob & { name?: string }, id = createTransferId()) {
+export function createImageTransferMeta(
+  file: Blob & { name?: string },
+  id = createTransferId(),
+  chunkSize = IMAGE_CHUNK_SIZE,
+) {
   return {
     id,
     name: file.name || "shared-image",
     type: file.type,
     size: file.size,
-    totalChunks: Math.ceil(file.size / IMAGE_CHUNK_SIZE),
+    chunkSize,
+    totalChunks: Math.ceil(file.size / chunkSize),
   } satisfies ImageTransferMeta;
 }
 
@@ -99,7 +107,11 @@ function decodeThumbnail(value: unknown) {
 }
 
 function sendControl(channel: RTCDataChannel, message: TransferControlMessage) {
-  channel.send(JSON.stringify(message));
+  const payload = JSON.stringify(message);
+  if (new TextEncoder().encode(payload).byteLength > MAX_DATA_CHANNEL_PAYLOAD_BYTES) {
+    throw new Error("Image transfer control message exceeds the 1200-byte payload limit");
+  }
+  channel.send(payload);
 }
 
 function isValidMeta(value: unknown): value is ImageTransferMeta {
@@ -119,8 +131,12 @@ function isValidMeta(value: unknown): value is ImageTransferMeta {
     Number.isSafeInteger(meta.size) &&
     meta.size >= 0 &&
     meta.size <= MAX_IMAGE_TRANSFER_SIZE &&
+    typeof meta.chunkSize === "number" &&
+    Number.isSafeInteger(meta.chunkSize) &&
+    meta.chunkSize >= WEAK_NETWORK_CHUNK_SIZE &&
+    meta.chunkSize <= IMAGE_CHUNK_SIZE &&
     typeof meta.totalChunks === "number" &&
-    meta.totalChunks === Math.ceil(meta.size / IMAGE_CHUNK_SIZE)
+    meta.totalChunks === Math.ceil(meta.size / meta.chunkSize)
   );
 }
 
@@ -228,21 +244,22 @@ export async function sendImageFile(
   file: File,
   onProgress: (progress: TransferProgress) => void,
   transferId?: string,
+  chunkSize = IMAGE_CHUNK_SIZE,
 ) {
   if (channel.readyState !== "open") {
     throw new Error("DataChannel is not open");
   }
 
-  const meta = createImageTransferMeta(file, transferId);
+  const meta = createImageTransferMeta(file, transferId, chunkSize);
   sendControl(channel, { type: "IMAGE_START", payload: meta });
   onProgress({ ...meta, transferredBytes: 0, progress: 0 });
 
   let transferredBytes = 0;
   let reportedPercent = 0;
   try {
-    for (let offset = 0; offset < file.size; offset += IMAGE_CHUNK_SIZE) {
+    for (let offset = 0; offset < file.size; offset += meta.chunkSize) {
       await waitForWritableBuffer(channel);
-      const chunk = await file.slice(offset, offset + IMAGE_CHUNK_SIZE).arrayBuffer();
+      const chunk = await file.slice(offset, offset + meta.chunkSize).arrayBuffer();
       channel.send(chunk);
       transferredBytes += chunk.byteLength;
       const progress = file.size ? transferredBytes / file.size : 1;
@@ -379,8 +396,9 @@ export class RealtimeImageReceiver {
       this.callbacks.onError(null, "Received an image chunk without metadata");
       return;
     }
+    const incomingMeta = this.incoming.meta;
     if (
-      chunk.byteLength > IMAGE_CHUNK_SIZE ||
+      chunk.byteLength > incomingMeta.chunkSize ||
       this.incoming.receivedBytes + chunk.byteLength > this.incoming.meta.size
     ) {
       const meta = this.incoming.meta;

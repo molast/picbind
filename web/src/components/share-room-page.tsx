@@ -49,7 +49,9 @@ import {
 } from "@/utils/realtime-room";
 import {
   RealtimeImageReceiver,
+  IMAGE_CHUNK_SIZE,
   MAX_IMAGE_TRANSFER_SIZE,
+  WEAK_NETWORK_CHUNK_SIZE,
   createImageTransferMeta,
   sendImageDelete,
   sendImagePlaceholder,
@@ -74,6 +76,7 @@ import { generateSharePlaceholder } from "@/utils/share-placeholder";
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
 type ConnectionState = "waiting" | "connecting" | "connected" | "error";
+type TransferMode = "throughput" | "compatibility";
 
 type ActivityItem = {
   id: string;
@@ -165,6 +168,7 @@ export default function ShareRoomPage() {
   const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
   const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const transferChunkSizeRef = React.useRef(IMAGE_CHUNK_SIZE);
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
@@ -187,6 +191,8 @@ export default function ShareRoomPage() {
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [isSending, setIsSending] = React.useState(false);
+  const [transferMode, setTransferMode] =
+    React.useState<TransferMode>("throughput");
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
   const [textMessage, setTextMessage] = React.useState("");
@@ -204,6 +210,13 @@ export default function ShareRoomPage() {
     null,
   );
 
+  React.useEffect(() => {
+    transferChunkSizeRef.current =
+      transferMode === "compatibility"
+        ? WEAK_NETWORK_CHUNK_SIZE
+        : IMAGE_CHUNK_SIZE;
+  }, [transferMode]);
+
   const labels = React.useMemo(
     () =>
       lang === "zh"
@@ -215,6 +228,9 @@ export default function ShareRoomPage() {
           invalid: "分享链接无效",
           workspace: "图片工作区",
           upload: "选择图片",
+          transferMode: "传输模式",
+          throughputMode: "标准（16 KB，吞吐优先）",
+          compatibilityMode: "弱网（1200 B，稳定优先）",
           uploading: "正在发送",
           drop: "拖入图片开始传输",
           dropHint: "支持常见图片格式，单张最大 50 MB",
@@ -271,6 +287,9 @@ export default function ShareRoomPage() {
           invalid: "Invalid share link",
           workspace: "Image workspace",
           upload: "Choose images",
+          transferMode: "Transfer mode",
+          throughputMode: "Standard (16 KB, throughput)",
+          compatibilityMode: "Weak network (1200 B, stable)",
           uploading: "Sending",
           drop: "Drop images to transfer",
           dropHint: "Common image formats, up to 50 MB each",
@@ -784,7 +803,11 @@ export default function ShareRoomPage() {
         }
         try {
           const file = new File([image.blob], image.name, { type: image.type });
-          const meta = createImageTransferMeta(file, image.id);
+          const meta = createImageTransferMeta(
+            file,
+            image.id,
+            transferChunkSizeRef.current,
+          );
           const placeholder =
             image.placeholder || (await generateSharePlaceholder(file));
           if (!image.placeholder) {
@@ -1411,7 +1434,11 @@ export default function ShareRoomPage() {
           continue;
         }
 
-        const meta = createImageTransferMeta(file);
+        const meta = createImageTransferMeta(
+          file,
+          undefined,
+          transferChunkSizeRef.current,
+        );
         const image: CachedRoomImage = {
           id: meta.id,
           roomId: roomId!,
@@ -1509,6 +1536,7 @@ export default function ShareRoomPage() {
         file,
         updateSendingActivity,
         image.id,
+        transferChunkSizeRef.current,
       );
       updateRoomImage(
         image.id,
@@ -1799,6 +1827,18 @@ export default function ShareRoomPage() {
                 </h1>
                 <p className="mt-1 text-sm text-slate-500">{labels.cached}</p>
               </div>
+              <label className="hidden text-xs font-medium text-slate-600 sm:flex sm:flex-col sm:gap-1">
+                <span>{labels.transferMode}</span>
+                <select
+                  value={transferMode}
+                  onChange={(event) => setTransferMode(event.target.value as TransferMode)}
+                  disabled={isSending}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 disabled:opacity-50"
+                >
+                  <option value="throughput">{labels.throughputMode}</option>
+                  <option value="compatibility">{labels.compatibilityMode}</option>
+                </select>
+              </label>
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
