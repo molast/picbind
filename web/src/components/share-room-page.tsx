@@ -3,12 +3,58 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { FiArrowLeft, FiCheck, FiCopy, FiLink, FiLoader } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiArrowLeft,
+  FiCheck,
+  FiCheckCircle,
+  FiCopy,
+  FiDownload,
+  FiImage,
+  FiLoader,
+  FiUploadCloud,
+  FiUsers,
+  FiWifi,
+} from "react-icons/fi";
 import { getLang, type Lang } from "@/locales";
 import { getShareRoomOwnerToken } from "@/utils/share-room";
-import { createRealtimeDataChannel, establishRealtimeTransport, getRealtimeRoomStatus, joinRealtimeRoom, renegotiateRealtimeTransport, type RoomRole } from "@/utils/realtime-room";
+import {
+  createRealtimeDataChannel,
+  establishRealtimeTransport,
+  getRealtimeRoomStatus,
+  joinRealtimeRoom,
+  renegotiateRealtimeTransport,
+  type RoomRole,
+} from "@/utils/realtime-room";
+import {
+  RealtimeImageReceiver,
+  MAX_IMAGE_TRANSFER_SIZE,
+  sendImageReceipt,
+  sendImageFile,
+  type TransferProgress,
+} from "@/utils/realtime-image-transfer";
+import {
+  listRoomImages,
+  storeRoomImage,
+  type CachedRoomImage,
+} from "@/utils/realtime-image-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
+
+type ConnectionState = "waiting" | "connecting" | "connected" | "error";
+
+type ActivityItem = {
+  id: string;
+  kind: "connection" | "sending" | "receiving" | "complete" | "error";
+  title: string;
+  detail?: string;
+  progress?: number;
+  createdAt: number;
+};
+
+type RoomImage = CachedRoomImage & {
+  url: string;
+};
 
 function readRoomId() {
   const roomIdFromQuery = new URLSearchParams(window.location.search).get(
@@ -17,103 +63,582 @@ function readRoomId() {
   if (roomIdFromQuery !== null) {
     return roomIdFromQuery;
   }
-
-  // Preserve compatibility with links generated before query-based share URLs.
   const segments = window.location.pathname.split("/").filter(Boolean);
   return segments[0] === "share" ? segments[1] || "" : "";
 }
 
+function formatBytes(size: number) {
+  if (size >= 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${size} B`;
+}
+
+function formatTime(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
 export default function ShareRoomPage() {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const objectUrlsRef = React.useRef(new Set<string>());
+  const imageIdsRef = React.useRef(new Set<string>());
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const [role, setRole] = React.useState<RoomRole | null>(null);
-  const [connection, setConnection] = React.useState("waiting");
-  const [connectionError, setConnectionError] = React.useState<string | null>(null);
-  const [remoteEmoji, setRemoteEmoji] = React.useState<string | null>(null);
-  const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const [connection, setConnection] =
+    React.useState<ConnectionState>("waiting");
+  const [connectionError, setConnectionError] = React.useState<string | null>(
+    null,
+  );
+  const [presence, setPresence] = React.useState({ owner: false, guest: false });
+  const [activities, setActivities] = React.useState<ActivityItem[]>([]);
+  const [images, setImages] = React.useState<RoomImage[]>([]);
+  const [isSending, setIsSending] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
 
-  React.useEffect(() => {
-    setLang(getLang());
-    setRoomId(readRoomId());
-  }, []);
-
-  const labels =
-    lang === "zh"
+  const labels = React.useMemo(
+    () =>
+      lang === "zh"
       ? {
           back: "返回首页",
-          title: "图片分享房间",
-          roomId: "房间 ID",
-           waiting: "等待建立连接",
-           connecting: "正在建立实时连接",
-           connected: "已连接，可传输数据",
-           failed: "连接失败",
-          expires: "房间将在创建 30 分钟后过期",
-          copy: "复制链接",
-          copied: "已复制",
+          room: "分享房间",
+          copy: "复制房间链接",
+          copied: "链接已复制",
           invalid: "分享链接无效",
+          workspace: "图片工作区",
+          upload: "选择图片",
+          uploading: "正在发送",
+          drop: "拖入图片开始传输",
+          dropHint: "支持常见图片格式，单张最大 50 MB",
+          guestEmpty: "等待 Owner 发送图片",
+          cached: "图片保存在当前浏览器",
+          sent: "已发送",
+          received: "已接收",
+          download: "下载图片",
+          participants: "匿名成员",
+          owner: "匿名 Owner",
+          guest: "匿名 Guest",
+          you: "你",
+          online: "在线",
+          offline: "等待加入",
+          activity: "传输消息",
+          noActivity: "暂无传输消息",
+          waiting: "等待另一位成员",
+          connecting: "正在建立实时连接",
+          connected: "实时通道已连接",
+          failed: "连接失败",
+          sending: "正在发送",
+          receiving: "正在接收",
+          complete: "传输完成",
+          awaitingReceipt: "已发送，等待对方确认",
+          cacheFailed: "本地缓存失败",
+          transferFailed: "图片传输失败",
+          imageOnly: "只能传输图片文件",
+          tooLarge: "图片超过 50 MB",
         }
       : {
           back: "Back to home",
-          title: "Image share room",
-          roomId: "Room ID",
-           waiting: "Waiting for connection",
-           connecting: "Establishing realtime connection",
-           connected: "Connected and ready to transfer",
-           failed: "Connection failed",
-          expires: "This room expires 30 minutes after creation",
-          copy: "Copy link",
-          copied: "Copied",
+          room: "Share room",
+          copy: "Copy room link",
+          copied: "Link copied",
           invalid: "Invalid share link",
-        };
+          workspace: "Image workspace",
+          upload: "Choose images",
+          uploading: "Sending",
+          drop: "Drop images to transfer",
+          dropHint: "Common image formats, up to 50 MB each",
+          guestEmpty: "Waiting for the Owner to send images",
+          cached: "Images are stored in this browser",
+          sent: "Sent",
+          received: "Received",
+          download: "Download image",
+          participants: "Anonymous members",
+          owner: "Anonymous Owner",
+          guest: "Anonymous Guest",
+          you: "You",
+          online: "Online",
+          offline: "Waiting",
+          activity: "Transfer messages",
+          noActivity: "No transfer messages yet",
+          waiting: "Waiting for another member",
+          connecting: "Establishing realtime connection",
+          connected: "Realtime channel connected",
+          failed: "Connection failed",
+          sending: "Sending",
+          receiving: "Receiving",
+          complete: "Transfer complete",
+          awaitingReceipt: "Sent, waiting for receiver confirmation",
+          cacheFailed: "Local cache failed",
+          transferFailed: "Image transfer failed",
+          imageOnly: "Only image files can be transferred",
+          tooLarge: "Image exceeds 50 MB",
+        },
+    [lang],
+  );
 
   const validRoomId = Boolean(roomId && ROOM_ID_PATTERN.test(roomId));
 
+  const upsertActivity = React.useCallback((activity: ActivityItem) => {
+    setActivities((current) => {
+      const index = current.findIndex((item) => item.id === activity.id);
+      if (index === -1) {
+        return [...current, activity].slice(-60);
+      }
+      const next = [...current];
+      next[index] = { ...next[index], ...activity };
+      return next;
+    });
+  }, []);
+
+  const addRoomImage = React.useCallback((image: CachedRoomImage) => {
+    if (imageIdsRef.current.has(image.id)) {
+      return;
+    }
+    imageIdsRef.current.add(image.id);
+    const url = URL.createObjectURL(image.blob);
+    objectUrlsRef.current.add(url);
+    setImages((current) => [...current, { ...image, url }]);
+  }, []);
+
   React.useEffect(() => {
-    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
+    const objectUrls = objectUrlsRef.current;
+    const imageIds = imageIdsRef.current;
+    setLang(getLang());
+    setRoomId(readRoomId());
+    return () => {
+      for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+      }
+      objectUrls.clear();
+      imageIds.clear();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+      return;
+    }
+    let disposed = false;
+    void listRoomImages(roomId)
+      .then((cachedImages) => {
+        if (!disposed) {
+          cachedImages.forEach(addRoomImage);
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load cached room images", error);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [addRoomImage, roomId]);
+
+  React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+      return;
+    }
+
     let disposed = false;
     let pollTimer: number | undefined;
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }], bundlePolicy: "max-bundle" });
+    let incomingChannel: RTCDataChannel | null = null;
+    let attached = false;
+    let attaching = false;
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
+      bundlePolicy: "max-bundle",
+    });
+
+    const confirmReceipt = (id: string, attempt = 0) => {
+      if (disposed) {
+        return;
+      }
+      const channel = outgoingChannelRef.current;
+      if (channel?.readyState === "open") {
+        sendImageReceipt(channel, id);
+        return;
+      }
+      if (attempt < 100) {
+        window.setTimeout(() => confirmReceipt(id, attempt + 1), 100);
+      }
+    };
+
+    const receiver = new RealtimeImageReceiver({
+      onStart(meta) {
+        upsertActivity({
+          id: `transfer-${meta.id}`,
+          kind: "receiving",
+          title: meta.name,
+          detail: `${labels.receiving} · 0 B / ${formatBytes(meta.size)}`,
+          progress: 0,
+          createdAt: Date.now(),
+        });
+      },
+      onProgress(progress) {
+        upsertActivity({
+          id: `transfer-${progress.id}`,
+          kind: "receiving",
+          title: progress.name,
+          detail: `${labels.receiving} · ${formatBytes(progress.transferredBytes)} / ${formatBytes(progress.size)}`,
+          progress: progress.progress,
+          createdAt: Date.now(),
+        });
+      },
+      async onComplete(meta, blob) {
+        const image: CachedRoomImage = {
+          id: meta.id,
+          roomId,
+          name: meta.name,
+          type: meta.type,
+          size: meta.size,
+          blob,
+          direction: "received",
+          createdAt: Date.now(),
+        };
+        try {
+          await storeRoomImage(image);
+          if (!disposed) {
+            addRoomImage(image);
+            upsertActivity({
+              id: `transfer-${meta.id}`,
+              kind: "complete",
+              title: meta.name,
+              detail: `${labels.complete} · ${formatBytes(meta.size)}`,
+              progress: 1,
+              createdAt: Date.now(),
+            });
+            confirmReceipt(meta.id);
+          }
+        } catch (error) {
+          if (!disposed) {
+            upsertActivity({
+              id: `transfer-${meta.id}`,
+              kind: "error",
+              title: meta.name,
+              detail: error instanceof Error ? error.message : labels.cacheFailed,
+              createdAt: Date.now(),
+            });
+          }
+        }
+      },
+      onError(meta, reason) {
+        upsertActivity({
+          id: meta ? `transfer-${meta.id}` : `error-${Date.now()}`,
+          kind: "error",
+          title: meta?.name || labels.transferFailed,
+          detail: reason,
+          createdAt: Date.now(),
+        });
+      },
+      onReceipt(id) {
+        setActivities((current) =>
+          current.map((activity) =>
+            activity.id === `transfer-${id}`
+              ? {
+                  ...activity,
+                  kind: "complete",
+                  detail: labels.complete,
+                  progress: 1,
+                  createdAt: Date.now(),
+                }
+              : activity,
+          ),
+        );
+      },
+    });
+
+    const setConnectionActivity = (
+      state: ConnectionState,
+      detail?: string,
+    ) => {
+      const title =
+        state === "connected"
+          ? labels.connected
+          : state === "connecting"
+            ? labels.connecting
+            : state === "error"
+              ? labels.failed
+              : labels.waiting;
+      upsertActivity({
+        id: "connection",
+        kind: state === "error" ? "error" : "connection",
+        title,
+        detail,
+        createdAt: Date.now(),
+      });
+    };
+
     const connect = async () => {
       try {
         setConnection("connecting");
-        const joined = await joinRealtimeRoom(roomId, getShareRoomOwnerToken(roomId));
-        if (disposed) return;
+        setConnectionActivity("connecting");
+        const joined = await joinRealtimeRoom(
+          roomId,
+          getShareRoomOwnerToken(roomId),
+        );
+        if (disposed) {
+          return;
+        }
         setRole(joined.role);
-        pc.createDataChannel("server-events");
+        setPresence((current) => ({ ...current, [joined.role]: true }));
+
+        const serverEvents = pc.createDataChannel("server-events");
+        serverEvents.onmessage = () => undefined;
         await pc.setLocalDescription(await pc.createOffer());
-        const transport = await establishRealtimeTransport(roomId, joined.sessionId, pc.localDescription!);
-        if (!transport.sessionDescription) throw new Error("Realtime did not return SDP");
+        const transport = await establishRealtimeTransport(
+          roomId,
+          joined.sessionId,
+          pc.localDescription!,
+        );
+        if (!transport.sessionDescription) {
+          throw new Error("Realtime did not return SDP");
+        }
         await pc.setRemoteDescription(transport.sessionDescription);
         if (transport.requiresImmediateRenegotiation) {
           await pc.setLocalDescription(await pc.createAnswer());
-          await renegotiateRealtimeTransport(roomId, joined.sessionId, pc.localDescription!);
+          await renegotiateRealtimeTransport(
+            roomId,
+            joined.sessionId,
+            pc.localDescription!,
+          );
         }
-        const localName = joined.role === "owner" ? "owner-to-guest" : "guest-to-owner";
-        const remoteName = joined.role === "owner" ? "guest-to-owner" : "owner-to-guest";
-        const localId = await createRealtimeDataChannel(roomId, joined.sessionId, "local", localName);
-        const outgoing = pc.createDataChannel(localName, { negotiated: true, id: localId });
-        outgoing.onopen = () => { outgoingChannelRef.current = outgoing; setConnection(joined.peerSessionId ? "connecting" : "waiting"); };
-        let attached = false;
-        const attachPeer = async (peerId?: string) => {
-          if (!peerId || attached || disposed) return;
-          const remoteId = await createRealtimeDataChannel(roomId, joined.sessionId, "remote", remoteName);
-          const incoming = pc.createDataChannel(`${remoteName}-subscribed`, { negotiated: true, id: remoteId });
-          attached = true;
-          incoming.onopen = () => { incoming.send("ack"); setConnection("connected"); };
-          incoming.onmessage = (event) => { if (typeof event.data !== "string") return; try { const m = JSON.parse(event.data); if (m.type === "EMOJI") setRemoteEmoji(m.payload?.emoji || null); } catch {} };
-        };
-        await attachPeer(joined.peerSessionId);
-        if (!joined.peerSessionId) pollTimer = window.setInterval(async () => { const s = await getRealtimeRoomStatus(roomId).catch(() => null); await attachPeer(joined.role === "owner" ? s?.guestSessionId : s?.ownerSessionId); }, 3000);
-      } catch (error) { if (!disposed) { setConnection("error"); setConnectionError(error instanceof Error ? error.message : "Could not connect"); } }
-    };
-    void connect();
-    return () => { disposed = true; if (pollTimer) window.clearInterval(pollTimer); outgoingChannelRef.current?.close(); pc.close(); };
-  }, [roomId]);
 
-  const sendEmoji = (emoji: string) => {
+        const localName =
+          joined.role === "owner" ? "owner-to-guest" : "guest-to-owner";
+        const remoteName =
+          joined.role === "owner" ? "guest-to-owner" : "owner-to-guest";
+        const localId = await createRealtimeDataChannel(
+          roomId,
+          joined.sessionId,
+          "local",
+          localName,
+        );
+        const outgoing = pc.createDataChannel(localName, {
+          negotiated: true,
+          id: localId,
+        });
+        outgoing.onopen = () => {
+          outgoingChannelRef.current = outgoing;
+          if (!attached) {
+            setConnection("waiting");
+            setConnectionActivity("waiting");
+          }
+        };
+        outgoing.onclose = () => {
+          outgoingChannelRef.current = null;
+          if (!disposed) {
+            setConnection("waiting");
+            setConnectionActivity("waiting");
+          }
+        };
+
+        const attachPeer = async (peerId?: string) => {
+          if (!peerId || attached || attaching || disposed) {
+            return;
+          }
+          attaching = true;
+          try {
+            const remoteId = await createRealtimeDataChannel(
+              roomId,
+              joined.sessionId,
+              "remote",
+              remoteName,
+            );
+            const incoming = pc.createDataChannel(
+              `${remoteName}-subscribed`,
+              { negotiated: true, id: remoteId },
+            );
+            incoming.binaryType = "arraybuffer";
+            incoming.onmessage = (event) => {
+              if (
+                typeof event.data === "string" ||
+                event.data instanceof ArrayBuffer
+              ) {
+                receiver.handle(event.data);
+              }
+            };
+            incoming.onopen = () => {
+              incoming.send("ack");
+              setConnection("connected");
+              setConnectionError(null);
+              setConnectionActivity("connected");
+            };
+            incoming.onclose = () => {
+              attached = false;
+              incomingChannel = null;
+              if (!disposed) {
+                setConnection("waiting");
+                setConnectionActivity("waiting");
+              }
+            };
+            incomingChannel = incoming;
+            attached = true;
+          } finally {
+            attaching = false;
+          }
+        };
+
+        const refreshStatus = async () => {
+          const status = await getRealtimeRoomStatus(roomId);
+          if (disposed) {
+            return;
+          }
+          setPresence({
+            owner: status.ownerJoined,
+            guest: status.guestJoined,
+          });
+          const peerId =
+            joined.role === "owner"
+              ? status.guestSessionId
+              : status.ownerSessionId;
+          try {
+            await attachPeer(peerId);
+          } catch (error) {
+            console.warn("Failed to attach peer DataChannel", error);
+          }
+        };
+
+        await refreshStatus();
+        pollTimer = window.setInterval(() => {
+          void refreshStatus().catch((error) => {
+            console.warn("Failed to refresh room presence", error);
+          });
+        }, 3000);
+      } catch (error) {
+        if (!disposed) {
+          const message =
+            error instanceof Error ? error.message : "Could not connect";
+          setConnection("error");
+          setConnectionError(message);
+          setConnectionActivity("error", message);
+        }
+      }
+    };
+
+    pc.addEventListener("connectionstatechange", () => {
+      if (disposed) {
+        return;
+      }
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        setConnection("error");
+        setConnectionActivity("error", pc.connectionState);
+      }
+    });
+
+    void connect();
+    return () => {
+      disposed = true;
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+      }
+      incomingChannel?.close();
+      outgoingChannelRef.current?.close();
+      outgoingChannelRef.current = null;
+      pc.close();
+    };
+  }, [addRoomImage, labels, roomId, upsertActivity]);
+
+  const updateSendingActivity = React.useCallback(
+    (progress: TransferProgress) => {
+      upsertActivity({
+        id: `transfer-${progress.id}`,
+        kind: "sending",
+        title: progress.name,
+        detail: `${labels.sending} · ${formatBytes(progress.transferredBytes)} / ${formatBytes(progress.size)}`,
+        progress: progress.progress,
+        createdAt: Date.now(),
+      });
+    },
+    [labels.sending, upsertActivity],
+  );
+
+  const handleFiles = async (fileList: FileList | File[]) => {
+    if (role !== "owner" || isSending) {
+      return;
+    }
     const channel = outgoingChannelRef.current;
-    if (connection === "connected" && channel?.readyState === "open") channel.send(JSON.stringify({ type: "EMOJI", payload: { emoji } }));
+    if (connection !== "connected" || channel?.readyState !== "open") {
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.waiting,
+        detail: labels.guestEmpty,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    const files = Array.from(fileList);
+    setIsSending(true);
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) {
+          upsertActivity({
+            id: `error-${Date.now()}-${file.name}`,
+            kind: "error",
+            title: file.name,
+            detail: labels.imageOnly,
+            createdAt: Date.now(),
+          });
+          continue;
+        }
+        if (file.size > MAX_IMAGE_TRANSFER_SIZE) {
+          upsertActivity({
+            id: `error-${Date.now()}-${file.name}`,
+            kind: "error",
+            title: file.name,
+            detail: labels.tooLarge,
+            createdAt: Date.now(),
+          });
+          continue;
+        }
+
+        try {
+          const meta = await sendImageFile(channel, file, updateSendingActivity);
+          const image: CachedRoomImage = {
+            id: meta.id,
+            roomId: roomId!,
+            name: meta.name,
+            type: meta.type,
+            size: meta.size,
+            blob: file,
+            direction: "sent",
+            createdAt: Date.now(),
+          };
+          await storeRoomImage(image);
+          addRoomImage(image);
+          upsertActivity({
+            id: `transfer-${meta.id}`,
+            kind: "sending",
+            title: meta.name,
+            detail: `${labels.awaitingReceipt} · ${formatBytes(meta.size)}`,
+            progress: 1,
+            createdAt: Date.now(),
+          });
+        } catch (error) {
+          upsertActivity({
+            id: `error-${Date.now()}-${file.name}`,
+            kind: "error",
+            title: file.name,
+            detail:
+              error instanceof Error ? error.message : labels.transferFailed,
+            createdAt: Date.now(),
+          });
+        }
+      }
+    } finally {
+      setIsSending(false);
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+    }
   };
 
   const handleCopy = async () => {
@@ -122,89 +647,324 @@ export default function ShareRoomPage() {
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  if (roomId !== null && !validRoomId) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+        <p className="rounded-md bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+          {labels.invalid}
+        </p>
+      </main>
+    );
+  }
+
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#dce8f8] text-slate-800">
-      <div className="absolute inset-0 bg-[url('/images/hero-background.avif')] bg-cover bg-center bg-no-repeat opacity-80" />
-      <div className="absolute inset-0 bg-white/25" />
-
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1120px] flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex h-14 items-center justify-between">
-          <Link href="/" className="inline-flex items-center">
-            <Image
-              src="/images/wordmark.png"
-              alt="PicBind"
-              width={178}
-              height={38}
-              className="h-10 w-auto object-contain"
-              priority
-            />
-          </Link>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-[#415c8a] transition hover:text-[#2457bd]"
-          >
-            <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
-            <span>{labels.back}</span>
-          </Link>
-        </header>
-
-        <div className="flex flex-1 items-center justify-center py-10">
-          <section className="w-full max-w-[520px] rounded-lg border border-white/70 bg-white/90 p-6 shadow-[0_24px_64px_rgba(48,76,126,0.18)] backdrop-blur-md sm:p-8">
-            <div className="flex h-11 w-11 items-center justify-center rounded-md bg-[#2f65cf] text-white">
-              <FiLink className="h-5 w-5" aria-hidden="true" />
+    <main className="h-screen overflow-hidden bg-[#eef2f7] text-slate-800">
+      <div className="grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1">
+        <section className="flex min-h-0 flex-col">
+          <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6">
+            <div className="flex min-w-0 items-center gap-4">
+              <Link href="/" className="shrink-0">
+                <Image
+                  src="/images/wordmark.png"
+                  alt="PicBind"
+                  width={178}
+                  height={38}
+                  className="h-9 w-auto object-contain"
+                  priority
+                />
+              </Link>
+              <div className="hidden h-7 w-px bg-slate-200 sm:block" />
+              <div className="hidden min-w-0 sm:block">
+                <div className="text-xs font-medium text-slate-500">
+                  {labels.room}
+                </div>
+                <div className="truncate font-mono text-sm font-semibold text-slate-800">
+                  {roomId || "..."}
+                </div>
+              </div>
             </div>
-            <h1 className="mt-5 text-2xl font-semibold text-slate-900">
-              {labels.title}
-            </h1>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                aria-label={copied ? labels.copied : labels.copy}
+                title={copied ? labels.copied : labels.copy}
+              >
+                {copied ? (
+                  <FiCheck className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <FiCopy className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+              <Link
+                href="/"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                aria-label={labels.back}
+                title={labels.back}
+              >
+                <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+          </header>
 
-            {roomId === null ? (
-              <div className="mt-8 flex h-24 items-center justify-center text-[#2f65cf]">
-                <FiLoader className="h-6 w-6 animate-spin" aria-label="Loading" />
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+            <div className="mb-5 flex items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl font-semibold text-slate-900">
+                  {labels.workspace}
+                </h1>
+                <p className="mt-1 text-sm text-slate-500">{labels.cached}</p>
               </div>
-            ) : validRoomId ? (
-              <div className="mt-7">
-                <div className="text-xs font-semibold uppercase text-slate-500">
-                  {labels.roomId}
-                </div>
-                <div className="mt-2 break-all font-mono text-2xl font-semibold text-slate-900">
-                  {roomId}
-                </div>
+              {role === "owner" ? (
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.click()}
+                  disabled={isSending || connection !== "connected"}
+                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSending ? (
+                    <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <FiUploadCloud className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  <span>{isSending ? labels.uploading : labels.upload}</span>
+                </button>
+              ) : null}
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  if (event.target.files) {
+                    void handleFiles(event.target.files);
+                  }
+                }}
+              />
+            </div>
 
-                <div className="mt-7 flex items-center gap-3 border-y border-slate-200 py-4">
-                  <span className="relative flex h-3 w-3 shrink-0">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                    <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500" />
-                  </span>
-                  <span className="text-sm font-medium text-slate-700">
-                    {connection === "connected" ? labels.connected : connection === "connecting" ? labels.connecting : connection === "error" ? labels.failed : labels.waiting}
-                  </span>
+            <div
+              className={`min-h-[260px] flex-1 rounded-lg border-2 border-dashed transition ${
+                isDragging
+                  ? "border-[#2f65cf] bg-blue-50"
+                  : "border-slate-300 bg-white/70"
+              }`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (role === "owner") setIsDragging(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setIsDragging(false);
+                if (role === "owner") {
+                  void handleFiles(event.dataTransfer.files);
+                }
+              }}
+            >
+              {images.length ? (
+                <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 xl:grid-cols-4 2xl:grid-cols-5">
+                  {images.map((image) => (
+                    <article
+                      key={image.id}
+                      className="overflow-hidden rounded-md border border-slate-200 bg-white"
+                    >
+                      <div className="aspect-square bg-slate-100">
+                        {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={image.url}
+                          alt={image.name}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                      <div className="p-3">
+                        <div className="truncate text-sm font-semibold text-slate-800">
+                          {image.name}
+                        </div>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500">
+                          <span>{formatBytes(image.size)}</span>
+                          <span>
+                            {image.direction === "sent"
+                              ? labels.sent
+                              : labels.received}
+                          </span>
+                        </div>
+                        <a
+                          href={image.url}
+                          download={image.name}
+                          className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                        >
+                          <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span>{labels.download}</span>
+                        </a>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-                {connectionError ? <p className="mt-3 text-sm text-red-700">{connectionError}</p> : null}
-                {connection === "connected" ? <div className="mt-3 flex gap-2 text-xl"><button type="button" onClick={() => sendEmoji("👋")}>👋</button><button type="button" onClick={() => sendEmoji("👍")}>👍</button><button type="button" onClick={() => sendEmoji("🎉")}>🎉</button>{remoteEmoji ? <span className="text-sm text-slate-600">对方：{remoteEmoji}</span> : null}</div> : null}
+              ) : (
+                <button
+                  type="button"
+                  disabled={role !== "owner" || connection !== "connected"}
+                  onClick={() => inputRef.current?.click()}
+                  className="flex h-full min-h-[260px] w-full flex-col items-center justify-center px-6 text-center disabled:cursor-default"
+                >
+                  <span className="flex h-14 w-14 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]">
+                    <FiImage className="h-7 w-7" aria-hidden="true" />
+                  </span>
+                  <span className="mt-4 text-base font-semibold text-slate-800">
+                    {role === "owner" ? labels.drop : labels.guestEmpty}
+                  </span>
+                  {role === "owner" ? (
+                    <span className="mt-1 text-sm text-slate-500">
+                      {labels.dropHint}
+                    </span>
+                  ) : null}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
 
-                <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-sm text-slate-500">{labels.expires}</p>
-                  <button
-                    type="button"
-                    onClick={handleCopy}
-                    className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd]"
-                  >
-                    {copied ? (
-                      <FiCheck className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <FiCopy className="h-4 w-4" aria-hidden="true" />
-                    )}
-                    <span>{copied ? labels.copied : labels.copy}</span>
-                  </button>
+        <aside className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
+          <div className="border-b border-slate-200 px-4 py-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <FiWifi className="h-4 w-4" aria-hidden="true" />
+              <span>
+                {connection === "connected"
+                  ? labels.connected
+                  : connection === "connecting"
+                    ? labels.connecting
+                    : connection === "error"
+                      ? labels.failed
+                      : labels.waiting}
+              </span>
+            </div>
+            {connectionError ? (
+              <p className="mt-2 text-xs text-red-600">{connectionError}</p>
+            ) : null}
+          </div>
+
+          <div className="border-b border-slate-200 px-4 py-4">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+              <FiUsers className="h-4 w-4" aria-hidden="true" />
+              <span>{labels.participants}</span>
+            </div>
+            <div className="space-y-2">
+              {(
+                [
+                  ["owner", labels.owner, presence.owner],
+                  ["guest", labels.guest, presence.guest],
+                ] as const
+              ).map(([memberRole, name, online]) => (
+                <div
+                  key={memberRole}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold uppercase text-slate-600">
+                      {memberRole === "owner" ? "O" : "G"}
+                    </span>
+                    <span className="truncate text-sm font-medium text-slate-700">
+                      {name}
+                      {role === memberRole ? (
+                        <span className="ml-1 text-xs text-[#2f65cf]">
+                          ({labels.you})
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                    <span
+                      className={`h-2 w-2 rounded-full ${online ? "bg-emerald-500" : "bg-slate-300"}`}
+                    />
+                    {online ? labels.online : labels.offline}
+                  </span>
                 </div>
-              </div>
-            ) : (
-              <p className="mt-7 rounded-md bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                {labels.invalid}
-              </p>
-            )}
-          </section>
-        </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-col">
+            <div className="shrink-0 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
+              {labels.activity}
+            </div>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              {activities.length ? (
+                activities.map((activity) => {
+                  const Icon =
+                    activity.kind === "sending"
+                      ? FiUploadCloud
+                      : activity.kind === "receiving"
+                        ? FiDownload
+                        : activity.kind === "complete"
+                          ? FiCheckCircle
+                          : activity.kind === "error"
+                            ? FiAlertCircle
+                            : FiWifi;
+                  return (
+                    <div
+                      key={activity.id}
+                      className={`rounded-md px-3 py-3 ${
+                        activity.kind === "error"
+                          ? "bg-red-50"
+                          : activity.kind === "complete"
+                            ? "bg-emerald-50"
+                            : "bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <Icon
+                          className={`mt-0.5 h-4 w-4 shrink-0 ${
+                            activity.kind === "error"
+                              ? "text-red-600"
+                              : activity.kind === "complete"
+                                ? "text-emerald-600"
+                                : "text-[#2f65cf]"
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="truncate text-sm font-semibold text-slate-800">
+                              {activity.title}
+                            </span>
+                            <span className="shrink-0 text-[11px] text-slate-400">
+                              {formatTime(activity.createdAt)}
+                            </span>
+                          </div>
+                          {activity.detail ? (
+                            <p className="mt-1 break-words text-xs leading-5 text-slate-500">
+                              {activity.detail}
+                            </p>
+                          ) : null}
+                          {typeof activity.progress === "number" &&
+                          activity.progress < 1 ? (
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className="h-full rounded-full bg-[#2f65cf] transition-[width] duration-150"
+                                style={{
+                                  width: `${Math.round(activity.progress * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="flex h-full min-h-24 items-center justify-center text-center text-sm text-slate-400">
+                  {labels.noActivity}
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   );
