@@ -14,6 +14,9 @@ type CreateShareRoomResponse = ShareRoom & {
 };
 
 const OWNER_TOKEN_PREFIX = "picbind:share-room:owner:";
+const CLIENT_ID_PREFIX = "picbind:share-room:client:";
+const OWNED_ROOM_PREFIX = "picbind:share-room:owned:";
+const TEMPORARY_ROOM_KEY = "picbind:share-room:temporary";
 
 function ownerTokenKey(roomId: string) {
   return `${OWNER_TOKEN_PREFIX}${roomId}`;
@@ -42,14 +45,78 @@ export async function createShareRoom(): Promise<ShareRoom> {
   }
 
   sessionStorage.setItem(ownerTokenKey(result.roomId), result.ownerToken);
-  return {
+  const room = {
     roomId: result.roomId,
     shareUrl: result.shareUrl,
     createdAt: result.createdAt,
     expiresAt: result.expiresAt,
   };
+  sessionStorage.setItem(
+    `${OWNED_ROOM_PREFIX}${result.roomId}`,
+    JSON.stringify(room),
+  );
+  return room;
 }
 
 export function getShareRoomOwnerToken(roomId: string) {
   return sessionStorage.getItem(ownerTokenKey(roomId));
+}
+
+export function getShareRoomClientId(roomId: string) {
+  const key = `${CLIENT_ID_PREFIX}${roomId}`;
+  const existing = sessionStorage.getItem(key);
+  if (existing) {
+    return existing;
+  }
+  const clientId = crypto.randomUUID().replace(/-/g, "");
+  sessionStorage.setItem(key, clientId);
+  return clientId;
+}
+
+export function markShareRoomTemporarilyAway(roomId: string) {
+  const raw = sessionStorage.getItem(`${OWNED_ROOM_PREFIX}${roomId}`);
+  if (!raw) {
+    throw new Error("Owned room metadata is unavailable");
+  }
+  localStorage.setItem(TEMPORARY_ROOM_KEY, raw);
+}
+
+export function getTemporaryShareRoom() {
+  const raw = localStorage.getItem(TEMPORARY_ROOM_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const room = JSON.parse(raw) as ShareRoom;
+    if (
+      !room.roomId ||
+      !room.shareUrl ||
+      Date.parse(room.expiresAt) <= Date.now()
+    ) {
+      localStorage.removeItem(TEMPORARY_ROOM_KEY);
+      return null;
+    }
+    return room;
+  } catch {
+    localStorage.removeItem(TEMPORARY_ROOM_KEY);
+    return null;
+  }
+}
+
+export function clearTemporaryShareRoom(roomId?: string) {
+  if (!roomId) {
+    localStorage.removeItem(TEMPORARY_ROOM_KEY);
+    return;
+  }
+  const room = getTemporaryShareRoom();
+  if (room?.roomId === roomId) {
+    localStorage.removeItem(TEMPORARY_ROOM_KEY);
+  }
+}
+
+export function clearOwnedShareRoom(roomId: string) {
+  sessionStorage.removeItem(ownerTokenKey(roomId));
+  sessionStorage.removeItem(`${CLIENT_ID_PREFIX}${roomId}`);
+  sessionStorage.removeItem(`${OWNED_ROOM_PREFIX}${roomId}`);
+  clearTemporaryShareRoom(roomId);
 }

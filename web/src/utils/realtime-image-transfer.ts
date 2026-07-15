@@ -1,9 +1,9 @@
 "use client";
 
-export const IMAGE_CHUNK_SIZE = 64 * 1024;
+export const IMAGE_CHUNK_SIZE = 32 * 1024;
 export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
-const MAX_BUFFERED_BYTES = 1024 * 1024;
-const LOW_BUFFERED_BYTES = 256 * 1024;
+const MAX_BUFFERED_BYTES = 512 * 1024;
+const BUFFER_DRAIN_TIMEOUT_MS = 60_000;
 
 export type ImageTransferMeta = {
   id: string;
@@ -76,34 +76,16 @@ export function sendImageReceipt(channel: RTCDataChannel, id: string) {
 }
 
 async function waitForWritableBuffer(channel: RTCDataChannel) {
-  if (channel.bufferedAmount <= MAX_BUFFERED_BYTES) {
-    return;
+  const startedAt = Date.now();
+  while (channel.bufferedAmount > MAX_BUFFERED_BYTES) {
+    if (channel.readyState !== "open") {
+      throw new Error("DataChannel closed during transfer");
+    }
+    if (Date.now() - startedAt >= BUFFER_DRAIN_TIMEOUT_MS) {
+      throw new Error("The peer stopped receiving image data");
+    }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
   }
-
-  channel.bufferedAmountLowThreshold = LOW_BUFFERED_BYTES;
-  await new Promise<void>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("DataChannel backpressure timeout"));
-    }, 30_000);
-    const handleLow = () => {
-      cleanup();
-      resolve();
-    };
-    const handleClosed = () => {
-      cleanup();
-      reject(new Error("DataChannel closed during transfer"));
-    };
-    const cleanup = () => {
-      window.clearTimeout(timeout);
-      channel.removeEventListener("bufferedamountlow", handleLow);
-      channel.removeEventListener("close", handleClosed);
-      channel.removeEventListener("error", handleClosed);
-    };
-    channel.addEventListener("bufferedamountlow", handleLow, { once: true });
-    channel.addEventListener("close", handleClosed, { once: true });
-    channel.addEventListener("error", handleClosed, { once: true });
-  });
 }
 
 export async function sendImageFile(

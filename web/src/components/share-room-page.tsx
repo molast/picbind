@@ -12,18 +12,31 @@ import {
   FiDownload,
   FiImage,
   FiLoader,
+  FiLogOut,
+  FiMessageCircle,
+  FiMinimize2,
   FiUploadCloud,
   FiUsers,
   FiWifi,
 } from "react-icons/fi";
 import { getLang, type Lang } from "@/locales";
-import { getShareRoomOwnerToken } from "@/utils/share-room";
 import {
+  clearOwnedShareRoom,
+  clearTemporaryShareRoom,
+  getShareRoomClientId,
+  getShareRoomOwnerToken,
+  markShareRoomTemporarilyAway,
+} from "@/utils/share-room";
+import {
+  closeRealtimeRoom,
   createRealtimeDataChannel,
   establishRealtimeTransport,
   getRealtimeRoomStatus,
+  heartbeatRealtimeRoom,
+  leaveRealtimeRoomTemporarily,
   joinRealtimeRoom,
   renegotiateRealtimeTransport,
+  RealtimeRoomRequestError,
   type RoomRole,
 } from "@/utils/realtime-room";
 import {
@@ -38,6 +51,12 @@ import {
   storeRoomImage,
   type CachedRoomImage,
 } from "@/utils/realtime-image-store";
+import {
+  createPeerMessageId,
+  parsePeerMessage,
+  sendPeerMessage,
+  TEST_EMOJIS,
+} from "@/utils/realtime-peer-messages";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -45,7 +64,13 @@ type ConnectionState = "waiting" | "connecting" | "connected" | "error";
 
 type ActivityItem = {
   id: string;
-  kind: "connection" | "sending" | "receiving" | "complete" | "error";
+  kind:
+    | "connection"
+    | "message"
+    | "sending"
+    | "receiving"
+    | "complete"
+    | "error";
   title: string;
   detail?: string;
   progress?: number;
@@ -87,6 +112,7 @@ function formatTime(timestamp: number) {
 export default function ShareRoomPage() {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
   const [lang, setLang] = React.useState<Lang>("en");
@@ -103,6 +129,8 @@ export default function ShareRoomPage() {
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [isSending, setIsSending] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
+  const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
+  const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
 
   const labels = React.useMemo(
     () =>
@@ -131,6 +159,10 @@ export default function ShareRoomPage() {
           offline: "等待加入",
           activity: "传输消息",
           noActivity: "暂无传输消息",
+          testMessage: "测试消息",
+          messageSending: "等待对方确认",
+          messageSent: "对方已接收",
+          messageReceived: "收到普通消息",
           waiting: "等待另一位成员",
           connecting: "正在建立实时连接",
           connected: "实时通道已连接",
@@ -143,6 +175,9 @@ export default function ShareRoomPage() {
           transferFailed: "图片传输失败",
           imageOnly: "只能传输图片文件",
           tooLarge: "图片超过 50 MB",
+          temporaryLeave: "临时离开",
+          closeRoom: "退出并销毁房间",
+          confirmClose: "退出后房间将立即销毁，所有成员都会被移出。确定继续吗？",
         }
       : {
           back: "Back to home",
@@ -168,6 +203,10 @@ export default function ShareRoomPage() {
           offline: "Waiting",
           activity: "Transfer messages",
           noActivity: "No transfer messages yet",
+          testMessage: "Test message",
+          messageSending: "Waiting for peer confirmation",
+          messageSent: "Received by peer",
+          messageReceived: "Regular message received",
           waiting: "Waiting for another member",
           connecting: "Establishing realtime connection",
           connected: "Realtime channel connected",
@@ -180,6 +219,10 @@ export default function ShareRoomPage() {
           transferFailed: "Image transfer failed",
           imageOnly: "Only image files can be transferred",
           tooLarge: "Image exceeds 50 MB",
+          temporaryLeave: "Leave temporarily",
+          closeRoom: "Exit and close room",
+          confirmClose:
+            "Closing the room removes every member immediately. Continue?",
         },
     [lang],
   );
@@ -248,6 +291,8 @@ export default function ShareRoomPage() {
 
     let disposed = false;
     let pollTimer: number | undefined;
+    let heartbeatTimer: number | undefined;
+    let handshakeTimer: number | undefined;
     let incomingChannel: RTCDataChannel | null = null;
     let attached = false;
     let attaching = false;
@@ -255,6 +300,14 @@ export default function ShareRoomPage() {
       iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
       bundlePolicy: "max-bundle",
     });
+
+    const redirectIfRoomClosed = (error: unknown) => {
+      if (error instanceof RealtimeRoomRequestError && error.status === 404) {
+        window.location.replace("/?roomClosed=1");
+        return true;
+      }
+      return false;
+    };
 
     const confirmReceipt = (id: string, attempt = 0) => {
       if (disposed) {
@@ -382,12 +435,25 @@ export default function ShareRoomPage() {
         const joined = await joinRealtimeRoom(
           roomId,
           getShareRoomOwnerToken(roomId),
+          getShareRoomClientId(roomId),
         );
         if (disposed) {
           return;
         }
+        sessionIdRef.current = joined.sessionId;
         setRole(joined.role);
+        if (joined.role === "owner") {
+          clearTemporaryShareRoom(roomId);
+        }
         setPresence((current) => ({ ...current, [joined.role]: true }));
+        heartbeatTimer = window.setInterval(() => {
+          void heartbeatRealtimeRoom(roomId, joined.sessionId).catch((error) => {
+            if (redirectIfRoomClosed(error)) {
+              return;
+            }
+            console.warn("Room heartbeat failed", error);
+          });
+        }, 15_000);
 
         const serverEvents = pc.createDataChannel("server-events");
         serverEvents.onmessage = () => undefined;
@@ -424,14 +490,72 @@ export default function ShareRoomPage() {
           negotiated: true,
           id: localId,
         });
+        const handshakeId = createPeerMessageId();
+        let outgoingOpen = false;
+        let incomingOpen = false;
+        let handshakeAcknowledged = false;
+
+        const stopHandshake = () => {
+          if (handshakeTimer) {
+            window.clearInterval(handshakeTimer);
+            handshakeTimer = undefined;
+          }
+        };
+
+        const sendHello = () => {
+          sendPeerMessage(outgoingChannelRef.current, {
+            type: "HELLO",
+            payload: { id: handshakeId },
+          });
+        };
+
+        const startHandshake = () => {
+          if (
+            !outgoingOpen ||
+            !incomingOpen ||
+            handshakeAcknowledged ||
+            handshakeTimer ||
+            disposed
+          ) {
+            return;
+          }
+          setConnection("connecting");
+          setConnectionActivity("connecting");
+          sendHello();
+          handshakeTimer = window.setInterval(sendHello, 500);
+        };
+
+        const sendWhenReady = (
+          message:
+            | { type: "HELLO_ACK"; payload: { replyTo: string } }
+            | { type: "MESSAGE_ACK"; payload: { replyTo: string } },
+          attempt = 0,
+        ) => {
+          if (disposed) {
+            return;
+          }
+          if (sendPeerMessage(outgoingChannelRef.current, message)) {
+            return;
+          }
+          if (attempt < 100) {
+            window.setTimeout(() => sendWhenReady(message, attempt + 1), 100);
+          }
+        };
+
         outgoing.onopen = () => {
           outgoingChannelRef.current = outgoing;
-          if (!attached) {
+          outgoingOpen = true;
+          if (incomingOpen) {
+            startHandshake();
+          } else {
             setConnection("waiting");
             setConnectionActivity("waiting");
           }
         };
         outgoing.onclose = () => {
+          outgoingOpen = false;
+          handshakeAcknowledged = false;
+          stopHandshake();
           outgoingChannelRef.current = null;
           if (!disposed) {
             setConnection("waiting");
@@ -457,20 +581,74 @@ export default function ShareRoomPage() {
             );
             incoming.binaryType = "arraybuffer";
             incoming.onmessage = (event) => {
-              if (
-                typeof event.data === "string" ||
-                event.data instanceof ArrayBuffer
-              ) {
+              if (typeof event.data === "string") {
+                const peerMessage = parsePeerMessage(event.data);
+                if (peerMessage?.type === "HELLO") {
+                  sendWhenReady({
+                    type: "HELLO_ACK",
+                    payload: { replyTo: peerMessage.payload.id },
+                  });
+                  startHandshake();
+                  return;
+                }
+                if (
+                  peerMessage?.type === "HELLO_ACK" &&
+                  peerMessage.payload.replyTo === handshakeId
+                ) {
+                  handshakeAcknowledged = true;
+                  stopHandshake();
+                  setConnection("connected");
+                  setConnectionError(null);
+                  setConnectionActivity("connected");
+                  return;
+                }
+                if (peerMessage?.type === "EMOJI") {
+                  upsertActivity({
+                    id: `message-${peerMessage.payload.id}`,
+                    kind: "message",
+                    title: peerMessage.payload.emoji,
+                    detail: `${labels.messageReceived} · ${
+                      joined.role === "owner" ? labels.guest : labels.owner
+                    }`,
+                    createdAt: Date.now(),
+                  });
+                  sendWhenReady({
+                    type: "MESSAGE_ACK",
+                    payload: { replyTo: peerMessage.payload.id },
+                  });
+                  return;
+                }
+                if (peerMessage?.type === "MESSAGE_ACK") {
+                  setActivities((current) =>
+                    current.map((activity) =>
+                      activity.id === `message-${peerMessage.payload.replyTo}`
+                        ? {
+                            ...activity,
+                            kind: "complete",
+                            detail: labels.messageSent,
+                            createdAt: Date.now(),
+                          }
+                        : activity,
+                    ),
+                  );
+                  return;
+                }
+                receiver.handle(event.data);
+                return;
+              }
+              if (event.data instanceof ArrayBuffer) {
                 receiver.handle(event.data);
               }
             };
             incoming.onopen = () => {
               incoming.send("ack");
-              setConnection("connected");
-              setConnectionError(null);
-              setConnectionActivity("connected");
+              incomingOpen = true;
+              startHandshake();
             };
             incoming.onclose = () => {
+              incomingOpen = false;
+              handshakeAcknowledged = false;
+              stopHandshake();
               attached = false;
               incomingChannel = null;
               if (!disposed) {
@@ -508,11 +686,17 @@ export default function ShareRoomPage() {
         await refreshStatus();
         pollTimer = window.setInterval(() => {
           void refreshStatus().catch((error) => {
+            if (redirectIfRoomClosed(error)) {
+              return;
+            }
             console.warn("Failed to refresh room presence", error);
           });
         }, 3000);
       } catch (error) {
         if (!disposed) {
+          if (redirectIfRoomClosed(error)) {
+            return;
+          }
           const message =
             error instanceof Error ? error.message : "Could not connect";
           setConnection("error");
@@ -538,9 +722,16 @@ export default function ShareRoomPage() {
       if (pollTimer) {
         window.clearInterval(pollTimer);
       }
+      if (heartbeatTimer) {
+        window.clearInterval(heartbeatTimer);
+      }
+      if (handshakeTimer) {
+        window.clearInterval(handshakeTimer);
+      }
       incomingChannel?.close();
       outgoingChannelRef.current?.close();
       outgoingChannelRef.current = null;
+      sessionIdRef.current = null;
       pc.close();
     };
   }, [addRoomImage, labels, roomId, upsertActivity]);
@@ -641,6 +832,81 @@ export default function ShareRoomPage() {
     }
   };
 
+  const handleTemporaryLeave = async () => {
+    const sessionId = sessionIdRef.current;
+    if (!roomId || role !== "owner" || !sessionId || isRoomActionPending) {
+      return;
+    }
+    setIsRoomActionPending(true);
+    try {
+      await leaveRealtimeRoomTemporarily(roomId, sessionId);
+      markShareRoomTemporarilyAway(roomId);
+      window.location.assign("/");
+    } catch (error) {
+      setIsRoomActionPending(false);
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.temporaryLeave,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    }
+  };
+
+  const handleCloseRoom = async () => {
+    const sessionId = sessionIdRef.current;
+    if (
+      !roomId ||
+      role !== "owner" ||
+      !sessionId ||
+      isRoomActionPending ||
+      !window.confirm(labels.confirmClose)
+    ) {
+      return;
+    }
+    setIsRoomActionPending(true);
+    try {
+      await closeRealtimeRoom(roomId, sessionId);
+      clearOwnedShareRoom(roomId);
+      window.location.assign("/");
+    } catch (error) {
+      setIsRoomActionPending(false);
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.closeRoom,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    }
+  };
+
+  const handleEmoji = (emoji: string) => {
+    if (connection !== "connected") {
+      return;
+    }
+    const id = createPeerMessageId();
+    const sent = sendPeerMessage(outgoingChannelRef.current, {
+      type: "EMOJI",
+      payload: { id, emoji, sentAt: Date.now() },
+    });
+    if (!sent) {
+      return;
+    }
+    setPressedEmoji(emoji);
+    window.setTimeout(() => {
+      setPressedEmoji((current) => (current === emoji ? null : current));
+    }, 280);
+    upsertActivity({
+      id: `message-${id}`,
+      kind: "message",
+      title: emoji,
+      detail: labels.messageSending,
+      createdAt: Date.now(),
+    });
+  };
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -663,16 +929,36 @@ export default function ShareRoomPage() {
         <section className="flex min-h-0 flex-col">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-4">
-              <Link href="/" className="shrink-0">
-                <Image
-                  src="/images/wordmark.png"
-                  alt="PicBind"
-                  width={178}
-                  height={38}
-                  className="h-9 w-auto object-contain"
-                  priority
-                />
-              </Link>
+              {role === "owner" ? (
+                <button
+                  type="button"
+                  onClick={() => void handleTemporaryLeave()}
+                  disabled={isRoomActionPending}
+                  className="shrink-0 disabled:opacity-50"
+                  aria-label={labels.temporaryLeave}
+                  title={labels.temporaryLeave}
+                >
+                  <Image
+                    src="/images/wordmark.png"
+                    alt="PicBind"
+                    width={178}
+                    height={38}
+                    className="h-9 w-auto object-contain"
+                    priority
+                  />
+                </button>
+              ) : (
+                <Link href="/" className="shrink-0">
+                  <Image
+                    src="/images/wordmark.png"
+                    alt="PicBind"
+                    width={178}
+                    height={38}
+                    className="h-9 w-auto object-contain"
+                    priority
+                  />
+                </Link>
+              )}
               <div className="hidden h-7 w-px bg-slate-200 sm:block" />
               <div className="hidden min-w-0 sm:block">
                 <div className="text-xs font-medium text-slate-500">
@@ -697,14 +983,39 @@ export default function ShareRoomPage() {
                   <FiCopy className="h-4 w-4" aria-hidden="true" />
                 )}
               </button>
-              <Link
-                href="/"
-                className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-                aria-label={labels.back}
-                title={labels.back}
-              >
-                <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
-              </Link>
+              {role === "owner" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleTemporaryLeave()}
+                    disabled={isRoomActionPending}
+                    className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
+                    aria-label={labels.temporaryLeave}
+                    title={labels.temporaryLeave}
+                  >
+                    <FiMinimize2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCloseRoom()}
+                    disabled={isRoomActionPending}
+                    className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                    aria-label={labels.closeRoom}
+                    title={labels.closeRoom}
+                  >
+                    <FiLogOut className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </>
+              ) : (
+                <Link
+                  href="/"
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                  aria-label={labels.back}
+                  title={labels.back}
+                >
+                  <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              )}
             </div>
           </header>
 
@@ -829,7 +1140,7 @@ export default function ShareRoomPage() {
           </div>
         </section>
 
-        <aside className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
+        <aside className="grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
           <div className="border-b border-slate-200 px-4 py-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <FiWifi className="h-4 w-4" aria-hidden="true" />
@@ -859,7 +1170,9 @@ export default function ShareRoomPage() {
                   ["owner", labels.owner, presence.owner],
                   ["guest", labels.guest, presence.guest],
                 ] as const
-              ).map(([memberRole, name, online]) => (
+              )
+                .filter(([, , online]) => online)
+                .map(([memberRole, name, online]) => (
                 <div
                   key={memberRole}
                   className="flex items-center justify-between gap-3"
@@ -888,6 +1201,31 @@ export default function ShareRoomPage() {
             </div>
           </div>
 
+          <div className="border-b border-slate-200 px-4 py-3">
+            <div className="mb-2 text-xs font-semibold uppercase text-slate-500">
+              {labels.testMessage}
+            </div>
+            <div className="flex items-center gap-2">
+              {TEST_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => handleEmoji(emoji)}
+                  disabled={connection !== "connected"}
+                  className={`flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-xl transition duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 ${
+                    pressedEmoji === emoji
+                      ? "-translate-y-1 scale-125 border-blue-400 bg-blue-50 shadow-md"
+                      : "scale-100"
+                  }`}
+                  aria-label={`${labels.testMessage} ${emoji}`}
+                  title={`${labels.testMessage} ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex min-h-0 flex-col">
             <div className="shrink-0 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
               {labels.activity}
@@ -900,6 +1238,8 @@ export default function ShareRoomPage() {
                       ? FiUploadCloud
                       : activity.kind === "receiving"
                         ? FiDownload
+                        : activity.kind === "message"
+                          ? FiMessageCircle
                         : activity.kind === "complete"
                           ? FiCheckCircle
                           : activity.kind === "error"

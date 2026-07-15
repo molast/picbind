@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import ShareRoomDialog from "@/components/share-room-dialog";
+import TemporaryRoomDock from "@/components/temporary-room-dock";
 import {
   ReactCompareSlider,
   ReactCompareSliderImage,
@@ -2199,6 +2200,7 @@ export default function HomeCompressLanding({
           </div>
         </div>
       </footer>
+      <TemporaryRoomDock lang={lang} />
     </main>
   );
 }

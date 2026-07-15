@@ -13,6 +13,16 @@ type TransportResult = {
   requiresImmediateRenegotiation?: boolean;
 };
 
+export class RealtimeRoomRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "RealtimeRoomRequestError";
+  }
+}
+
 async function roomRequest<T>(action: string, body: Record<string, unknown>) {
   const url = getShareRoomRealtimeApiPath(action);
   console.info("[PicBind Realtime] request", { action, url, body });
@@ -37,17 +47,39 @@ async function roomRequest<T>(action: string, body: Record<string, unknown>) {
   }
   if (!response.ok || !result) {
     console.error("[PicBind Realtime] request failed", { action, status: response.status, result });
-    throw new Error(result?.error || `Realtime ${action} failed (${response.status})`);
+    throw new RealtimeRoomRequestError(
+      result?.error || `Realtime ${action} failed (${response.status})`,
+      response.status,
+    );
   }
   return result;
 }
 
-export function joinRealtimeRoom(roomId: string, ownerToken: string | null) {
-  return roomRequest<JoinResult>("join", { roomId, ownerToken });
+export function joinRealtimeRoom(
+  roomId: string,
+  ownerToken: string | null,
+  clientId: string,
+) {
+  return roomRequest<JoinResult>("join", { roomId, ownerToken, clientId });
 }
 
 export function getRealtimeRoomStatus(roomId: string) {
   return roomRequest<{ ownerJoined: boolean; guestJoined: boolean; ownerSessionId?: string; guestSessionId?: string }>("status", { roomId });
+}
+
+export function heartbeatRealtimeRoom(roomId: string, sessionId: string) {
+  return roomRequest<{ ok: true }>("heartbeat", { roomId, sessionId });
+}
+
+export function leaveRealtimeRoomTemporarily(
+  roomId: string,
+  sessionId: string,
+) {
+  return roomRequest<{ ok: true }>("temporary-away", { roomId, sessionId });
+}
+
+export function closeRealtimeRoom(roomId: string, sessionId: string) {
+  return roomRequest<{ ok: true }>("close", { roomId, sessionId });
 }
 
 export function establishRealtimeTransport(roomId: string, sessionId: string, sessionDescription: RTCSessionDescriptionInit) {

@@ -171,9 +171,17 @@ export async function handleShareRoomRealtime(
     if (action === "join") {
       stage = "create-session";
       const ownerToken = typeof body.ownerToken === "string" ? body.ownerToken : "";
+      const clientId = typeof body.clientId === "string" ? body.clientId : "";
+      if (!/^[a-f0-9]{32}$/.test(clientId)) {
+        throw new Error("Invalid room client ID");
+      }
       const isOwner = ownerToken && (await hashToken(ownerToken)) === room.ownerTokenHash;
       const role = isOwner ? "owner" : "guest";
-      if (role === "guest" && room.guestSessionId && room.guestReady) {
+      if (
+        role === "guest" &&
+        room.guestSessionId &&
+        room.guestClientId !== clientId
+      ) {
         return json({ error: "Room already has a guest" }, { status: 409 });
       }
       const session = await realtimeRequest(env, "/sessions/new");
@@ -183,7 +191,7 @@ export async function handleShareRoomRealtime(
       const claimed = await object.fetch("https://share-room/join", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ role, sessionId: session.sessionId }),
+        body: JSON.stringify({ role, sessionId: session.sessionId, clientId }),
       });
       const updated = await readJson<ShareRoomState | { error?: string }>(claimed, "Share room join response");
       if (!claimed.ok) throw new Error((updated as { error?: string }).error || "Could not join room");
@@ -205,6 +213,63 @@ export async function handleShareRoomRealtime(
     const isOwnerSession = room.ownerSessionId === sessionId;
     const isGuestSession = room.guestSessionId === sessionId;
     if (!isOwnerSession && !isGuestSession) return json({ error: "Invalid room session" }, { status: 403 });
+
+    if (action === "heartbeat") {
+      stage = "heartbeat";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const heartbeat = await object.fetch("https://share-room/heartbeat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          role: isOwnerSession ? "owner" : "guest",
+          sessionId,
+        }),
+      });
+      if (!heartbeat.ok) {
+        throw new Error("Room heartbeat was rejected");
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "temporary-away") {
+      if (!isOwnerSession) {
+        return json({ error: "Only the Owner can leave temporarily" }, { status: 403 });
+      }
+      stage = "temporary-away";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/temporary-away", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!response.ok) {
+        throw new Error("Could not leave the room temporarily");
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "close") {
+      if (!isOwnerSession) {
+        return json({ error: "Only the Owner can close the room" }, { status: 403 });
+      }
+      stage = "close-room";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/close", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!response.ok) {
+        throw new Error("Could not close the room");
+      }
+      return json({ ok: true });
+    }
 
     if (action === "transport") {
       stage = "validate-transport";
@@ -252,7 +317,8 @@ export async function handleShareRoomRealtime(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Realtime request failed";
     console.error("Share room realtime request failed", { stage, message });
-    return json({ error: message, stage }, { status: 400 });
+    const status = /not found|expired/i.test(message) ? 404 : 400;
+    return json({ error: message, stage }, { status });
   }
 }
 
