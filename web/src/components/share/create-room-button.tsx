@@ -2,7 +2,10 @@
 
 import React from "react";
 import { FiAlertCircle, FiLoader, FiShare2, FiX } from "react-icons/fi";
-import { createShareRoom } from "@/utils/share-room";
+import {
+  createShareRoom,
+  transferShareRoomSession,
+} from "@/utils/share-room";
 import type { Lang } from "@/locales";
 
 type CreateRoomButtonProps = {
@@ -50,14 +53,35 @@ export default function CreateRoomButton({
 
   const handleCreate = async () => {
     if (isCreating) return;
+    const roomTab = window.open("", "_blank");
+    if (!roomTab) {
+      setError(
+        lang === "zh"
+          ? "浏览器阻止了新标签页，请允许本站打开弹出式窗口。"
+          : "The browser blocked the new tab. Allow pop-ups for this site.",
+      );
+      setIsOpen(true);
+      return;
+    }
     setIsCreating(true);
     setError(null);
     setIsOpen(false);
     try {
       const createdRoom = await createShareRoom();
+      if (roomTab.closed) {
+        throw new Error(
+          lang === "zh" ? "新标签页已关闭" : "The new room tab was closed",
+        );
+      }
       const target = new URL(createdRoom.shareUrl);
-      window.location.assign(`${target.pathname}${target.search}${target.hash}`);
+      transferShareRoomSession(createdRoom.roomId, roomTab.sessionStorage);
+      roomTab.location.replace(
+        `${target.pathname}${target.search}${target.hash}`,
+      );
+      roomTab.opener = null;
+      roomTab.focus();
     } catch (caught) {
+      if (!roomTab.closed) roomTab.close();
       setError(
         caught instanceof Error ? caught.message : "Failed to create share room",
       );
