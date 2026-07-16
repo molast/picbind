@@ -22,7 +22,7 @@ export type ImageTransferMeta = {
   totalChunks: number;
 };
 
-type TransferControlMessage =
+type TransferInstruction =
   | {
       type: "IMAGE_PLACEHOLDER";
       payload: ImageTransferMeta & { placeholder: ImagePlaceholderMetadata };
@@ -118,10 +118,10 @@ function decodeThumbnail(value: unknown) {
   }
 }
 
-function sendControl(channel: RTCDataChannel, message: TransferControlMessage) {
+function sendInstruction(channel: RTCDataChannel, message: TransferInstruction) {
   const payload = JSON.stringify(message);
   if (new TextEncoder().encode(payload).byteLength > MAX_DATA_CHANNEL_PAYLOAD_BYTES) {
-    throw new Error("Image transfer control message exceeds the 1200-byte payload limit");
+    throw new Error("Image transfer instruction exceeds the 1200-byte payload limit");
   }
   channel.send(payload);
 }
@@ -175,13 +175,13 @@ function isValidPlaceholder(value: unknown): value is ImagePlaceholderMetadata {
 
 export function sendImageReceipt(channel: RTCDataChannel, id: string) {
   if (channel.readyState === "open") {
-    sendControl(channel, { type: "IMAGE_RECEIVED", payload: { id } });
+    sendInstruction(channel, { type: "IMAGE_RECEIVED", payload: { id } });
   }
 }
 
 export function sendImageReady(channel: RTCDataChannel, id: string) {
   if (channel.readyState === "open") {
-    sendControl(channel, { type: "IMAGE_READY", payload: { id } });
+    sendInstruction(channel, { type: "IMAGE_READY", payload: { id } });
   }
 }
 
@@ -193,7 +193,7 @@ export function sendImagePlaceholder(
   if (channel.readyState !== "open") {
     throw new Error("DataChannel is not open");
   }
-  sendControl(channel, {
+  sendInstruction(channel, {
     type: "IMAGE_PLACEHOLDER",
     payload: { ...meta, placeholder },
   });
@@ -201,7 +201,7 @@ export function sendImagePlaceholder(
 
 export function sendImageDelete(channel: RTCDataChannel, id: string) {
   if (channel.readyState === "open") {
-    sendControl(channel, { type: "IMAGE_DELETE", payload: { id } });
+    sendInstruction(channel, { type: "IMAGE_DELETE", payload: { id } });
   }
 }
 
@@ -214,7 +214,7 @@ export function sendR2ImageAvailable(
   if (channel.readyState !== "open") {
     throw new Error("DataChannel is not open");
   }
-  sendControl(channel, {
+  sendInstruction(channel, {
     type: "R2_IMAGE_AVAILABLE",
     payload: { ...meta, objectKey, expiresAt },
   });
@@ -231,7 +231,7 @@ export function sendImagePreview(
   if (thumbnail.byteLength > MAX_THUMBNAIL_BYTES) {
     throw new Error("Generated thumbnail is too large");
   }
-  sendControl(channel, {
+  sendInstruction(channel, {
     type: "IMAGE_PREVIEW",
     payload: { ...meta, thumbnailBase64: bytesToBase64(thumbnail) },
   });
@@ -276,7 +276,7 @@ async function waitForWritableBuffer(channel: RTCDataChannel) {
 }
 
 export async function sendImageFile(
-  controlChannel: RTCDataChannel,
+  instructionChannel: RTCDataChannel,
   fileChannel: RTCDataChannel,
   file: File,
   onProgress: (progress: TransferProgress) => void,
@@ -285,14 +285,14 @@ export async function sendImageFile(
   waitUntilReady?: (id: string) => Promise<void>,
 ) {
   if (
-    controlChannel.readyState !== "open" ||
+    instructionChannel.readyState !== "open" ||
     fileChannel.readyState !== "open"
   ) {
     throw new Error("DataChannels are not open");
   }
 
   const meta = createImageTransferMeta(file, transferId, chunkSize);
-  sendControl(controlChannel, { type: "IMAGE_START", payload: meta });
+  sendInstruction(instructionChannel, { type: "IMAGE_START", payload: meta });
   await waitUntilReady?.(meta.id);
   onProgress({ ...meta, transferredBytes: 0, progress: 0 });
 
@@ -315,12 +315,12 @@ export async function sendImageFile(
       }
     }
     await waitForWritableBuffer(fileChannel);
-    sendControl(controlChannel, { type: "IMAGE_COMPLETE", payload: { id: meta.id } });
+    sendInstruction(instructionChannel, { type: "IMAGE_COMPLETE", payload: { id: meta.id } });
     return meta;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Image transfer failed";
-    if (controlChannel.readyState === "open") {
-      sendControl(controlChannel, {
+    if (instructionChannel.readyState === "open") {
+      sendInstruction(instructionChannel, {
         type: "IMAGE_FAILED",
         payload: { id: meta.id, reason },
       });
@@ -352,7 +352,7 @@ export class RealtimeImageReceiver {
     if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
       return;
     }
-    const message = parsed as TransferControlMessage;
+    const message = parsed as TransferInstruction;
 
     if (message.type === "IMAGE_PLACEHOLDER") {
       if (

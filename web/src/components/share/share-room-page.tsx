@@ -75,6 +75,7 @@ export default function ShareRoomPage() {
   const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
   const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const instructionChannelRef = React.useRef<RTCDataChannel | null>(null);
   const transferChunkSizeRef = React.useRef(IMAGE_CHUNK_SIZE);
   const maxImageTransferSizeRef = React.useRef(0);
   const weakNetworkTransferRef = React.useRef(false);
@@ -362,6 +363,7 @@ export default function ShareRoomPage() {
     roomId,
     labels,
     controlChannelRef,
+    instructionChannelRef,
     outgoingChannelRef,
     transferChunkSizeRef,
     maxImageTransferSizeRef,
@@ -402,7 +404,7 @@ export default function ShareRoomPage() {
   );
 
   const handleFiles = async (fileList: FileList | File[]) => {
-    const channel = controlChannelRef.current;
+    const channel = instructionChannelRef.current;
     if (connection !== "connected" || channel?.readyState !== "open") {
       upsertActivity({
         id: `error-${Date.now()}`,
@@ -472,7 +474,7 @@ export default function ShareRoomPage() {
                 return;
               }
               updateRoomImage(meta.id, { placeholder });
-              const activeChannel = controlChannelRef.current;
+              const activeChannel = instructionChannelRef.current;
               if (activeChannel?.readyState === "open") {
                 sendImagePlaceholder(activeChannel, meta, placeholder);
               }
@@ -513,7 +515,7 @@ export default function ShareRoomPage() {
   };
 
   const handleSendImage = async (image: RoomImage) => {
-    const controlChannel = controlChannelRef.current;
+    const controlChannel = instructionChannelRef.current;
     const fileChannel = outgoingChannelRef.current;
     if (
       image.direction !== "sent" ||
@@ -623,7 +625,7 @@ export default function ShareRoomPage() {
 
   const handleDeleteImage = async (image: RoomImage) => {
     const status = image.transferStatus || "waiting";
-    const channel = controlChannelRef.current;
+    const channel = instructionChannelRef.current;
     if (
       image.direction !== "sent" ||
       (status !== "waiting" && status !== "failed") ||
