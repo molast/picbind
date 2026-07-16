@@ -32,6 +32,11 @@ new_sqlite_classes = ["ShareRoomObject"]
 
 [vars]
 DEV_MODE = "0"
+FILE_TRANSFER_MODE = "r2"
+R2_RTT_THRESHOLD_MS = "200"
+R2_FILE_TTL_SECONDS = "1800"
+R2_BUCKET_NAME = "picbind-bucket"
+R2_ACCOUNT_ID = "a3af9fe482ea605e4cc8b2496a45b806"
 SITE_URL = "https://picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
@@ -60,9 +65,3 @@ invocation_logs = true
 enabled = false
 persist = true
 head_sampling_rate = 1
-
-[env.preview.vars]
-DEV_MODE = "1"
-SITE_URL = "https://preview.picbind.pages.dev"
-ALLOWED_ORIGINS = "*"
-TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"

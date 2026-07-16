@@ -35,6 +35,7 @@ import {
 import {
   closeRealtimeRoom,
   getRealtimeIceServers,
+  getRealtimeR2Download,
   getRealtimeRoomStatus,
   heartbeatRealtimeRoom,
   kickRealtimeRoomMember,
@@ -43,6 +44,10 @@ import {
   joinRealtimeRoom,
   publishRealtimeCandidate,
   publishRealtimeSignal,
+  prepareRealtimeImageTransfer,
+  confirmRealtimeR2Download,
+  confirmRealtimeR2Upload,
+  markRealtimeR2Shared,
   RealtimeRoomRequestError,
   type RoomRole,
   type RoomMemberPresence,
@@ -55,8 +60,10 @@ import {
   createImageTransferMeta,
   sendImageDelete,
   sendImagePlaceholder,
+  sendImageReady,
   sendImageReceipt,
   sendImageFile,
+  sendR2ImageAvailable,
   type TransferProgress,
 } from "@/utils/realtime-image-transfer";
 import {
@@ -72,6 +79,10 @@ import {
   TEST_EMOJIS,
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
+import {
+  downloadFileFromR2,
+  uploadFileToR2,
+} from "@/utils/realtime-r2-transfer";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -173,6 +184,9 @@ export default function ShareRoomPage() {
   const objectUrlsRef = React.useRef(new Set<string>());
   const imageIdsRef = React.useRef(new Set<string>());
   const deletedImageIdsRef = React.useRef(new Set<string>());
+  const imageReadyWaitersRef = React.useRef(
+    new Map<string, { resolve(): void; timeoutId: number }>(),
+  );
   const imagesRef = React.useRef<RoomImage[]>([]);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
@@ -206,6 +220,26 @@ export default function ShareRoomPage() {
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
+  );
+
+  const waitUntilImageReady = React.useCallback(
+    (id: string) =>
+      new Promise<void>((resolve) => {
+        const waiters = imageReadyWaitersRef.current;
+        const timeoutId = window.setTimeout(() => {
+          waiters.delete(id);
+          resolve();
+        }, 750);
+        waiters.set(id, {
+          timeoutId,
+          resolve: () => {
+            window.clearTimeout(timeoutId);
+            waiters.delete(id);
+            resolve();
+          },
+        });
+      }),
+    [],
   );
 
   React.useEffect(() => {
@@ -544,6 +578,7 @@ export default function ShareRoomPage() {
     let handshakeAttempts = 0;
     let handshakeAcknowledged = false;
     let placeholdersPublished = false;
+    const imageReadyWaiters = imageReadyWaitersRef.current;
 
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
@@ -565,7 +600,7 @@ export default function ShareRoomPage() {
       if (disposed) {
         return;
       }
-      const channel = outgoingChannelRef.current;
+      const channel = controlChannelRef.current;
       if (channel?.readyState === "open") {
         sendImageReceipt(channel, id);
         return;
@@ -646,6 +681,8 @@ export default function ShareRoomPage() {
           progress: 0,
           createdAt: Date.now(),
         });
+        const channel = controlChannelRef.current;
+        if (channel?.readyState === "open") sendImageReady(channel, meta.id);
       },
       onProgress(progress) {
         updateRoomImage(progress.id, {
@@ -740,6 +777,9 @@ export default function ShareRoomPage() {
           ),
         );
       },
+      onReady(id) {
+        imageReadyWaiters.get(id)?.resolve();
+      },
       async onDelete(id) {
         deletedImageIdsRef.current.add(id);
         removeRoomImage(id);
@@ -747,6 +787,102 @@ export default function ShareRoomPage() {
           await deleteRoomImage(id);
         } catch (error) {
           console.warn("Failed to delete remote image placeholder", error);
+        }
+      },
+      async onR2Available(meta, objectKey) {
+        const sessionId = sessionIdRef.current;
+        if (!sessionId || disposed) return;
+        updateRoomImage(
+          meta.id,
+          { transferStatus: "receiving", progress: 0 },
+          true,
+        );
+        upsertActivity({
+          id: `transfer-${meta.id}`,
+          kind: "receiving",
+          title: meta.name,
+          detail: `${labels.receiving} · 0 B / ${formatBytes(meta.size)}`,
+          progress: 0,
+          createdAt: Date.now(),
+        });
+        try {
+          const download = await getRealtimeR2Download(
+            roomId,
+            sessionId,
+            objectKey,
+          );
+          const blob = await downloadFileFromR2(
+            download.downloadUrl,
+            meta.type,
+            meta.size,
+            (progress) => {
+              updateRoomImage(meta.id, {
+                transferStatus: "receiving",
+                progress: progress.progress,
+              });
+              upsertActivity({
+                id: `transfer-${meta.id}`,
+                kind: "receiving",
+                title: meta.name,
+                detail: `${labels.receiving} · ${formatBytes(progress.transferredBytes)} / ${formatBytes(meta.size)}`,
+                progress: progress.progress,
+                createdAt: Date.now(),
+              });
+            },
+          );
+          const current = imagesRef.current.find((image) => image.id === meta.id);
+          const image: CachedRoomImage = {
+            id: meta.id,
+            roomId,
+            name: meta.name,
+            type: meta.type,
+            size: meta.size,
+            blob,
+            direction: "received",
+            transferStatus: "received",
+            progress: 1,
+            previewOnly: false,
+            placeholderOnly: false,
+            placeholder: current?.placeholder,
+            createdAt: current?.createdAt || Date.now(),
+          };
+          await storeRoomImage(image);
+          if (disposed) return;
+          addRoomImage(image);
+          upsertActivity({
+            id: `transfer-${meta.id}`,
+            kind: "complete",
+            title: meta.name,
+            detail: `${labels.complete} · ${formatBytes(meta.size)}`,
+            progress: 1,
+            createdAt: Date.now(),
+          });
+          confirmReceipt(meta.id);
+          void (async () => {
+            let lastError: unknown;
+            for (const delayMs of [0, 500, 1_500]) {
+              if (delayMs) {
+                await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+              }
+              try {
+                await confirmRealtimeR2Download(roomId, sessionId, objectKey);
+                return;
+              } catch (error) {
+                lastError = error;
+              }
+            }
+            console.warn("Failed to record completed R2 download", lastError);
+          })();
+        } catch (error) {
+          updateRoomImage(meta.id, { transferStatus: "failed" }, true);
+          upsertActivity({
+            id: `transfer-${meta.id}`,
+            kind: "error",
+            title: meta.name,
+            detail:
+              error instanceof Error ? error.message : labels.transferFailed,
+            createdAt: Date.now(),
+          });
         }
       },
     });
@@ -780,7 +916,7 @@ export default function ShareRoomPage() {
     };
 
     const publishWaitingPlaceholders = async () => {
-      const activeChannel = outgoingChannelRef.current;
+      const activeChannel = controlChannelRef.current;
       if (
         placeholdersPublished ||
         activeChannel?.readyState !== "open"
@@ -931,6 +1067,7 @@ export default function ShareRoomPage() {
         );
         return;
       }
+      receiver.handle(event.data);
     };
 
     const attachControlChannel = (nextChannel: RTCDataChannel) => {
@@ -983,6 +1120,7 @@ export default function ShareRoomPage() {
 
     const closePeerConnection = () => {
       stopHandshake();
+      for (const waiter of [...imageReadyWaiters.values()]) waiter.resolve();
       if (statsTimer) {
         window.clearInterval(statsTimer);
         statsTimer = undefined;
@@ -1395,7 +1533,7 @@ export default function ShareRoomPage() {
   );
 
   const handleFiles = async (fileList: FileList | File[]) => {
-    const channel = outgoingChannelRef.current;
+    const channel = controlChannelRef.current;
     if (connection !== "connected" || channel?.readyState !== "open") {
       upsertActivity({
         id: `error-${Date.now()}`,
@@ -1465,7 +1603,7 @@ export default function ShareRoomPage() {
                 return;
               }
               updateRoomImage(meta.id, { placeholder });
-              const activeChannel = outgoingChannelRef.current;
+              const activeChannel = controlChannelRef.current;
               if (activeChannel?.readyState === "open") {
                 sendImagePlaceholder(activeChannel, meta, placeholder);
               }
@@ -1506,7 +1644,8 @@ export default function ShareRoomPage() {
   };
 
   const handleSendImage = async (image: RoomImage) => {
-    const channel = outgoingChannelRef.current;
+    const controlChannel = controlChannelRef.current;
+    const fileChannel = outgoingChannelRef.current;
     if (
       image.direction !== "sent" ||
       image.previewOnly ||
@@ -1515,7 +1654,7 @@ export default function ShareRoomPage() {
       image.transferStatus === "sending" ||
       isSending ||
       connection !== "connected" ||
-      channel?.readyState !== "open"
+      controlChannel?.readyState !== "open"
     ) {
       return;
     }
@@ -1528,13 +1667,63 @@ export default function ShareRoomPage() {
     );
     try {
       const file = new File([image.blob], image.name, { type: image.type });
-      const meta = await sendImageFile(
-        channel,
-        file,
-        updateSendingActivity,
-        image.id,
-        transferChunkSizeRef.current,
+      const transferImage = {
+        id: image.id,
+        name: image.name,
+        type: image.type,
+        size: image.size,
+      };
+      const preparation = await prepareRealtimeImageTransfer(
+        roomId!,
+        sessionIdRef.current!,
+        transferImage,
+        networkLatencyMs,
       );
+      let meta: ReturnType<typeof createImageTransferMeta>;
+      if (preparation.mode === "r2") {
+        meta = createImageTransferMeta(
+          file,
+          image.id,
+          transferChunkSizeRef.current,
+        );
+        await uploadFileToR2(preparation.uploadUrl, file, (progress) => {
+          updateSendingActivity({
+            ...meta,
+            transferredBytes: progress.transferredBytes,
+            progress: progress.progress,
+          });
+        });
+        const uploaded = await confirmRealtimeR2Upload(
+          roomId!,
+          sessionIdRef.current!,
+          transferImage,
+          preparation.objectKey,
+        );
+        await markRealtimeR2Shared(
+          roomId!,
+          sessionIdRef.current!,
+          preparation.objectKey,
+        );
+        sendR2ImageAvailable(
+          controlChannel,
+          meta,
+          preparation.objectKey,
+          uploaded.expiresAt,
+        );
+      } else {
+        if (fileChannel?.readyState !== "open") {
+          throw new Error("File DataChannel is not open");
+        }
+        meta = await sendImageFile(
+          controlChannel,
+          fileChannel,
+          file,
+          updateSendingActivity,
+          image.id,
+          transferChunkSizeRef.current,
+          waitUntilImageReady,
+        );
+      }
       updateRoomImage(
         image.id,
         { transferStatus: "awaiting-receipt", progress: 1 },
@@ -1565,7 +1754,7 @@ export default function ShareRoomPage() {
 
   const handleDeleteImage = async (image: RoomImage) => {
     const status = image.transferStatus || "waiting";
-    const channel = outgoingChannelRef.current;
+    const channel = controlChannelRef.current;
     if (
       image.direction !== "sent" ||
       (status !== "waiting" && status !== "failed") ||

@@ -27,6 +27,7 @@ type Env = RuntimeLogEnv & {
   };
   METRICS_COUNTER: DurableObjectNamespace;
   REALTIME_ROOMS: DurableObjectNamespace;
+  SHARE_IMAGES_R2: R2Bucket;
   GLOBAL_LIMITER?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
@@ -40,6 +41,13 @@ type Env = RuntimeLogEnv & {
   BAIDU_PUSH_TOKEN?: string;
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
+  FILE_TRANSFER_MODE?: string;
+  R2_RTT_THRESHOLD_MS?: string;
+  R2_FILE_TTL_SECONDS?: string;
+  R2_BUCKET_NAME?: string;
+  R2_ACCOUNT_ID?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
 };
 
 const CONFIG_KEY = "metrics:config:v1";

@@ -33,9 +33,14 @@ type TransferControlMessage =
       payload: ImageTransferMeta & { thumbnailBase64: string };
     }
   | { type: "IMAGE_START"; payload: ImageTransferMeta }
+  | { type: "IMAGE_READY"; payload: { id: string } }
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
   | { type: "IMAGE_RECEIVED"; payload: { id: string } }
   | { type: "IMAGE_DELETE"; payload: { id: string } }
+  | {
+      type: "R2_IMAGE_AVAILABLE";
+      payload: ImageTransferMeta & { objectKey: string; expiresAt: number };
+    }
   | { type: "IMAGE_FAILED"; payload: { id: string; reason: string } };
 
 type IncomingTransfer = {
@@ -62,7 +67,13 @@ export type ImageReceiverCallbacks = {
   onComplete(meta: ImageTransferMeta, blob: Blob): void | Promise<void>;
   onError(meta: ImageTransferMeta | null, reason: string): void;
   onReceipt?(id: string): void;
+  onReady?(id: string): void;
   onDelete?(id: string): void | Promise<void>;
+  onR2Available?(
+    meta: ImageTransferMeta,
+    objectKey: string,
+    expiresAt: number,
+  ): void | Promise<void>;
 };
 
 function createTransferId() {
@@ -166,6 +177,12 @@ export function sendImageReceipt(channel: RTCDataChannel, id: string) {
   }
 }
 
+export function sendImageReady(channel: RTCDataChannel, id: string) {
+  if (channel.readyState === "open") {
+    sendControl(channel, { type: "IMAGE_READY", payload: { id } });
+  }
+}
+
 export function sendImagePlaceholder(
   channel: RTCDataChannel,
   meta: ImageTransferMeta,
@@ -184,6 +201,21 @@ export function sendImageDelete(channel: RTCDataChannel, id: string) {
   if (channel.readyState === "open") {
     sendControl(channel, { type: "IMAGE_DELETE", payload: { id } });
   }
+}
+
+export function sendR2ImageAvailable(
+  channel: RTCDataChannel,
+  meta: ImageTransferMeta,
+  objectKey: string,
+  expiresAt: number,
+) {
+  if (channel.readyState !== "open") {
+    throw new Error("DataChannel is not open");
+  }
+  sendControl(channel, {
+    type: "R2_IMAGE_AVAILABLE",
+    payload: { ...meta, objectKey, expiresAt },
+  });
 }
 
 export function sendImagePreview(
@@ -242,30 +274,36 @@ async function waitForWritableBuffer(channel: RTCDataChannel) {
 }
 
 export async function sendImageFile(
-  channel: RTCDataChannel,
+  controlChannel: RTCDataChannel,
+  fileChannel: RTCDataChannel,
   file: File,
   onProgress: (progress: TransferProgress) => void,
   transferId?: string,
   chunkSize = IMAGE_CHUNK_SIZE,
+  waitUntilReady?: (id: string) => Promise<void>,
 ) {
-  if (channel.readyState !== "open") {
-    throw new Error("DataChannel is not open");
+  if (
+    controlChannel.readyState !== "open" ||
+    fileChannel.readyState !== "open"
+  ) {
+    throw new Error("DataChannels are not open");
   }
 
   const meta = createImageTransferMeta(file, transferId, chunkSize);
-  sendControl(channel, { type: "IMAGE_START", payload: meta });
+  sendControl(controlChannel, { type: "IMAGE_START", payload: meta });
+  await waitUntilReady?.(meta.id);
   onProgress({ ...meta, transferredBytes: 0, progress: 0 });
 
   let transferredBytes = 0;
   let reportedPercent = 0;
   try {
     for (let offset = 0; offset < file.size; offset += meta.chunkSize) {
-      await waitForWritableBuffer(channel);
+      await waitForWritableBuffer(fileChannel);
       const chunk = await file.slice(offset, offset + meta.chunkSize).arrayBuffer();
       const frame = new Uint8Array(CHUNK_INDEX_BYTES + chunk.byteLength);
       new DataView(frame.buffer).setUint32(0, offset / meta.chunkSize);
       frame.set(new Uint8Array(chunk), CHUNK_INDEX_BYTES);
-      channel.send(frame.buffer);
+      fileChannel.send(frame.buffer);
       transferredBytes += chunk.byteLength;
       const progress = file.size ? transferredBytes / file.size : 1;
       const percent = Math.floor(progress * 100);
@@ -274,13 +312,13 @@ export async function sendImageFile(
         onProgress({ ...meta, transferredBytes, progress });
       }
     }
-    await waitForWritableBuffer(channel);
-    sendControl(channel, { type: "IMAGE_COMPLETE", payload: { id: meta.id } });
+    await waitForWritableBuffer(fileChannel);
+    sendControl(controlChannel, { type: "IMAGE_COMPLETE", payload: { id: meta.id } });
     return meta;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Image transfer failed";
-    if (channel.readyState === "open") {
-      sendControl(channel, {
+    if (controlChannel.readyState === "open") {
+      sendControl(controlChannel, {
         type: "IMAGE_FAILED",
         payload: { id: meta.id, reason },
       });
@@ -362,6 +400,13 @@ export class RealtimeImageReceiver {
       return;
     }
 
+    if (message.type === "IMAGE_READY") {
+      if (typeof message.payload?.id === "string") {
+        this.callbacks.onReady?.(message.payload.id);
+      }
+      return;
+    }
+
     if (message.type === "IMAGE_FAILED") {
       const meta = this.incoming?.meta ?? null;
       this.incoming = null;
@@ -394,6 +439,26 @@ export class RealtimeImageReceiver {
         this.incoming = null;
       }
       void this.callbacks.onDelete?.(id);
+      return;
+    }
+
+    if (message.type === "R2_IMAGE_AVAILABLE") {
+      if (
+        !isValidMeta(message.payload) ||
+        typeof message.payload.objectKey !== "string" ||
+        message.payload.objectKey.length > 512 ||
+        !/^[A-Za-z0-9_\/-]+$/.test(message.payload.objectKey) ||
+        typeof message.payload.expiresAt !== "number" ||
+        !Number.isSafeInteger(message.payload.expiresAt)
+      ) {
+        this.callbacks.onError(null, "Received invalid R2 image metadata");
+        return;
+      }
+      void this.callbacks.onR2Available?.(
+        message.payload,
+        message.payload.objectKey,
+        message.payload.expiresAt,
+      );
     }
   }
 

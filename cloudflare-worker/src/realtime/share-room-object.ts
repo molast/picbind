@@ -1,5 +1,6 @@
 export const SHARE_ROOM_TTL_MS = 30 * 60 * 1000;
 export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 90 * 1000;
+const MAX_ACTIVE_R2_OBJECTS_PER_ROOM = 100;
 
 export type ShareRoomRole = "owner" | "guest";
 
@@ -22,6 +23,32 @@ export type ShareRoomSignal = {
   guestCandidates?: RTCIceCandidateInit[];
 };
 
+export type ShareRoomR2ObjectStatus =
+  | "uploaded"
+  | "shared"
+  | "downloading"
+  | "downloaded"
+  | "expired"
+  | "deleted";
+
+export type ShareRoomR2Object = {
+  objectKey: string;
+  imageId: string;
+  name: string;
+  type: string;
+  size: number;
+  uploadedBySessionId: string;
+  downloadedBySessionId?: string;
+  status: ShareRoomR2ObjectStatus;
+  uploadedAt: number;
+  sharedAt?: number;
+  downloadingAt?: number;
+  downloadedAt?: number;
+  expiresAt: number;
+  expiredAt?: number;
+  deletedAt?: number;
+};
+
 export type ShareRoomState = {
   roomId: string;
   ownerTokenHash: string;
@@ -33,6 +60,7 @@ export type ShareRoomState = {
   hadOwner?: boolean;
   ownerTemporarilyAway?: boolean;
   signal?: ShareRoomSignal;
+  r2Objects?: ShareRoomR2Object[];
 
   // Legacy V1 fields are migrated into members on first access.
   ownerSessionId?: string;
@@ -123,11 +151,40 @@ function json(data: unknown, init?: ResponseInit) {
 }
 
 export class ShareRoomObject {
-  constructor(private readonly state: DurableObjectState) {}
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: { SHARE_IMAGES_R2: R2Bucket },
+  ) {}
 
-  private async destroy() {
+  private async destroy(room?: ShareRoomState) {
+    const currentRoom =
+      room || (await this.state.storage.get<ShareRoomState>("room"));
+    const objectKeys = (currentRoom?.r2Objects || [])
+      .filter((object) => object.status !== "deleted")
+      .map((object) => object.objectKey);
+    if (objectKeys.length) {
+      await this.env.SHARE_IMAGES_R2.delete(objectKeys).catch(() => undefined);
+    }
     await this.state.storage.deleteAll();
     await this.state.storage.deleteAlarm();
+  }
+
+  private async expireR2Objects(room: ShareRoomState, now = Date.now()) {
+    let changed = false;
+    for (const object of room.r2Objects || []) {
+      if (object.status === "deleted" || object.expiresAt > now) continue;
+      object.status = "expired";
+      object.expiredAt ||= now;
+      changed = true;
+      try {
+        await this.env.SHARE_IMAGES_R2.delete(object.objectKey);
+        object.status = "deleted";
+        object.deletedAt = Date.now();
+      } catch {
+        // Keep the expired state so the next alarm retries deletion.
+      }
+    }
+    return changed;
   }
 
   private async persistAndSchedule(room: ShareRoomState) {
@@ -140,7 +197,7 @@ export class ShareRoomObject {
       activeMembers.length === 0 &&
       !room.ownerTemporarilyAway;
     if (ownerLeftPermanently || roomBecameEmpty) {
-      await this.destroy();
+      await this.destroy(room);
       return false;
     }
 
@@ -151,6 +208,13 @@ export class ShareRoomObject {
         (member) =>
           member.lastSeen + SHARE_ROOM_PRESENCE_TIMEOUT_MS + 1,
       ),
+      ...(room.r2Objects || [])
+        .filter((object) => object.status !== "deleted")
+        .map((object) =>
+          object.status === "expired"
+            ? Date.now() + 60_000
+            : object.expiresAt,
+        ),
     ];
     await this.state.storage.setAlarm(Math.min(...deadlines));
     return true;
@@ -186,11 +250,12 @@ export class ShareRoomObject {
         return json({ error: "Room not found" }, { status: 404 });
       }
       const presence = pruneStaleMembers(room);
+      const r2Changed = await this.expireR2Objects(room);
       if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
         await this.destroy();
         return json({ error: "Room not found" }, { status: 404 });
       }
-      if (presence.changed) {
+      if (presence.changed || r2Changed) {
         const retained = await this.persistAndSchedule(room);
         if (!retained) {
           return json({ error: "Room not found" }, { status: 404 });
@@ -457,6 +522,147 @@ export class ShareRoomObject {
       return json({ ok: true, roomRetained: retained });
     }
 
+    if (request.method === "POST" && pathname === "/r2-uploaded") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as Partial<ShareRoomR2Object> & {
+        sessionId?: string;
+      };
+      const member = room
+        ? normalizeMembers(room).find(
+            (candidate) =>
+              candidate.sessionId === body.sessionId &&
+              candidate.status === "online",
+          )
+        : null;
+      if (
+        !room ||
+        !member ||
+        typeof body.objectKey !== "string" ||
+        typeof body.imageId !== "string" ||
+        !/^[a-f0-9]{32}$/.test(body.imageId) ||
+        !body.objectKey.startsWith(`${room.roomId}/${body.imageId}/`) ||
+        typeof body.name !== "string" ||
+        body.name.length < 1 ||
+        body.name.length > 255 ||
+        typeof body.type !== "string" ||
+        !body.type.startsWith("image/") ||
+        typeof body.size !== "number" ||
+        !Number.isSafeInteger(body.size) ||
+        body.size < 0 ||
+        typeof body.expiresAt !== "number" ||
+        !Number.isSafeInteger(body.expiresAt) ||
+        body.expiresAt <= Date.now() ||
+        body.expiresAt > Date.parse(room.expiresAt)
+      ) {
+        return json({ error: "Invalid uploaded object metadata" }, { status: 400 });
+      }
+      const objects = (room.r2Objects ||= []);
+      const existing = objects.find(
+        (object) => object.objectKey === body.objectKey,
+      );
+      if (existing) return json(existing);
+      if (
+        objects.filter((object) => object.status !== "deleted").length >=
+        MAX_ACTIVE_R2_OBJECTS_PER_ROOM
+      ) {
+        return json({ error: "Room R2 object limit reached" }, { status: 429 });
+      }
+      const uploaded: ShareRoomR2Object = {
+        objectKey: body.objectKey,
+        imageId: body.imageId,
+        name: body.name,
+        type: body.type,
+        size: Number(body.size),
+        uploadedBySessionId: member.sessionId,
+        status: "uploaded",
+        uploadedAt: Date.now(),
+        expiresAt: Number(body.expiresAt),
+      };
+      objects.push(uploaded);
+      await this.persistAndSchedule(room);
+      return json(uploaded);
+    }
+
+    if (request.method === "POST" && pathname === "/r2-shared") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        sessionId?: string;
+        objectKey?: string;
+      };
+      const object = room?.r2Objects?.find(
+        (candidate) => candidate.objectKey === body.objectKey,
+      );
+      if (
+        !room ||
+        !object ||
+        object.uploadedBySessionId !== body.sessionId ||
+        object.status !== "uploaded"
+      ) {
+        return json({ error: "Uploaded object is not shareable" }, { status: 409 });
+      }
+      object.status = "shared";
+      object.sharedAt = Date.now();
+      await this.persistAndSchedule(room);
+      return json(object);
+    }
+
+    if (request.method === "POST" && pathname === "/r2-downloading") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        sessionId?: string;
+        objectKey?: string;
+      };
+      const member = room
+        ? normalizeMembers(room).find(
+            (candidate) =>
+              candidate.sessionId === body.sessionId &&
+              candidate.status === "online",
+          )
+        : null;
+      const object = room?.r2Objects?.find(
+        (candidate) => candidate.objectKey === body.objectKey,
+      );
+      if (
+        !room ||
+        !member ||
+        !object ||
+        object.uploadedBySessionId === member.sessionId ||
+        (object.status !== "shared" && object.status !== "downloading") ||
+        object.expiresAt <= Date.now()
+      ) {
+        return json({ error: "Shared object is not downloadable" }, { status: 409 });
+      }
+      object.status = "downloading";
+      object.downloadedBySessionId = member.sessionId;
+      object.downloadingAt = Date.now();
+      await this.persistAndSchedule(room);
+      return json(object);
+    }
+
+    if (request.method === "POST" && pathname === "/r2-downloaded") {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const body = (await request.json()) as {
+        sessionId?: string;
+        objectKey?: string;
+      };
+      const object = room?.r2Objects?.find(
+        (candidate) => candidate.objectKey === body.objectKey,
+      );
+      if (
+        !room ||
+        !object ||
+        object.downloadedBySessionId !== body.sessionId ||
+        (object.status !== "downloading" && object.status !== "downloaded")
+      ) {
+        return json({ error: "Object download is not active" }, { status: 409 });
+      }
+      if (object.status === "downloaded") return json(object);
+      object.status = "downloaded";
+      object.downloadedAt = Date.now();
+      await this.persistAndSchedule(room);
+      return json(object);
+    }
+
     if (request.method === "POST" && pathname === "/kick") {
       const room = await this.state.storage.get<ShareRoomState>("room");
       const body = (await request.json()) as {
@@ -542,6 +748,7 @@ export class ShareRoomObject {
       return;
     }
     const presence = pruneStaleMembers(room);
+    await this.expireR2Objects(room);
     if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
       await this.destroy();
       return;

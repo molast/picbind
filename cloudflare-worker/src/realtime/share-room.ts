@@ -1,11 +1,21 @@
 import {
   SHARE_ROOM_TTL_MS,
   type ShareRoomMember,
+  type ShareRoomR2Object,
   type ShareRoomState,
 } from "./share-room-object";
 import { devError, type RuntimeLogEnv } from "../runtime-log";
+import {
+  createR2DownloadUrl,
+  decideFileTransferMode,
+  prepareR2Upload,
+  r2FileExpiresAt,
+  verifyR2Upload,
+  type R2ImageMetadata,
+  type ShareRoomR2Env,
+} from "./share-room-r2";
 
-export type RealtimeRoomEnv = RuntimeLogEnv & {
+export type RealtimeRoomEnv = RuntimeLogEnv & ShareRoomR2Env & {
   REALTIME_ROOMS: DurableObjectNamespace;
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
@@ -95,6 +105,27 @@ async function generateTurnIceServers(env: RealtimeRoomEnv) {
 
 function validRoomId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{12}$/.test(value);
+}
+
+function r2ImageMetadata(body: Record<string, unknown>): R2ImageMetadata | null {
+  const image = body.image as Partial<R2ImageMetadata> | undefined;
+  if (
+    !image ||
+    typeof image.id !== "string" ||
+    !/^[a-f0-9]{32}$/.test(image.id) ||
+    typeof image.name !== "string" ||
+    image.name.length < 1 ||
+    image.name.length > 255 ||
+    typeof image.type !== "string" ||
+    !image.type.startsWith("image/") ||
+    typeof image.size !== "number" ||
+    !Number.isSafeInteger(image.size) ||
+    image.size < 0 ||
+    image.size > 50 * 1024 * 1024
+  ) {
+    return null;
+  }
+  return image as R2ImageMetadata;
 }
 
 async function requireRoom(env: RealtimeRoomEnv, roomId: unknown) {
@@ -228,6 +259,145 @@ export async function handleShareRoomRealtime(
     if (action === "ice-servers") {
       stage = "generate-turn-credentials";
       return json({ iceServers: await generateTurnIceServers(env) });
+    }
+
+    if (action === "r2-prepare") {
+      const image = r2ImageMetadata(body);
+      if (!image) {
+        return json({ error: "Invalid R2 image metadata" }, { status: 400 });
+      }
+      const rawRtt = body.rttMs;
+      const rttMs =
+        typeof rawRtt === "number" && Number.isFinite(rawRtt)
+          ? Math.max(0, rawRtt)
+          : null;
+      const mode = decideFileTransferMode(env, rttMs);
+      if (mode === "p2p") return json({ mode });
+      stage = "prepare-r2-upload";
+      return json({
+        mode,
+        ...(await prepareR2Upload(
+          env,
+          room.roomId,
+          image,
+          room.expiresAt,
+        )),
+      });
+    }
+
+    if (action === "r2-uploaded") {
+      const image = r2ImageMetadata(body);
+      const objectKey = typeof body.objectKey === "string" ? body.objectKey : "";
+      if (
+        !image ||
+        !objectKey.startsWith(`${room.roomId}/${image.id}/`)
+      ) {
+        return json({ error: "Invalid R2 upload completion" }, { status: 400 });
+      }
+      stage = "verify-r2-upload";
+      await verifyR2Upload(env, objectKey, image);
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/r2-uploaded", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          objectKey,
+          imageId: image.id,
+          name: image.name,
+          type: image.type,
+          size: image.size,
+          expiresAt: r2FileExpiresAt(env, room.expiresAt),
+        }),
+      });
+      const result = await readJson<ShareRoomR2Object | { error?: string }>(
+        response,
+        `Share room R2 uploaded (${response.status})`,
+      );
+      return response.ok
+        ? json(result)
+        : json(
+            { error: (result as { error?: string }).error || "R2 upload was rejected" },
+            { status: response.status },
+          );
+    }
+
+    if (action === "r2-shared") {
+      const objectKey = typeof body.objectKey === "string" ? body.objectKey : "";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/r2-shared", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, objectKey }),
+      });
+      const result = await readJson<ShareRoomR2Object | { error?: string }>(
+        response,
+        `Share room R2 shared (${response.status})`,
+      );
+      return response.ok
+        ? json(result)
+        : json(
+            { error: (result as { error?: string }).error || "R2 object was not shared" },
+            { status: response.status },
+          );
+    }
+
+    if (action === "r2-download") {
+      const objectKey = typeof body.objectKey === "string" ? body.objectKey : "";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/r2-downloading", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, objectKey }),
+      });
+      const result = await readJson<ShareRoomR2Object | { error?: string }>(
+        response,
+        `Share room R2 downloading (${response.status})`,
+      );
+      if (!response.ok) {
+        return json(
+          { error: (result as { error?: string }).error || "R2 object is unavailable" },
+          { status: response.status },
+        );
+      }
+      const r2Object = result as ShareRoomR2Object;
+      return json({
+        objectKey,
+        downloadUrl: await createR2DownloadUrl(
+          env,
+          objectKey,
+          r2Object.expiresAt,
+        ),
+        expiresAt: r2Object.expiresAt,
+      });
+    }
+
+    if (action === "r2-downloaded") {
+      const objectKey = typeof body.objectKey === "string" ? body.objectKey : "";
+      const object = env.REALTIME_ROOMS.get(
+        env.REALTIME_ROOMS.idFromName(room.roomId),
+      );
+      const response = await object.fetch("https://share-room/r2-downloaded", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, objectKey }),
+      });
+      const result = await readJson<ShareRoomR2Object | { error?: string }>(
+        response,
+        `Share room R2 downloaded (${response.status})`,
+      );
+      return response.ok
+        ? json(result)
+        : json(
+            { error: (result as { error?: string }).error || "R2 download was not recorded" },
+            { status: response.status },
+          );
     }
 
     if (action === "signal") {

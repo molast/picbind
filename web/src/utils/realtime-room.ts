@@ -24,6 +24,22 @@ export type RoomMemberPresence = {
   leftAt?: number;
 };
 
+export type RealtimeR2Image = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+};
+
+export type RealtimeTransferPreparation =
+  | { mode: "p2p" }
+  | {
+      mode: "r2";
+      objectKey: string;
+      uploadUrl: string;
+      expiresAt: number;
+    };
+
 export class RealtimeRoomRequestError extends Error {
   constructor(
     message: string,
@@ -140,6 +156,70 @@ export function publishRealtimeCandidate(
 
 export function heartbeatRealtimeRoom(roomId: string, sessionId: string) {
   return roomRequest<{ ok: true }>("heartbeat", { roomId, sessionId });
+}
+
+export function prepareRealtimeImageTransfer(
+  roomId: string,
+  sessionId: string,
+  image: RealtimeR2Image,
+  rttMs: number | null,
+) {
+  return roomRequest<RealtimeTransferPreparation>("r2-prepare", {
+    roomId,
+    sessionId,
+    image,
+    rttMs,
+  });
+}
+
+export function confirmRealtimeR2Upload(
+  roomId: string,
+  sessionId: string,
+  image: RealtimeR2Image,
+  objectKey: string,
+) {
+  return roomRequest<{ objectKey: string; expiresAt: number }>("r2-uploaded", {
+    roomId,
+    sessionId,
+    image,
+    objectKey,
+  });
+}
+
+export function markRealtimeR2Shared(
+  roomId: string,
+  sessionId: string,
+  objectKey: string,
+) {
+  return roomRequest<{ objectKey: string; expiresAt: number }>("r2-shared", {
+    roomId,
+    sessionId,
+    objectKey,
+  });
+}
+
+export function getRealtimeR2Download(
+  roomId: string,
+  sessionId: string,
+  objectKey: string,
+) {
+  return roomRequest<{
+    objectKey: string;
+    downloadUrl: string;
+    expiresAt: number;
+  }>("r2-download", { roomId, sessionId, objectKey });
+}
+
+export function confirmRealtimeR2Download(
+  roomId: string,
+  sessionId: string,
+  objectKey: string,
+) {
+  return roomRequest<{ objectKey: string; status: string }>("r2-downloaded", {
+    roomId,
+    sessionId,
+    objectKey,
+  });
 }
 
 export function kickRealtimeRoomMember(
