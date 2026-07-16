@@ -538,49 +538,44 @@ export default function ShareRoomPage() {
         const initialPersist = storeRoomImage(image).catch((error) => {
           console.warn("Failed to cache pending image", error);
         });
-        window.setTimeout(() => {
-          void (async () => {
-            try {
-              const placeholder = await generateSharePlaceholder(file);
-              if (
-                deletedImageIdsRef.current.has(meta.id) ||
-                !imagesRef.current.some((current) => current.id === meta.id)
-              ) {
-                return;
-              }
-              updateRoomImage(meta.id, { placeholder });
-              const activeChannel = instructionChannelRef.current;
-              if (activeChannel?.readyState === "open") {
-                sendImagePlaceholder(activeChannel, meta, placeholder);
-              }
-              await initialPersist;
-              if (
-                !deletedImageIdsRef.current.has(meta.id) &&
-                imagesRef.current.some((current) => current.id === meta.id)
-              ) {
-                updateRoomImage(meta.id, { placeholder }, true);
-              }
-            } catch (error) {
-              if (!deletedImageIdsRef.current.has(meta.id)) {
-                updateRoomImage(meta.id, { transferStatus: "failed" });
-                await initialPersist;
-                if (imagesRef.current.some((current) => current.id === meta.id)) {
-                  updateRoomImage(meta.id, { transferStatus: "failed" }, true);
-                }
-                upsertActivity({
-                  id: `error-${Date.now()}-${file.name}`,
-                  kind: "error",
-                  title: file.name,
-                  detail:
-                    error instanceof Error
-                      ? error.message
-                      : labels.previewFailed,
-                  createdAt: Date.now(),
-                });
-              }
+        try {
+          const placeholder = await generateSharePlaceholder(file);
+          if (
+            deletedImageIdsRef.current.has(meta.id) ||
+            !imagesRef.current.some((current) => current.id === meta.id)
+          ) {
+            continue;
+          }
+          updateRoomImage(meta.id, { placeholder });
+          const activeChannel = instructionChannelRef.current;
+          if (activeChannel?.readyState !== "open") {
+            throw new Error("Image instruction channel is not open");
+          }
+          sendImagePlaceholder(activeChannel, meta, placeholder);
+          await initialPersist;
+          if (
+            !deletedImageIdsRef.current.has(meta.id) &&
+            imagesRef.current.some((current) => current.id === meta.id)
+          ) {
+            updateRoomImage(meta.id, { placeholder }, true);
+          }
+        } catch (error) {
+          if (!deletedImageIdsRef.current.has(meta.id)) {
+            updateRoomImage(meta.id, { transferStatus: "failed" });
+            await initialPersist;
+            if (imagesRef.current.some((current) => current.id === meta.id)) {
+              updateRoomImage(meta.id, { transferStatus: "failed" }, true);
             }
-          })();
-        }, 0);
+            upsertActivity({
+              id: `error-${Date.now()}-${file.name}`,
+              kind: "error",
+              title: file.name,
+              detail:
+                error instanceof Error ? error.message : labels.previewFailed,
+              createdAt: Date.now(),
+            });
+          }
+        }
       }
     } finally {
       if (inputRef.current) {
