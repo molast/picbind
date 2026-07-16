@@ -154,54 +154,42 @@ export default function GalleryImageCard({
         </div>
         <div className="mt-1 flex min-h-6 items-center justify-between gap-2 text-xs text-slate-500">
           <span>{formatBytes(image.size)}</span>
-          <span className="shrink-0">{statusLabel}</span>
-        </div>
-        {image.previewOnly ? (
-          <div className="mt-2 text-[11px] text-slate-400">{labels.previewOnly}</div>
-        ) : null}
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
           {isLocalImage && status === "sending" ? (
             <button
               type="button"
               onClick={() => onCancelTransfer(image)}
-              className="flex h-9 items-center justify-center rounded-md border border-red-200 text-red-600 transition hover:bg-red-50 hover:text-red-700"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-red-200 text-red-600 transition hover:bg-red-50 hover:text-red-700"
               aria-label={labels.cancelTransfer}
               title={labels.cancelTransfer}
             >
-              <FiXCircle className="h-4 w-4" aria-hidden="true" />
+              <FiXCircle className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           ) : isLocalImage && sendReady ? (
             <button
               type="button"
               onClick={() => void onSend(image)}
               disabled={isSending || connection !== "connected"}
-              className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-[#2f65cf] text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#2f65cf] px-2 text-[11px] font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
+              <FiSend className="h-3 w-3" aria-hidden="true" />
               <span>{labels.send}</span>
             </button>
           ) : (
-            <button
-              type="button"
-              disabled
-              className={`flex h-9 min-w-0 cursor-not-allowed items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold ${
-                sendComplete
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-600"
-                  : "border-slate-200 text-slate-400"
-              }`}
-            >
-              <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="truncate" title={sendComplete ? labels.sent : statusLabel}>
-                {sendComplete ? labels.sent : statusLabel}
-              </span>
-            </button>
+            <span className={`shrink-0 ${sendComplete ? "font-semibold text-emerald-600" : ""}`}>
+              {sendComplete ? labels.sent : statusLabel}
+            </span>
           )}
+        </div>
+        {image.previewOnly ? (
+          <div className="mt-2 text-[11px] text-slate-400">{labels.previewOnly}</div>
+        ) : null}
+
+        <div className="mt-3">
           {downloadReady ? (
             <a
               href={image.url}
               download={image.name}
-              className="flex h-9 items-center justify-center gap-1.5 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-slate-200 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
             >
               <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
               <span>{labels.download}</span>
@@ -210,7 +198,7 @@ export default function GalleryImageCard({
             <button
               type="button"
               disabled
-              className="relative flex h-9 cursor-not-allowed items-center justify-center gap-1.5 overflow-hidden rounded-md border border-slate-200 text-xs font-semibold text-slate-400"
+              className="relative flex h-9 w-full cursor-not-allowed items-center justify-center gap-1.5 overflow-hidden rounded-md border border-slate-200 text-xs font-semibold text-slate-400"
             >
               {showProgress ? (
                 <span
