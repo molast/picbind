@@ -3,7 +3,9 @@
 import React from "react";
 import CreatedRoomDialog from "./created-room-dialog";
 import FloatingEmojiLayer from "./floating-emoji-layer";
-import ImageWorkspace from "./image-workspace";
+import GalleryWorkspace from "./workspace/gallery-workspace";
+import { canReviewRoomImage } from "./workspace/gallery-image-card";
+import ReviewWorkspace from "./workspace/review-workspace";
 import RoomImagePreviewDialog from "@/components/share/room-image-preview-dialog";
 import RoomHeader from "./room-header";
 import RoomSidebar from "./room-sidebar";
@@ -108,6 +110,7 @@ export default function ShareRoomPage() {
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
+  const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
   const [isSending, setIsSending] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
@@ -167,6 +170,10 @@ export default function ShareRoomPage() {
   );
   const previewImage =
     previewImages.find((image) => image.id === previewImageId) || null;
+  const reviewImage =
+    images.find(
+      (image) => image.id === reviewImageId && canReviewRoomImage(image),
+    ) || null;
 
   const upsertActivity = React.useCallback((activity: ActivityItem) => {
     setActivities((current) => {
@@ -764,6 +771,13 @@ export default function ShareRoomPage() {
     });
   };
 
+  const handleReviewImage = (imageId: string) => {
+    const image = imagesRef.current.find((current) => current.id === imageId);
+    if (!image || !canReviewRoomImage(image)) return;
+    setPreviewImageId(null);
+    setReviewImageId(imageId);
+  };
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -789,24 +803,33 @@ export default function ShareRoomPage() {
             roomId={roomId}
             copied={copied}
             actionPending={isRoomActionPending}
-            labels={imageWorkspaceLabels}
+            labels={labels}
             onCopy={handleCopy}
             onTemporaryLeave={handleTemporaryLeave}
             onCloseRoom={handleCloseRoom}
           />
-          <ImageWorkspace
-            inputRef={inputRef}
-            images={images}
-            connection={connection}
-            isSending={isSending}
-            isDragging={isDragging}
-            labels={labels}
-            onFiles={handleFiles}
-            onDraggingChange={setIsDragging}
-            onPreview={setPreviewImageId}
-            onSend={handleSendImage}
-            onDelete={handleDeleteImage}
-          />
+          {reviewImage ? (
+            <ReviewWorkspace
+              image={reviewImage}
+              labels={labels}
+              onBack={() => setReviewImageId(null)}
+            />
+          ) : (
+            <GalleryWorkspace
+              inputRef={inputRef}
+              images={images}
+              connection={connection}
+              isSending={isSending}
+              isDragging={isDragging}
+              labels={imageWorkspaceLabels}
+              onFiles={handleFiles}
+              onDraggingChange={setIsDragging}
+              onPreview={setPreviewImageId}
+              onReview={handleReviewImage}
+              onSend={handleSendImage}
+              onDelete={handleDeleteImage}
+            />
+          )}
         </section>
         <RoomSidebar
           activityListRef={activityListRef}
