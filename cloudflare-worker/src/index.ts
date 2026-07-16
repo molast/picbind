@@ -42,6 +42,7 @@ type Env = RuntimeLogEnv & {
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
   FILE_TRANSFER_MODE?: string;
+  MAX_IMAGE_TRANSFER_SIZE_MB?: string;
   R2_RTT_THRESHOLD_MS?: string;
   R2_FILE_TTL_SECONDS?: string;
   R2_BUCKET_NAME?: string;

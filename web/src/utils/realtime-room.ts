@@ -6,6 +6,7 @@ type JoinResult = {
   role: RoomRole;
   sessionId: string;
   peerSessionId?: string;
+  maxImageTransferSize: number;
 };
 
 export type RoomSignal = {
@@ -112,6 +113,7 @@ export function joinRealtimeRoom(
 
 export function getRealtimeRoomStatus(roomId: string, sessionId?: string) {
   return roomRequest<{
+    maxImageTransferSize: number;
     members: RoomMemberPresence[];
     ownerKnown: boolean;
     guestKnown: boolean;

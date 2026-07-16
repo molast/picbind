@@ -14,7 +14,7 @@ const zh = {
   upload: "选择图片",
   uploading: "正在发送",
   drop: "拖入图片开始传输",
-  dropHint: "支持常见图片格式，单张最大 50 MB",
+  dropHint: "支持常见图片格式，单张大小以房间配置为准",
   guestEmpty: "选择或拖入图片",
   cached: "图片保存在当前浏览器",
   sent: "已发送",
@@ -55,7 +55,7 @@ const zh = {
   cacheFailed: "本地缓存失败",
   transferFailed: "图片传输失败",
   imageOnly: "只能传输图片文件",
-  tooLarge: "图片超过 50 MB",
+  tooLarge: "图片超过房间大小限制",
   temporaryLeave: "临时离开",
   closeRoom: "退出并销毁房间",
   confirmClose: "退出后房间将立即销毁，所有成员都会被移出。确定继续吗？",
@@ -75,7 +75,7 @@ const en: typeof zh = {
   upload: "Choose images",
   uploading: "Sending",
   drop: "Drop images to transfer",
-  dropHint: "Common image formats, up to 50 MB each",
+  dropHint: "Common image formats; the room sets the size limit",
   guestEmpty: "Choose or drop images",
   cached: "Images are stored in this browser",
   sent: "Sent",
@@ -116,7 +116,7 @@ const en: typeof zh = {
   cacheFailed: "Local cache failed",
   transferFailed: "Image transfer failed",
   imageOnly: "Only image files can be transferred",
-  tooLarge: "Image exceeds 50 MB",
+  tooLarge: "Image exceeds the room size limit",
   temporaryLeave: "Leave temporarily",
   closeRoom: "Exit and close room",
   confirmClose: "Closing the room removes every member immediately. Continue?",
@@ -124,6 +124,23 @@ const en: typeof zh = {
 
 export type ShareRoomLabels = typeof zh;
 
-export function getShareRoomLabels(lang: Lang): ShareRoomLabels {
-  return lang === "zh" ? zh : en;
+export function getShareRoomLabels(
+  lang: Lang,
+  maxImageTransferSize: number | null = null,
+): ShareRoomLabels {
+  const labels = lang === "zh" ? zh : en;
+  if (!maxImageTransferSize) return labels;
+  const sizeMb = maxImageTransferSize / 1024 / 1024;
+  const sizeText = `${Number(sizeMb.toFixed(2))} MB`;
+  return {
+    ...labels,
+    dropHint:
+      lang === "zh"
+        ? `支持常见图片格式，单张最大 ${sizeText}`
+        : `Common image formats, up to ${sizeText} each`,
+    tooLarge:
+      lang === "zh"
+        ? `图片超过 ${sizeText}`
+        : `Image exceeds ${sizeText}`,
+  };
 }

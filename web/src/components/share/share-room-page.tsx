@@ -34,7 +34,6 @@ import {
 } from "@/utils/realtime-room";
 import {
   IMAGE_CHUNK_SIZE,
-  MAX_IMAGE_TRANSFER_SIZE,
   WEAK_NETWORK_CHUNK_SIZE,
   createImageTransferMeta,
   sendImageDelete,
@@ -77,6 +76,7 @@ export default function ShareRoomPage() {
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
   const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
   const transferChunkSizeRef = React.useRef(IMAGE_CHUNK_SIZE);
+  const maxImageTransferSizeRef = React.useRef(0);
   const weakNetworkTransferRef = React.useRef(false);
   const sessionIdRef = React.useRef<string | null>(null);
   const objectUrlsRef = React.useRef(new Set<string>());
@@ -100,6 +100,9 @@ export default function ShareRoomPage() {
   const [networkLatencyMs, setNetworkLatencyMs] = React.useState<number | null>(
     null,
   );
+  const [maxImageTransferSize, setMaxImageTransferSize] = React.useState<
+    number | null
+  >(null);
   const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
   const [images, setImages] = React.useState<RoomImage[]>([]);
@@ -147,6 +150,10 @@ export default function ShareRoomPage() {
   }, [networkLatencyMs]);
 
   const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
+  const imageWorkspaceLabels = React.useMemo(
+    () => getShareRoomLabels(lang, maxImageTransferSize),
+    [lang, maxImageTransferSize],
+  );
 
   const validRoomId = Boolean(roomId && ROOM_ID_PATTERN.test(roomId));
   const previewImages = images.filter(
@@ -357,6 +364,7 @@ export default function ShareRoomPage() {
     controlChannelRef,
     outgoingChannelRef,
     transferChunkSizeRef,
+    maxImageTransferSizeRef,
     sessionIdRef,
     deletedImageIdsRef,
     imagesRef,
@@ -371,6 +379,7 @@ export default function ShareRoomPage() {
     setConnectionError,
     setMembers,
     setNetworkLatencyMs,
+    setMaxImageTransferSize,
     setRole,
   });
 
@@ -418,12 +427,12 @@ export default function ShareRoomPage() {
           });
           continue;
         }
-        if (file.size > MAX_IMAGE_TRANSFER_SIZE) {
+        if (file.size > maxImageTransferSizeRef.current) {
           upsertActivity({
             id: `error-${Date.now()}-${file.name}`,
             kind: "error",
             title: file.name,
-            detail: labels.tooLarge,
+            detail: imageWorkspaceLabels.tooLarge,
             createdAt: Date.now(),
           });
           continue;
@@ -778,7 +787,7 @@ export default function ShareRoomPage() {
             roomId={roomId}
             copied={copied}
             actionPending={isRoomActionPending}
-            labels={labels}
+            labels={imageWorkspaceLabels}
             onCopy={handleCopy}
             onTemporaryLeave={handleTemporaryLeave}
             onCloseRoom={handleCloseRoom}

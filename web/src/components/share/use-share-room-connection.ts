@@ -79,6 +79,7 @@ type UseShareRoomConnectionOptions = {
   controlChannelRef: React.MutableRefObject<RTCDataChannel | null>;
   outgoingChannelRef: React.MutableRefObject<RTCDataChannel | null>;
   transferChunkSizeRef: React.MutableRefObject<number>;
+  maxImageTransferSizeRef: React.MutableRefObject<number>;
   sessionIdRef: React.MutableRefObject<string | null>;
   deletedImageIdsRef: React.MutableRefObject<Set<string>>;
   imagesRef: React.MutableRefObject<RoomImage[]>;
@@ -99,6 +100,7 @@ type UseShareRoomConnectionOptions = {
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
   setMembers: React.Dispatch<React.SetStateAction<RoomMemberPresence[]>>;
   setNetworkLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
+  setMaxImageTransferSize: React.Dispatch<React.SetStateAction<number | null>>;
   setRole: React.Dispatch<React.SetStateAction<RoomRole | null>>;
 };
 
@@ -108,6 +110,7 @@ export function useShareRoomConnection({
   controlChannelRef,
   outgoingChannelRef,
   transferChunkSizeRef,
+  maxImageTransferSizeRef,
   sessionIdRef,
   deletedImageIdsRef,
   imagesRef,
@@ -122,6 +125,7 @@ export function useShareRoomConnection({
   setConnectionError,
   setMembers,
   setNetworkLatencyMs,
+  setMaxImageTransferSize,
   setRole,
 }: UseShareRoomConnectionOptions) {
   React.useEffect(() => {
@@ -454,7 +458,7 @@ export function useShareRoomConnection({
           });
         }
       },
-    });
+    }, () => maxImageTransferSizeRef.current);
 
     const setConnectionActivity = (
       state: ConnectionState,
@@ -965,6 +969,8 @@ export function useShareRoomConnection({
           return;
         }
         sessionIdRef.current = joined.sessionId;
+        maxImageTransferSizeRef.current = joined.maxImageTransferSize;
+        setMaxImageTransferSize(joined.maxImageTransferSize);
         connectedRole = joined.role;
         setRole(joined.role);
         if (joined.role === "owner") {
@@ -1079,6 +1085,7 @@ export function useShareRoomConnection({
     deletedImageIdsRef,
     imageReadyWaitersRef,
     imagesRef,
+    maxImageTransferSizeRef,
     labels,
     outgoingChannelRef,
     removeRoomImage,
@@ -1088,6 +1095,7 @@ export function useShareRoomConnection({
     setConnection,
     setConnectionError,
     setMembers,
+    setMaxImageTransferSize,
     setNetworkLatencyMs,
     setRole,
     showFloatingEmoji,

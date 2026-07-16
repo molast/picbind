@@ -5,7 +5,6 @@ import type { ImagePlaceholderMetadata } from "./share-placeholder";
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
 const CHUNK_INDEX_BYTES = 4;
 export const WEAK_NETWORK_CHUNK_SIZE = 1200 - CHUNK_INDEX_BYTES;
-export const MAX_IMAGE_TRANSFER_SIZE = 50 * 1024 * 1024;
 const MAX_DATA_CHANNEL_PAYLOAD_BYTES = 1200;
 const MAX_THUMBNAIL_BYTES = 256;
 // Keep the SCTP queue deliberately small for mobile and Wi-Fi connections.
@@ -127,7 +126,10 @@ function sendControl(channel: RTCDataChannel, message: TransferControlMessage) {
   channel.send(payload);
 }
 
-function isValidMeta(value: unknown): value is ImageTransferMeta {
+function isValidMeta(
+  value: unknown,
+  maxImageTransferSize: number,
+): value is ImageTransferMeta {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -143,7 +145,7 @@ function isValidMeta(value: unknown): value is ImageTransferMeta {
     typeof meta.size === "number" &&
     Number.isSafeInteger(meta.size) &&
     meta.size >= 0 &&
-    meta.size <= MAX_IMAGE_TRANSFER_SIZE &&
+    meta.size <= maxImageTransferSize &&
     typeof meta.chunkSize === "number" &&
     Number.isSafeInteger(meta.chunkSize) &&
     meta.chunkSize >= WEAK_NETWORK_CHUNK_SIZE &&
@@ -330,7 +332,10 @@ export async function sendImageFile(
 export class RealtimeImageReceiver {
   private incoming: IncomingTransfer | null = null;
 
-  constructor(private readonly callbacks: ImageReceiverCallbacks) {}
+  constructor(
+    private readonly callbacks: ImageReceiverCallbacks,
+    private readonly getMaxImageTransferSize: () => number,
+  ) {}
 
   handle(data: string | ArrayBuffer) {
     if (typeof data !== "string") {
@@ -351,7 +356,7 @@ export class RealtimeImageReceiver {
 
     if (message.type === "IMAGE_PLACEHOLDER") {
       if (
-        !isValidMeta(message.payload) ||
+        !isValidMeta(message.payload, this.getMaxImageTransferSize()) ||
         !isValidPlaceholder(message.payload.placeholder)
       ) {
         this.callbacks.onError(null, "Received invalid placeholder metadata");
@@ -365,7 +370,7 @@ export class RealtimeImageReceiver {
     }
 
     if (message.type === "IMAGE_PREVIEW") {
-      if (!isValidMeta(message.payload)) {
+      if (!isValidMeta(message.payload, this.getMaxImageTransferSize())) {
         this.callbacks.onError(null, "Received invalid image preview metadata");
         return;
       }
@@ -379,7 +384,7 @@ export class RealtimeImageReceiver {
     }
 
     if (message.type === "IMAGE_START") {
-      if (!isValidMeta(message.payload)) {
+      if (!isValidMeta(message.payload, this.getMaxImageTransferSize())) {
         this.callbacks.onError(null, "Received invalid image metadata");
         return;
       }
@@ -444,7 +449,7 @@ export class RealtimeImageReceiver {
 
     if (message.type === "R2_IMAGE_AVAILABLE") {
       if (
-        !isValidMeta(message.payload) ||
+        !isValidMeta(message.payload, this.getMaxImageTransferSize()) ||
         typeof message.payload.objectKey !== "string" ||
         message.payload.objectKey.length > 512 ||
         !/^[A-Za-z0-9_\/-]+$/.test(message.payload.objectKey) ||

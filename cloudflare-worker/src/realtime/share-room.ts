@@ -20,6 +20,7 @@ export type RealtimeRoomEnv = RuntimeLogEnv & ShareRoomR2Env & {
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
   SITE_URL?: string;
+  MAX_IMAGE_TRANSFER_SIZE_MB?: string;
 };
 
 function json(data: unknown, init?: ResponseInit) {
@@ -107,7 +108,17 @@ function validRoomId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{12}$/.test(value);
 }
 
-function r2ImageMetadata(body: Record<string, unknown>): R2ImageMetadata | null {
+function maxImageTransferSize(env: RealtimeRoomEnv) {
+  const configuredMb = Number(env.MAX_IMAGE_TRANSFER_SIZE_MB || 10);
+  const normalizedMb =
+    Number.isFinite(configuredMb) && configuredMb > 0 ? configuredMb : 10;
+  return Math.floor(normalizedMb * 1024 * 1024);
+}
+
+function r2ImageMetadata(
+  body: Record<string, unknown>,
+  maxSize: number,
+): R2ImageMetadata | null {
   const image = body.image as Partial<R2ImageMetadata> | undefined;
   if (
     !image ||
@@ -121,7 +132,7 @@ function r2ImageMetadata(body: Record<string, unknown>): R2ImageMetadata | null 
     typeof image.size !== "number" ||
     !Number.isSafeInteger(image.size) ||
     image.size < 0 ||
-    image.size > 50 * 1024 * 1024
+    image.size > maxSize
   ) {
     return null;
   }
@@ -178,6 +189,7 @@ export async function handleShareRoomRealtime(
       }
       const requester = memberForSession(room, sessionId);
       return json({
+        maxImageTransferSize: maxImageTransferSize(env),
         members: roomMembers(room)
           .filter((member) => member.status !== "kicked")
           .map(({ clientId, role, status, leftAt }) => ({
@@ -248,6 +260,7 @@ export async function handleShareRoomRealtime(
         role,
         sessionId,
         peerSessionId: peer?.sessionId,
+        maxImageTransferSize: maxImageTransferSize(env),
       });
     }
 
@@ -262,7 +275,7 @@ export async function handleShareRoomRealtime(
     }
 
     if (action === "r2-prepare") {
-      const image = r2ImageMetadata(body);
+      const image = r2ImageMetadata(body, maxImageTransferSize(env));
       if (!image) {
         return json({ error: "Invalid R2 image metadata" }, { status: 400 });
       }
@@ -286,7 +299,7 @@ export async function handleShareRoomRealtime(
     }
 
     if (action === "r2-uploaded") {
-      const image = r2ImageMetadata(body);
+      const image = r2ImageMetadata(body, maxImageTransferSize(env));
       const objectKey = typeof body.objectKey === "string" ? body.objectKey : "";
       if (
         !image ||
