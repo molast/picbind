@@ -16,6 +16,7 @@ type CreateShareRoomResponse = ShareRoom & {
 const OWNER_TOKEN_PREFIX = "picbind:share-room:owner:";
 const CLIENT_ID_PREFIX = "picbind:share-room:client:";
 const OWNED_ROOM_PREFIX = "picbind:share-room:owned:";
+const CREATED_ROOM_PROMPT_PREFIX = "picbind:share-room:created-prompt:";
 const TEMPORARY_ROOM_KEY = "picbind:share-room:temporary";
 
 function ownerTokenKey(roomId: string) {
@@ -55,7 +56,17 @@ export async function createShareRoom(): Promise<ShareRoom> {
     `${OWNED_ROOM_PREFIX}${result.roomId}`,
     JSON.stringify(room),
   );
+  sessionStorage.setItem(`${CREATED_ROOM_PROMPT_PREFIX}${result.roomId}`, "1");
   return room;
+}
+
+export function consumeCreatedShareRoomPrompt(roomId: string) {
+  const key = `${CREATED_ROOM_PROMPT_PREFIX}${roomId}`;
+  if (sessionStorage.getItem(key) !== "1") {
+    return false;
+  }
+  sessionStorage.removeItem(key);
+  return true;
 }
 
 export function getShareRoomOwnerToken(roomId: string) {
@@ -118,5 +129,6 @@ export function clearOwnedShareRoom(roomId: string) {
   sessionStorage.removeItem(ownerTokenKey(roomId));
   sessionStorage.removeItem(`${CLIENT_ID_PREFIX}${roomId}`);
   sessionStorage.removeItem(`${OWNED_ROOM_PREFIX}${roomId}`);
+  sessionStorage.removeItem(`${CREATED_ROOM_PROMPT_PREFIX}${roomId}`);
   clearTemporaryShareRoom(roomId);
 }

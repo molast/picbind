@@ -79,12 +79,8 @@ export default function ShareRoomDialog({
             : "relative inline-flex items-center gap-1.5 rounded-full px-3 py-1 transition hover:bg-white/35"
         }
       >
-        {isCreating ? (
-          <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
-        ) : (
-          <FiShare2 className="h-4 w-4" aria-hidden="true" />
-        )}
-        <span>{isCreating ? labels.creating : labels.trigger}</span>
+        <FiShare2 className="h-4 w-4" aria-hidden="true" />
+        <span>{labels.trigger}</span>
         <span
           className="pointer-events-none absolute -right-2 -top-2 rounded bg-[#2f65cf] px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
           aria-hidden="true"
@@ -92,6 +88,22 @@ export default function ShareRoomDialog({
           BETA
         </span>
       </button>
+
+      {isCreating ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-white/55 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-label={labels.creating}
+        >
+          <div className="flex flex-col items-center gap-3 text-[#2f65cf]">
+            <FiLoader className="h-9 w-9 animate-spin" aria-hidden="true" />
+            <span className="text-sm font-semibold text-slate-700">
+              {labels.creating}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {isOpen ? (
         <div
