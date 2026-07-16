@@ -22,6 +22,7 @@ export type CachedRoomImage = {
     | "receiving"
     | "sent"
     | "received"
+    | "cancelled"
     | "failed";
   progress?: number;
   previewOnly?: boolean;

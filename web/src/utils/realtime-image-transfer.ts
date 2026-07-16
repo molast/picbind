@@ -3,8 +3,10 @@
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
+const TRANSFER_ID_BYTES = 16;
 const CHUNK_INDEX_BYTES = 4;
-export const WEAK_NETWORK_CHUNK_SIZE = 1200 - CHUNK_INDEX_BYTES;
+const FRAME_HEADER_BYTES = TRANSFER_ID_BYTES + CHUNK_INDEX_BYTES;
+export const WEAK_NETWORK_CHUNK_SIZE = 1200 - FRAME_HEADER_BYTES;
 const MAX_DATA_CHANNEL_PAYLOAD_BYTES = 1200;
 const MAX_THUMBNAIL_BYTES = 256;
 // Keep the SCTP queue deliberately small for mobile and Wi-Fi connections.
@@ -36,6 +38,7 @@ type TransferInstruction =
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
   | { type: "IMAGE_RECEIVED"; payload: { id: string } }
   | { type: "IMAGE_DELETE"; payload: { id: string } }
+  | { type: "IMAGE_CANCEL"; payload: { id: string } }
   | {
       type: "R2_IMAGE_AVAILABLE";
       payload: ImageTransferMeta & { objectKey: string; expiresAt: number };
@@ -68,6 +71,7 @@ export type ImageReceiverCallbacks = {
   onReceipt?(id: string): void;
   onReady?(id: string): void;
   onDelete?(id: string): void | Promise<void>;
+  onCancel?(id: string): void | Promise<void>;
   onR2Available?(
     meta: ImageTransferMeta,
     objectKey: string,
@@ -100,6 +104,16 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function transferIdToBytes(id: string) {
+  return Uint8Array.from({ length: TRANSFER_ID_BYTES }, (_, index) =>
+    Number.parseInt(id.slice(index * 2, index * 2 + 2), 16),
+  );
+}
+
+function transferIdFromBytes(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function decodeThumbnail(value: unknown) {
@@ -205,6 +219,12 @@ export function sendImageDelete(channel: RTCDataChannel, id: string) {
   }
 }
 
+export function sendImageCancel(channel: RTCDataChannel, id: string) {
+  if (channel.readyState === "open") {
+    sendInstruction(channel, { type: "IMAGE_CANCEL", payload: { id } });
+  }
+}
+
 export function sendR2ImageAvailable(
   channel: RTCDataChannel,
   meta: ImageTransferMeta,
@@ -237,7 +257,11 @@ export function sendImagePreview(
   });
 }
 
-async function waitForWritableBuffer(channel: RTCDataChannel) {
+async function waitForWritableBuffer(
+  channel: RTCDataChannel,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");
   if (channel.readyState !== "open") {
     throw new Error("DataChannel closed during transfer");
   }
@@ -251,6 +275,7 @@ async function waitForWritableBuffer(channel: RTCDataChannel) {
     const cleanUp = () => {
       channel.removeEventListener("bufferedamountlow", onBufferedAmountLow);
       channel.removeEventListener("close", onClose);
+      signal?.removeEventListener("abort", onAbort);
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
     const onBufferedAmountLow = () => {
@@ -263,9 +288,14 @@ async function waitForWritableBuffer(channel: RTCDataChannel) {
       cleanUp();
       reject(new Error("DataChannel closed during transfer"));
     };
+    const onAbort = () => {
+      cleanUp();
+      reject(new DOMException("Transfer cancelled", "AbortError"));
+    };
 
     channel.addEventListener("bufferedamountlow", onBufferedAmountLow);
     channel.addEventListener("close", onClose, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
     timeoutId = window.setTimeout(() => {
       cleanUp();
       reject(new Error("The peer stopped receiving image data"));
@@ -283,6 +313,7 @@ export async function sendImageFile(
   transferId?: string,
   chunkSize = IMAGE_CHUNK_SIZE,
   waitUntilReady?: (id: string) => Promise<void>,
+  signal?: AbortSignal,
 ) {
   if (
     instructionChannel.readyState !== "open" ||
@@ -294,17 +325,21 @@ export async function sendImageFile(
   const meta = createImageTransferMeta(file, transferId, chunkSize);
   sendInstruction(instructionChannel, { type: "IMAGE_START", payload: meta });
   await waitUntilReady?.(meta.id);
+  if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");
   onProgress({ ...meta, transferredBytes: 0, progress: 0 });
 
   let transferredBytes = 0;
   let reportedPercent = 0;
   try {
     for (let offset = 0; offset < file.size; offset += meta.chunkSize) {
-      await waitForWritableBuffer(fileChannel);
+      await waitForWritableBuffer(fileChannel, signal);
+      if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");
       const chunk = await file.slice(offset, offset + meta.chunkSize).arrayBuffer();
-      const frame = new Uint8Array(CHUNK_INDEX_BYTES + chunk.byteLength);
-      new DataView(frame.buffer).setUint32(0, offset / meta.chunkSize);
-      frame.set(new Uint8Array(chunk), CHUNK_INDEX_BYTES);
+      if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");
+      const frame = new Uint8Array(FRAME_HEADER_BYTES + chunk.byteLength);
+      frame.set(transferIdToBytes(meta.id), 0);
+      new DataView(frame.buffer).setUint32(TRANSFER_ID_BYTES, offset / meta.chunkSize);
+      frame.set(new Uint8Array(chunk), FRAME_HEADER_BYTES);
       fileChannel.send(frame.buffer);
       transferredBytes += chunk.byteLength;
       const progress = file.size ? transferredBytes / file.size : 1;
@@ -314,12 +349,12 @@ export async function sendImageFile(
         onProgress({ ...meta, transferredBytes, progress });
       }
     }
-    await waitForWritableBuffer(fileChannel);
+    await waitForWritableBuffer(fileChannel, signal);
     sendInstruction(instructionChannel, { type: "IMAGE_COMPLETE", payload: { id: meta.id } });
     return meta;
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Image transfer failed";
-    if (instructionChannel.readyState === "open") {
+    if (!signal?.aborted && instructionChannel.readyState === "open") {
       sendInstruction(instructionChannel, {
         type: "IMAGE_FAILED",
         payload: { id: meta.id, reason },
@@ -423,6 +458,14 @@ export class RealtimeImageReceiver {
       return;
     }
 
+    if (message.type === "IMAGE_CANCEL") {
+      const id = message.payload?.id;
+      if (typeof id !== "string" || !/^[a-f0-9]{32}$/.test(id)) return;
+      if (this.incoming?.meta.id === id) this.incoming = null;
+      void this.callbacks.onCancel?.(id);
+      return;
+    }
+
     if (message.type === "IMAGE_COMPLETE") {
       if (typeof message.payload?.id === "string") {
         this.complete(message.payload.id);
@@ -468,16 +511,19 @@ export class RealtimeImageReceiver {
   }
 
   private handleChunk(frame: ArrayBuffer) {
-    if (!this.incoming) {
-      this.callbacks.onError(null, "Received an image chunk without metadata");
+    if (frame.byteLength <= FRAME_HEADER_BYTES) {
+      this.callbacks.onError(
+        this.incoming?.meta ?? null,
+        "Received an invalid image chunk frame",
+      );
       return;
     }
-    if (frame.byteLength <= CHUNK_INDEX_BYTES) {
-      this.callbacks.onError(this.incoming.meta, "Received an invalid image chunk frame");
-      return;
-    }
-    const index = new DataView(frame).getUint32(0);
-    const chunk = frame.slice(CHUNK_INDEX_BYTES);
+    const transferId = transferIdFromBytes(
+      new Uint8Array(frame, 0, TRANSFER_ID_BYTES),
+    );
+    if (!this.incoming || this.incoming.meta.id !== transferId) return;
+    const index = new DataView(frame).getUint32(TRANSFER_ID_BYTES);
+    const chunk = frame.slice(FRAME_HEADER_BYTES);
     const incomingMeta = this.incoming.meta;
     if (
       index >= incomingMeta.totalChunks ||

@@ -10,6 +10,7 @@ export type ActivityItem = {
     | "sending"
     | "receiving"
     | "complete"
+    | "cancelled"
     | "error";
   title: string;
   detail?: string;

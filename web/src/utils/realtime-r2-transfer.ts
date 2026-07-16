@@ -10,9 +10,17 @@ export function uploadFileToR2(
   uploadUrl: string,
   file: File,
   onProgress: (progress: HttpTransferProgress) => void,
+  signal?: AbortSignal,
 ) {
   return new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const onAbort = () => request.abort();
+    if (signal?.aborted) {
+      reject(new DOMException("R2 upload was cancelled", "AbortError"));
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const cleanUp = () => signal?.removeEventListener("abort", onAbort);
     request.open("PUT", uploadUrl);
     request.setRequestHeader("content-type", file.type);
     request.upload.onprogress = (event) => {
@@ -23,9 +31,16 @@ export function uploadFileToR2(
         progress: file.size ? Math.min(1, transferredBytes / file.size) : 1,
       });
     };
-    request.onerror = () => reject(new Error("R2 upload failed"));
-    request.onabort = () => reject(new Error("R2 upload was cancelled"));
+    request.onerror = () => {
+      cleanUp();
+      reject(new Error("R2 upload failed"));
+    };
+    request.onabort = () => {
+      cleanUp();
+      reject(new DOMException("R2 upload was cancelled", "AbortError"));
+    };
     request.onload = () => {
+      cleanUp();
       if (request.status >= 200 && request.status < 300) {
         onProgress({ transferredBytes: file.size, size: file.size, progress: 1 });
         resolve();

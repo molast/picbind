@@ -3,6 +3,7 @@
 const DB_NAME = "picbind-image-queue";
 const DB_VERSION = 1;
 const STORE_NAME = "files";
+const COMPRESSION_HANDOFF_KEY = "picbind:compression-handoff";
 
 type StoredImageFile = {
   id: string;
@@ -81,4 +82,34 @@ export async function getQueuedImageFile(id: string) {
 
 export async function deleteQueuedImageFile(id: string) {
   await runFileStoreTransaction("readwrite", (store) => store.delete(id));
+}
+
+export async function queueFilesForCompression(files: File[]) {
+  const entries = files.map((file) => ({
+    id: `handoff-${crypto.randomUUID()}`,
+    file,
+  }));
+  await Promise.all(entries.map(({ id, file }) => storeQueuedImageFile(id, file)));
+  localStorage.setItem(
+    COMPRESSION_HANDOFF_KEY,
+    JSON.stringify(entries.map(({ id }) => id)),
+  );
+}
+
+export async function consumeFilesForCompression() {
+  const raw = localStorage.getItem(COMPRESSION_HANDOFF_KEY);
+  localStorage.removeItem(COMPRESSION_HANDOFF_KEY);
+  if (!raw) return [];
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      ids = parsed.filter((id): id is string => typeof id === "string");
+    }
+  } catch {
+    return [];
+  }
+  const files = await Promise.all(ids.map((id) => getQueuedImageFile(id)));
+  await Promise.all(ids.map((id) => deleteQueuedImageFile(id)));
+  return files.filter((file): file is File => file instanceof File);
 }

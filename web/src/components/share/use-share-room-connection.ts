@@ -356,6 +356,22 @@ export function useShareRoomConnection({
       onReady(id) {
         imageReadyWaiters.get(id)?.resolve();
       },
+      onCancel(id) {
+        updateRoomImage(
+          id,
+          { transferStatus: "cancelled", progress: 0 },
+          true,
+        );
+        const image = imagesRef.current.find((current) => current.id === id);
+        upsertActivity({
+          id: `transfer-${id}`,
+          kind: "cancelled",
+          title: image?.name || labels.transferCancelled,
+          detail: labels.transferCancelled,
+          progress: 0,
+          createdAt: Date.now(),
+        });
+      },
       async onDelete(id) {
         deletedImageIdsRef.current.add(id);
         removeRoomImage(id);
@@ -506,7 +522,8 @@ export function useShareRoomConnection({
           image.previewOnly ||
           image.placeholderOnly ||
           (image.transferStatus !== "waiting" &&
-            image.transferStatus !== "failed")
+            image.transferStatus !== "failed" &&
+            image.transferStatus !== "cancelled")
         ) {
           continue;
         }

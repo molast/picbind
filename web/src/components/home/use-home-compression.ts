@@ -27,10 +27,12 @@ import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
 import {
+  consumeFilesForCompression,
   deleteQueuedImageFile,
   getQueuedImageFile,
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
+import { storeCompressedImage } from "@/utils/compressed-image-store";
 import {
   compressWithWasmWorker,
   terminateCompressionWorker,
@@ -42,7 +44,7 @@ import {
 } from "@/utils/wasm";
 
 const MAX_FILES = 20;
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
@@ -722,6 +724,16 @@ export function useHomeCompression({
   );
 
   React.useEffect(() => {
+    void consumeFilesForCompression()
+      .then((files) => {
+        if (files.length) return enqueueFiles(files);
+      })
+      .catch((error) => {
+        if (IS_DEV) console.warn("Failed to load compression handoff", error);
+      });
+  }, [enqueueFiles]);
+
+  React.useEffect(() => {
     if (!items.length) {
       return;
     }
@@ -847,6 +859,23 @@ export function useHomeCompression({
             outputSize,
           );
           setTotalCompressedCount((prev) => prev + 1);
+
+          try {
+            await storeCompressedImage({
+              id: `${currentItem.id}:${currentVariant.id}`,
+              sourceId: currentItem.id,
+              sourceName: currentItem.fileName,
+              sourceSize: currentItem.fileSize,
+              name: compressed.fileName,
+              type: compressed.blob.type,
+              format: normalizeOutputFormat(compressed.ext),
+              size: outputSize,
+              blob: compressed.blob,
+              createdAt: Date.now(),
+            });
+          } catch (error) {
+            if (IS_DEV) console.warn("Failed to cache compressed image", error);
+          }
 
           const doneAt = Date.now();
           setItems((prev) =>

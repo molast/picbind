@@ -6,6 +6,9 @@ import FloatingEmojiLayer from "./floating-emoji-layer";
 import GalleryWorkspace from "./workspace/gallery-workspace";
 import { canReviewRoomImage } from "./workspace/gallery-image-card";
 import ReviewWorkspace from "./workspace/review-workspace";
+import ImageSourceDialog from "./workspace/image-source-dialog";
+import CompressedImagePickerDialog from "./workspace/compressed-image-picker-dialog";
+import CompressionSuggestionDialog from "./workspace/compression-suggestion-dialog";
 import RoomImagePreviewDialog from "@/components/share/room-image-preview-dialog";
 import RoomHeader from "./room-header";
 import RoomSidebar from "./room-sidebar";
@@ -39,6 +42,7 @@ import {
   WEAK_NETWORK_CHUNK_SIZE,
   createImageTransferMeta,
   sendImageDelete,
+  sendImageCancel,
   sendImagePlaceholder,
   sendImageFile,
   sendR2ImageAvailable,
@@ -56,6 +60,7 @@ import {
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
 import { uploadFileToR2 } from "@/utils/realtime-r2-transfer";
+import { queueFilesForCompression } from "@/utils/image-file-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -89,6 +94,9 @@ export default function ShareRoomPage() {
     new Map<string, { resolve(): void; timeoutId: number }>(),
   );
   const imagesRef = React.useRef<RoomImage[]>([]);
+  const transferAbortControllersRef = React.useRef(
+    new Map<string, AbortController>(),
+  );
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
@@ -112,6 +120,10 @@ export default function ShareRoomPage() {
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
   const [isSending, setIsSending] = React.useState(false);
+  const [isWeakNetwork, setIsWeakNetwork] = React.useState(false);
+  const [isSourceDialogOpen, setIsSourceDialogOpen] = React.useState(false);
+  const [isCompressedPickerOpen, setIsCompressedPickerOpen] = React.useState(false);
+  const [pendingLocalFiles, setPendingLocalFiles] = React.useState<File[] | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
   const [textMessage, setTextMessage] = React.useState("");
@@ -146,9 +158,11 @@ export default function ShareRoomPage() {
     // Hysteresis prevents toggling the payload size on every small RTT change.
     if (!weakNetworkTransferRef.current && networkLatencyMs >= 250) {
       weakNetworkTransferRef.current = true;
+      setIsWeakNetwork(true);
       transferChunkSizeRef.current = WEAK_NETWORK_CHUNK_SIZE;
     } else if (weakNetworkTransferRef.current && networkLatencyMs <= 160) {
       weakNetworkTransferRef.current = false;
+      setIsWeakNetwork(false);
       transferChunkSizeRef.current = IMAGE_CHUNK_SIZE;
     }
   }, [networkLatencyMs]);
@@ -307,12 +321,14 @@ export default function ShareRoomPage() {
     imagesRef.current = next;
     setImages(next);
     setPreviewImageId((current) => (current === id ? null : current));
+    setReviewImageId((current) => (current === id ? null : current));
   }, []);
 
   React.useEffect(() => {
     const objectUrls = objectUrlsRef.current;
     const imageIds = imageIdsRef.current;
     const deletedImageIds = deletedImageIdsRef.current;
+    const transferAbortControllers = transferAbortControllersRef.current;
     setLang(getLang());
     setRoomId(readRoomId());
     return () => {
@@ -322,6 +338,8 @@ export default function ShareRoomPage() {
       objectUrls.clear();
       imageIds.clear();
       deletedImageIds.clear();
+      transferAbortControllers.forEach((controller) => controller.abort());
+      transferAbortControllers.clear();
       imagesRef.current = [];
     };
   }, []);
@@ -410,7 +428,7 @@ export default function ShareRoomPage() {
     [labels.sending, updateRoomImage, upsertActivity],
   );
 
-  const handleFiles = async (fileList: FileList | File[]) => {
+  const addFilesToGallery = async (fileList: FileList | File[]) => {
     const channel = instructionChannelRef.current;
     if (connection !== "connected" || channel?.readyState !== "open") {
       upsertActivity({
@@ -521,6 +539,22 @@ export default function ShareRoomPage() {
     }
   };
 
+  const handleLocalFiles = (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    const suggestionThreshold = isWeakNetwork ? 300 * 1024 : 1024 * 1024;
+    if (files.some((file) => file.size > suggestionThreshold)) {
+      if (inputRef.current) inputRef.current.value = "";
+      setPendingLocalFiles(files);
+      return;
+    }
+    void addFilesToGallery(files);
+  };
+
+  const goCompressImages = async (files: File[] = []) => {
+    if (files.length) await queueFilesForCompression(files);
+    window.location.assign("/");
+  };
+
   const handleSendImage = async (image: RoomImage) => {
     const controlChannel = instructionChannelRef.current;
     const fileChannel = outgoingChannelRef.current;
@@ -537,6 +571,8 @@ export default function ShareRoomPage() {
       return;
     }
 
+    const abortController = new AbortController();
+    transferAbortControllersRef.current.set(image.id, abortController);
     setIsSending(true);
     updateRoomImage(
       image.id,
@@ -557,6 +593,7 @@ export default function ShareRoomPage() {
         transferImage,
         networkLatencyMs,
       );
+      abortController.signal.throwIfAborted();
       let meta: ReturnType<typeof createImageTransferMeta>;
       if (preparation.mode === "r2") {
         meta = createImageTransferMeta(
@@ -564,24 +601,32 @@ export default function ShareRoomPage() {
           image.id,
           transferChunkSizeRef.current,
         );
-        await uploadFileToR2(preparation.uploadUrl, file, (progress) => {
-          updateSendingActivity({
-            ...meta,
-            transferredBytes: progress.transferredBytes,
-            progress: progress.progress,
-          });
-        });
+        await uploadFileToR2(
+          preparation.uploadUrl,
+          file,
+          (progress) => {
+            updateSendingActivity({
+              ...meta,
+              transferredBytes: progress.transferredBytes,
+              progress: progress.progress,
+            });
+          },
+          abortController.signal,
+        );
+        abortController.signal.throwIfAborted();
         const uploaded = await confirmRealtimeR2Upload(
           roomId!,
           sessionIdRef.current!,
           transferImage,
           preparation.objectKey,
         );
+        abortController.signal.throwIfAborted();
         await markRealtimeR2Shared(
           roomId!,
           sessionIdRef.current!,
           preparation.objectKey,
         );
+        abortController.signal.throwIfAborted();
         sendR2ImageAvailable(
           controlChannel,
           meta,
@@ -600,6 +645,7 @@ export default function ShareRoomPage() {
           image.id,
           transferChunkSizeRef.current,
           waitUntilImageReady,
+          abortController.signal,
         );
       }
       updateRoomImage(
@@ -616,18 +662,36 @@ export default function ShareRoomPage() {
         createdAt: Date.now(),
       });
     } catch (error) {
-      updateRoomImage(image.id, { transferStatus: "failed" }, true);
+      const cancelled =
+        abortController.signal.aborted ||
+        (error instanceof DOMException && error.name === "AbortError");
+      updateRoomImage(
+        image.id,
+        { transferStatus: cancelled ? "cancelled" : "failed", progress: 0 },
+        true,
+      );
       upsertActivity({
         id: `transfer-${image.id}`,
-        kind: "error",
+        kind: cancelled ? "cancelled" : "error",
         title: image.name,
-        detail:
-          error instanceof Error ? error.message : labels.transferFailed,
+        detail: cancelled
+          ? labels.transferCancelled
+          : error instanceof Error
+            ? error.message
+            : labels.transferFailed,
+        progress: 0,
         createdAt: Date.now(),
       });
     } finally {
+      transferAbortControllersRef.current.delete(image.id);
       setIsSending(false);
     }
+  };
+
+  const handleCancelTransfer = (image: RoomImage) => {
+    transferAbortControllersRef.current.get(image.id)?.abort();
+    const channel = instructionChannelRef.current;
+    if (channel?.readyState === "open") sendImageCancel(channel, image.id);
   };
 
   const handleDeleteImage = async (image: RoomImage) => {
@@ -635,7 +699,7 @@ export default function ShareRoomPage() {
     const channel = instructionChannelRef.current;
     if (
       image.direction !== "sent" ||
-      (status !== "waiting" && status !== "failed") ||
+      (status !== "waiting" && status !== "failed" && status !== "cancelled") ||
       connection !== "connected" ||
       channel?.readyState !== "open"
     ) {
@@ -822,11 +886,13 @@ export default function ShareRoomPage() {
               isSending={isSending}
               isDragging={isDragging}
               labels={imageWorkspaceLabels}
-              onFiles={handleFiles}
+              onChooseImages={() => setIsSourceDialogOpen(true)}
+              onFiles={handleLocalFiles}
               onDraggingChange={setIsDragging}
               onPreview={setPreviewImageId}
               onReview={handleReviewImage}
               onSend={handleSendImage}
+              onCancelTransfer={handleCancelTransfer}
               onDelete={handleDeleteImage}
             />
           )}
@@ -859,6 +925,45 @@ export default function ShareRoomPage() {
         labels={labels}
         onClose={() => setIsShareDialogOpen(false)}
         onCopy={handleCopy}
+      />
+      <ImageSourceDialog
+        open={isSourceDialogOpen}
+        labels={labels}
+        onClose={() => setIsSourceDialogOpen(false)}
+        onLocal={() => {
+          setIsSourceDialogOpen(false);
+          window.requestAnimationFrame(() => inputRef.current?.click());
+        }}
+        onCompressed={() => {
+          setIsSourceDialogOpen(false);
+          setIsCompressedPickerOpen(true);
+        }}
+      />
+      <CompressedImagePickerDialog
+        open={isCompressedPickerOpen}
+        labels={labels}
+        onClose={() => setIsCompressedPickerOpen(false)}
+        onCompress={() => goCompressImages()}
+        onSelect={(files) => {
+          setIsCompressedPickerOpen(false);
+          void addFilesToGallery(files);
+        }}
+      />
+      <CompressionSuggestionDialog
+        open={Boolean(pendingLocalFiles)}
+        weakNetwork={isWeakNetwork}
+        labels={labels}
+        onCancel={() => setPendingLocalFiles(null)}
+        onContinue={() => {
+          const files = pendingLocalFiles || [];
+          setPendingLocalFiles(null);
+          void addFilesToGallery(files);
+        }}
+        onCompress={() => {
+          const files = pendingLocalFiles || [];
+          setPendingLocalFiles(null);
+          return goCompressImages(files);
+        }}
       />
       {previewImage ? (
         <RoomImagePreviewDialog

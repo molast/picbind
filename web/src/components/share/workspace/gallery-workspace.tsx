@@ -13,11 +13,13 @@ type GalleryWorkspaceProps = {
   isSending: boolean;
   isDragging: boolean;
   labels: ShareRoomLabels;
-  onFiles(files: FileList): void | Promise<void>;
+  onChooseImages(): void;
+  onFiles(files: FileList | File[]): void | Promise<void>;
   onDraggingChange(dragging: boolean): void;
   onPreview(imageId: string): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
+  onCancelTransfer(image: RoomImage): void;
   onDelete(image: RoomImage): void | Promise<void>;
 };
 
@@ -28,11 +30,13 @@ export default function GalleryWorkspace({
   isSending,
   isDragging,
   labels,
+  onChooseImages,
   onFiles,
   onDraggingChange,
   onPreview,
   onReview,
   onSend,
+  onCancelTransfer,
   onDelete,
 }: GalleryWorkspaceProps) {
   return (
@@ -44,7 +48,7 @@ export default function GalleryWorkspace({
         </div>
         <button
           type="button"
-          onClick={() => inputRef.current?.click()}
+          onClick={onChooseImages}
           disabled={isSending || connection !== "connected"}
           className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -97,6 +101,7 @@ export default function GalleryWorkspace({
                 onPreview={onPreview}
                 onReview={onReview}
                 onSend={onSend}
+                onCancelTransfer={onCancelTransfer}
                 onDelete={onDelete}
               />
             ))}
@@ -105,7 +110,7 @@ export default function GalleryWorkspace({
           <button
             type="button"
             disabled={connection !== "connected"}
-            onClick={() => inputRef.current?.click()}
+            onClick={onChooseImages}
             className="flex h-full min-h-[260px] w-full flex-col items-center justify-center px-6 text-center disabled:cursor-default"
           >
             <span className="flex h-14 w-14 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]">

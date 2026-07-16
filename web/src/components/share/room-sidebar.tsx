@@ -12,6 +12,7 @@ import {
   FiUserX,
   FiUsers,
   FiWifi,
+  FiXCircle,
 } from "react-icons/fi";
 import { getShareRoomClientId } from "@/utils/share-room";
 import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
@@ -229,6 +230,8 @@ export default function RoomSidebar({
                       ? FiMessageCircle
                       : activity.kind === "complete"
                         ? FiCheckCircle
+                        : activity.kind === "cancelled"
+                          ? FiXCircle
                         : activity.kind === "error"
                           ? FiAlertCircle
                           : FiWifi;

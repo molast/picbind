@@ -13,7 +13,7 @@ const en: LocaleType = {
     heroDesc:
       "Upload, optimize, and download in one focused homepage flow with fewer steps and faster delivery.",
     dropTitle: "Drop your images here!",
-    dropDesc: "Up to 20 images, max 5 MB each.",
+    dropDesc: "Up to 20 images, max 10 MB each.",
     faviconEntry: "Favicon",
     autoLabel: "Convert my images automatically",
     selectAll: "SELECT ALL",
@@ -28,7 +28,7 @@ const en: LocaleType = {
     uploadNotice: {
       tooManyFiles: "You can process up to 20 images at a time.",
       unsupportedFiles: "Some files were skipped. Only PNG, JPEG, and WebP are supported right now.",
-      fileTooLarge: "Some files were skipped. Each image must be 5 MB or smaller.",
+      fileTooLarge: "Some files were skipped. Each image must be 10 MB or smaller.",
     },
     downloadZip: "Download ZIP",
     cards: [

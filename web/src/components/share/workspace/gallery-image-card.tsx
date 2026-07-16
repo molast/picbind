@@ -5,6 +5,7 @@ import {
   FiEye,
   FiMaximize2,
   FiTrash2,
+  FiXCircle,
 } from "react-icons/fi";
 import RoomImageMedia from "../room-image-media";
 import type { ShareRoomLabels } from "../share-room-labels";
@@ -19,6 +20,7 @@ type GalleryImageCardProps = {
   onPreview(imageId: string): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
+  onCancelTransfer(image: RoomImage): void;
   onDelete(image: RoomImage): void | Promise<void>;
 };
 
@@ -41,6 +43,7 @@ export default function GalleryImageCard({
   onPreview,
   onReview,
   onSend,
+  onCancelTransfer,
   onDelete,
 }: GalleryImageCardProps) {
   const status =
@@ -62,6 +65,8 @@ export default function GalleryImageCard({
             ? labels.awaitingReceipt
             : status === "failed"
               ? labels.transferFailed
+              : status === "cancelled"
+                ? labels.transferCancelled
               : status === "sent"
                 ? labels.sent
                 : labels.received;
@@ -74,10 +79,11 @@ export default function GalleryImageCard({
   const sendReady =
     isLocalImage &&
     Boolean(image.placeholder) &&
-    (status === "waiting" || status === "failed");
+    (status === "waiting" || status === "failed" || status === "cancelled");
   const sendComplete = isLocalImage && status === "sent";
   const canDelete =
-    isLocalImage && (status === "waiting" || status === "failed");
+    isLocalImage &&
+    (status === "waiting" || status === "failed" || status === "cancelled");
   const downloadReady = status === "sent" || status === "received";
 
   return (
@@ -137,17 +143,31 @@ export default function GalleryImageCard({
           {isLocalImage ? (
             <button
               type="button"
-              onClick={() => void onSend(image)}
-              disabled={!sendReady || isSending || connection !== "connected"}
+              onClick={() =>
+                status === "sending"
+                  ? onCancelTransfer(image)
+                  : void onSend(image)
+              }
+              disabled={
+                status !== "sending" &&
+                (!sendReady || isSending || connection !== "connected")
+              }
               className={`shrink-0 font-semibold transition ${
-                sendReady
+                status === "sending"
+                  ? "inline-flex items-center gap-1 text-red-600 hover:text-red-700"
+                  : sendReady
                   ? "text-[#2f65cf] hover:text-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
                   : sendComplete
                     ? "cursor-default text-emerald-600"
                     : "cursor-default text-slate-400"
               }`}
             >
-              {sendReady ? labels.send : sendComplete ? labels.sent : statusLabel}
+              {status === "sending" ? (
+                <>
+                  <FiXCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                  {labels.cancelTransfer}
+                </>
+              ) : sendReady ? labels.send : sendComplete ? labels.sent : statusLabel}
             </button>
           ) : (
             <span className="shrink-0">{statusLabel}</span>
