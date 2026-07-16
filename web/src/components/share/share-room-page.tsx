@@ -30,6 +30,7 @@ import {
 import {
   closeRealtimeRoom,
   kickRealtimeRoomMember,
+  leaveRealtimeRoom,
   leaveRealtimeRoomTemporarily,
   prepareRealtimeImageTransfer,
   confirmRealtimeR2Upload,
@@ -601,7 +602,8 @@ export default function ShareRoomPage() {
 
   const goCompressImages = async (files: File[] = []) => {
     if (files.length) await queueFilesForCompression(files);
-    window.location.assign("/");
+    if (role === "owner") await handleTemporaryLeave();
+    else await handleGuestLeave();
   };
 
   const handleSendImage = async (image: RoomImage) => {
@@ -815,6 +817,27 @@ export default function ShareRoomPage() {
     }
   };
 
+  const handleGuestLeave = async () => {
+    const sessionId = sessionIdRef.current;
+    if (!roomId || role !== "guest" || !sessionId || isRoomActionPending) return;
+    if (!window.confirm(labels.confirmLeaveRoom)) return;
+    setIsRoomActionPending(true);
+    try {
+      await leaveRealtimeRoom(roomId, sessionId);
+      clearRoomPageState(roomId);
+      window.location.assign("/");
+    } catch (error) {
+      setIsRoomActionPending(false);
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.back,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    }
+  };
+
   const handleCloseRoom = async () => {
     const sessionId = sessionIdRef.current;
     if (
@@ -920,6 +943,7 @@ export default function ShareRoomPage() {
             labels={labels}
             onCopy={handleCopy}
             onTemporaryLeave={handleTemporaryLeave}
+            onGuestLeave={handleGuestLeave}
             onCloseRoom={handleCloseRoom}
           />
           {reviewImage ? (

@@ -94,6 +94,7 @@ const zh = {
   tooLarge: "图片超过房间大小限制",
   temporaryLeave: "临时离开",
   closeRoom: "退出并销毁房间",
+  confirmLeaveRoom: "离开房间将断开实时连接。确定继续吗？",
   confirmClose: "退出后房间将立即销毁，所有成员都会被移出。确定继续吗？",
 };
 
@@ -191,6 +192,7 @@ const en: typeof zh = {
   tooLarge: "Image exceeds the room size limit",
   temporaryLeave: "Leave temporarily",
   closeRoom: "Exit and close room",
+  confirmLeaveRoom: "Leaving the room will disconnect the realtime session. Continue?",
   confirmClose: "Closing the room removes every member immediately. Continue?",
 };
 

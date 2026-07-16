@@ -1,5 +1,4 @@
 import Image from "next/image";
-import Link from "next/link";
 import {
   FiArrowLeft,
   FiCheck,
@@ -18,6 +17,7 @@ type RoomHeaderProps = {
   labels: ShareRoomLabels;
   onCopy(): void | Promise<void>;
   onTemporaryLeave(): void | Promise<void>;
+  onGuestLeave(): void | Promise<void>;
   onCloseRoom(): void | Promise<void>;
 };
 
@@ -29,6 +29,7 @@ export default function RoomHeader({
   labels,
   onCopy,
   onTemporaryLeave,
+  onGuestLeave,
   onCloseRoom,
 }: RoomHeaderProps) {
   const wordmark = (
@@ -57,9 +58,9 @@ export default function RoomHeader({
             {wordmark}
           </button>
         ) : (
-          <Link href="/" className="shrink-0">
+          <button type="button" onClick={() => void onGuestLeave()} className="shrink-0">
             {wordmark}
-          </Link>
+          </button>
         )}
         <div className="hidden h-7 w-px bg-slate-200 sm:block" />
         <div className="hidden min-w-0 sm:block">
@@ -107,14 +108,15 @@ export default function RoomHeader({
             </button>
           </>
         ) : (
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={() => void onGuestLeave()}
             className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
             aria-label={labels.back}
             title={labels.back}
           >
             <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          </button>
         )}
       </div>
     </header>
