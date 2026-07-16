@@ -69,3 +69,25 @@ export async function listCompressedImages() {
       reject(request.error ?? new Error("Compressed image cache read failed"));
   });
 }
+
+export async function deleteCompressedImage(id: string) {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Compressed image cache delete failed"));
+  });
+}
+
+export async function clearCompressedImages() {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Compressed image cache clear failed"));
+  });
+}
