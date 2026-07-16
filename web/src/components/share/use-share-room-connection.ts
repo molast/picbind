@@ -42,6 +42,7 @@ import {
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
 import { downloadFileFromR2 } from "@/utils/realtime-r2-transfer";
+import { clearRoomPageState } from "@/utils/realtime-room-page-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -158,6 +159,7 @@ export function useShareRoomConnection({
 
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
+        clearRoomPageState(roomId);
         window.location.replace("/?roomClosed=1");
         return true;
       }
@@ -166,6 +168,7 @@ export function useShareRoomConnection({
         error.status === 403 &&
         /removed|revoked/i.test(error.message)
       ) {
+        clearRoomPageState(roomId);
         window.location.replace("/?roomKicked=1");
         return true;
       }
@@ -1020,6 +1023,9 @@ export function useShareRoomConnection({
       try {
         setConnection("connecting");
         setConnectionActivity("connecting");
+        const initialStatus = await getRealtimeRoomStatus(roomId);
+        if (disposed) return;
+        setMembers(initialStatus.members);
         const joined = await joinRealtimeRoom(
           roomId,
           getShareRoomOwnerToken(roomId),

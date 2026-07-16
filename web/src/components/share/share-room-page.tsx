@@ -61,6 +61,11 @@ import {
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
 import { uploadFileToR2 } from "@/utils/realtime-r2-transfer";
 import { queueFilesForCompression } from "@/utils/image-file-store";
+import {
+  clearRoomPageState,
+  loadRoomPageState,
+  saveRoomPageState,
+} from "@/utils/realtime-room-page-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -129,6 +134,7 @@ export default function ShareRoomPage() {
   const [textMessage, setTextMessage] = React.useState("");
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
+  const [isPageStateLoaded, setIsPageStateLoaded] = React.useState(false);
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
   );
@@ -366,6 +372,25 @@ export default function ShareRoomPage() {
   }, [isShareDialogOpen]);
 
   React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
+    setIsPageStateLoaded(false);
+    const cached = loadRoomPageState(roomId);
+    setActivities(cached?.activities || []);
+    setTextMessage(cached?.textMessage || "");
+    setReviewImageId(cached?.reviewImageId || null);
+    setIsPageStateLoaded(true);
+  }, [roomId]);
+
+  React.useEffect(() => {
+    if (!roomId || !isPageStateLoaded) return;
+    saveRoomPageState(roomId, {
+      activities,
+      textMessage,
+      reviewImageId,
+    });
+  }, [activities, isPageStateLoaded, reviewImageId, roomId, textMessage]);
+
+  React.useEffect(() => {
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
       return;
     }
@@ -373,7 +398,31 @@ export default function ShareRoomPage() {
     void listRoomImages(roomId)
       .then((cachedImages) => {
         if (!disposed) {
-          cachedImages.forEach(addRoomImage);
+          cachedImages.forEach((cachedImage) => {
+            const interrupted =
+              cachedImage.transferStatus === "sending" ||
+              cachedImage.transferStatus === "receiving" ||
+              cachedImage.transferStatus === "awaiting-receipt";
+            const restoredImage = interrupted
+              ? {
+                  ...cachedImage,
+                  transferStatus: "failed" as const,
+                  progress: 0,
+                }
+              : cachedImage;
+            addRoomImage(restoredImage);
+            if (interrupted) {
+              void storeRoomImage(restoredImage);
+              upsertActivity({
+                id: `transfer-${cachedImage.id}`,
+                kind: "error",
+                title: cachedImage.name,
+                detail: labels.transferInterrupted,
+                progress: 0,
+                createdAt: Date.now(),
+              });
+            }
+          });
         }
       })
       .catch((error) => {
@@ -382,7 +431,7 @@ export default function ShareRoomPage() {
     return () => {
       disposed = true;
     };
-  }, [addRoomImage, roomId]);
+  }, [addRoomImage, labels.transferInterrupted, roomId, upsertActivity]);
 
   useShareRoomConnection({
     roomId,
@@ -780,6 +829,7 @@ export default function ShareRoomPage() {
     setIsRoomActionPending(true);
     try {
       await closeRealtimeRoom(roomId, sessionId);
+      clearRoomPageState(roomId);
       clearOwnedShareRoom(roomId);
       window.location.assign("/");
     } catch (error) {
