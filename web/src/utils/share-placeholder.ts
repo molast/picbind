@@ -15,24 +15,52 @@ export type ImagePlaceholderMetadata = {
 export async function generateSharePlaceholder(
   image: Blob,
 ): Promise<ImagePlaceholderMetadata> {
-  const mod = await initWasm();
-  if (!mod || typeof mod.generate_share_placeholder !== "function") {
-    throw new Error("WASM module does not expose generate_share_placeholder");
+  try {
+    const mod = await initWasm();
+    if (!mod || typeof mod.generate_share_placeholder !== "function") {
+      throw new Error("WASM module does not expose generate_share_placeholder");
+    }
+    const input = new Uint8Array(await image.arrayBuffer());
+    const value = mod.generate_share_placeholder(input) as Partial<ImagePlaceholderMetadata>;
+    if (!Number.isInteger(value.width) || !Number.isInteger(value.height) || Number(value.width) <= 0 || Number(value.height) <= 0 || typeof value.dominantColor !== "string" || !/^#[0-9a-f]{6}$/i.test(value.dominantColor) || typeof value.blurHash !== "string") {
+      throw new Error("WASM returned invalid placeholder metadata");
+    }
+    return value as ImagePlaceholderMetadata;
+  } catch (error) {
+    if (image.type !== "image/avif") throw error;
+    return generateAvifPlaceholder(image);
   }
-  const input = new Uint8Array(await image.arrayBuffer());
-  const value = mod.generate_share_placeholder(input) as Partial<ImagePlaceholderMetadata>;
-  if (
-    !Number.isInteger(value.width) ||
-    !Number.isInteger(value.height) ||
-    Number(value.width) <= 0 ||
-    Number(value.height) <= 0 ||
-    typeof value.dominantColor !== "string" ||
-    !/^#[0-9a-f]{6}$/i.test(value.dominantColor) ||
-    typeof value.blurHash !== "string"
-  ) {
-    throw new Error("WASM returned invalid placeholder metadata");
+}
+
+function encode83(value: number, length: number) {
+  let encoded = "";
+  for (let index = length - 1; index >= 0; index -= 1) {
+    encoded += BASE83[Math.floor(value / 83 ** index) % 83];
   }
-  return value as ImagePlaceholderMetadata;
+  return encoded;
+}
+
+async function generateAvifPlaceholder(image: Blob): Promise<ImagePlaceholderMetadata> {
+  const bitmap = await createImageBitmap(image);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas is unavailable for AVIF placeholder generation");
+    context.drawImage(bitmap, 0, 0, 1, 1);
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+    const dominantColor = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+    // A 1×1 BlurHash is a valid compact solid-color fallback (6 characters).
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      dominantColor,
+      blurHash: `00${encode83((red << 16) + (green << 8) + blue, 4)}`,
+    };
+  } finally {
+    bitmap.close();
+  }
 }
 
 function decode83(value: string) {

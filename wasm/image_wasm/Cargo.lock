@@ -560,8 +560,6 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png 0.18.0",
- "ravif 0.12.0",
- "rgb",
  "zune-core",
  "zune-jpeg",
 ]
@@ -586,7 +584,7 @@ dependencies = [
  "js-sys",
  "lodepng",
  "mozjpeg-rs",
- "ravif 0.13.0",
+ "ravif",
  "wasm-bindgen",
  "wasm-bindgen-test",
  "wee_alloc",
@@ -1098,20 +1096,6 @@ dependencies = [
  "thiserror",
  "v_frame",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "ravif"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef69c1990ceef18a116855938e74793a5f7496ee907562bd0857b6ac734ab285"
-dependencies = [
- "avif-serialize",
- "imgref",
- "loop9",
- "quick-error",
- "rav1e",
- "rgb",
 ]
 
 [[package]]
