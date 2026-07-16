@@ -9,6 +9,7 @@ import {
   FiMessageCircle,
   FiSend,
   FiUploadCloud,
+  FiTrash2,
   FiUserX,
   FiUsers,
   FiWifi,
@@ -39,6 +40,7 @@ type RoomSidebarProps = {
   onTextChange(value: string): void;
   onTextSubmit(): void;
   onEmoji(emoji: string): void;
+  onClearActivities(): void;
 };
 
 export default function RoomSidebar({
@@ -59,6 +61,7 @@ export default function RoomSidebar({
   onTextChange,
   onTextSubmit,
   onEmoji,
+  onClearActivities,
 }: RoomSidebarProps) {
   return (
     <aside className="grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
@@ -212,8 +215,9 @@ export default function RoomSidebar({
       </div>
 
       <div className="flex min-h-0 flex-col">
-        <div className="shrink-0 border-b border-slate-100 px-4 py-3 text-xs font-semibold uppercase text-slate-500">
-          {labels.activity}
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
+          <span className="text-xs font-semibold uppercase text-slate-500">{labels.activity}</span>
+          {activities.length ? <button type="button" onClick={onClearActivities} className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold text-slate-400 hover:bg-red-50 hover:text-red-600" title={labels.clearActivity}><FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" />{labels.clearActivity}</button> : null}
         </div>
         <div
           ref={activityListRef}

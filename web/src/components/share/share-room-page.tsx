@@ -916,6 +916,17 @@ export default function ShareRoomPage() {
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const handleClearActivities = () => {
+    setActivities([]);
+    if (roomId) {
+      saveRoomPageState(roomId, {
+        activities: [],
+        textMessage,
+        reviewImageId,
+      });
+    }
+  };
+
   if (roomId !== null && !validRoomId) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
@@ -984,6 +995,7 @@ export default function ShareRoomPage() {
           onTextChange={setTextMessage}
           onTextSubmit={handleTextMessage}
           onEmoji={handleEmoji}
+          onClearActivities={handleClearActivities}
         />
       </div>
       <CreatedRoomDialog
