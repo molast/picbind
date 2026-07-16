@@ -840,7 +840,7 @@ export default function ShareRoomPage() {
       role !== "owner" ||
       !sessionId ||
       isRoomActionPending ||
-      !window.confirm(labels.confirmClose)
+      !window.confirm(labels.confirmLeaveRoom)
     ) {
       return;
     }
