@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import ShareRoomPage from "@/components/share-room-page";
+import ShareRoomPage from "@/components/share/share-room-page";
 
 export const metadata: Metadata = {
   title: "Share room",

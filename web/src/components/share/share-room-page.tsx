@@ -1,0 +1,847 @@
+"use client";
+
+import React from "react";
+import CreatedRoomDialog from "./created-room-dialog";
+import FloatingEmojiLayer from "./floating-emoji-layer";
+import ImageWorkspace from "./image-workspace";
+import RoomImagePreviewDialog from "@/components/share/room-image-preview-dialog";
+import RoomHeader from "./room-header";
+import RoomSidebar from "./room-sidebar";
+import { formatBytes } from "./share-room-formatters";
+import { getShareRoomLabels } from "./share-room-labels";
+import type {
+  ActivityItem,
+  ConnectionState,
+  FloatingEmoji,
+  RoomImage,
+} from "./share-room-types";
+import { useShareRoomConnection } from "./use-share-room-connection";
+import { getLang, type Lang } from "@/locales";
+import {
+  clearOwnedShareRoom,
+  consumeCreatedShareRoomPrompt,
+  markShareRoomTemporarilyAway,
+} from "@/utils/share-room";
+import {
+  closeRealtimeRoom,
+  kickRealtimeRoomMember,
+  leaveRealtimeRoomTemporarily,
+  prepareRealtimeImageTransfer,
+  confirmRealtimeR2Upload,
+  markRealtimeR2Shared,
+  type RoomRole,
+  type RoomMemberPresence,
+} from "@/utils/realtime-room";
+import {
+  IMAGE_CHUNK_SIZE,
+  MAX_IMAGE_TRANSFER_SIZE,
+  WEAK_NETWORK_CHUNK_SIZE,
+  createImageTransferMeta,
+  sendImageDelete,
+  sendImagePlaceholder,
+  sendImageFile,
+  sendR2ImageAvailable,
+  type TransferProgress,
+} from "@/utils/realtime-image-transfer";
+import {
+  deleteRoomImage,
+  listRoomImages,
+  storeRoomImage,
+  type CachedRoomImage,
+} from "@/utils/realtime-image-store";
+import {
+  createPeerMessageId,
+  sendPeerMessage,
+} from "@/utils/realtime-peer-messages";
+import { generateSharePlaceholder } from "@/utils/share-placeholder";
+import { uploadFileToR2 } from "@/utils/realtime-r2-transfer";
+
+const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
+
+function readRoomId() {
+  const roomIdFromQuery = new URLSearchParams(window.location.search).get(
+    "roomId",
+  );
+  if (roomIdFromQuery !== null) {
+    return roomIdFromQuery;
+  }
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  return segments[0] === "share" ? segments[1] || "" : "";
+}
+
+export default function ShareRoomPage() {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const activityListRef = React.useRef<HTMLDivElement | null>(null);
+  const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
+  const emojiSequenceRef = React.useRef(0);
+  const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const transferChunkSizeRef = React.useRef(IMAGE_CHUNK_SIZE);
+  const weakNetworkTransferRef = React.useRef(false);
+  const sessionIdRef = React.useRef<string | null>(null);
+  const objectUrlsRef = React.useRef(new Set<string>());
+  const imageIdsRef = React.useRef(new Set<string>());
+  const deletedImageIdsRef = React.useRef(new Set<string>());
+  const imageReadyWaitersRef = React.useRef(
+    new Map<string, { resolve(): void; timeoutId: number }>(),
+  );
+  const imagesRef = React.useRef<RoomImage[]>([]);
+  const [lang, setLang] = React.useState<Lang>("en");
+  const [roomId, setRoomId] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
+  const [shareUrl, setShareUrl] = React.useState("");
+  const [isShareDialogOpen, setIsShareDialogOpen] = React.useState(false);
+  const [role, setRole] = React.useState<RoomRole | null>(null);
+  const [connection, setConnection] =
+    React.useState<ConnectionState>("waiting");
+  const [connectionError, setConnectionError] = React.useState<string | null>(
+    null,
+  );
+  const [networkLatencyMs, setNetworkLatencyMs] = React.useState<number | null>(
+    null,
+  );
+  const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
+  const [activities, setActivities] = React.useState<ActivityItem[]>([]);
+  const [images, setImages] = React.useState<RoomImage[]>([]);
+  const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
+  const [isSending, setIsSending] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
+  const [textMessage, setTextMessage] = React.useState("");
+  const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
+  const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
+  const [kickingClientId, setKickingClientId] = React.useState<string | null>(
+    null,
+  );
+
+  const waitUntilImageReady = React.useCallback(
+    (id: string) =>
+      new Promise<void>((resolve) => {
+        const waiters = imageReadyWaitersRef.current;
+        const timeoutId = window.setTimeout(() => {
+          waiters.delete(id);
+          resolve();
+        }, 750);
+        waiters.set(id, {
+          timeoutId,
+          resolve: () => {
+            window.clearTimeout(timeoutId);
+            waiters.delete(id);
+            resolve();
+          },
+        });
+      }),
+    [],
+  );
+
+  React.useEffect(() => {
+    if (networkLatencyMs === null) return;
+    // Hysteresis prevents toggling the payload size on every small RTT change.
+    if (!weakNetworkTransferRef.current && networkLatencyMs >= 250) {
+      weakNetworkTransferRef.current = true;
+      transferChunkSizeRef.current = WEAK_NETWORK_CHUNK_SIZE;
+    } else if (weakNetworkTransferRef.current && networkLatencyMs <= 160) {
+      weakNetworkTransferRef.current = false;
+      transferChunkSizeRef.current = IMAGE_CHUNK_SIZE;
+    }
+  }, [networkLatencyMs]);
+
+  const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
+
+  const validRoomId = Boolean(roomId && ROOM_ID_PATTERN.test(roomId));
+  const previewImages = images.filter(
+    (image) =>
+      !image.previewOnly &&
+      !image.placeholderOnly &&
+      (image.direction === "sent" ||
+        image.transferStatus === "sent" ||
+        image.transferStatus === "received"),
+  );
+  const previewImage =
+    previewImages.find((image) => image.id === previewImageId) || null;
+
+  const upsertActivity = React.useCallback((activity: ActivityItem) => {
+    setActivities((current) => {
+      const index = current.findIndex((item) => item.id === activity.id);
+      if (index === -1) {
+        return [...current, activity].slice(-60);
+      }
+      const next = [...current];
+      next[index] = { ...next[index], ...activity };
+      return next;
+    });
+  }, []);
+
+  const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
+    const sequence = emojiSequenceRef.current++;
+    const direction = sequence % 2 === 0 ? 1 : -1;
+    const startX = ((sequence % 5) - 2) * 24;
+    const firstBend = direction * (74 + (sequence % 3) * 16);
+    const secondBend = direction * -(42 + (sequence % 4) * 13);
+    const endX = direction * (18 + (sequence % 3) * 12);
+    const path = `path("M 0 0 C ${firstBend} -120 ${secondBend} -310 ${endX} -520")`;
+    const item = {
+      id,
+      emoji,
+      startX,
+      path,
+      duration: 3200 + (sequence % 3) * 180,
+    };
+    setFloatingEmojis((current) => [...current, item].slice(-60));
+    window.setTimeout(() => {
+      setFloatingEmojis((current) =>
+        current.filter((item) => item.id !== id),
+      );
+    }, item.duration + 150);
+  }, []);
+
+  React.useEffect(() => {
+    const list = activityListRef.current;
+    if (!list) return;
+    const frame = window.requestAnimationFrame(() => {
+      list.scrollTop = list.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activities]);
+
+  React.useEffect(() => {
+    const scroller = emojiScrollerRef.current;
+    if (!scroller) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (scroller.scrollWidth <= scroller.clientWidth) return;
+      const delta =
+        Math.abs(event.deltaX) > Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+      const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth;
+      const nextScrollLeft = Math.max(
+        0,
+        Math.min(maxScrollLeft, scroller.scrollLeft + delta),
+      );
+      if (nextScrollLeft !== scroller.scrollLeft) {
+        scroller.scrollLeft = nextScrollLeft;
+        event.preventDefault();
+      }
+    };
+    scroller.addEventListener("wheel", handleWheel, { passive: false });
+    return () => scroller.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  const addRoomImage = React.useCallback((image: CachedRoomImage) => {
+    const normalized: CachedRoomImage = {
+      ...image,
+      transferStatus:
+        image.transferStatus ||
+        (image.direction === "sent" ? "sent" : "received"),
+      progress:
+        image.progress ??
+        (image.direction === "sent" || image.direction === "received" ? 1 : 0),
+    };
+    const url = URL.createObjectURL(image.blob);
+    objectUrlsRef.current.add(url);
+    const nextImage = { ...normalized, url };
+    const existingIndex = imagesRef.current.findIndex(
+      (current) => current.id === image.id,
+    );
+    let next: RoomImage[];
+    if (existingIndex === -1) {
+      imageIdsRef.current.add(image.id);
+      next = [...imagesRef.current, nextImage];
+    } else {
+      const existing = imagesRef.current[existingIndex];
+      URL.revokeObjectURL(existing.url);
+      objectUrlsRef.current.delete(existing.url);
+      next = [...imagesRef.current];
+      next[existingIndex] = nextImage;
+    }
+    imagesRef.current = next;
+    setImages(next);
+  }, []);
+
+  const updateRoomImage = React.useCallback(
+    (
+      id: string,
+      patch: Partial<Omit<RoomImage, "id" | "url">>,
+      persist = false,
+    ) => {
+      const index = imagesRef.current.findIndex((image) => image.id === id);
+      if (index === -1) {
+        return;
+      }
+      const next = [...imagesRef.current];
+      next[index] = { ...next[index], ...patch };
+      imagesRef.current = next;
+      setImages(next);
+      if (persist) {
+        const { url: _url, ...cached } = next[index];
+        void storeRoomImage(cached).catch((error) => {
+          console.warn("Failed to persist image transfer state", error);
+        });
+      }
+    },
+    [],
+  );
+
+  const removeRoomImage = React.useCallback((id: string) => {
+    const image = imagesRef.current.find((current) => current.id === id);
+    if (!image) return;
+    URL.revokeObjectURL(image.url);
+    objectUrlsRef.current.delete(image.url);
+    imageIdsRef.current.delete(id);
+    const next = imagesRef.current.filter((current) => current.id !== id);
+    imagesRef.current = next;
+    setImages(next);
+    setPreviewImageId((current) => (current === id ? null : current));
+  }, []);
+
+  React.useEffect(() => {
+    const objectUrls = objectUrlsRef.current;
+    const imageIds = imageIdsRef.current;
+    const deletedImageIds = deletedImageIdsRef.current;
+    setLang(getLang());
+    setRoomId(readRoomId());
+    return () => {
+      for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+      }
+      objectUrls.clear();
+      imageIds.clear();
+      deletedImageIds.clear();
+      imagesRef.current = [];
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (
+      !roomId ||
+      !ROOM_ID_PATTERN.test(roomId) ||
+      !consumeCreatedShareRoomPrompt(roomId)
+    ) {
+      return;
+    }
+    setShareUrl(window.location.href);
+    setIsShareDialogOpen(true);
+  }, [roomId]);
+
+  React.useEffect(() => {
+    if (!isShareDialogOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsShareDialogOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isShareDialogOpen]);
+
+  React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+      return;
+    }
+    let disposed = false;
+    void listRoomImages(roomId)
+      .then((cachedImages) => {
+        if (!disposed) {
+          cachedImages.forEach(addRoomImage);
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load cached room images", error);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [addRoomImage, roomId]);
+
+  useShareRoomConnection({
+    roomId,
+    labels,
+    controlChannelRef,
+    outgoingChannelRef,
+    transferChunkSizeRef,
+    sessionIdRef,
+    deletedImageIdsRef,
+    imagesRef,
+    imageReadyWaitersRef,
+    addRoomImage,
+    updateRoomImage,
+    removeRoomImage,
+    upsertActivity,
+    showFloatingEmoji,
+    setActivities,
+    setConnection,
+    setConnectionError,
+    setMembers,
+    setNetworkLatencyMs,
+    setRole,
+  });
+
+  const updateSendingActivity = React.useCallback(
+    (progress: TransferProgress) => {
+      updateRoomImage(progress.id, {
+        transferStatus: "sending",
+        progress: progress.progress,
+      });
+      upsertActivity({
+        id: `transfer-${progress.id}`,
+        kind: "sending",
+        title: progress.name,
+        detail: `${labels.sending} · ${formatBytes(progress.transferredBytes)} / ${formatBytes(progress.size)}`,
+        progress: progress.progress,
+        createdAt: Date.now(),
+      });
+    },
+    [labels.sending, updateRoomImage, upsertActivity],
+  );
+
+  const handleFiles = async (fileList: FileList | File[]) => {
+    const channel = controlChannelRef.current;
+    if (connection !== "connected" || channel?.readyState !== "open") {
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.waiting,
+        detail: labels.guestEmpty,
+        createdAt: Date.now(),
+      });
+      return;
+    }
+
+    const files = Array.from(fileList);
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) {
+          upsertActivity({
+            id: `error-${Date.now()}-${file.name}`,
+            kind: "error",
+            title: file.name,
+            detail: labels.imageOnly,
+            createdAt: Date.now(),
+          });
+          continue;
+        }
+        if (file.size > MAX_IMAGE_TRANSFER_SIZE) {
+          upsertActivity({
+            id: `error-${Date.now()}-${file.name}`,
+            kind: "error",
+            title: file.name,
+            detail: labels.tooLarge,
+            createdAt: Date.now(),
+          });
+          continue;
+        }
+
+        const meta = createImageTransferMeta(
+          file,
+          undefined,
+          transferChunkSizeRef.current,
+        );
+        const image: CachedRoomImage = {
+          id: meta.id,
+          roomId: roomId!,
+          name: meta.name,
+          type: meta.type,
+          size: meta.size,
+          blob: file,
+          direction: "sent",
+          transferStatus: "waiting",
+          progress: 0,
+          previewOnly: false,
+          placeholderOnly: false,
+          createdAt: Date.now(),
+        };
+        addRoomImage(image);
+        const initialPersist = storeRoomImage(image).catch((error) => {
+          console.warn("Failed to cache pending image", error);
+        });
+        window.setTimeout(() => {
+          void (async () => {
+            try {
+              const placeholder = await generateSharePlaceholder(file);
+              if (
+                deletedImageIdsRef.current.has(meta.id) ||
+                !imagesRef.current.some((current) => current.id === meta.id)
+              ) {
+                return;
+              }
+              updateRoomImage(meta.id, { placeholder });
+              const activeChannel = controlChannelRef.current;
+              if (activeChannel?.readyState === "open") {
+                sendImagePlaceholder(activeChannel, meta, placeholder);
+              }
+              await initialPersist;
+              if (
+                !deletedImageIdsRef.current.has(meta.id) &&
+                imagesRef.current.some((current) => current.id === meta.id)
+              ) {
+                updateRoomImage(meta.id, { placeholder }, true);
+              }
+            } catch (error) {
+              if (!deletedImageIdsRef.current.has(meta.id)) {
+                updateRoomImage(meta.id, { transferStatus: "failed" });
+                await initialPersist;
+                if (imagesRef.current.some((current) => current.id === meta.id)) {
+                  updateRoomImage(meta.id, { transferStatus: "failed" }, true);
+                }
+                upsertActivity({
+                  id: `error-${Date.now()}-${file.name}`,
+                  kind: "error",
+                  title: file.name,
+                  detail:
+                    error instanceof Error
+                      ? error.message
+                      : labels.previewFailed,
+                  createdAt: Date.now(),
+                });
+              }
+            }
+          })();
+        }, 0);
+      }
+    } finally {
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleSendImage = async (image: RoomImage) => {
+    const controlChannel = controlChannelRef.current;
+    const fileChannel = outgoingChannelRef.current;
+    if (
+      image.direction !== "sent" ||
+      image.previewOnly ||
+      image.placeholderOnly ||
+      !image.placeholder ||
+      image.transferStatus === "sending" ||
+      isSending ||
+      connection !== "connected" ||
+      controlChannel?.readyState !== "open"
+    ) {
+      return;
+    }
+
+    setIsSending(true);
+    updateRoomImage(
+      image.id,
+      { transferStatus: "sending", progress: 0 },
+      true,
+    );
+    try {
+      const file = new File([image.blob], image.name, { type: image.type });
+      const transferImage = {
+        id: image.id,
+        name: image.name,
+        type: image.type,
+        size: image.size,
+      };
+      const preparation = await prepareRealtimeImageTransfer(
+        roomId!,
+        sessionIdRef.current!,
+        transferImage,
+        networkLatencyMs,
+      );
+      let meta: ReturnType<typeof createImageTransferMeta>;
+      if (preparation.mode === "r2") {
+        meta = createImageTransferMeta(
+          file,
+          image.id,
+          transferChunkSizeRef.current,
+        );
+        await uploadFileToR2(preparation.uploadUrl, file, (progress) => {
+          updateSendingActivity({
+            ...meta,
+            transferredBytes: progress.transferredBytes,
+            progress: progress.progress,
+          });
+        });
+        const uploaded = await confirmRealtimeR2Upload(
+          roomId!,
+          sessionIdRef.current!,
+          transferImage,
+          preparation.objectKey,
+        );
+        await markRealtimeR2Shared(
+          roomId!,
+          sessionIdRef.current!,
+          preparation.objectKey,
+        );
+        sendR2ImageAvailable(
+          controlChannel,
+          meta,
+          preparation.objectKey,
+          uploaded.expiresAt,
+        );
+      } else {
+        if (fileChannel?.readyState !== "open") {
+          throw new Error("File DataChannel is not open");
+        }
+        meta = await sendImageFile(
+          controlChannel,
+          fileChannel,
+          file,
+          updateSendingActivity,
+          image.id,
+          transferChunkSizeRef.current,
+          waitUntilImageReady,
+        );
+      }
+      updateRoomImage(
+        image.id,
+        { transferStatus: "awaiting-receipt", progress: 1 },
+        true,
+      );
+      upsertActivity({
+        id: `transfer-${meta.id}`,
+        kind: "sending",
+        title: meta.name,
+        detail: `${labels.awaitingReceipt} · ${formatBytes(meta.size)}`,
+        progress: 1,
+        createdAt: Date.now(),
+      });
+    } catch (error) {
+      updateRoomImage(image.id, { transferStatus: "failed" }, true);
+      upsertActivity({
+        id: `transfer-${image.id}`,
+        kind: "error",
+        title: image.name,
+        detail:
+          error instanceof Error ? error.message : labels.transferFailed,
+        createdAt: Date.now(),
+      });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleDeleteImage = async (image: RoomImage) => {
+    const status = image.transferStatus || "waiting";
+    const channel = controlChannelRef.current;
+    if (
+      image.direction !== "sent" ||
+      (status !== "waiting" && status !== "failed") ||
+      connection !== "connected" ||
+      channel?.readyState !== "open"
+    ) {
+      return;
+    }
+    sendImageDelete(channel, image.id);
+    deletedImageIdsRef.current.add(image.id);
+    removeRoomImage(image.id);
+    try {
+      await deleteRoomImage(image.id);
+    } catch (error) {
+      console.warn("Failed to delete local pending image", error);
+    }
+  };
+
+  const handleKickMember = async (targetClientId: string) => {
+    const sessionId = sessionIdRef.current;
+    if (
+      !roomId ||
+      role !== "owner" ||
+      !sessionId ||
+      kickingClientId
+    ) {
+      return;
+    }
+    setKickingClientId(targetClientId);
+    try {
+      await kickRealtimeRoomMember(roomId, sessionId, targetClientId);
+      setMembers((current) =>
+        current.filter((member) => member.clientId !== targetClientId),
+      );
+    } catch (error) {
+      upsertActivity({
+        id: `error-kick-${Date.now()}`,
+        kind: "error",
+        title: labels.kickMember,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    } finally {
+      setKickingClientId(null);
+    }
+  };
+
+  const handleTemporaryLeave = async () => {
+    const sessionId = sessionIdRef.current;
+    if (!roomId || role !== "owner" || !sessionId || isRoomActionPending) {
+      return;
+    }
+    setIsRoomActionPending(true);
+    try {
+      await leaveRealtimeRoomTemporarily(roomId, sessionId);
+      markShareRoomTemporarilyAway(roomId);
+      window.location.assign("/");
+    } catch (error) {
+      setIsRoomActionPending(false);
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.temporaryLeave,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    }
+  };
+
+  const handleCloseRoom = async () => {
+    const sessionId = sessionIdRef.current;
+    if (
+      !roomId ||
+      role !== "owner" ||
+      !sessionId ||
+      isRoomActionPending ||
+      !window.confirm(labels.confirmClose)
+    ) {
+      return;
+    }
+    setIsRoomActionPending(true);
+    try {
+      await closeRealtimeRoom(roomId, sessionId);
+      clearOwnedShareRoom(roomId);
+      window.location.assign("/");
+    } catch (error) {
+      setIsRoomActionPending(false);
+      upsertActivity({
+        id: `error-${Date.now()}`,
+        kind: "error",
+        title: labels.closeRoom,
+        detail: error instanceof Error ? error.message : labels.failed,
+        createdAt: Date.now(),
+      });
+    }
+  };
+
+  const handleEmoji = (emoji: string) => {
+    if (connection !== "connected") {
+      return;
+    }
+    const id = createPeerMessageId();
+    const sent = sendPeerMessage(controlChannelRef.current, {
+      type: "EMOJI",
+      payload: { id, emoji, sentAt: Date.now() },
+    });
+    if (!sent) {
+      return;
+    }
+    setPressedEmoji(emoji);
+    showFloatingEmoji(`local-${id}`, emoji);
+    window.setTimeout(() => {
+      setPressedEmoji((current) => (current === emoji ? null : current));
+    }, 280);
+  };
+
+  const handleTextMessage = () => {
+    const text = textMessage.trim().slice(0, 200);
+    if (!text || connection !== "connected") return;
+    const id = createPeerMessageId();
+    if (
+      !sendPeerMessage(controlChannelRef.current, {
+        type: "TEXT",
+        payload: { id, text, sentAt: Date.now() },
+      })
+    ) {
+      return;
+    }
+    setTextMessage("");
+    upsertActivity({
+      id: `message-${id}`,
+      kind: "message",
+      title: text,
+      detail: labels.messageSending,
+      createdAt: Date.now(),
+    });
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  if (roomId !== null && !validRoomId) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+        <p className="rounded-md bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+          {labels.invalid}
+        </p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="h-screen overflow-hidden bg-[#eef2f7] text-slate-800">
+      <div className="grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1">
+        <section className="flex min-h-0 flex-col">
+          <RoomHeader
+            role={role}
+            roomId={roomId}
+            copied={copied}
+            actionPending={isRoomActionPending}
+            labels={labels}
+            onCopy={handleCopy}
+            onTemporaryLeave={handleTemporaryLeave}
+            onCloseRoom={handleCloseRoom}
+          />
+          <ImageWorkspace
+            inputRef={inputRef}
+            images={images}
+            connection={connection}
+            isSending={isSending}
+            isDragging={isDragging}
+            labels={labels}
+            onFiles={handleFiles}
+            onDraggingChange={setIsDragging}
+            onPreview={setPreviewImageId}
+            onSend={handleSendImage}
+            onDelete={handleDeleteImage}
+          />
+        </section>
+        <RoomSidebar
+          activityListRef={activityListRef}
+          emojiScrollerRef={emojiScrollerRef}
+          connection={connection}
+          connectionError={connectionError}
+          networkLatencyMs={networkLatencyMs}
+          roomId={roomId}
+          role={role}
+          members={members}
+          activities={activities}
+          kickingClientId={kickingClientId}
+          textMessage={textMessage}
+          pressedEmoji={pressedEmoji}
+          labels={labels}
+          onKick={handleKickMember}
+          onTextChange={setTextMessage}
+          onTextSubmit={handleTextMessage}
+          onEmoji={handleEmoji}
+        />
+      </div>
+      <CreatedRoomDialog
+        open={isShareDialogOpen}
+        roomId={roomId}
+        shareUrl={shareUrl}
+        copied={copied}
+        labels={labels}
+        onClose={() => setIsShareDialogOpen(false)}
+        onCopy={handleCopy}
+      />
+      {previewImage ? (
+        <RoomImagePreviewDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPreviewImageId(null);
+          }}
+          images={previewImages.map((image) => ({
+            id: image.id,
+            src: image.url,
+            name: image.name,
+          }))}
+          activeId={previewImage.id}
+          onActiveChange={setPreviewImageId}
+        />
+      ) : null}
+      <FloatingEmojiLayer items={floatingEmojis} />
+    </main>
+  );
+}

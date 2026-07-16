@@ -5,15 +5,15 @@ import { FiAlertCircle, FiLoader, FiShare2, FiX } from "react-icons/fi";
 import { createShareRoom } from "@/utils/share-room";
 import type { Lang } from "@/locales";
 
-type ShareRoomDialogProps = {
+type CreateRoomButtonProps = {
   lang: Lang;
   mobile?: boolean;
 };
 
-export default function ShareRoomDialog({
+export default function CreateRoomButton({
   lang,
   mobile = false,
-}: ShareRoomDialogProps) {
+}: CreateRoomButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
