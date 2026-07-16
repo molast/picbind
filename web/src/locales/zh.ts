@@ -289,7 +289,6 @@ const zh = {
           links: [
             { label: "常见问题", href: "#faq" },
             { label: "站点地图", href: "/sitemap.xml" },
-            { label: "Robots", href: "/robots.txt" },
           ],
         },
         {

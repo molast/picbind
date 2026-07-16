@@ -174,7 +174,6 @@ const en: LocaleType = {
           links: [
             { label: "FAQ", href: "#faq" },
             { label: "Sitemap", href: "/sitemap.xml" },
-            { label: "Robots", href: "/robots.txt" },
           ],
         },
         {
