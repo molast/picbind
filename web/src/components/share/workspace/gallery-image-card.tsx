@@ -4,6 +4,7 @@ import {
   FiDownload,
   FiEye,
   FiMaximize2,
+  FiSend,
   FiTrash2,
   FiXCircle,
 } from "react-icons/fi";
@@ -112,6 +113,17 @@ export default function GalleryImageCard({
         {canReview ? (
           <button
             type="button"
+            onClick={() => onReview(image.id)}
+            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf]"
+            aria-label={labels.reviewImage}
+            title={labels.reviewImage}
+          >
+            <FiEye className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+        {canReview ? (
+          <button
+            type="button"
             onClick={() => onPreview(image.id)}
             className="absolute left-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf]"
             aria-label={labels.previewImage}
@@ -125,7 +137,9 @@ export default function GalleryImageCard({
             type="button"
             onClick={() => void onDelete(image)}
             disabled={connection !== "connected"}
-            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45"
+            className={`absolute top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45 ${
+              canReview ? "right-12" : "right-2"
+            }`}
             aria-label={labels.deleteImage}
             title={labels.deleteImage}
           >
@@ -140,44 +154,49 @@ export default function GalleryImageCard({
         </div>
         <div className="mt-1 flex min-h-6 items-center justify-between gap-2 text-xs text-slate-500">
           <span>{formatBytes(image.size)}</span>
-          {isLocalImage ? (
-            <button
-              type="button"
-              onClick={() =>
-                status === "sending"
-                  ? onCancelTransfer(image)
-                  : void onSend(image)
-              }
-              disabled={
-                status !== "sending" &&
-                (!sendReady || isSending || connection !== "connected")
-              }
-              className={`shrink-0 font-semibold transition ${
-                status === "sending"
-                  ? "inline-flex items-center gap-1 text-red-600 hover:text-red-700"
-                  : sendReady
-                  ? "text-[#2f65cf] hover:text-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
-                  : sendComplete
-                    ? "cursor-default text-emerald-600"
-                    : "cursor-default text-slate-400"
-              }`}
-            >
-              {status === "sending" ? (
-                <>
-                  <FiXCircle className="h-3.5 w-3.5" aria-hidden="true" />
-                  {labels.cancelTransfer}
-                </>
-              ) : sendReady ? labels.send : sendComplete ? labels.sent : statusLabel}
-            </button>
-          ) : (
-            <span className="shrink-0">{statusLabel}</span>
-          )}
+          <span className="shrink-0">{statusLabel}</span>
         </div>
         {image.previewOnly ? (
           <div className="mt-2 text-[11px] text-slate-400">{labels.previewOnly}</div>
         ) : null}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
+          {isLocalImage && status === "sending" ? (
+            <button
+              type="button"
+              onClick={() => onCancelTransfer(image)}
+              className="flex h-9 items-center justify-center rounded-md border border-red-200 text-red-600 transition hover:bg-red-50 hover:text-red-700"
+              aria-label={labels.cancelTransfer}
+              title={labels.cancelTransfer}
+            >
+              <FiXCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : isLocalImage && sendReady ? (
+            <button
+              type="button"
+              onClick={() => void onSend(image)}
+              disabled={isSending || connection !== "connected"}
+              className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-[#2f65cf] text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{labels.send}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className={`flex h-9 min-w-0 cursor-not-allowed items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-semibold ${
+                sendComplete
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-600"
+                  : "border-slate-200 text-slate-400"
+              }`}
+            >
+              <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="truncate" title={sendComplete ? labels.sent : statusLabel}>
+                {sendComplete ? labels.sent : statusLabel}
+              </span>
+            </button>
+          )}
           {downloadReady ? (
             <a
               href={image.url}
@@ -203,15 +222,6 @@ export default function GalleryImageCard({
               <span className="relative">{showProgress ? `${progress}%` : labels.download}</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onReview(image.id)}
-            disabled={!canReview}
-            className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-slate-900 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-          >
-            <FiEye className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{labels.review}</span>
-          </button>
         </div>
       </div>
     </article>
