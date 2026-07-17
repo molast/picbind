@@ -27,6 +27,7 @@ type RoomHistoryState = {
 
 export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
   const [activeRoomId, setActiveRoomId] = React.useState<string | null>(null);
+  const [roomMinimized, setRoomMinimized] = React.useState(false);
 
   React.useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
@@ -34,6 +35,7 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
       setActiveRoomId(
         typeof state?.picbindRoomId === "string" ? state.picbindRoomId : null,
       );
+      setRoomMinimized(false);
       if (!state?.picbindRoomId && typeof state?.picbindHomeScrollY === "number") {
         window.requestAnimationFrame(() => {
           window.scrollTo({ top: state.picbindHomeScrollY, behavior: "instant" });
@@ -67,17 +69,25 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
       `${target.pathname}${target.search}${target.hash}`,
     );
     setActiveRoomId(room.roomId);
+    setRoomMinimized(false);
   }, []);
 
   return (
     <>
-      <div className={activeRoomId ? "hidden" : "block"}>
+      <div className={activeRoomId && !roomMinimized ? "hidden" : "block"}>
         <HomeCompressLanding
           initialLang={initialLang}
           onRoomCreated={openRoom}
         />
       </div>
-      {activeRoomId ? <ShareRoomPage embedded /> : null}
+      {activeRoomId ? (
+        <ShareRoomPage
+          embedded
+          minimized={roomMinimized}
+          onMinimize={() => setRoomMinimized(true)}
+          onRestore={() => setRoomMinimized(false)}
+        />
+      ) : null}
     </>
   );
 }

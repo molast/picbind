@@ -3,7 +3,12 @@
 import React from "react";
 import { formatBytes } from "./share-room-formatters";
 import type { ShareRoomLabels } from "./share-room-labels";
-import type { ActivityItem, ConnectionState, RoomImage } from "./share-room-types";
+import type {
+  ActivityItem,
+  ConnectionState,
+  RoomDockNotification,
+  RoomImage,
+} from "./share-room-types";
 import {
   clearTemporaryShareRoom,
   getShareRoomClientId,
@@ -97,6 +102,7 @@ type UseShareRoomConnectionOptions = {
   removeRoomImage(id: string): void;
   upsertActivity(activity: ActivityItem): void;
   showFloatingEmoji(id: string, emoji: string): void;
+  onIncomingNotification?(notification: RoomDockNotification): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -123,6 +129,7 @@ export function useShareRoomConnection({
   removeRoomImage,
   upsertActivity,
   showFloatingEmoji,
+  onIncomingNotification,
   setActivities,
   setConnection,
   setConnectionError,
@@ -189,6 +196,18 @@ export function useShareRoomConnection({
       }
     };
 
+    const notifiedIncomingImages = new Set<string>();
+    const notifyIncomingImage = (id: string, name: string) => {
+      if (notifiedIncomingImages.has(id)) return;
+      notifiedIncomingImages.add(id);
+      onIncomingNotification?.({
+        id: `image-${id}`,
+        kind: "image",
+        label: name,
+        createdAt: Date.now(),
+      });
+    };
+
     const receiver = new RealtimeImageReceiver({
       async onPlaceholder(meta, placeholder) {
         if (deletedImageIdsRef.current.has(meta.id)) return;
@@ -211,6 +230,7 @@ export function useShareRoomConnection({
           placeholder,
           createdAt: current?.createdAt || Date.now(),
         };
+        notifyIncomingImage(meta.id, meta.name);
         if (!disposed) addRoomImage(image);
         try {
           await storeRoomImage(image);
@@ -237,6 +257,7 @@ export function useShareRoomConnection({
           placeholderOnly: false,
           createdAt: current?.createdAt || Date.now(),
         };
+        notifyIncomingImage(meta.id, meta.name);
         try {
           await storeRoomImage(image);
           if (!disposed) {
@@ -247,6 +268,7 @@ export function useShareRoomConnection({
         }
       },
       onStart(meta) {
+        notifyIncomingImage(meta.id, meta.name);
         updateRoomImage(
           meta.id,
           { transferStatus: "receiving", progress: 0 },
@@ -603,6 +625,12 @@ export function useShareRoomConnection({
       if (typeof event.data !== "string") return;
       const peerMessage = parsePeerMessage(event.data);
       if (peerMessage?.type === "EMOJI") {
+        onIncomingNotification?.({
+          id: `emoji-${peerMessage.payload.id}`,
+          kind: "emoji",
+          label: peerMessage.payload.emoji,
+          createdAt: Date.now(),
+        });
         showFloatingEmoji(
           peerMessage.payload.id,
           peerMessage.payload.emoji,
@@ -614,6 +642,12 @@ export function useShareRoomConnection({
         return;
       }
       if (peerMessage?.type === "TEXT") {
+        onIncomingNotification?.({
+          id: `text-${peerMessage.payload.id}`,
+          kind: "text",
+          label: peerMessage.payload.text,
+          createdAt: Date.now(),
+        });
         upsertActivity({
           id: `message-${peerMessage.payload.id}`,
           kind: "message",
@@ -1155,6 +1189,7 @@ export function useShareRoomConnection({
     maxImageTransferSizeRef,
     labels,
     outgoingChannelRef,
+    onIncomingNotification,
     removeRoomImage,
     roomId,
     sessionIdRef,

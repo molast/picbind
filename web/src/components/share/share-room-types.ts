@@ -29,3 +29,10 @@ export type FloatingEmoji = {
   path: string;
   duration: number;
 };
+
+export type RoomDockNotification = {
+  id: string;
+  kind: "emoji" | "text" | "image";
+  label: string;
+  createdAt: number;
+};

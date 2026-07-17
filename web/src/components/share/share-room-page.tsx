@@ -13,12 +13,14 @@ import CompressionSuggestionDialog from "./workspace/compression-suggestion-dial
 import RoomImagePreviewDialog from "@/components/share/room-image-preview-dialog";
 import RoomHeader from "./room-header";
 import RoomSidebar from "./room-sidebar";
+import TemporaryRoomDock from "./temporary-room-dock";
 import { formatBytes } from "./share-room-formatters";
 import { getShareRoomLabels } from "./share-room-labels";
 import type {
   ActivityItem,
   ConnectionState,
   FloatingEmoji,
+  RoomDockNotification,
   RoomImage,
 } from "./share-room-types";
 import { useShareRoomConnection } from "./use-share-room-connection";
@@ -26,13 +28,11 @@ import { getLang, type Lang } from "@/locales";
 import {
   clearOwnedShareRoom,
   consumeCreatedShareRoomPrompt,
-  markShareRoomTemporarilyAway,
 } from "@/utils/share-room";
 import {
   closeRealtimeRoom,
   kickRealtimeRoomMember,
   leaveRealtimeRoom,
-  leaveRealtimeRoomTemporarily,
   prepareRealtimeImageTransfer,
   confirmRealtimeR2Upload,
   markRealtimeR2Shared,
@@ -82,7 +82,19 @@ function readRoomId() {
   return segments[0] === "share" ? segments[1] || "" : "";
 }
 
-export default function ShareRoomPage({ embedded = false }: { embedded?: boolean }) {
+type ShareRoomPageProps = {
+  embedded?: boolean;
+  minimized?: boolean;
+  onMinimize?(): void;
+  onRestore?(): void;
+};
+
+export default function ShareRoomPage({
+  embedded = false,
+  minimized,
+  onMinimize,
+  onRestore,
+}: ShareRoomPageProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const activityListRef = React.useRef<HTMLDivElement | null>(null);
   const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
@@ -102,6 +114,7 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   );
   const imagesRef = React.useRef<RoomImage[]>([]);
   const roomExitHandledRef = React.useRef(false);
+  const minimizedRef = React.useRef(false);
   const exitRequestSourceRef = React.useRef<"button" | "history" | null>(null);
   const transferAbortControllersRef = React.useRef(
     new Map<string, AbortController>(),
@@ -138,6 +151,10 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   const [textMessage, setTextMessage] = React.useState("");
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
+  const [isInternallyMinimized, setIsInternallyMinimized] = React.useState(false);
+  const [dockNotifications, setDockNotifications] = React.useState<
+    RoomDockNotification[]
+  >([]);
   const [isExitDialogOpen, setIsExitDialogOpen] = React.useState(false);
   const [isPageStateLoaded, setIsPageStateLoaded] = React.useState(false);
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
@@ -179,6 +196,42 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   }, [networkLatencyMs]);
 
   const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
+  const isMinimized = minimized ?? isInternallyMinimized;
+
+  React.useEffect(() => {
+    minimizedRef.current = isMinimized;
+  }, [isMinimized]);
+
+  const minimizeRoom = React.useCallback(() => {
+    minimizedRef.current = true;
+    setDockNotifications([]);
+    if (onMinimize) {
+      onMinimize();
+    } else {
+      setIsInternallyMinimized(true);
+    }
+  }, [onMinimize]);
+
+  const restoreRoom = React.useCallback(() => {
+    minimizedRef.current = false;
+    setDockNotifications([]);
+    if (onRestore) {
+      onRestore();
+    } else {
+      setIsInternallyMinimized(false);
+    }
+  }, [onRestore]);
+
+  const handleIncomingNotification = React.useCallback(
+    (notification: RoomDockNotification) => {
+      if (!minimizedRef.current) return;
+      setDockNotifications((current) => {
+        if (current.some((item) => item.id === notification.id)) return current;
+        return [...current, notification].slice(-99);
+      });
+    },
+    [],
+  );
   const imageWorkspaceLabels = React.useMemo(
     () => getShareRoomLabels(lang, maxImageTransferSize),
     [lang, maxImageTransferSize],
@@ -411,12 +464,13 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
         picbindRoomEntry: "guard" as const,
       };
       window.history.pushState(roomState, "", window.location.href);
+      restoreRoom();
       exitRequestSourceRef.current = "history";
       setIsExitDialogOpen(true);
     };
     window.addEventListener("popstate", handleHistoryBack);
     return () => window.removeEventListener("popstate", handleHistoryBack);
-  }, [role, roomId]);
+  }, [restoreRoom, role, roomId]);
 
   React.useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -507,6 +561,7 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
     removeRoomImage,
     upsertActivity,
     showFloatingEmoji,
+    onIncomingNotification: handleIncomingNotification,
     setActivities,
     setConnection,
     setConnectionError,
@@ -846,27 +901,9 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
     }
   };
 
-  const handleTemporaryLeave = async () => {
-    const sessionId = sessionIdRef.current;
-    if (!roomId || role !== "owner" || !sessionId || isRoomActionPending) {
-      return;
-    }
-    setIsRoomActionPending(true);
-    try {
-      await leaveRealtimeRoomTemporarily(roomId, sessionId);
-      markShareRoomTemporarilyAway(roomId);
-      roomExitHandledRef.current = true;
-      embedded ? window.history.go(-2) : window.location.assign("/");
-    } catch (error) {
-      setIsRoomActionPending(false);
-      upsertActivity({
-        id: `error-${Date.now()}`,
-        kind: "error",
-        title: labels.temporaryLeave,
-        detail: error instanceof Error ? error.message : labels.failed,
-        createdAt: Date.now(),
-      });
-    }
+  const handleTemporaryLeave = () => {
+    if (!roomId || role !== "owner" || isRoomActionPending) return;
+    minimizeRoom();
   };
 
   const requestExitRoom = () => {
@@ -983,7 +1020,10 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#eef2f7] text-slate-800">
+    <>
+      <main
+        className={`${isMinimized ? "hidden" : "block"} h-screen overflow-hidden bg-[#eef2f7] text-slate-800`}
+      >
       <div className="grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-1">
         <section className="flex min-h-0 flex-col">
           <RoomHeader
@@ -1116,6 +1156,16 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
         />
       ) : null}
       <FloatingEmojiLayer items={floatingEmojis} />
-    </main>
+      </main>
+      {isMinimized && roomId ? (
+        <TemporaryRoomDock
+          lang={lang}
+          roomId={roomId}
+          connection={connection}
+          notifications={dockNotifications}
+          onRestore={restoreRoom}
+        />
+      ) : null}
+    </>
   );
 }

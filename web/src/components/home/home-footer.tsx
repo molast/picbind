@@ -1,5 +1,4 @@
 import Link from "next/link";
-import TemporaryRoomDock from "@/components/share/temporary-room-dock";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 
 type HomeFooterProps = {
@@ -7,11 +6,10 @@ type HomeFooterProps = {
   lang: Lang;
 };
 
-export default function HomeFooter({ copy, lang }: HomeFooterProps) {
+export default function HomeFooter({ copy }: HomeFooterProps) {
   return (
-    <>
-      <footer className="bg-[#171923] text-white">
-        <div className="mx-auto max-w-[1280px] px-6 py-14 sm:px-8 lg:px-10 lg:py-16">
+    <footer className="bg-[#171923] text-white">
+      <div className="mx-auto max-w-[1280px] px-6 py-14 sm:px-8 lg:px-10 lg:py-16">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,2fr)] lg:gap-16">
             <div className="max-w-[360px]">
               <Link
@@ -60,9 +58,7 @@ export default function HomeFooter({ copy, lang }: HomeFooterProps) {
               ))}
             </div>
           </div>
-        </div>
-      </footer>
-      <TemporaryRoomDock lang={lang} />
-    </>
+      </div>
+    </footer>
   );
 }
