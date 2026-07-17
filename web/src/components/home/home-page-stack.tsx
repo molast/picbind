@@ -86,6 +86,8 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
         <HomeCompressLanding
           initialLang={initialLang}
           onRoomCreated={openRoom}
+          hasActiveRoom={Boolean(activeRoomId)}
+          onRestoreActiveRoom={restoreRoom}
         />
       </div>
       {activeRoomId ? (

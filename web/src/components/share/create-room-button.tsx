@@ -8,15 +8,21 @@ import type { Lang } from "@/locales";
 type CreateRoomButtonProps = {
   lang: Lang;
   mobile?: boolean;
+  hasActiveRoom?: boolean;
   onRoomCreated?(room: ShareRoom): void;
+  onRestoreActiveRoom?(): void;
 };
 
 export default function CreateRoomButton({
   lang,
   mobile = false,
+  hasActiveRoom = false,
   onRoomCreated,
+  onRestoreActiveRoom,
 }: CreateRoomButtonProps) {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [dialog, setDialog] = React.useState<"error" | "active-room" | null>(
+    null,
+  );
   const [isCreating, setIsCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -25,6 +31,9 @@ export default function CreateRoomButton({
       ? {
           trigger: "分享图片",
           failedTitle: "房间创建失败",
+          activeRoomTitle: "已有分享房间",
+          activeRoomMessage: "当前已有一个最小化的分享房间，请先返回并退出该房间。",
+          restoreRoom: "返回现有房间",
           creating: "正在创建",
           retry: "重试",
           close: "关闭",
@@ -32,29 +41,37 @@ export default function CreateRoomButton({
       : {
           trigger: "Share Images",
           failedTitle: "Could not create room",
+          activeRoomTitle: "Share room already active",
+          activeRoomMessage:
+            "A minimized share room is still active. Return to it and exit before creating another room.",
+          restoreRoom: "Return to room",
           creating: "Creating",
           retry: "Try again",
           close: "Close",
         };
 
   React.useEffect(() => {
-    if (!isOpen) {
+    if (!dialog) {
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        setDialog(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  }, [dialog]);
 
   const handleCreate = async () => {
     if (isCreating) return;
+    if (hasActiveRoom) {
+      setDialog("active-room");
+      return;
+    }
     setIsCreating(true);
     setError(null);
-    setIsOpen(false);
+    setDialog(null);
     try {
       const createdRoom = await createShareRoom();
       if (onRoomCreated) {
@@ -67,7 +84,7 @@ export default function CreateRoomButton({
       setError(
         caught instanceof Error ? caught.message : "Failed to create share room",
       );
-      setIsOpen(true);
+      setDialog("error");
     } finally {
       setIsCreating(false);
     }
@@ -111,26 +128,28 @@ export default function CreateRoomButton({
         </div>
       ) : null}
 
-      {isOpen ? (
+      {dialog ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="share-room-error-title"
+          aria-labelledby="share-room-dialog-title"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) {
-              setIsOpen(false);
+              setDialog(null);
             }
           }}
         >
           <div className="w-full max-w-[460px] rounded-lg border border-slate-200 bg-white p-5 text-slate-800 shadow-2xl sm:p-6">
             <div className="flex items-center justify-between gap-4">
-              <h2 id="share-room-error-title" className="text-lg font-semibold">
-                {labels.failedTitle}
+              <h2 id="share-room-dialog-title" className="text-lg font-semibold">
+                {dialog === "active-room"
+                  ? labels.activeRoomTitle
+                  : labels.failedTitle}
               </h2>
               <button
                 type="button"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setDialog(null)}
                 className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
                 aria-label={labels.close}
                 title={labels.close}
@@ -140,17 +159,34 @@ export default function CreateRoomButton({
             </div>
 
             <div className="mt-6">
-              <div className="flex gap-3 rounded-md bg-red-50 px-3 py-3 text-sm text-red-700">
+              <div
+                className={`flex gap-3 rounded-md px-3 py-3 text-sm ${
+                  dialog === "active-room"
+                    ? "bg-amber-50 text-amber-800"
+                    : "bg-red-50 text-red-700"
+                }`}
+              >
                 <FiAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <p className="break-words">{error}</p>
+                <p className="break-words">
+                  {dialog === "active-room" ? labels.activeRoomMessage : error}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => void handleCreate()}
+                onClick={() => {
+                  if (dialog === "active-room") {
+                    setDialog(null);
+                    onRestoreActiveRoom?.();
+                  } else {
+                    void handleCreate();
+                  }
+                }}
                 className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd]"
               >
                 <FiShare2 className="h-4 w-4" aria-hidden="true" />
-                <span>{labels.retry}</span>
+                <span>
+                  {dialog === "active-room" ? labels.restoreRoom : labels.retry}
+                </span>
               </button>
             </div>
           </div>

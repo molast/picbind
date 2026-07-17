@@ -11,11 +11,15 @@ import type { ShareRoom } from "@/utils/share-room";
 type HomeCompressLandingProps = {
   initialLang: Lang;
   onRoomCreated?(room: ShareRoom): void;
+  hasActiveRoom?: boolean;
+  onRestoreActiveRoom?(): void;
 };
 
 export default function HomeCompressLanding({
   initialLang,
   onRoomCreated,
+  hasActiveRoom = false,
+  onRestoreActiveRoom,
 }: HomeCompressLandingProps) {
   const home = useHomeCompression({ initialLang });
 
@@ -44,6 +48,8 @@ export default function HomeCompressLanding({
         onToggleFormat={home.handleToggleFormat}
         onSelectAllFormats={home.handleSelectAllFormats}
         onRoomCreated={onRoomCreated}
+        hasActiveRoom={hasActiveRoom}
+        onRestoreActiveRoom={onRestoreActiveRoom}
       />
 
       <input

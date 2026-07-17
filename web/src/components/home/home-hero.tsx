@@ -27,6 +27,8 @@ type HomeHeroProps = {
   onToggleFormat(format: OutputFormat): void;
   onSelectAllFormats(): void;
   onRoomCreated?(room: ShareRoom): void;
+  hasActiveRoom?: boolean;
+  onRestoreActiveRoom?(): void;
 };
 
 export default function HomeHero({
@@ -48,6 +50,8 @@ export default function HomeHero({
   onToggleFormat,
   onSelectAllFormats,
   onRoomCreated,
+  hasActiveRoom = false,
+  onRestoreActiveRoom,
 }: HomeHeroProps) {
   return (
     <section className="relative min-h-[470px] overflow-hidden bg-[#c8d8f2] sm:min-h-[520px] lg:min-h-[560px]">
@@ -83,7 +87,12 @@ export default function HomeHero({
                   >
                     {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
                   </Link>
-                  <CreateRoomButton lang={lang} onRoomCreated={onRoomCreated} />
+                  <CreateRoomButton
+                    lang={lang}
+                    hasActiveRoom={hasActiveRoom}
+                    onRoomCreated={onRoomCreated}
+                    onRestoreActiveRoom={onRestoreActiveRoom}
+                  />
                 </nav>
               </div>
               <div ref={langMenuRef} className="relative">
@@ -151,7 +160,9 @@ export default function HomeHero({
             <CreateRoomButton
               lang={lang}
               mobile
+              hasActiveRoom={hasActiveRoom}
               onRoomCreated={onRoomCreated}
+              onRestoreActiveRoom={onRestoreActiveRoom}
             />
           </div>
         </header>
