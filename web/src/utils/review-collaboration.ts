@@ -6,6 +6,7 @@ export type ReviewTool =
   | "select"
   | "hand"
   | "arrow"
+  | "line"
   | "rectangle"
   | "circle"
   | "pen"
@@ -13,6 +14,7 @@ export type ReviewTool =
   | "emoji";
 
 export type ReviewMode = "present" | "follow" | null;
+export type ReviewStrokeStyle = "solid" | "dashed" | "dotted";
 
 export type ReviewAnnotation = {
   id: string;
@@ -29,6 +31,7 @@ export type ReviewAnnotation = {
   emoji?: string;
   stroke: string;
   strokeWidth: number;
+  strokeStyle?: ReviewStrokeStyle;
   createdBy: string;
 };
 
@@ -125,7 +128,7 @@ function validAnnotation(value: unknown): value is ReviewAnnotation {
   const annotation = value as Partial<ReviewAnnotation>;
   return (
     validId(annotation.id) &&
-    ["arrow", "rectangle", "circle", "pen", "text", "emoji"].includes(
+    ["arrow", "line", "rectangle", "circle", "pen", "text", "emoji"].includes(
       annotation.type || "",
     ) &&
     validFinite(annotation.x) &&
@@ -138,6 +141,8 @@ function validAnnotation(value: unknown): value is ReviewAnnotation {
     typeof annotation.stroke === "string" &&
     /^#[0-9a-f]{6}$/i.test(annotation.stroke) &&
     validFinite(annotation.strokeWidth) &&
+    (!annotation.strokeStyle ||
+      ["solid", "dashed", "dotted"].includes(annotation.strokeStyle)) &&
     validId(annotation.createdBy) &&
     (!annotation.points ||
       (annotation.points.length <= 512 && annotation.points.every(validFinite))) &&

@@ -4,7 +4,6 @@ import React from "react";
 import type { IconType } from "react-icons";
 import {
   FiArrowLeft,
-  FiArrowUpRight,
   FiCircle,
   FiCornerUpLeft,
   FiCornerUpRight,
@@ -20,11 +19,17 @@ import {
   FiZoomIn,
   FiZoomOut,
 } from "react-icons/fi";
-import { MdPanToolAlt } from "react-icons/md";
+import { LuMinus, LuMoveUpRight } from "react-icons/lu";
+import { PiHandPalmBold } from "react-icons/pi";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { middleEllipsisFileName } from "../share-room-formatters";
-import type { ReviewMode, ReviewTool } from "@/utils/review-collaboration";
+import type {
+  ReviewMode,
+  ReviewStrokeStyle,
+  ReviewTool,
+} from "@/utils/review-collaboration";
 import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
+import ReviewStrokeStyleTool from "./review-stroke-style-tool";
 
 const ANNOTATION_COLORS = [
   "#000000",
@@ -55,6 +60,9 @@ type ReviewToolbarProps = {
   annotationColor: string;
   lineThickness: number;
   lineThicknessDisabled: boolean;
+  arrowStyle: ReviewStrokeStyle;
+  lineStyle: ReviewStrokeStyle;
+  hasSelection: boolean;
   onBack(): void;
   onToolChange(tool: ReviewTool): void;
   onUndo(): void;
@@ -62,6 +70,8 @@ type ReviewToolbarProps = {
   onModeChange(mode: ReviewMode): void;
   onColorChange(color: string): void;
   onLineThicknessChange(value: number): void;
+  onArrowStyleChange(style: ReviewStrokeStyle): void;
+  onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
   onZoomIn(): void;
   onZoomOut(): void;
@@ -122,6 +132,9 @@ export default function ReviewToolbar({
   annotationColor,
   lineThickness,
   lineThicknessDisabled,
+  arrowStyle,
+  lineStyle,
+  hasSelection,
   onBack,
   onToolChange,
   onUndo,
@@ -129,6 +142,8 @@ export default function ReviewToolbar({
   onModeChange,
   onColorChange,
   onLineThicknessChange,
+  onArrowStyleChange,
+  onLineStyleChange,
   onInsertEmoji,
   onZoomIn,
   onZoomOut,
@@ -136,7 +151,7 @@ export default function ReviewToolbar({
   onReset,
 }: ReviewToolbarProps) {
   const [openPanel, setOpenPanel] = React.useState<
-    "emoji" | "color" | "line" | null
+    "emoji" | "color" | "line" | "arrowStyle" | "lineStyle" | null
   >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -155,10 +170,11 @@ export default function ReviewToolbar({
     };
   }, []);
 
-  const annotationTools: ToolButtonProps[] = [
+  const navigationTools: ToolButtonProps[] = [
     { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: workspaceLocked },
-    { icon: MdPanToolAlt, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
-    { icon: FiArrowUpRight, label: labels.arrowTool, onClick: () => onToolChange("arrow"), active: activeTool === "arrow", disabled: workspaceLocked },
+    { icon: PiHandPalmBold, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
+  ];
+  const annotationTools: ToolButtonProps[] = [
     { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: workspaceLocked },
     { icon: FiCircle, label: labels.circleTool, onClick: () => onToolChange("circle"), active: activeTool === "circle", disabled: workspaceLocked },
     { icon: FiEdit3, label: labels.penTool, onClick: () => onToolChange("pen"), active: activeTool === "pen", disabled: workspaceLocked },
@@ -187,6 +203,57 @@ export default function ReviewToolbar({
       </div>
 
       <div ref={panelsRef} className="relative flex h-12 items-center gap-1 overflow-visible px-3 sm:px-4">
+        {navigationTools.map((tool) => (
+          <ToolButton key={tool.label} {...tool} />
+        ))}
+        <ReviewStrokeStyleTool
+          icon={LuMoveUpRight}
+          label={labels.arrowTool}
+          tool="arrow"
+          style={arrowStyle}
+          active={activeTool === "arrow"}
+          panelOpen={openPanel === "arrowStyle"}
+          disabled={workspaceLocked}
+          styleLabels={{
+            solid: labels.solidLine,
+            dashed: labels.dashedLine,
+            dotted: labels.dottedLine,
+          }}
+          onActivate={() => {
+            if (!(hasSelection && activeTool === "arrow")) onToolChange("arrow");
+          }}
+          onTogglePanel={() =>
+            setOpenPanel((current) => current === "arrowStyle" ? null : "arrowStyle")
+          }
+          onStyleChange={(style) => {
+            onArrowStyleChange(style);
+            setOpenPanel(null);
+          }}
+        />
+        <ReviewStrokeStyleTool
+          icon={LuMinus}
+          label={labels.lineTool}
+          tool="line"
+          style={lineStyle}
+          active={activeTool === "line"}
+          panelOpen={openPanel === "lineStyle"}
+          disabled={workspaceLocked}
+          styleLabels={{
+            solid: labels.solidLine,
+            dashed: labels.dashedLine,
+            dotted: labels.dottedLine,
+          }}
+          onActivate={() => {
+            if (!(hasSelection && activeTool === "line")) onToolChange("line");
+          }}
+          onTogglePanel={() =>
+            setOpenPanel((current) => current === "lineStyle" ? null : "lineStyle")
+          }
+          onStyleChange={(style) => {
+            onLineStyleChange(style);
+            setOpenPanel(null);
+          }}
+        />
         {annotationTools.map((tool) => (
           <ToolButton key={tool.label} {...tool} />
         ))}

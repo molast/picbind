@@ -4,6 +4,7 @@ import React from "react";
 import Konva from "konva";
 import type {
   ReviewAnnotation,
+  ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
 
@@ -12,6 +13,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2
 type ReviewAnnotationLayerProps = {
   width: number;
   height: number;
+  viewportScale: number;
   imageWidth: number;
   imageHeight: number;
   annotations: ReviewAnnotation[];
@@ -20,6 +22,8 @@ type ReviewAnnotationLayerProps = {
   actorId: string;
   defaultColor: string;
   defaultStrokeRatio: number;
+  arrowStyle: ReviewStrokeStyle;
+  lineStyle: ReviewStrokeStyle;
   onSelect(ids: string[]): void;
   onTextRequest(position: { x: number; y: number; strokeWidth: number }): void;
   onTextEditRequest(annotation: ReviewAnnotation, caretIndex: number): void;
@@ -34,6 +38,7 @@ function annotationAtPoint(
   y: number,
   strokeWidth: number,
   stroke: string,
+  strokeStyle?: ReviewStrokeStyle,
 ): ReviewAnnotation {
   return {
     id: crypto.randomUUID().replace(/-/g, ""),
@@ -45,11 +50,12 @@ function annotationAtPoint(
     scaleX: 1,
     scaleY: 1,
     rotation: 0,
-    points: tool === "arrow" || tool === "pen" ? [0, 0] : undefined,
+    points: tool === "arrow" || tool === "line" || tool === "pen" ? [0, 0] : undefined,
     text: tool === "text" ? "Text" : undefined,
     emoji: tool === "emoji" ? "👍" : undefined,
     stroke,
     strokeWidth,
+    strokeStyle,
     createdBy: actorId,
   };
 }
@@ -58,6 +64,12 @@ function createAnnotationNode(
   annotation: ReviewAnnotation,
   selectable: boolean,
 ) {
+  const dash =
+    annotation.strokeStyle === "dashed"
+      ? [annotation.strokeWidth * 4, annotation.strokeWidth * 2.5]
+      : annotation.strokeStyle === "dotted"
+        ? [Math.max(0.01, annotation.strokeWidth * 0.1), annotation.strokeWidth * 2.2]
+        : [];
   const shared: Konva.NodeConfig = {
     id: annotation.id,
     x: annotation.x,
@@ -77,6 +89,19 @@ function createAnnotationNode(
       pointerLength: annotation.strokeWidth * 4,
       pointerWidth: annotation.strokeWidth * 3,
       strokeScaleEnabled: false,
+      dash,
+      lineCap: "round",
+      lineJoin: "round",
+    });
+  }
+  if (annotation.type === "line") {
+    return new Konva.Line({
+      ...shared,
+      points: annotation.points || [0, 0, annotation.width, annotation.height],
+      stroke: annotation.stroke,
+      strokeWidth: annotation.strokeWidth,
+      strokeScaleEnabled: false,
+      dash,
       lineCap: "round",
       lineJoin: "round",
     });
@@ -216,7 +241,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       const strokeRatio =
         currentProps.activeTool === "text" ? 0.004 : currentProps.defaultStrokeRatio;
       const strokeWidth = Math.max(
-        3,
+        currentProps.activeTool === "text" ? 3 : 1,
         Math.max(currentProps.imageWidth, currentProps.imageHeight) * strokeRatio,
       );
       const next = annotationAtPoint(
@@ -226,6 +251,11 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         current.y,
         strokeWidth,
         currentProps.defaultColor,
+        currentProps.activeTool === "arrow"
+          ? currentProps.arrowStyle
+          : currentProps.activeTool === "line"
+            ? currentProps.lineStyle
+            : undefined,
       );
       if (currentProps.activeTool === "text") {
         currentProps.onSelect([]);
@@ -293,7 +323,10 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         const shapeHeight = Math.max(1, Math.abs(shapeDy) * (centered ? 2 : 1));
         next = {
           ...currentDraft,
-          points: currentDraft.type === "arrow" ? [0, 0, dx, dy] : undefined,
+          points:
+            currentDraft.type === "arrow" || currentDraft.type === "line"
+              ? [0, 0, dx, dy]
+              : undefined,
           width: shapeWidth,
           height: shapeHeight,
           x:
@@ -355,13 +388,16 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       draftNodeRef.current = null;
       layer.batchDraw();
       if (!current) return;
-      const arrowPoints = current.type === "arrow" ? current.points || [] : [];
+      const linearPoints =
+        current.type === "arrow" || current.type === "line"
+          ? current.points || []
+          : [];
       const valid =
         current.type === "pen"
           ? (current.points?.length || 0) >= 4
-          : current.type === "arrow"
-            ? arrowPoints.length >= 4 &&
-              Math.hypot(arrowPoints[2], arrowPoints[3]) > current.strokeWidth
+          : current.type === "arrow" || current.type === "line"
+            ? linearPoints.length >= 4 &&
+              Math.hypot(linearPoints[2], linearPoints[3]) > current.strokeWidth
             : current.width > current.strokeWidth &&
               current.height > current.strokeWidth;
       if (valid) propsRef.current.onCreate(current);
@@ -388,6 +424,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     draftNodeRef.current = null;
     const scaleX = props.width / Math.max(1, props.imageWidth);
     const scaleY = props.height / Math.max(1, props.imageHeight);
+    const controlScale = Math.max(scaleX, scaleY) * props.viewportScale;
     layer.scale({ x: scaleX, y: scaleY });
     selectionLayerRef.current?.scale({ x: scaleX, y: scaleY });
 
@@ -401,6 +438,12 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         }
       });
       if (annotation.type === "text") {
+        node.on("mouseenter", () => {
+          stage.content.style.cursor = "text";
+        });
+        node.on("mouseleave", () => {
+          stage.content.style.cursor = "";
+        });
         node.on("dblclick dbltap", (event) => {
           event.cancelBubble = true;
           if (propsRef.current.activeTool !== "select") return;
@@ -445,17 +488,17 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       keepRatio: false,
       rotateEnabled: true,
       rotateAnchorCursor: ROTATE_CURSOR,
-      rotateAnchorOffset: 22 / Math.max(scaleX, scaleY),
+      rotateAnchorOffset: 12 / controlScale,
       rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
       rotationSnapTolerance: 4,
       borderStroke: "#2563eb",
       anchorFill: "#ffffff",
       anchorStroke: "#2563eb",
-      anchorSize: 2 / Math.max(scaleX, scaleY),
+      anchorSize: 2 / controlScale,
       anchorStyleFunc: (anchor) => {
-        anchor.hitStrokeWidth(12 / Math.max(scaleX, scaleY));
+        anchor.hitStrokeWidth(12 / controlScale);
         if (!anchor.hasName("rotater")) return;
-        const size = 7 / Math.max(scaleX, scaleY);
+        const size = 7 / controlScale;
         anchor.width(size);
         anchor.height(size);
         anchor.offsetX(size / 2);
@@ -482,12 +525,15 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
   }, [
     props.activeTool,
     props.annotations,
+    props.arrowStyle,
     props.defaultColor,
     props.defaultStrokeRatio,
     props.height,
     props.imageHeight,
     props.imageWidth,
+    props.lineStyle,
     props.selectedIds,
+    props.viewportScale,
     props.width,
   ]);
 

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import type { RoomImage } from "../share-room-types";
 import type {
   ReviewAnnotation,
+  ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
 
@@ -12,6 +13,8 @@ const ReviewAnnotationLayer = dynamic(
   () => import("./review-annotation-layer"),
   { ssr: false },
 );
+
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
 export type ReviewViewportOffset = { x: number; y: number };
 
@@ -25,6 +28,8 @@ type ReviewCanvasProps = {
   actorId: string;
   defaultColor: string;
   defaultStrokeRatio: number;
+  arrowStyle: ReviewStrokeStyle;
+  lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
@@ -45,6 +50,8 @@ export default function ReviewCanvas({
   actorId,
   defaultColor,
   defaultStrokeRatio,
+  arrowStyle,
+  lineStyle,
   interactionDisabled,
   onScaleChange,
   onOffsetChange,
@@ -184,8 +191,9 @@ export default function ReviewCanvas({
       onWheel={(event) => {
         if (interactionDisabled) return;
         event.preventDefault();
-        const direction = event.deltaY > 0 ? -0.1 : 0.1;
-        onScaleChange(Math.min(4, Math.max(0.25, scale + direction)));
+        const normalizedDelta = Math.max(-80, Math.min(80, event.deltaY));
+        const zoomFactor = Math.exp(-normalizedDelta * WHEEL_ZOOM_SENSITIVITY);
+        onScaleChange(Math.min(4, Math.max(0.25, scale * zoomFactor)));
       }}
       onPointerDown={(event) => {
         if (
@@ -257,6 +265,7 @@ export default function ReviewCanvas({
               <ReviewAnnotationLayer
                 width={renderedSize.width}
                 height={renderedSize.height}
+                viewportScale={scale}
                 imageWidth={imageSize.width}
                 imageHeight={imageSize.height}
                 annotations={annotations}
@@ -265,6 +274,8 @@ export default function ReviewCanvas({
                 actorId={actorId}
                 defaultColor={defaultColor}
                 defaultStrokeRatio={defaultStrokeRatio}
+                arrowStyle={arrowStyle}
+                lineStyle={lineStyle}
                 onSelect={onSelect}
                 onTextRequest={({ x, y, strokeWidth }) => {
                   textCaretRef.current = 0;

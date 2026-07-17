@@ -7,6 +7,7 @@ import type {
   ReviewAnnotation,
   ReviewCollaborationMessage,
   ReviewMode,
+  ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
 import ReviewCanvas, { type ReviewViewportOffset } from "./review-canvas";
@@ -51,7 +52,9 @@ export default function ReviewWorkspace({
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
-  const [defaultStrokeRatio, setDefaultStrokeRatio] = React.useState(0.004);
+  const [defaultStrokeRatio, setDefaultStrokeRatio] = React.useState(0.0015);
+  const [arrowStyle, setArrowStyle] = React.useState<ReviewStrokeStyle>("solid");
+  const [lineStyle, setLineStyle] = React.useState<ReviewStrokeStyle>("solid");
   const [localMode, setLocalMode] = React.useState<ReviewMode>(null);
   const [remoteMode, setRemoteMode] = React.useState<ReviewMode>(null);
   const [remoteReviewActive, setRemoteReviewActive] = React.useState(false);
@@ -320,9 +323,6 @@ export default function ReviewWorkspace({
     [annotations, selectedIds],
   );
 
-  const selectedLineAnnotation = selectedAnnotations.find(
-    (annotation) => annotation.type !== "text" && annotation.type !== "emoji",
-  );
   const displayedTool =
     selectedAnnotations.length > 0 &&
     selectedAnnotations.every(
@@ -337,12 +337,6 @@ export default function ReviewWorkspace({
     )
       ? selectedAnnotations[0].stroke
       : defaultColor;
-  const displayedLineThickness =
-    selectedLineAnnotation && dimensions.width && dimensions.height
-      ? selectedLineAnnotation.strokeWidth /
-        Math.max(dimensions.width, dimensions.height)
-      : defaultStrokeRatio;
-
   const changeAnnotationColor = React.useCallback(
     (color: string) => {
       if (selectedAnnotations.length) {
@@ -358,22 +352,34 @@ export default function ReviewWorkspace({
 
   const changeLineThickness = React.useCallback(
     (ratio: number) => {
+      setDefaultStrokeRatio(ratio);
       const lineAnnotations = selectedAnnotations.filter(
         (annotation) => annotation.type !== "text" && annotation.type !== "emoji",
       );
       if (lineAnnotations.length && dimensions.width && dimensions.height) {
         const strokeWidth = Math.max(
-          3,
+          1,
           Math.max(dimensions.width, dimensions.height) * ratio,
         );
         lineAnnotations.forEach((annotation) => {
           commitUpdate(annotation, { ...annotation, strokeWidth });
         });
-        return;
       }
-      setDefaultStrokeRatio(ratio);
     },
     [commitUpdate, dimensions, selectedAnnotations],
+  );
+
+  const changeStrokeStyle = React.useCallback(
+    (type: "arrow" | "line", style: ReviewStrokeStyle) => {
+      if (type === "arrow") setArrowStyle(style);
+      else setLineStyle(style);
+      selectedAnnotations
+        .filter((annotation) => annotation.type === type)
+        .forEach((annotation) => {
+          commitUpdate(annotation, { ...annotation, strokeStyle: style });
+        });
+    },
+    [commitUpdate, selectedAnnotations],
   );
 
   const insertEmoji = React.useCallback(
@@ -482,13 +488,17 @@ export default function ReviewWorkspace({
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
         annotationColor={displayedColor}
-        lineThickness={displayedLineThickness}
-        lineThicknessDisabled={
-          selectedAnnotations.length > 0 &&
-          selectedAnnotations.every(
-            (annotation) => annotation.type === "text" || annotation.type === "emoji",
-          )
+        lineThickness={defaultStrokeRatio}
+        lineThicknessDisabled={false}
+        arrowStyle={
+          selectedAnnotations.find((annotation) => annotation.type === "arrow")
+            ?.strokeStyle ?? arrowStyle
         }
+        lineStyle={
+          selectedAnnotations.find((annotation) => annotation.type === "line")
+            ?.strokeStyle ?? lineStyle
+        }
+        hasSelection={selectedAnnotations.length > 0}
         onBack={onBack}
         onToolChange={(tool) => {
           setSelectedIds([]);
@@ -499,6 +509,8 @@ export default function ReviewWorkspace({
         onModeChange={changeMode}
         onColorChange={changeAnnotationColor}
         onLineThicknessChange={changeLineThickness}
+        onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
+        onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}
         onZoomIn={() => setScale((current) => Math.min(4, current + 0.25))}
         onZoomOut={() => setScale((current) => Math.max(0.25, current - 0.25))}
@@ -515,6 +527,8 @@ export default function ReviewWorkspace({
         actorId={actorId}
         defaultColor={defaultColor}
         defaultStrokeRatio={defaultStrokeRatio}
+        arrowStyle={arrowStyle}
+        lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
