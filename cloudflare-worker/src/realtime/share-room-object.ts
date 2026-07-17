@@ -209,6 +209,17 @@ export class ShareRoomObject {
     }
   }
 
+  private notifySockets(eventType: string) {
+    const message = JSON.stringify({ type: eventType });
+    for (const socket of this.state.getWebSockets()) {
+      try {
+        socket.send(message);
+      } catch {
+        // Socket is already closed.
+      }
+    }
+  }
+
   private async destroy(room?: ShareRoomState) {
     this.closeAllSockets("ROOM_CLOSED");
     const currentRoom =
@@ -335,6 +346,9 @@ export class ShareRoomObject {
       if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
         await this.destroy();
         return json({ error: "Room not found" }, { status: 404 });
+      }
+      if (presence.changed && !presence.ownerTimedOut) {
+        this.notifySockets("PEER_UNAVAILABLE");
       }
       if (presence.changed || r2Changed) {
         const retained = await this.persistAndSchedule(room);
@@ -599,6 +613,7 @@ export class ShareRoomObject {
       leavingMember.ready = false;
       leavingMember.leftAt = Date.now();
       this.closeSessionSockets(leavingMember.sessionId);
+      this.notifySockets("PEER_UNAVAILABLE");
       delete room.signal;
       const retained = await this.persistAndSchedule(room);
       return json({ ok: true, roomRetained: retained });
@@ -776,6 +791,7 @@ export class ShareRoomObject {
       target.lastSeen = Date.now();
       target.leftAt = Date.now();
       this.closeSessionSockets(target.sessionId, "ROOM_KICKED");
+      this.notifySockets("PEER_UNAVAILABLE");
       delete room.signal;
       await this.persistAndSchedule(room);
       return json({ ok: true });
@@ -891,6 +907,7 @@ export class ShareRoomObject {
       await this.destroy();
       return;
     }
+    if (presence.changed) this.notifySockets("PEER_UNAVAILABLE");
     await this.persistAndSchedule(room);
   }
 }

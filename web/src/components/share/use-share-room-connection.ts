@@ -1071,6 +1071,7 @@ export function useShareRoomConnection({
         setConnectionActivity("waiting");
         return;
       }
+      socketRelay?.markPeerAvailable();
 
       if (currentPeerSessionId !== peerSessionId) {
         closePeerConnection();
@@ -1151,6 +1152,7 @@ export function useShareRoomConnection({
         signal?.guestSessionId === sessionId
           ? signal.offer
           : undefined;
+      if (peerSessionId) socketRelay?.markPeerAvailable();
       if (!peerSessionId || !offer?.sdp) {
         if (!peerSessionId && currentPeerSessionId) {
           closePeerConnection();

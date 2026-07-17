@@ -31,6 +31,8 @@ export class WeakNetworkSocket {
   private reconnectTimer: number | null = null;
   private recoveryStartedAt: number | null = null;
   private pingTimer: number | null = null;
+  private peerDisconnectTimer: number | null = null;
+  private peerUnavailable = false;
   private readonly pendingPings = new Map<string, number>();
 
   constructor(private readonly options: WeakNetworkSocketOptions) {}
@@ -40,6 +42,11 @@ export class WeakNetworkSocket {
   }
 
   updateRtt(rttMs: number | null) {
+    if (rttMs !== null && Number.isFinite(rttMs)) {
+      this.peerUnavailable = false;
+      this.clearPeerDisconnectTimer();
+    }
+    if (this.peerUnavailable) return;
     if (rttMs === null || !Number.isFinite(rttMs)) {
       this.markUnavailable();
       return;
@@ -61,8 +68,14 @@ export class WeakNetworkSocket {
   }
 
   markUnavailable() {
+    if (this.peerUnavailable) return;
     this.recoveryStartedAt = null;
     if (!this.desired) this.enterWeakNetwork();
+  }
+
+  markPeerAvailable() {
+    this.peerUnavailable = false;
+    this.clearPeerDisconnectTimer();
   }
 
   send(channel: RelayChannelName, payload: string) {
@@ -85,6 +98,7 @@ export class WeakNetworkSocket {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearPeerDisconnectTimer();
     const socket = this.socket;
     this.socket = null;
     this.stopLatencyMonitor();
@@ -150,6 +164,8 @@ export class WeakNetworkSocket {
       } else if (message.type === "ROOM_KICKED") {
         this.disconnect();
         this.options.onRoomKicked();
+      } else if (message.type === "PEER_UNAVAILABLE") {
+        this.handlePeerUnavailable();
       }
     };
     socket.onopen = () => {
@@ -176,6 +192,24 @@ export class WeakNetworkSocket {
     if (this.relayReady === ready) return;
     this.relayReady = ready;
     this.options.onRelayReadyChange(ready);
+  }
+
+  private handlePeerUnavailable() {
+    this.peerUnavailable = true;
+    this.recoveryStartedAt = null;
+    this.setRelayReady(false);
+    this.clearPeerDisconnectTimer();
+    this.peerDisconnectTimer = window.setTimeout(() => {
+      this.peerDisconnectTimer = null;
+      this.disconnect();
+    }, 5000);
+  }
+
+  private clearPeerDisconnectTimer() {
+    if (this.peerDisconnectTimer !== null) {
+      window.clearTimeout(this.peerDisconnectTimer);
+      this.peerDisconnectTimer = null;
+    }
   }
 
   private startLatencyMonitor(socket: WebSocket) {
