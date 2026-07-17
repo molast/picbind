@@ -1,18 +1,7 @@
 "use client";
 
 import React from "react";
-import type Konva from "konva";
-import type { KonvaEventObject } from "konva/lib/Node";
-import {
-  Arrow,
-  Ellipse,
-  Layer,
-  Line,
-  Rect,
-  Stage,
-  Text,
-  Transformer,
-} from "react-konva";
+import Konva from "konva";
 import type {
   ReviewAnnotation,
   ReviewTool,
@@ -31,153 +20,6 @@ type ReviewAnnotationLayerProps = {
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
-
-function AnnotationNode({
-  annotation,
-  selected,
-  selectable,
-  onSelect,
-  onUpdate,
-}: {
-  annotation: ReviewAnnotation;
-  selected: boolean;
-  selectable: boolean;
-  onSelect(): void;
-  onUpdate(after: ReviewAnnotation): void;
-}) {
-  const shapeRef = React.useRef<Konva.Node | null>(null);
-  const transformerRef = React.useRef<Konva.Transformer | null>(null);
-
-  React.useEffect(() => {
-    if (!selected || !shapeRef.current || !transformerRef.current) return;
-    transformerRef.current.nodes([shapeRef.current]);
-    transformerRef.current.getLayer()?.batchDraw();
-  }, [selected]);
-
-  const shared = {
-    ref: (node: Konva.Node | null) => {
-      shapeRef.current = node;
-    },
-    x: annotation.x,
-    y: annotation.y,
-    scaleX: annotation.scaleX,
-    scaleY: annotation.scaleY,
-    rotation: annotation.rotation,
-    draggable: selectable,
-    onClick: (event: KonvaEventObject<MouseEvent>) => {
-      event.cancelBubble = true;
-      if (selectable) onSelect();
-    },
-    onTap: (event: KonvaEventObject<TouchEvent>) => {
-      event.cancelBubble = true;
-      if (selectable) onSelect();
-    },
-    onDragEnd: (event: KonvaEventObject<DragEvent>) => {
-      onUpdate({
-        ...annotation,
-        x: event.target.x(),
-        y: event.target.y(),
-      });
-    },
-    onTransformEnd: () => {
-      const node = shapeRef.current;
-      if (!node) return;
-      onUpdate({
-        ...annotation,
-        x: node.x(),
-        y: node.y(),
-        scaleX: Math.max(0.05, node.scaleX()),
-        scaleY: Math.max(0.05, node.scaleY()),
-        rotation: node.rotation(),
-      });
-    },
-  };
-
-  let shape: React.ReactNode;
-  if (annotation.type === "arrow") {
-    shape = (
-      <Arrow
-        {...shared}
-        points={annotation.points || [0, 0, annotation.width, annotation.height]}
-        stroke={annotation.stroke}
-        fill={annotation.stroke}
-        strokeWidth={annotation.strokeWidth}
-        pointerLength={annotation.strokeWidth * 4}
-        pointerWidth={annotation.strokeWidth * 3}
-        lineCap="round"
-        lineJoin="round"
-      />
-    );
-  } else if (annotation.type === "rectangle") {
-    shape = (
-      <Rect
-        {...shared}
-        width={annotation.width}
-        height={annotation.height}
-        stroke={annotation.stroke}
-        strokeWidth={annotation.strokeWidth}
-      />
-    );
-  } else if (annotation.type === "circle") {
-    shape = (
-      <Ellipse
-        {...shared}
-        x={annotation.x}
-        y={annotation.y}
-        radiusX={Math.max(1, annotation.width / 2)}
-        radiusY={Math.max(1, annotation.height / 2)}
-        stroke={annotation.stroke}
-        strokeWidth={annotation.strokeWidth}
-      />
-    );
-  } else if (annotation.type === "pen") {
-    shape = (
-      <Line
-        {...shared}
-        points={annotation.points || []}
-        stroke={annotation.stroke}
-        strokeWidth={annotation.strokeWidth}
-        lineCap="round"
-        lineJoin="round"
-        tension={0.35}
-      />
-    );
-  } else {
-    shape = (
-      <Text
-        {...shared}
-        text={annotation.type === "emoji" ? annotation.emoji : annotation.text}
-        width={Math.max(1, annotation.width)}
-        height={Math.max(1, annotation.height)}
-        fontSize={Math.max(12, annotation.height * 0.8)}
-        fill={annotation.stroke}
-        verticalAlign="middle"
-      />
-    );
-  }
-
-  return (
-    <>
-      {shape}
-      {selected ? (
-        <Transformer
-          ref={transformerRef}
-          flipEnabled={false}
-          rotateEnabled
-          borderStroke="#2563eb"
-          anchorFill="#ffffff"
-          anchorStroke="#2563eb"
-          anchorSize={8}
-          boundBoxFunc={(oldBox, newBox) =>
-            Math.abs(newBox.width) < 8 || Math.abs(newBox.height) < 8
-              ? oldBox
-              : newBox
-          }
-        />
-      ) : null}
-    </>
-  );
-}
 
 function annotationAtPoint(
   tool: Exclude<ReviewTool, "select">,
@@ -205,164 +47,309 @@ function annotationAtPoint(
   };
 }
 
-export default function ReviewAnnotationLayer({
-  width,
-  height,
-  imageWidth,
-  imageHeight,
-  annotations,
-  activeTool,
-  selectedId,
-  actorId,
-  onSelect,
-  onCreate,
-  onUpdate,
-}: ReviewAnnotationLayerProps) {
-  const [draft, setDraft] = React.useState<ReviewAnnotation | null>(null);
+function createAnnotationNode(
+  annotation: ReviewAnnotation,
+  selectable: boolean,
+) {
+  const shared: Konva.NodeConfig = {
+    id: annotation.id,
+    x: annotation.x,
+    y: annotation.y,
+    scaleX: annotation.scaleX,
+    scaleY: annotation.scaleY,
+    rotation: annotation.rotation,
+    draggable: selectable,
+  };
+  if (annotation.type === "arrow") {
+    return new Konva.Arrow({
+      ...shared,
+      points: annotation.points || [0, 0, annotation.width, annotation.height],
+      stroke: annotation.stroke,
+      fill: annotation.stroke,
+      strokeWidth: annotation.strokeWidth,
+      pointerLength: annotation.strokeWidth * 4,
+      pointerWidth: annotation.strokeWidth * 3,
+      lineCap: "round",
+      lineJoin: "round",
+    });
+  }
+  if (annotation.type === "rectangle") {
+    return new Konva.Rect({
+      ...shared,
+      width: annotation.width,
+      height: annotation.height,
+      stroke: annotation.stroke,
+      strokeWidth: annotation.strokeWidth,
+    });
+  }
+  if (annotation.type === "circle") {
+    return new Konva.Ellipse({
+      ...shared,
+      radiusX: Math.max(1, annotation.width / 2),
+      radiusY: Math.max(1, annotation.height / 2),
+      stroke: annotation.stroke,
+      strokeWidth: annotation.strokeWidth,
+    });
+  }
+  if (annotation.type === "pen") {
+    return new Konva.Line({
+      ...shared,
+      points: annotation.points || [],
+      stroke: annotation.stroke,
+      strokeWidth: annotation.strokeWidth,
+      lineCap: "round",
+      lineJoin: "round",
+      tension: 0.35,
+    });
+  }
+  return new Konva.Text({
+    ...shared,
+    text: annotation.type === "emoji" ? annotation.emoji : annotation.text,
+    width: Math.max(1, annotation.width),
+    height: Math.max(1, annotation.height),
+    fontSize: Math.max(12, annotation.height * 0.8),
+    fill: annotation.stroke,
+    verticalAlign: "middle",
+  });
+}
+
+export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps) {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const stageRef = React.useRef<Konva.Stage | null>(null);
+  const layerRef = React.useRef<Konva.Layer | null>(null);
+  const transformerRef = React.useRef<Konva.Transformer | null>(null);
   const draftRef = React.useRef<ReviewAnnotation | null>(null);
+  const draftNodeRef = React.useRef<Konva.Node | null>(null);
   const drawOriginRef = React.useRef<{ x: number; y: number } | null>(null);
-  const scaleX = width / Math.max(1, imageWidth);
-  const scaleY = height / Math.max(1, imageHeight);
-  const point = (stage: Konva.Stage) => {
+  const propsRef = React.useRef(props);
+  propsRef.current = props;
+
+  const pointInImage = React.useCallback((stage: Konva.Stage) => {
+    const current = propsRef.current;
     const pointer = stage.getPointerPosition() || { x: 0, y: 0 };
     return {
-      x: Math.max(0, Math.min(imageWidth, pointer.x / scaleX)),
-      y: Math.max(0, Math.min(imageHeight, pointer.y / scaleY)),
+      x: Math.max(
+        0,
+        Math.min(
+          current.imageWidth,
+          pointer.x / (current.width / Math.max(1, current.imageWidth)),
+        ),
+      ),
+      y: Math.max(
+        0,
+        Math.min(
+          current.imageHeight,
+          pointer.y / (current.height / Math.max(1, current.imageHeight)),
+        ),
+      ),
     };
-  };
+  }, []);
 
-  const start = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    if (activeTool === "select") {
-      if (event.target === event.target.getStage()) onSelect(null);
-      return;
-    }
-    const stage = event.target.getStage();
-    if (!stage) return;
-    const current = point(stage);
-    const strokeWidth = Math.max(3, Math.max(imageWidth, imageHeight) * 0.004);
-    const next = annotationAtPoint(
-      activeTool,
-      actorId,
-      current.x,
-      current.y,
-      strokeWidth,
-    );
-    if (activeTool === "text") {
-      const value = window.prompt("Text", "");
-      if (!value?.trim()) return;
-      onCreate({ ...next, text: value.trim(), width: strokeWidth * 35 });
-      return;
-    }
-    if (activeTool === "emoji") {
-      onCreate(next);
-      return;
-    }
-    draftRef.current = next;
-    drawOriginRef.current = current;
-    setDraft(next);
-  };
+  const drawDraft = React.useCallback((annotation: ReviewAnnotation) => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    draftNodeRef.current?.destroy();
+    const node = createAnnotationNode(annotation, false);
+    draftNodeRef.current = node;
+    layer.add(node);
+    layer.batchDraw();
+  }, []);
 
-  const move = (event: KonvaEventObject<MouseEvent | TouchEvent>) => {
-    const currentDraft = draftRef.current;
-    const origin = drawOriginRef.current;
-    const stage = event.target.getStage();
-    if (!currentDraft || !origin || !stage) return;
-    const current = point(stage);
-    let next: ReviewAnnotation;
-    if (currentDraft.type === "pen") {
-      const points = currentDraft.points || [0, 0];
-      const lastX = points[points.length - 2] + currentDraft.x;
-      const lastY = points[points.length - 1] + currentDraft.y;
-      if (Math.hypot(current.x - lastX, current.y - lastY) < currentDraft.strokeWidth) {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const stage = new Konva.Stage({
+      container,
+      width: propsRef.current.width,
+      height: propsRef.current.height,
+    });
+    const layer = new Konva.Layer();
+    stage.add(layer);
+    stageRef.current = stage;
+    layerRef.current = layer;
+
+    const start = () => {
+      const currentProps = propsRef.current;
+      if (currentProps.activeTool === "select") {
+        if (stage.getIntersection(stage.getPointerPosition() || { x: 0, y: 0 }) === null) {
+          currentProps.onSelect(null);
+        }
         return;
       }
-      next = {
-        ...currentDraft,
-        points: [...points, current.x - currentDraft.x, current.y - currentDraft.y].slice(
-          0,
-          512,
-        ),
-        width: Math.max(currentDraft.width, Math.abs(current.x - currentDraft.x)),
-        height: Math.max(currentDraft.height, Math.abs(current.y - currentDraft.y)),
-      };
-    } else {
-      const dx = current.x - origin.x;
-      const dy = current.y - origin.y;
-      next = {
-        ...currentDraft,
-        points: currentDraft.type === "arrow" ? [0, 0, dx, dy] : undefined,
-        width: Math.max(1, Math.abs(dx)),
-        height: Math.max(1, Math.abs(dy)),
-        x:
-          currentDraft.type === "circle"
-            ? (origin.x + current.x) / 2
-            : currentDraft.type === "rectangle"
-              ? Math.min(origin.x, current.x)
-              : origin.x,
-        y:
-          currentDraft.type === "circle"
-            ? (origin.y + current.y) / 2
-            : currentDraft.type === "rectangle"
-              ? Math.min(origin.y, current.y)
-              : origin.y,
-      };
-    }
-    draftRef.current = next;
-    setDraft(next);
-  };
+      const current = pointInImage(stage);
+      const strokeWidth = Math.max(
+        3,
+        Math.max(currentProps.imageWidth, currentProps.imageHeight) * 0.004,
+      );
+      const next = annotationAtPoint(
+        currentProps.activeTool,
+        currentProps.actorId,
+        current.x,
+        current.y,
+        strokeWidth,
+      );
+      if (currentProps.activeTool === "text") {
+        const value = window.prompt("Text", "");
+        if (value?.trim()) {
+          currentProps.onCreate({
+            ...next,
+            text: value.trim(),
+            width: strokeWidth * 35,
+          });
+        }
+        return;
+      }
+      if (currentProps.activeTool === "emoji") {
+        currentProps.onCreate(next);
+        return;
+      }
+      draftRef.current = next;
+      drawOriginRef.current = current;
+      drawDraft(next);
+    };
 
-  const finish = () => {
-    const current = draftRef.current;
-    draftRef.current = null;
-    drawOriginRef.current = null;
-    setDraft(null);
-    if (!current) return;
-    const arrowPoints = current.type === "arrow" ? current.points || [] : [];
-    const valid =
-      current.type === "pen"
-        ? (current.points?.length || 0) >= 4
-        : current.type === "arrow"
-          ? arrowPoints.length >= 4 &&
-            Math.hypot(arrowPoints[2], arrowPoints[3]) > current.strokeWidth
-          : current.width > current.strokeWidth &&
-            current.height > current.strokeWidth;
-    if (valid) {
-      onCreate(current);
-    }
-  };
+    const move = () => {
+      const currentDraft = draftRef.current;
+      const origin = drawOriginRef.current;
+      if (!currentDraft || !origin) return;
+      const current = pointInImage(stage);
+      let next: ReviewAnnotation;
+      if (currentDraft.type === "pen") {
+        const points = currentDraft.points || [0, 0];
+        const lastX = points[points.length - 2] + currentDraft.x;
+        const lastY = points[points.length - 1] + currentDraft.y;
+        if (Math.hypot(current.x - lastX, current.y - lastY) < currentDraft.strokeWidth) {
+          return;
+        }
+        next = {
+          ...currentDraft,
+          points: [...points, current.x - origin.x, current.y - origin.y].slice(0, 512),
+          width: Math.max(currentDraft.width, Math.abs(current.x - origin.x)),
+          height: Math.max(currentDraft.height, Math.abs(current.y - origin.y)),
+        };
+      } else {
+        const dx = current.x - origin.x;
+        const dy = current.y - origin.y;
+        next = {
+          ...currentDraft,
+          points: currentDraft.type === "arrow" ? [0, 0, dx, dy] : undefined,
+          width: Math.max(1, Math.abs(dx)),
+          height: Math.max(1, Math.abs(dy)),
+          x:
+            currentDraft.type === "circle"
+              ? (origin.x + current.x) / 2
+              : currentDraft.type === "rectangle"
+                ? Math.min(origin.x, current.x)
+                : origin.x,
+          y:
+            currentDraft.type === "circle"
+              ? (origin.y + current.y) / 2
+              : currentDraft.type === "rectangle"
+                ? Math.min(origin.y, current.y)
+                : origin.y,
+        };
+      }
+      draftRef.current = next;
+      drawDraft(next);
+    };
 
-  return (
-    <Stage
-      width={width}
-      height={height}
-      onMouseDown={start}
-      onTouchStart={start}
-      onMouseMove={move}
-      onTouchMove={move}
-      onMouseUp={finish}
-      onTouchEnd={finish}
-    >
-      <Layer scaleX={scaleX} scaleY={scaleY}>
-        {annotations.map((annotation) => (
-          <AnnotationNode
-            key={annotation.id}
-            annotation={annotation}
-            selected={selectedId === annotation.id}
-            selectable={activeTool === "select"}
-            onSelect={() => onSelect(annotation.id)}
-            onUpdate={(after) => onUpdate(annotation, after)}
-          />
-        ))}
-        {draft ? (
-          <AnnotationNode
-            annotation={draft}
-            selected={false}
-            selectable={false}
-            onSelect={() => undefined}
-            onUpdate={() => undefined}
-          />
-        ) : null}
-      </Layer>
-    </Stage>
-  );
+    const finish = () => {
+      const current = draftRef.current;
+      draftRef.current = null;
+      drawOriginRef.current = null;
+      draftNodeRef.current?.destroy();
+      draftNodeRef.current = null;
+      layer.batchDraw();
+      if (!current) return;
+      const arrowPoints = current.type === "arrow" ? current.points || [] : [];
+      const valid =
+        current.type === "pen"
+          ? (current.points?.length || 0) >= 4
+          : current.type === "arrow"
+            ? arrowPoints.length >= 4 &&
+              Math.hypot(arrowPoints[2], arrowPoints[3]) > current.strokeWidth
+            : current.width > current.strokeWidth &&
+              current.height > current.strokeWidth;
+      if (valid) propsRef.current.onCreate(current);
+    };
+
+    stage.on("mousedown touchstart", start);
+    stage.on("mousemove touchmove", move);
+    stage.on("mouseup touchend", finish);
+    return () => {
+      stage.destroy();
+      stageRef.current = null;
+      layerRef.current = null;
+      transformerRef.current = null;
+    };
+  }, [drawDraft, pointInImage]);
+
+  React.useEffect(() => {
+    const stage = stageRef.current;
+    const layer = layerRef.current;
+    if (!stage || !layer) return;
+    stage.size({ width: props.width, height: props.height });
+    layer.destroyChildren();
+    draftNodeRef.current = null;
+    const scaleX = props.width / Math.max(1, props.imageWidth);
+    const scaleY = props.height / Math.max(1, props.imageHeight);
+    layer.scale({ x: scaleX, y: scaleY });
+
+    let selectedNode: Konva.Node | null = null;
+    for (const annotation of props.annotations) {
+      const node = createAnnotationNode(annotation, props.activeTool === "select");
+      node.on("click tap", (event) => {
+        event.cancelBubble = true;
+        if (propsRef.current.activeTool === "select") {
+          propsRef.current.onSelect(annotation.id);
+        }
+      });
+      node.on("dragend", () => {
+        propsRef.current.onUpdate(annotation, {
+          ...annotation,
+          x: node.x(),
+          y: node.y(),
+        });
+      });
+      node.on("transformend", () => {
+        propsRef.current.onUpdate(annotation, {
+          ...annotation,
+          x: node.x(),
+          y: node.y(),
+          scaleX: Math.max(0.05, node.scaleX()),
+          scaleY: Math.max(0.05, node.scaleY()),
+          rotation: node.rotation(),
+        });
+      });
+      layer.add(node);
+      if (annotation.id === props.selectedId) selectedNode = node;
+    }
+
+    const transformer = new Konva.Transformer({
+      flipEnabled: false,
+      rotateEnabled: true,
+      borderStroke: "#2563eb",
+      anchorFill: "#ffffff",
+      anchorStroke: "#2563eb",
+      anchorSize: 8 / Math.max(scaleX, scaleY),
+      boundBoxFunc: (oldBox, newBox) =>
+        Math.abs(newBox.width) < 8 || Math.abs(newBox.height) < 8
+          ? oldBox
+          : newBox,
+    });
+    transformerRef.current = transformer;
+    layer.add(transformer);
+    if (selectedNode) transformer.nodes([selectedNode]);
+    layer.draw();
+  }, [
+    props.activeTool,
+    props.annotations,
+    props.height,
+    props.imageHeight,
+    props.imageWidth,
+    props.selectedId,
+    props.width,
+  ]);
+
+  return <div ref={containerRef} className="h-full w-full" />;
 }

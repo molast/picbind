@@ -143,7 +143,9 @@ export default function GalleryImageCard({
             aria-hidden="true"
           />
         ) : null}
-        {image.direction === "received" && image.thumbnailUrl ? (
+        {image.direction === "received" &&
+        image.placeholderOnly &&
+        image.thumbnailUrl ? (
           <button
             type="button"
             className="absolute bottom-2 left-2 z-10 flex h-8 w-8 touch-none items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf]"
