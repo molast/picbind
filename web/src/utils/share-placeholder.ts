@@ -15,49 +15,70 @@ export type ImagePlaceholderMetadata = {
 export async function generateSharePlaceholder(
   image: Blob,
 ): Promise<ImagePlaceholderMetadata> {
+  const mod = await initWasm();
+  if (!mod || typeof mod.generate_share_placeholder !== "function") {
+    throw new Error("WASM module does not expose generate_share_placeholder");
+  }
   try {
-    const mod = await initWasm();
-    if (!mod || typeof mod.generate_share_placeholder !== "function") {
-      throw new Error("WASM module does not expose generate_share_placeholder");
-    }
     const input = new Uint8Array(await image.arrayBuffer());
-    const value = mod.generate_share_placeholder(input) as Partial<ImagePlaceholderMetadata>;
-    if (!Number.isInteger(value.width) || !Number.isInteger(value.height) || Number(value.width) <= 0 || Number(value.height) <= 0 || typeof value.dominantColor !== "string" || !/^#[0-9a-f]{6}$/i.test(value.dominantColor) || typeof value.blurHash !== "string") {
-      throw new Error("WASM returned invalid placeholder metadata");
-    }
-    return value as ImagePlaceholderMetadata;
+    return validatePlaceholderMetadata(mod.generate_share_placeholder(input));
   } catch (error) {
     if (image.type !== "image/avif") throw error;
-    return generateAvifPlaceholder(image);
+    return generateAvifPlaceholder(mod, image);
   }
 }
 
-function encode83(value: number, length: number) {
-  let encoded = "";
-  for (let index = length - 1; index >= 0; index -= 1) {
-    encoded += BASE83[Math.floor(value / 83 ** index) % 83];
+function validatePlaceholderMetadata(value: unknown): ImagePlaceholderMetadata {
+  const metadata = value as Partial<ImagePlaceholderMetadata> | null;
+  if (
+    !metadata ||
+    !Number.isInteger(metadata.width) ||
+    !Number.isInteger(metadata.height) ||
+    Number(metadata.width) <= 0 ||
+    Number(metadata.height) <= 0 ||
+    typeof metadata.dominantColor !== "string" ||
+    !/^#[0-9a-f]{6}$/i.test(metadata.dominantColor) ||
+    typeof metadata.blurHash !== "string" ||
+    metadata.blurHash.length < 6
+  ) {
+    throw new Error("WASM returned invalid placeholder metadata");
   }
-  return encoded;
+  return metadata as ImagePlaceholderMetadata;
 }
 
-async function generateAvifPlaceholder(image: Blob): Promise<ImagePlaceholderMetadata> {
+async function generateAvifPlaceholder(
+  mod: Record<string, unknown>,
+  image: Blob,
+): Promise<ImagePlaceholderMetadata> {
+  const generateFromRgba = mod.generate_share_placeholder_from_rgba;
+  if (typeof generateFromRgba !== "function") {
+    throw new Error(
+      "WASM module does not expose generate_share_placeholder_from_rgba",
+    );
+  }
   const bitmap = await createImageBitmap(image);
   try {
+    const scale = Math.min(1, 32 / Math.max(bitmap.width, bitmap.height));
+    const sampleWidth = Math.max(1, Math.round(bitmap.width * scale));
+    const sampleHeight = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = 1;
-    canvas.height = 1;
+    canvas.width = sampleWidth;
+    canvas.height = sampleHeight;
     const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) throw new Error("Canvas is unavailable for AVIF placeholder generation");
-    context.drawImage(bitmap, 0, 0, 1, 1);
-    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-    const dominantColor = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
-    // A 1×1 BlurHash is a valid compact solid-color fallback (6 characters).
-    return {
-      width: bitmap.width,
-      height: bitmap.height,
-      dominantColor,
-      blurHash: `00${encode83((red << 16) + (green << 8) + blue, 4)}`,
-    };
+    if (!context) {
+      throw new Error("Canvas is unavailable for AVIF decoding");
+    }
+    context.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight);
+    const rgba = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    return validatePlaceholderMetadata(
+      generateFromRgba(
+        bitmap.width,
+        bitmap.height,
+        sampleWidth,
+        sampleHeight,
+        rgba,
+      ),
+    );
   } finally {
     bitmap.close();
   }

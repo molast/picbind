@@ -63,6 +63,19 @@ fn sampled_rgb(image: &DynamicImage) -> (Vec<[f64; 3]>, u32, u32) {
     (pixels, width, height)
 }
 
+fn rgba_to_linear_pixels(rgba: &[u8]) -> Vec<[f64; 3]> {
+    rgba.chunks_exact(4)
+        .map(|pixel| {
+            let alpha = f64::from(pixel[3]) / 255.0;
+            [
+                srgb_to_linear(pixel[0]) * alpha + (1.0 - alpha),
+                srgb_to_linear(pixel[1]) * alpha + (1.0 - alpha),
+                srgb_to_linear(pixel[2]) * alpha + (1.0 - alpha),
+            ]
+        })
+        .collect()
+}
+
 fn blur_hash(pixels: &[[f64; 3]], width: u32, height: u32) -> String {
     let mut factors = Vec::with_capacity(COMPONENTS_X * COMPONENTS_Y);
     let pixel_count = f64::from(width * height);
@@ -123,9 +136,13 @@ fn blur_hash(pixels: &[[f64; 3]], width: u32, height: u32) -> String {
     output
 }
 
-pub fn generate(image: &DynamicImage) -> SharePlaceholder {
-    let (width, height) = image.dimensions();
-    let (pixels, sample_width, sample_height) = sampled_rgb(image);
+fn generate_from_linear_pixels(
+    width: u32,
+    height: u32,
+    pixels: Vec<[f64; 3]>,
+    sample_width: u32,
+    sample_height: u32,
+) -> SharePlaceholder {
     let average = pixels.iter().fold([0.0; 3], |mut sum, pixel| {
         for channel in 0..3 {
             sum[channel] += pixel[channel];
@@ -148,6 +165,40 @@ pub fn generate(image: &DynamicImage) -> SharePlaceholder {
     }
 }
 
+pub fn generate(image: &DynamicImage) -> SharePlaceholder {
+    let (width, height) = image.dimensions();
+    let (pixels, sample_width, sample_height) = sampled_rgb(image);
+    generate_from_linear_pixels(width, height, pixels, sample_width, sample_height)
+}
+
+pub fn generate_from_rgba_sample(
+    width: u32,
+    height: u32,
+    sample_width: u32,
+    sample_height: u32,
+    rgba: &[u8],
+) -> Result<SharePlaceholder, String> {
+    if width == 0 || height == 0 || sample_width == 0 || sample_height == 0 {
+        return Err("Placeholder dimensions must be greater than zero".to_string());
+    }
+    let expected_length = usize::try_from(sample_width)
+        .ok()
+        .and_then(|value| value.checked_mul(sample_height as usize))
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| "Placeholder sample dimensions are too large".to_string())?;
+    if rgba.len() != expected_length {
+        return Err("Placeholder RGBA sample length is invalid".to_string());
+    }
+    let pixels = rgba_to_linear_pixels(rgba);
+    Ok(generate_from_linear_pixels(
+        width,
+        height,
+        pixels,
+        sample_width,
+        sample_height,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +209,15 @@ mod tests {
         let placeholder = generate(&image);
         assert_eq!((placeholder.width, placeholder.height), (80, 40));
         assert_eq!(placeholder.dominant_color, "#000000");
+        assert_eq!(placeholder.blur_hash.len(), 28);
+    }
+
+    #[test]
+    fn generates_placeholder_from_rgba_sample() {
+        let rgba = vec![255, 0, 0, 255, 255, 0, 0, 255];
+        let placeholder = generate_from_rgba_sample(200, 100, 2, 1, &rgba).unwrap();
+        assert_eq!((placeholder.width, placeholder.height), (200, 100));
+        assert_eq!(placeholder.dominant_color, "#ff0000");
         assert_eq!(placeholder.blur_hash.len(), 28);
     }
 }

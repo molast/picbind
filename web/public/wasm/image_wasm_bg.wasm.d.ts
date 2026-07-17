@@ -14,6 +14,7 @@ export const compressionresult_mime: (a: number) => [number, number];
 export const create_zip_from_items: (a: any) => [number, number, number, number];
 export const generate_favicon: (a: number, b: number) => [number, number, number];
 export const generate_share_placeholder: (a: number, b: number) => [number, number, number];
+export const generate_share_placeholder_from_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
 export const lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
 export const lodepng_add_text: (a: number, b: number, c: number) => number;

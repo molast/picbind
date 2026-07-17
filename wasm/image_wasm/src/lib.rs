@@ -177,7 +177,12 @@ pub fn generate_share_placeholder(input: &[u8]) -> Result<js_sys::Object, JsValu
     }
     let decoded = image::load_from_memory(input)
         .map_err(|err| JsValue::from_str(&format!("Placeholder decode failed: {err}")))?;
-    let placeholder = share_placeholder::generate(&decoded);
+    placeholder_to_js(share_placeholder::generate(&decoded))
+}
+
+fn placeholder_to_js(
+    placeholder: share_placeholder::SharePlaceholder,
+) -> Result<js_sys::Object, JsValue> {
     let output = js_sys::Object::new();
     Reflect::set(
         &output,
@@ -200,6 +205,25 @@ pub fn generate_share_placeholder(input: &[u8]) -> Result<js_sys::Object, JsValu
         &JsValue::from_str(&placeholder.blur_hash),
     )?;
     Ok(output)
+}
+
+#[wasm_bindgen]
+pub fn generate_share_placeholder_from_rgba(
+    width: u32,
+    height: u32,
+    sample_width: u32,
+    sample_height: u32,
+    rgba: &[u8],
+) -> Result<js_sys::Object, JsValue> {
+    let placeholder = share_placeholder::generate_from_rgba_sample(
+        width,
+        height,
+        sample_width,
+        sample_height,
+        rgba,
+    )
+    .map_err(|message| JsValue::from_str(&message))?;
+    placeholder_to_js(placeholder)
 }
 
 fn generate_ico(base: &DynamicImage) -> Result<Vec<u8>, JsValue> {
