@@ -25,6 +25,7 @@ export type CachedRoomImage = {
     | "cancelled"
     | "failed";
   progress?: number;
+  transferMode?: "p2p" | "r2";
   previewOnly?: boolean;
   placeholderOnly?: boolean;
   placeholder?: ImagePlaceholderMetadata;

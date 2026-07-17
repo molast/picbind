@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  FiCloud,
   FiDownload,
   FiEye,
   FiMaximize2,
+  FiLink,
   FiSend,
   FiTrash2,
   FiXCircle,
@@ -153,7 +155,31 @@ export default function GalleryImageCard({
           {middleEllipsisFileName(image.name)}
         </div>
         <div className="mt-1 flex min-h-6 items-center justify-between gap-2 text-xs text-slate-500">
-          <span>{formatBytes(image.size)}</span>
+          <span className="flex items-center gap-1.5">
+            <span>{formatBytes(image.size)}</span>
+            {image.transferMode ? (
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded ${
+                  image.transferMode === "r2"
+                    ? "bg-amber-50 text-amber-700"
+                    : "bg-emerald-50 text-emerald-700"
+                }`}
+                title={
+                  image.transferMode === "r2" ? labels.r2Mode : labels.p2pMode
+                }
+                role="img"
+                aria-label={
+                  image.transferMode === "r2" ? labels.r2Mode : labels.p2pMode
+                }
+              >
+                {image.transferMode === "r2" ? (
+                  <FiCloud className="h-3 w-3" aria-hidden="true" />
+                ) : (
+                  <FiLink className="h-3 w-3" aria-hidden="true" />
+                )}
+              </span>
+            ) : null}
+          </span>
           {isLocalImage && status === "sending" ? (
             <button
               type="button"

@@ -1,6 +1,7 @@
 import type { CachedRoomImage } from "@/utils/realtime-image-store";
 
 export type ConnectionState = "waiting" | "connecting" | "connected" | "error";
+export type MessageTransportMode = "p2p" | "relay";
 
 export type ActivityItem = {
   id: string;

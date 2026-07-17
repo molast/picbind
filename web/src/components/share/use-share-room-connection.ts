@@ -6,6 +6,7 @@ import type { ShareRoomLabels } from "./share-room-labels";
 import type {
   ActivityItem,
   ConnectionState,
+  MessageTransportMode,
   RoomDockNotification,
   RoomImage,
 } from "./share-room-types";
@@ -110,6 +111,7 @@ type UseShareRoomConnectionOptions = {
   onIncomingNotification?(notification: RoomDockNotification): void;
   onForcedNavigation(): void;
   onWeakNetworkChange(weakNetwork: boolean): void;
+  onMessageTransportChange(mode: MessageTransportMode): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -139,6 +141,7 @@ export function useShareRoomConnection({
   onIncomingNotification,
   onForcedNavigation,
   onWeakNetworkChange,
+  onMessageTransportChange,
   setActivities,
   setConnection,
   setConnectionError,
@@ -291,7 +294,7 @@ export function useShareRoomConnection({
         notifyIncomingImage(meta.id, meta.name);
         updateRoomImage(
           meta.id,
-          { transferStatus: "receiving", progress: 0 },
+          { transferStatus: "receiving", progress: 0, transferMode: "p2p" },
           true,
         );
         upsertActivity({
@@ -334,6 +337,7 @@ export function useShareRoomConnection({
           previewOnly: false,
           placeholderOnly: false,
           placeholder: current?.placeholder,
+          transferMode: current?.transferMode || "p2p",
           createdAt: current?.createdAt || Date.now(),
         };
         try {
@@ -431,7 +435,7 @@ export function useShareRoomConnection({
         if (!sessionId || disposed) return;
         updateRoomImage(
           meta.id,
-          { transferStatus: "receiving", progress: 0 },
+          { transferStatus: "receiving", progress: 0, transferMode: "r2" },
           true,
         );
         upsertActivity({
@@ -481,6 +485,7 @@ export function useShareRoomConnection({
             previewOnly: false,
             placeholderOnly: false,
             placeholder: current?.placeholder,
+            transferMode: "r2",
             createdAt: current?.createdAt || Date.now(),
           };
           await storeRoomImage(image);
@@ -1145,6 +1150,7 @@ export function useShareRoomConnection({
           onWeakNetworkChange,
           onRelayReadyChange(ready) {
             if (disposed) return;
+            onMessageTransportChange(ready ? "relay" : "p2p");
             if (ready) {
               stopHandshake();
               handshakeAcknowledged = true;
@@ -1281,6 +1287,7 @@ export function useShareRoomConnection({
       adaptiveInstruction = null;
       controlChannelRef.current = null;
       instructionChannelRef.current = null;
+      onMessageTransportChange("p2p");
       sessionIdRef.current = null;
     };
   }, [
@@ -1296,6 +1303,7 @@ export function useShareRoomConnection({
     onIncomingNotification,
     onForcedNavigation,
     onWeakNetworkChange,
+    onMessageTransportChange,
     removeRoomImage,
     roomId,
     sessionIdRef,

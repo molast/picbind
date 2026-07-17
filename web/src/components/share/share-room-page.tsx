@@ -21,6 +21,7 @@ import type {
   ActivityItem,
   ConnectionState,
   FloatingEmoji,
+  MessageTransportMode,
   RoomDockNotification,
   RoomImage,
 } from "./share-room-types";
@@ -137,6 +138,8 @@ export default function ShareRoomPage({
   const [networkLatencyMs, setNetworkLatencyMs] = React.useState<number | null>(
     null,
   );
+  const [messageTransportMode, setMessageTransportMode] =
+    React.useState<MessageTransportMode>("p2p");
   const [maxImageTransferSize, setMaxImageTransferSize] = React.useState<
     number | null
   >(null);
@@ -565,6 +568,7 @@ export default function ShareRoomPage({
     onIncomingNotification: handleIncomingNotification,
     onForcedNavigation: handleForcedNavigation,
     onWeakNetworkChange: handleWeakNetworkChange,
+    onMessageTransportChange: setMessageTransportMode,
     setActivities,
     setConnection,
     setConnectionError,
@@ -754,6 +758,7 @@ export default function ShareRoomPage({
         networkLatencyMs,
         weakNetworkTransferRef.current,
       );
+      updateRoomImage(image.id, { transferMode: preparation.mode }, true);
       abortController.signal.throwIfAborted();
       let meta: ReturnType<typeof createImageTransferMeta>;
       if (preparation.mode === "r2") {
@@ -1078,6 +1083,7 @@ export default function ShareRoomPage({
           connection={connection}
           connectionError={connectionError}
           networkLatencyMs={networkLatencyMs}
+          messageTransportMode={messageTransportMode}
           roomId={roomId}
           role={role}
           members={members}

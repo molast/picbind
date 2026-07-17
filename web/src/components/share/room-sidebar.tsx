@@ -4,8 +4,10 @@ import type React from "react";
 import {
   FiAlertCircle,
   FiCheckCircle,
+  FiCloud,
   FiDownload,
   FiLoader,
+  FiLink,
   FiMessageCircle,
   FiSend,
   FiUploadCloud,
@@ -20,7 +22,11 @@ import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
 import type { RoomMemberPresence, RoomRole } from "@/utils/realtime-room";
 import { formatTime, middleEllipsisFileName } from "./share-room-formatters";
 import type { ShareRoomLabels } from "./share-room-labels";
-import type { ActivityItem, ConnectionState } from "./share-room-types";
+import type {
+  ActivityItem,
+  ConnectionState,
+  MessageTransportMode,
+} from "./share-room-types";
 
 type RoomSidebarProps = {
   activityListRef: React.RefObject<HTMLDivElement>;
@@ -28,6 +34,7 @@ type RoomSidebarProps = {
   connection: ConnectionState;
   connectionError: string | null;
   networkLatencyMs: number | null;
+  messageTransportMode: MessageTransportMode;
   roomId: string | null;
   role: RoomRole | null;
   members: RoomMemberPresence[];
@@ -49,6 +56,7 @@ export default function RoomSidebar({
   connection,
   connectionError,
   networkLatencyMs,
+  messageTransportMode,
   roomId,
   role,
   members,
@@ -78,8 +86,34 @@ export default function RoomSidebar({
                   : labels.waiting}
           </span>
         </div>
-        <div className="mt-2 text-[11px] font-medium text-slate-500">
-          {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
+        <div className="mt-2 flex items-center gap-2 text-[11px] font-medium text-slate-500">
+          <span>
+            {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
+          </span>
+          <span
+            className={`inline-flex h-6 w-6 items-center justify-center rounded ${
+              messageTransportMode === "relay"
+                ? "bg-amber-50 text-amber-700"
+                : "bg-emerald-50 text-emerald-700"
+            }`}
+            title={
+              messageTransportMode === "relay"
+                ? labels.relayMode
+                : labels.p2pMode
+            }
+            role="img"
+            aria-label={
+              messageTransportMode === "relay"
+                ? labels.relayMode
+                : labels.p2pMode
+            }
+          >
+            {messageTransportMode === "relay" ? (
+              <FiCloud className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <FiLink className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </span>
         </div>
         {connectionError ? (
           <p className="mt-2 text-xs text-red-600">{connectionError}</p>
