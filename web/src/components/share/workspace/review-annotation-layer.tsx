@@ -483,6 +483,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     selectionLayerRef.current?.scale({ x: scaleX, y: scaleY });
 
     const selectedNodes: Konva.Node[] = [];
+    let selectedContainsEmoji = false;
     for (const annotation of props.annotations) {
       const node = createAnnotationNode(annotation, props.activeTool === "select");
       node.on("click tap", (event) => {
@@ -534,12 +535,28 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         });
       });
       layer.add(node);
-      if (props.selectedIds.includes(annotation.id)) selectedNodes.push(node);
+      if (props.selectedIds.includes(annotation.id)) {
+        selectedNodes.push(node);
+        if (annotation.type === "emoji") selectedContainsEmoji = true;
+      }
     }
 
     const transformer = new Konva.Transformer({
       flipEnabled: false,
-      keepRatio: false,
+      keepRatio: selectedContainsEmoji,
+      shiftBehavior: selectedContainsEmoji ? "none" : "default",
+      enabledAnchors: selectedContainsEmoji
+        ? ["top-left", "top-right", "bottom-left", "bottom-right"]
+        : [
+            "top-left",
+            "top-center",
+            "top-right",
+            "middle-right",
+            "bottom-right",
+            "bottom-center",
+            "bottom-left",
+            "middle-left",
+          ],
       shouldOverdrawWholeArea: selectedNodes.length > 1,
       rotateEnabled: true,
       rotateAnchorCursor: ROTATE_CURSOR,
