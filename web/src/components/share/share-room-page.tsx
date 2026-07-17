@@ -3,6 +3,7 @@
 import React from "react";
 import CreatedRoomDialog from "./created-room-dialog";
 import FloatingEmojiLayer from "./floating-emoji-layer";
+import ExitRoomDialog from "./exit-room-dialog";
 import GalleryWorkspace from "./workspace/gallery-workspace";
 import { canReviewRoomImage } from "./workspace/gallery-image-card";
 import ReviewWorkspace from "./workspace/review-workspace";
@@ -135,6 +136,7 @@ export default function ShareRoomPage() {
   const [textMessage, setTextMessage] = React.useState("");
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
+  const [isExitDialogOpen, setIsExitDialogOpen] = React.useState(false);
   const [isPageStateLoaded, setIsPageStateLoaded] = React.useState(false);
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
@@ -598,7 +600,7 @@ export default function ShareRoomPage() {
   const goCompressImages = async (files: File[] = []) => {
     if (files.length) await queueFilesForCompression(files);
     if (role === "owner") await handleTemporaryLeave();
-    else await handleExitRoom();
+    else requestExitRoom();
   };
 
   const handleSendImage = async (image: RoomImage) => {
@@ -812,10 +814,14 @@ export default function ShareRoomPage() {
     }
   };
 
-  const handleExitRoom = async () => {
+  const requestExitRoom = () => {
+    if (!roomId || !role || !sessionIdRef.current || isRoomActionPending) return;
+    setIsExitDialogOpen(true);
+  };
+
+  const confirmExitRoom = async () => {
     const sessionId = sessionIdRef.current;
     if (!roomId || !role || !sessionId || isRoomActionPending) return;
-    if (!window.confirm(labels.confirmLeaveRoom)) return;
     setIsRoomActionPending(true);
     try {
       if (role === "owner") {
@@ -828,6 +834,7 @@ export default function ShareRoomPage() {
       window.location.assign("/");
     } catch (error) {
       setIsRoomActionPending(false);
+      setIsExitDialogOpen(false);
       upsertActivity({
         id: `error-${Date.now()}`,
         kind: "error",
@@ -925,7 +932,7 @@ export default function ShareRoomPage() {
             labels={labels}
             onCopy={handleCopy}
             onTemporaryLeave={handleTemporaryLeave}
-            onExitRoom={handleExitRoom}
+            onExitRoom={requestExitRoom}
           />
           {reviewImage ? (
             <ReviewWorkspace
@@ -981,6 +988,13 @@ export default function ShareRoomPage() {
         labels={labels}
         onClose={() => setIsShareDialogOpen(false)}
         onCopy={handleCopy}
+      />
+      <ExitRoomDialog
+        open={isExitDialogOpen}
+        pending={isRoomActionPending}
+        labels={labels}
+        onCancel={() => setIsExitDialogOpen(false)}
+        onConfirm={confirmExitRoom}
       />
       <ImageSourceDialog
         open={isSourceDialogOpen}
