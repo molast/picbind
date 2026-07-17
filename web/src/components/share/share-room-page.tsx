@@ -235,7 +235,9 @@ export default function ShareRoomPage({
     [],
   );
   const handleForcedNavigation = React.useCallback(() => {
+    if (roomExitHandledRef.current) return false;
     roomExitHandledRef.current = true;
+    return true;
   }, []);
   const imageWorkspaceLabels = React.useMemo(
     () => getShareRoomLabels(lang, maxImageTransferSize),
@@ -929,6 +931,7 @@ export default function ShareRoomPage({
     setIsRoomActionPending(true);
     try {
       if (role === "owner") {
+        roomExitHandledRef.current = true;
         await closeRealtimeRoom(roomId, sessionId);
         clearOwnedShareRoom(roomId);
       } else {
@@ -943,6 +946,7 @@ export default function ShareRoomPage({
         window.location.assign("/");
       }
     } catch (error) {
+      roomExitHandledRef.current = false;
       setIsRoomActionPending(false);
       setIsExitDialogOpen(false);
       upsertActivity({

@@ -117,7 +117,7 @@ type UseShareRoomConnectionOptions = {
   upsertActivity(activity: ActivityItem): void;
   showFloatingEmoji(id: string, emoji: string): void;
   onIncomingNotification?(notification: RoomDockNotification): void;
-  onForcedNavigation(): void;
+  onForcedNavigation(): boolean;
   onWeakNetworkChange(weakNetwork: boolean): void;
   onMessageTransportChange(mode: MessageTransportMode): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
@@ -196,8 +196,8 @@ export function useShareRoomConnection({
     const imageReadyWaiters = imageReadyWaitersRef.current;
 
     const forceRoomNavigation = (reason: "closed" | "kicked") => {
+      if (!onForcedNavigation()) return;
       clearRoomPageState(roomId);
-      onForcedNavigation();
       window.location.replace(
         reason === "closed" ? "/?roomClosed=1" : "/?roomKicked=1",
       );
@@ -1064,6 +1064,7 @@ export function useShareRoomConnection({
     ) => {
       const peerSessionId = status.guestSessionId;
       if (!peerSessionId) {
+        socketRelay?.markPeerUnavailable();
         if (currentPeerSessionId) {
           closePeerConnection();
         }
@@ -1152,7 +1153,11 @@ export function useShareRoomConnection({
         signal?.guestSessionId === sessionId
           ? signal.offer
           : undefined;
-      if (peerSessionId) socketRelay?.markPeerAvailable();
+      if (peerSessionId) {
+        socketRelay?.markPeerAvailable();
+      } else {
+        socketRelay?.markPeerUnavailable();
+      }
       if (!peerSessionId || !offer?.sdp) {
         if (!peerSessionId && currentPeerSessionId) {
           closePeerConnection();
@@ -1250,6 +1255,15 @@ export function useShareRoomConnection({
             if (!disposed && socketRelay?.canRelay) {
               setNetworkLatencyMs(latencyMs);
             }
+          },
+          onPeerUnavailable() {
+            if (disposed) return;
+            closePeerConnection();
+            setNetworkLatencyMs(null);
+            setPacketLossRate(null);
+            setConnection("waiting");
+            setConnectionError(null);
+            setConnectionActivity("waiting");
           },
           onRelayReadyChange(ready) {
             if (disposed) return;

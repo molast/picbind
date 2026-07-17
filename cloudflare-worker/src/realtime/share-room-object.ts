@@ -195,7 +195,6 @@ export class ShareRoomObject {
         // Socket is already closed.
       }
     }
-    this.broadcastSocketState();
   }
 
   private closeAllSockets(eventType: string) {

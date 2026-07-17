@@ -22,6 +22,7 @@ type WeakNetworkSocketOptions = {
   onWeakNetworkChange(weakNetwork: boolean): void;
   onRelayReadyChange(ready: boolean): void;
   onSocketLatencyChange(latencyMs: number | null): void;
+  onPeerUnavailable(): void;
 };
 
 export class WeakNetworkSocket {
@@ -42,10 +43,6 @@ export class WeakNetworkSocket {
   }
 
   updateRtt(rttMs: number | null) {
-    if (rttMs !== null && Number.isFinite(rttMs)) {
-      this.peerUnavailable = false;
-      this.clearPeerDisconnectTimer();
-    }
     if (this.peerUnavailable) return;
     if (rttMs === null || !Number.isFinite(rttMs)) {
       this.markUnavailable();
@@ -74,8 +71,14 @@ export class WeakNetworkSocket {
   }
 
   markPeerAvailable() {
+    if (!this.peerUnavailable) return;
     this.peerUnavailable = false;
     this.clearPeerDisconnectTimer();
+  }
+
+  markPeerUnavailable() {
+    if (this.peerUnavailable) return;
+    this.handlePeerUnavailable();
   }
 
   send(channel: RelayChannelName, payload: string) {
@@ -165,7 +168,7 @@ export class WeakNetworkSocket {
         this.disconnect();
         this.options.onRoomKicked();
       } else if (message.type === "PEER_UNAVAILABLE") {
-        this.handlePeerUnavailable();
+        this.markPeerUnavailable();
       }
     };
     socket.onopen = () => {
@@ -189,6 +192,7 @@ export class WeakNetworkSocket {
   }
 
   private setRelayReady(ready: boolean) {
+    if (ready && this.peerUnavailable) return;
     if (this.relayReady === ready) return;
     this.relayReady = ready;
     this.options.onRelayReadyChange(ready);
@@ -198,6 +202,7 @@ export class WeakNetworkSocket {
     this.peerUnavailable = true;
     this.recoveryStartedAt = null;
     this.setRelayReady(false);
+    this.options.onPeerUnavailable();
     this.clearPeerDisconnectTimer();
     this.peerDisconnectTimer = window.setTimeout(() => {
       this.peerDisconnectTimer = null;
