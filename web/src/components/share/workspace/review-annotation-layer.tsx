@@ -210,6 +210,38 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     layerRef.current = layer;
     selectionLayerRef.current = selectionLayer;
 
+    const requestTextEdit = (annotation: ReviewAnnotation, node: Konva.Node) => {
+      const pointer = node.getRelativePointerPosition();
+      const text = annotation.text || "";
+      const caretIndex = pointer
+        ? Math.max(
+            0,
+            Math.min(
+              text.length,
+              Math.round((pointer.x / Math.max(1, annotation.width)) * text.length),
+            ),
+          )
+        : text.length;
+      propsRef.current.onSelect([]);
+      propsRef.current.onTextEditRequest(annotation, caretIndex);
+    };
+
+    const handleNativeDoubleClick = (event: MouseEvent) => {
+      if (propsRef.current.activeTool !== "select") return;
+      stage.setPointersPositions(event);
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
+      const node = stage.getIntersection(pointer);
+      if (!node) return;
+      const annotation = propsRef.current.annotations.find(
+        (item) => item.id === node.id() && item.type === "text",
+      );
+      if (!annotation) return;
+      event.preventDefault();
+      requestTextEdit(annotation, node);
+    };
+    stage.content.addEventListener("dblclick", handleNativeDoubleClick);
+
     const start = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const currentProps = propsRef.current;
       if (currentProps.activeTool === "hand") return;
@@ -407,6 +439,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     stage.on("mousemove touchmove", move);
     stage.on("mouseup touchend", finish);
     return () => {
+      stage.content.removeEventListener("dblclick", handleNativeDoubleClick);
       stage.destroy();
       stageRef.current = null;
       layerRef.current = null;
@@ -444,7 +477,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         node.on("mouseleave", () => {
           stage.content.style.cursor = "";
         });
-        node.on("dblclick dbltap", (event) => {
+        node.on("dbltap", (event) => {
           event.cancelBubble = true;
           if (propsRef.current.activeTool !== "select") return;
           const pointer = node.getRelativePointerPosition();
