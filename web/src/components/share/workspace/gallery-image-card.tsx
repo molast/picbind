@@ -1,15 +1,14 @@
 "use client";
 
 import {
-  FiCloud,
   FiDownload,
   FiEye,
   FiMaximize2,
-  FiLink,
   FiSend,
   FiTrash2,
   FiXCircle,
 } from "react-icons/fi";
+import { TbDevicesShare, TbWorldShare } from "react-icons/tb";
 import RoomImageMedia from "../room-image-media";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { ConnectionState, RoomImage } from "../share-room-types";
@@ -173,9 +172,9 @@ export default function GalleryImageCard({
                 }
               >
                 {image.transferMode === "r2" ? (
-                  <FiCloud className="h-3 w-3" aria-hidden="true" />
+                  <TbWorldShare className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
-                  <FiLink className="h-3 w-3" aria-hidden="true" />
+                  <TbDevicesShare className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
               </span>
             ) : null}

@@ -4,10 +4,8 @@ import type React from "react";
 import {
   FiAlertCircle,
   FiCheckCircle,
-  FiCloud,
   FiDownload,
   FiLoader,
-  FiLink,
   FiMessageCircle,
   FiSend,
   FiUploadCloud,
@@ -17,6 +15,7 @@ import {
   FiWifi,
   FiXCircle,
 } from "react-icons/fi";
+import { TbDevicesShare, TbWorldShare } from "react-icons/tb";
 import { getShareRoomClientId } from "@/utils/share-room";
 import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
 import type { RoomMemberPresence, RoomRole } from "@/utils/realtime-room";
@@ -75,27 +74,12 @@ export default function RoomSidebar({
     <aside className="grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
       <div className="border-b border-slate-200 px-4 py-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <FiWifi className="h-4 w-4" aria-hidden="true" />
-          <span>
-            {connection === "connected"
-              ? labels.connected
-              : connection === "connecting"
-                ? labels.connecting
-                : connection === "error"
-                  ? labels.failed
-                  : labels.waiting}
-          </span>
-        </div>
-        <div className="mt-2 flex items-center gap-2 text-[11px] font-medium text-slate-500">
-          <span>
-            {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
-          </span>
           <span
-            className={`inline-flex h-6 w-6 items-center justify-center rounded ${
+            className={
               messageTransportMode === "relay"
-                ? "bg-amber-50 text-amber-700"
-                : "bg-emerald-50 text-emerald-700"
-            }`}
+                ? "text-amber-600"
+                : "text-emerald-600"
+            }
             title={
               messageTransportMode === "relay"
                 ? labels.relayMode
@@ -109,11 +93,23 @@ export default function RoomSidebar({
             }
           >
             {messageTransportMode === "relay" ? (
-              <FiCloud className="h-3.5 w-3.5" aria-hidden="true" />
+              <TbWorldShare className="h-5 w-5" aria-hidden="true" />
             ) : (
-              <FiLink className="h-3.5 w-3.5" aria-hidden="true" />
+              <TbDevicesShare className="h-5 w-5" aria-hidden="true" />
             )}
           </span>
+          <span>
+            {connection === "connected"
+              ? labels.connected
+              : connection === "connecting"
+                ? labels.connecting
+                : connection === "error"
+                  ? labels.failed
+                  : labels.waiting}
+          </span>
+        </div>
+        <div className="mt-2 text-[11px] font-medium text-slate-500">
+          {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
         </div>
         {connectionError ? (
           <p className="mt-2 text-xs text-red-600">{connectionError}</p>
