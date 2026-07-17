@@ -18,10 +18,12 @@ type ReviewWorkspaceProps = {
   image: RoomImage;
   labels: ShareRoomLabels;
   actorId: string;
-  incomingMessage: {
-    sequence: number;
-    message: ReviewCollaborationMessage;
-  } | null;
+  subscribeMessages(
+    listener: (event: {
+      sequence: number;
+      message: ReviewCollaborationMessage;
+    }) => void,
+  ): () => void;
   onSendMessage(message: ReviewCollaborationMessage): boolean;
   onBack(): void;
 };
@@ -38,7 +40,7 @@ export default function ReviewWorkspace({
   image,
   labels,
   actorId,
-  incomingMessage,
+  subscribeMessages,
   onSendMessage,
   onBack,
 }: ReviewWorkspaceProps) {
@@ -48,8 +50,13 @@ export default function ReviewWorkspace({
   const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [defaultColor, setDefaultColor] = React.useState("#000000");
   const [localMode, setLocalMode] = React.useState<ReviewMode>(null);
   const [remoteMode, setRemoteMode] = React.useState<ReviewMode>(null);
+  const [remoteReviewActive, setRemoteReviewActive] = React.useState(false);
+  const [incomingMessages, setIncomingMessages] = React.useState<
+    Array<{ sequence: number; message: ReviewCollaborationMessage }>
+  >([]);
   const {
     operationsRef,
     cursorRef,
@@ -63,9 +70,16 @@ export default function ReviewWorkspace({
     replace,
   } = useReviewHistory(actorId);
   const incomingStatesRef = React.useRef(new Map<string, IncomingState>());
-  const handledSequenceRef = React.useRef<number | null>(null);
   const viewportRef = React.useRef({ scale, offset, dimensions, canvasSize });
   viewportRef.current = { scale, offset, dimensions, canvasSize };
+
+  React.useEffect(
+    () =>
+      subscribeMessages((event) => {
+        setIncomingMessages((current) => [...current, event]);
+      }),
+    [subscribeMessages],
+  );
 
   const baseMessage = React.useCallback(
     () => ({ imageId: image.id, actorId }),
@@ -117,11 +131,24 @@ export default function ReviewWorkspace({
     setActiveTool("select");
     setLocalMode(null);
     setRemoteMode(null);
+    setRemoteReviewActive(false);
     replace([], 0);
     incomingStatesRef.current.clear();
+    onSendMessage({
+      ...baseMessage(),
+      type: "REVIEW_PRESENCE",
+      active: true,
+      request: true,
+    });
     onSendMessage({ ...baseMessage(), type: "REVIEW_STATE_REQUEST" });
     return () => {
       onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
+      onSendMessage({
+        ...baseMessage(),
+        type: "REVIEW_PRESENCE",
+        active: false,
+        request: false,
+      });
     };
   }, [baseMessage, onSendMessage, replace, resetViewport]);
 
@@ -132,12 +159,29 @@ export default function ReviewWorkspace({
   }, [canvasSize, dimensions, localMode, offset, scale, sendViewport]);
 
   React.useEffect(() => {
-    if (!incomingMessage || handledSequenceRef.current === incomingMessage.sequence) {
+    if (!incomingMessages.length) return;
+    const message = incomingMessages[0].message;
+    setIncomingMessages((current) => current.slice(1));
+    if (message.imageId !== image.id || message.actorId === actorId) return;
+
+    if (message.type === "REVIEW_PRESENCE") {
+      setRemoteReviewActive(message.active);
+      if (!message.active) {
+        setRemoteMode(null);
+        if (localMode) {
+          setLocalMode(null);
+          onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
+        }
+      } else if (message.request) {
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_PRESENCE",
+          active: true,
+          request: false,
+        });
+      }
       return;
     }
-    handledSequenceRef.current = incomingMessage.sequence;
-    const message = incomingMessage.message;
-    if (message.imageId !== image.id || message.actorId === actorId) return;
 
     if (message.type === "REVIEW_MODE") {
       setRemoteMode(message.mode);
@@ -232,7 +276,7 @@ export default function ReviewWorkspace({
     baseMessage,
     geometryContext,
     image.id,
-    incomingMessage,
+    incomingMessages,
     localMode,
     moveCursor,
     onSendMessage,
@@ -270,6 +314,48 @@ export default function ReviewWorkspace({
     [baseMessage, commit, geometryContext, onSendMessage],
   );
 
+  const selectedAnnotation = React.useMemo(
+    () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
+    [annotations, selectedId],
+  );
+
+  const changeAnnotationColor = React.useCallback(
+    (color: string) => {
+      if (selectedAnnotation) {
+        commitUpdate(selectedAnnotation, { ...selectedAnnotation, stroke: color });
+        return;
+      }
+      setDefaultColor(color);
+    },
+    [commitUpdate, selectedAnnotation],
+  );
+
+  const insertEmoji = React.useCallback(
+    (emoji: string) => {
+      if (!dimensions.width || !dimensions.height || localMode === "follow") return;
+      const size = Math.max(
+        36,
+        Math.max(dimensions.width, dimensions.height) * 0.065,
+      );
+      commitCreate({
+        id: crypto.randomUUID().replace(/-/g, ""),
+        type: "emoji",
+        x: dimensions.width / 2 - size / 2,
+        y: dimensions.height / 2 - size / 2,
+        width: size,
+        height: size,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        emoji,
+        stroke: defaultColor,
+        strokeWidth: Math.max(2, size * 0.06),
+        createdBy: actorId,
+      });
+    },
+    [actorId, commitCreate, defaultColor, dimensions, localMode],
+  );
+
   const moveHistoryCursor = React.useCallback(
     (nextCursor: number) => {
       moveCursor(nextCursor);
@@ -284,6 +370,7 @@ export default function ReviewWorkspace({
       const target = event.target as HTMLElement | null;
       if (target?.matches("input, textarea, [contenteditable='true']")) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        if (localMode === "follow") return;
         event.preventDefault();
         if (event.shiftKey) {
           if (canRedo) moveHistoryCursor(cursor + 1);
@@ -293,6 +380,7 @@ export default function ReviewWorkspace({
         return;
       }
       if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+        if (localMode === "follow") return;
         const annotation = annotations.find((item) => item.id === selectedId);
         if (!annotation) return;
         event.preventDefault();
@@ -318,11 +406,17 @@ export default function ReviewWorkspace({
     commit,
     cursor,
     geometryContext,
+    localMode,
     selectedId,
   ]);
 
   const changeMode = (mode: ReviewMode) => {
+    if (!remoteReviewActive) return;
     setLocalMode(mode);
+    if (mode === "follow") {
+      setActiveTool("select");
+      setSelectedId(null);
+    }
     onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode });
   };
 
@@ -337,11 +431,16 @@ export default function ReviewWorkspace({
         canRedo={canRedo}
         localMode={localMode}
         remoteMode={remoteMode}
+        remoteReviewActive={remoteReviewActive}
+        workspaceLocked={localMode === "follow"}
+        annotationColor={selectedAnnotation?.stroke ?? defaultColor}
         onBack={onBack}
         onToolChange={setActiveTool}
         onUndo={() => moveHistoryCursor(cursor - 1)}
         onRedo={() => moveHistoryCursor(cursor + 1)}
         onModeChange={changeMode}
+        onColorChange={changeAnnotationColor}
+        onInsertEmoji={insertEmoji}
         onZoomIn={() => setScale((current) => Math.min(4, current + 0.25))}
         onZoomOut={() => setScale((current) => Math.max(0.25, current - 0.25))}
         onFit={resetViewport}
@@ -355,6 +454,8 @@ export default function ReviewWorkspace({
         annotations={annotations}
         selectedId={selectedId}
         actorId={actorId}
+        defaultColor={defaultColor}
+        interactionDisabled={localMode === "follow"}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
         onDimensionsChange={setDimensions}

@@ -176,18 +176,35 @@ export default function ShareRoomPage({
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
   );
-  const [incomingReviewMessage, setIncomingReviewMessage] = React.useState<{
-    sequence: number;
-    message: ReviewCollaborationMessage;
-  } | null>(null);
   const reviewMessageSequenceRef = React.useRef(0);
+  const pendingReviewMessagesRef = React.useRef<
+    Array<{ sequence: number; message: ReviewCollaborationMessage }>
+  >([]);
+  const reviewMessageListenersRef = React.useRef(
+    new Set<
+      (message: { sequence: number; message: ReviewCollaborationMessage }) => void
+    >(),
+  );
 
   const handleReviewMessage = React.useCallback(
     (message: ReviewCollaborationMessage) => {
-      setIncomingReviewMessage({
+      const event = {
         sequence: reviewMessageSequenceRef.current++,
         message,
-      });
+      };
+      if (reviewMessageListenersRef.current.size) {
+        reviewMessageListenersRef.current.forEach((listener) => listener(event));
+      } else if (message.type === "REVIEW_PRESENCE") {
+        pendingReviewMessagesRef.current = [
+          ...pendingReviewMessagesRef.current.filter(
+            (pending) =>
+              pending.message.type !== "REVIEW_PRESENCE" ||
+              pending.message.imageId !== message.imageId ||
+              pending.message.actorId !== message.actorId,
+          ),
+          event,
+        ].slice(-200);
+      }
     },
     [],
   );
@@ -195,6 +212,22 @@ export default function ShareRoomPage({
   const sendReviewMessage = React.useCallback(
     (message: ReviewCollaborationMessage) =>
       sendReviewCollaborationMessage(instructionChannelRef.current, message),
+    [],
+  );
+
+  const subscribeReviewMessages = React.useCallback(
+    (
+      listener: (event: {
+        sequence: number;
+        message: ReviewCollaborationMessage;
+      }) => void,
+    ) => {
+      reviewMessageListenersRef.current.add(listener);
+      const pending = pendingReviewMessagesRef.current;
+      pendingReviewMessagesRef.current = [];
+      pending.forEach(listener);
+      return () => reviewMessageListenersRef.current.delete(listener);
+    },
     [],
   );
 
@@ -1127,7 +1160,7 @@ export default function ShareRoomPage({
               image={reviewImage}
               labels={labels}
               actorId={role || "unknown"}
-              incomingMessage={incomingReviewMessage}
+              subscribeMessages={subscribeReviewMessages}
               onSendMessage={sendReviewMessage}
               onBack={() => setReviewImageId(null)}
             />

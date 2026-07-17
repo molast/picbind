@@ -23,6 +23,8 @@ type ReviewCanvasProps = {
   annotations: ReviewAnnotation[];
   selectedId: string | null;
   actorId: string;
+  defaultColor: string;
+  interactionDisabled: boolean;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
@@ -40,6 +42,8 @@ export default function ReviewCanvas({
   annotations,
   selectedId,
   actorId,
+  defaultColor,
+  interactionDisabled,
   onScaleChange,
   onOffsetChange,
   onDimensionsChange,
@@ -58,6 +62,15 @@ export default function ReviewCanvas({
   } | null>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
+  const [textEditor, setTextEditor] = React.useState<{
+    x: number;
+    y: number;
+    strokeWidth: number;
+    value: string;
+  } | null>(null);
+  const textInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const textEditorRef = React.useRef(textEditor);
+  textEditorRef.current = textEditor;
   const fitRatio =
     containerSize.width && containerSize.height && imageSize.width && imageSize.height
       ? Math.min(
@@ -89,15 +102,56 @@ export default function ReviewCanvas({
 
   React.useEffect(() => {
     setImageSize({ width: 0, height: 0 });
+    setTextEditor(null);
   }, [image.id]);
+
+  React.useEffect(() => {
+    if (!textEditor) return;
+    const frame = window.requestAnimationFrame(() => textInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [textEditor]);
+
+  const finishTextEditing = React.useCallback(
+    (commit: boolean) => {
+      const current = textEditorRef.current;
+      textEditorRef.current = null;
+      setTextEditor(null);
+      const value = current?.value.trim();
+      if (!commit || !current || !value) return;
+      const fontSize = Math.max(12, current.strokeWidth * 5);
+      onCreate({
+        id: crypto.randomUUID().replace(/-/g, ""),
+        type: "text",
+        x: current.x,
+        y: current.y,
+        width: Math.max(current.strokeWidth * 12, value.length * fontSize * 0.62),
+        height: fontSize * 1.35,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+        text: value,
+        stroke: defaultColor,
+        strokeWidth: current.strokeWidth,
+        createdBy: actorId,
+      });
+    },
+    [actorId, defaultColor, onCreate],
+  );
 
   return (
     <div
       ref={containerRef}
       className={`relative min-h-0 flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
-        activeTool === "select" ? "cursor-grab" : "cursor-crosshair"
+        interactionDisabled
+          ? "cursor-default"
+          : activeTool === "select"
+            ? "cursor-grab"
+            : activeTool === "text"
+              ? "cursor-text"
+            : "cursor-crosshair"
       }`}
       onWheel={(event) => {
+        if (interactionDisabled) return;
         event.preventDefault();
         const direction = event.deltaY > 0 ? -0.1 : 0.1;
         onScaleChange(Math.min(4, Math.max(0.25, scale + direction)));
@@ -105,6 +159,7 @@ export default function ReviewCanvas({
       onPointerDown={(event) => {
         if (
           activeTool !== "select" ||
+          interactionDisabled ||
           event.button !== 0 ||
           event.target instanceof HTMLCanvasElement
         ) {
@@ -165,7 +220,10 @@ export default function ReviewCanvas({
             className="block h-full w-full select-none object-contain"
           />
           {fitRatio ? (
-            <div className="absolute inset-0" data-layer="annotations">
+            <div
+              className={`absolute inset-0 ${interactionDisabled ? "pointer-events-none" : ""}`}
+              data-layer="annotations"
+            >
               <ReviewAnnotationLayer
                 width={renderedSize.width}
                 height={renderedSize.height}
@@ -175,11 +233,49 @@ export default function ReviewCanvas({
                 activeTool={activeTool}
                 selectedId={selectedId}
                 actorId={actorId}
+                defaultColor={defaultColor}
                 onSelect={onSelect}
+                onTextRequest={({ x, y, strokeWidth }) =>
+                  setTextEditor({ x, y, strokeWidth, value: "" })
+                }
                 onCreate={onCreate}
                 onUpdate={onUpdate}
               />
             </div>
+          ) : null}
+          {textEditor && fitRatio ? (
+            <textarea
+              ref={textInputRef}
+              value={textEditor.value}
+              rows={1}
+              aria-label="Text annotation"
+              className="absolute z-20 min-h-8 resize-none overflow-hidden border-0 bg-white/90 px-1.5 py-1 text-slate-950 shadow-lg outline-none ring-2 ring-blue-500"
+              style={{
+                left: `${(textEditor.x / Math.max(1, imageSize.width)) * 100}%`,
+                top: `${(textEditor.y / Math.max(1, imageSize.height)) * 100}%`,
+                width: Math.max(120, renderedSize.width * 0.28),
+                fontSize: Math.max(
+                  14,
+                  textEditor.strokeWidth * 5 * (renderedSize.height / Math.max(1, imageSize.height)),
+                ),
+                color: defaultColor,
+              }}
+              onChange={(event) =>
+                setTextEditor((current) =>
+                  current ? { ...current, value: event.target.value } : null,
+                )
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  finishTextEditing(false);
+                } else if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  finishTextEditing(true);
+                }
+              }}
+              onBlur={() => finishTextEditing(true)}
+            />
           ) : null}
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>

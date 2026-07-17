@@ -16,7 +16,9 @@ type ReviewAnnotationLayerProps = {
   activeTool: ReviewTool;
   selectedId: string | null;
   actorId: string;
+  defaultColor: string;
   onSelect(id: string | null): void;
+  onTextRequest(position: { x: number; y: number; strokeWidth: number }): void;
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
@@ -27,6 +29,7 @@ function annotationAtPoint(
   x: number,
   y: number,
   strokeWidth: number,
+  stroke: string,
 ): ReviewAnnotation {
   return {
     id: crypto.randomUUID().replace(/-/g, ""),
@@ -41,7 +44,7 @@ function annotationAtPoint(
     points: tool === "arrow" || tool === "pen" ? [0, 0, 0, 0] : undefined,
     text: tool === "text" ? "Text" : undefined,
     emoji: tool === "emoji" ? "👍" : undefined,
-    stroke: "#ef4444",
+    stroke,
     strokeWidth,
     createdBy: actorId,
   };
@@ -168,10 +171,10 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     stageRef.current = stage;
     layerRef.current = layer;
 
-    const start = () => {
+    const start = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const currentProps = propsRef.current;
       if (currentProps.activeTool === "select") {
-        if (stage.getIntersection(stage.getPointerPosition() || { x: 0, y: 0 }) === null) {
+        if (event.target === stage) {
           currentProps.onSelect(null);
         }
         return;
@@ -187,20 +190,15 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         current.x,
         current.y,
         strokeWidth,
+        currentProps.defaultColor,
       );
       if (currentProps.activeTool === "text") {
-        const value = window.prompt("Text", "");
-        if (value?.trim()) {
-          currentProps.onCreate({
-            ...next,
-            text: value.trim(),
-            width: strokeWidth * 35,
-          });
-        }
-        return;
-      }
-      if (currentProps.activeTool === "emoji") {
-        currentProps.onCreate(next);
+        currentProps.onSelect(null);
+        currentProps.onTextRequest({
+          x: current.x,
+          y: current.y,
+          strokeWidth,
+        });
         return;
       }
       draftRef.current = next;
@@ -328,10 +326,24 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const transformer = new Konva.Transformer({
       flipEnabled: false,
       rotateEnabled: true,
+      rotateAnchorOffset: 22 / Math.max(scaleX, scaleY),
+      rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
+      rotationSnapTolerance: 4,
       borderStroke: "#2563eb",
       anchorFill: "#ffffff",
       anchorStroke: "#2563eb",
-      anchorSize: 8 / Math.max(scaleX, scaleY),
+      anchorSize: 2 / Math.max(scaleX, scaleY),
+      anchorStyleFunc: (anchor) => {
+        anchor.hitStrokeWidth(12 / Math.max(scaleX, scaleY));
+        if (!anchor.hasName("rotater")) return;
+        const size = 7 / Math.max(scaleX, scaleY);
+        anchor.width(size);
+        anchor.height(size);
+        anchor.offsetX(size / 2);
+        anchor.offsetY(size / 2);
+        anchor.cornerRadius(size / 2);
+        anchor.fill("#2563eb");
+      },
       boundBoxFunc: (oldBox, newBox) =>
         Math.abs(newBox.width) < 8 || Math.abs(newBox.height) < 8
           ? oldBox
@@ -344,6 +356,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
   }, [
     props.activeTool,
     props.annotations,
+    props.defaultColor,
     props.height,
     props.imageHeight,
     props.imageWidth,

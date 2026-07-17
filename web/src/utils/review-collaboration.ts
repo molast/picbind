@@ -55,6 +55,11 @@ export type ReviewGeometryContext = {
 
 export type ReviewCollaborationMessage =
   | (ReviewMessageBase & {
+      type: "REVIEW_PRESENCE";
+      active: boolean;
+      request: boolean;
+    })
+  | (ReviewMessageBase & {
       type: "REVIEW_MODE";
       mode: ReviewMode;
     })
@@ -95,6 +100,7 @@ export type ReviewCollaborationMessage =
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
+  "REVIEW_PRESENCE",
   "REVIEW_MODE",
   "REVIEW_OPERATION",
   "REVIEW_CURSOR",
@@ -177,6 +183,12 @@ export function parseReviewCollaborationMessage(
   }
   if (!parsed || typeof parsed !== "object") return null;
   const message = parsed as Record<string, unknown>;
+  if (
+    message.type === "REVIEW_PRESENCE" &&
+    (typeof message.active !== "boolean" || typeof message.request !== "boolean")
+  ) {
+    return null;
+  }
   if (
     typeof message.type !== "string" ||
     !REVIEW_MESSAGE_TYPES.has(message.type) ||
