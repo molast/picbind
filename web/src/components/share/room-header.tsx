@@ -1,6 +1,5 @@
 import Image from "next/image";
 import {
-  FiArrowLeft,
   FiCheck,
   FiCopy,
   FiLogOut,
@@ -44,22 +43,16 @@ export default function RoomHeader({
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6">
       <div className="flex min-w-0 items-center gap-4">
-        {role === "owner" ? (
-          <button
-            type="button"
-            onClick={() => void onTemporaryLeave()}
-            disabled={actionPending}
-            className="shrink-0 disabled:opacity-50"
-            aria-label={labels.temporaryLeave}
-            title={labels.temporaryLeave}
-          >
-            {wordmark}
-          </button>
-        ) : (
-          <button type="button" onClick={() => void onExitRoom()} className="shrink-0">
-            {wordmark}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void onTemporaryLeave()}
+          disabled={actionPending || !role}
+          className="shrink-0 disabled:opacity-50"
+          aria-label={labels.temporaryLeave}
+          title={labels.temporaryLeave}
+        >
+          {wordmark}
+        </button>
         <div className="hidden h-7 w-px bg-slate-200 sm:block" />
         <div className="hidden min-w-0 sm:block">
           <div className="text-xs font-medium text-slate-500">{labels.room}</div>
@@ -82,40 +75,26 @@ export default function RoomHeader({
             <FiCopy className="h-4 w-4" aria-hidden="true" />
           )}
         </button>
-        {role === "owner" ? (
-          <>
-            <button
-              type="button"
-              onClick={() => void onTemporaryLeave()}
-              disabled={actionPending}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
-              aria-label={labels.temporaryLeave}
-              title={labels.temporaryLeave}
-            >
-              <FiMinimize2 className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void onExitRoom()}
-              disabled={actionPending}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-              aria-label={labels.closeRoom}
-              title={labels.closeRoom}
-            >
-              <FiLogOut className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void onExitRoom()}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-            aria-label={labels.back}
-            title={labels.back}
-          >
-            <FiArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void onTemporaryLeave()}
+          disabled={actionPending || !role}
+          className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
+          aria-label={labels.temporaryLeave}
+          title={labels.temporaryLeave}
+        >
+          <FiMinimize2 className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          onClick={() => void onExitRoom()}
+          disabled={actionPending || !role}
+          className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+          aria-label={role === "owner" ? labels.closeRoom : labels.leaveRoom}
+          title={role === "owner" ? labels.closeRoom : labels.leaveRoom}
+        >
+          <FiLogOut className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
     </header>
   );

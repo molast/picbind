@@ -14,6 +14,7 @@ import RoomImagePreviewDialog from "@/components/share/room-image-preview-dialog
 import RoomHeader from "./room-header";
 import RoomSidebar from "./room-sidebar";
 import TemporaryRoomDock from "./temporary-room-dock";
+import HomeCompressLanding from "@/components/home/home-compress-landing";
 import { formatBytes } from "./share-room-formatters";
 import { getShareRoomLabels } from "./share-room-labels";
 import type {
@@ -902,7 +903,7 @@ export default function ShareRoomPage({
   };
 
   const handleTemporaryLeave = () => {
-    if (!roomId || role !== "owner" || isRoomActionPending) return;
+    if (!roomId || !role || isRoomActionPending) return;
     minimizeRoom();
   };
 
@@ -1021,6 +1022,13 @@ export default function ShareRoomPage({
 
   return (
     <>
+      {!embedded && isMinimized ? (
+        <HomeCompressLanding
+          initialLang={lang}
+          hasActiveRoom
+          onRestoreActiveRoom={restoreRoom}
+        />
+      ) : null}
       <main
         className={`${isMinimized ? "hidden" : "block"} h-screen overflow-hidden bg-[#eef2f7] text-slate-800`}
       >
