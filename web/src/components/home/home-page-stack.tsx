@@ -72,6 +72,14 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
     setRoomMinimized(false);
   }, []);
 
+  const minimizeRoom = React.useCallback(() => {
+    setRoomMinimized(true);
+  }, []);
+
+  const restoreRoom = React.useCallback(() => {
+    setRoomMinimized(false);
+  }, []);
+
   return (
     <>
       <div className={activeRoomId && !roomMinimized ? "hidden" : "block"}>
@@ -84,8 +92,8 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
         <ShareRoomPage
           embedded
           minimized={roomMinimized}
-          onMinimize={() => setRoomMinimized(true)}
-          onRestore={() => setRoomMinimized(false)}
+          onMinimize={minimizeRoom}
+          onRestore={restoreRoom}
         />
       ) : null}
     </>

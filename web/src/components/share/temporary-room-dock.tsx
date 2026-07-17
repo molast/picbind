@@ -6,6 +6,7 @@ import {
   FiMessageSquare,
   FiRadio,
 } from "react-icons/fi";
+import { createPortal } from "react-dom";
 import type { Lang } from "@/locales";
 import type {
   ConnectionState,
@@ -43,8 +44,10 @@ export default function TemporaryRoomDock({
   const unread = lang === "zh" ? "条新消息" : "new";
   const recent = notifications.slice(-3).reverse();
 
-  return (
-    <aside className="fixed bottom-4 right-4 z-[70] w-[min(340px,calc(100vw-32px))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.2)]">
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <aside className="fixed bottom-4 right-4 z-[2147483647] w-[min(340px,calc(100vw-32px))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.2)]">
       <div className="flex items-center gap-3 p-3">
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]">
           <FiRadio className="h-5 w-5" aria-hidden="true" />
@@ -97,6 +100,7 @@ export default function TemporaryRoomDock({
           </span>
         </button>
       ) : null}
-    </aside>
+    </aside>,
+    document.body,
   );
 }
