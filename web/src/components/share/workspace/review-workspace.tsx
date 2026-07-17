@@ -11,7 +11,10 @@ import type {
   ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
-import ReviewCanvas, { type ReviewViewportOffset } from "./review-canvas";
+import ReviewCanvas, {
+  type ReviewMagnifierPoint,
+  type ReviewViewportOffset,
+} from "./review-canvas";
 import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
 import { useReviewHistory } from "./use-review-history";
@@ -77,6 +80,8 @@ export default function ReviewWorkspace({
   const [localMode, setLocalMode] = React.useState<ReviewMode>(null);
   const [remoteMode, setRemoteMode] = React.useState<ReviewMode>(null);
   const [remoteReviewActive, setRemoteReviewActive] = React.useState(false);
+  const [remoteMagnifier, setRemoteMagnifier] =
+    React.useState<ReviewMagnifierPoint | null>(null);
   const [incomingMessages, setIncomingMessages] = React.useState<
     Array<{ sequence: number; message: ReviewCollaborationMessage }>
   >([]);
@@ -98,6 +103,8 @@ export default function ReviewWorkspace({
   } = useReviewHistory(actorId);
   const incomingStatesRef = React.useRef(new Map<string, IncomingState>());
   const viewportRef = React.useRef({ scale, offset, dimensions, canvasSize });
+  const magnifierFrameRef = React.useRef<number | null>(null);
+  const pendingMagnifierRef = React.useRef<ReviewMagnifierPoint | null>(null);
   viewportRef.current = { scale, offset, dimensions, canvasSize };
 
   React.useEffect(
@@ -122,6 +129,41 @@ export default function ReviewWorkspace({
       canvasHeight: Math.max(1, current.canvasSize.height),
     };
   }, []);
+
+  const sendMagnifier = React.useCallback(
+    (position: ReviewMagnifierPoint | null) => {
+      if (!position) {
+        pendingMagnifierRef.current = null;
+        if (magnifierFrameRef.current !== null) {
+          window.cancelAnimationFrame(magnifierFrameRef.current);
+          magnifierFrameRef.current = null;
+        }
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_MAGNIFIER",
+          active: false,
+          x: 0,
+          y: 0,
+        });
+        return;
+      }
+      pendingMagnifierRef.current = position;
+      if (magnifierFrameRef.current !== null) return;
+      magnifierFrameRef.current = window.requestAnimationFrame(() => {
+        magnifierFrameRef.current = null;
+        const current = pendingMagnifierRef.current;
+        if (!current) return;
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_MAGNIFIER",
+          active: true,
+          x: current.x,
+          y: current.y,
+        });
+      });
+    },
+    [baseMessage, onSendMessage],
+  );
 
   const sendViewport = React.useCallback(() => {
     const current = viewportRef.current;
@@ -161,6 +203,7 @@ export default function ReviewWorkspace({
     setLocalMode(null);
     setRemoteMode(null);
     setRemoteReviewActive(false);
+    setRemoteMagnifier(null);
     setHydratedHistoryKey(null);
     replace([], 0);
     incomingStatesRef.current.clear();
@@ -188,6 +231,10 @@ export default function ReviewWorkspace({
     })();
     return () => {
       cancelled = true;
+      if (magnifierFrameRef.current !== null) {
+        window.cancelAnimationFrame(magnifierFrameRef.current);
+        magnifierFrameRef.current = null;
+      }
       onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
       onSendMessage({
         ...baseMessage(),
@@ -227,6 +274,7 @@ export default function ReviewWorkspace({
       setRemoteReviewActive(message.active);
       if (!message.active) {
         setRemoteMode(null);
+        setRemoteMagnifier(null);
         if (localMode) {
           setLocalMode(null);
           onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
@@ -249,6 +297,12 @@ export default function ReviewWorkspace({
         onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
       }
       if (message.mode === "follow" && localMode === "present") sendViewport();
+      return;
+    }
+    if (message.type === "REVIEW_MAGNIFIER") {
+      setRemoteMagnifier(
+        message.active ? { x: message.x, y: message.y } : null,
+      );
       return;
     }
     if (message.type === "REVIEW_OPERATION") {
@@ -504,6 +558,21 @@ export default function ReviewWorkspace({
     [baseMessage, moveCursor, onSendMessage],
   );
 
+  const resetWorkspace = React.useCallback(() => {
+    resetViewport();
+    setSelectedIds([]);
+    setActiveTool("select");
+    annotations.forEach((annotation) => {
+      const operation = commit("delete", annotation, null);
+      onSendMessage({
+        ...baseMessage(),
+        ...geometryContext(),
+        type: "REVIEW_OPERATION",
+        operation,
+      });
+    });
+  }, [annotations, baseMessage, commit, geometryContext, onSendMessage, resetViewport]);
+
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -604,7 +673,7 @@ export default function ReviewWorkspace({
         onZoomIn={() => setScale((current) => Math.min(4, current + 0.25))}
         onZoomOut={() => setScale((current) => Math.max(0.25, current - 0.25))}
         onFit={resetViewport}
-        onReset={resetViewport}
+        onReset={resetWorkspace}
       />
       <ReviewCanvas
         image={image}
@@ -620,6 +689,7 @@ export default function ReviewWorkspace({
         arrowStyle={arrowStyle}
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
+        remoteMagnifier={remoteMagnifier}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
         onDimensionsChange={setDimensions}
@@ -627,6 +697,7 @@ export default function ReviewWorkspace({
         onSelect={setSelectedIds}
         onCreate={commitCreate}
         onUpdate={commitUpdate}
+        onMagnifierChange={sendMagnifier}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
     </div>

@@ -103,6 +103,12 @@ export type ReviewCollaborationMessage =
       imageHeight: number;
       canvasWidth: number;
       canvasHeight: number;
+    })
+  | (ReviewMessageBase & {
+      type: "REVIEW_MAGNIFIER";
+      active: boolean;
+      x: number;
+      y: number;
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
@@ -115,6 +121,7 @@ const REVIEW_MESSAGE_TYPES = new Set([
   "REVIEW_STATE_OPERATION",
   "REVIEW_STATE_END",
   "REVIEW_VIEWPORT",
+  "REVIEW_MAGNIFIER",
 ]);
 
 function validId(value: unknown) {
@@ -267,6 +274,18 @@ export function parseReviewCollaborationMessage(
       Number(message.canvasWidth) <= 0 ||
       !validFinite(message.canvasHeight) ||
       Number(message.canvasHeight) <= 0)
+  ) {
+    return null;
+  }
+  if (
+    message.type === "REVIEW_MAGNIFIER" &&
+    (typeof message.active !== "boolean" ||
+      !validFinite(message.x) ||
+      Number(message.x) < 0 ||
+      Number(message.x) > 1 ||
+      !validFinite(message.y) ||
+      Number(message.y) < 0 ||
+      Number(message.y) > 1)
   ) {
     return null;
   }

@@ -27,6 +27,7 @@ function estimateTextWidth(text: string, fontSize: number) {
 }
 
 export type ReviewViewportOffset = { x: number; y: number };
+export type ReviewMagnifierPoint = { x: number; y: number };
 type MagnifierPosition = {
   pointerX: number;
   pointerY: number;
@@ -50,6 +51,7 @@ type ReviewCanvasProps = {
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
+  remoteMagnifier: ReviewMagnifierPoint | null;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
@@ -57,6 +59,7 @@ type ReviewCanvasProps = {
   onSelect(ids: string[]): void;
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
+  onMagnifierChange(position: ReviewMagnifierPoint | null): void;
 };
 
 export default function ReviewCanvas({
@@ -73,6 +76,7 @@ export default function ReviewCanvas({
   arrowStyle,
   lineStyle,
   interactionDisabled,
+  remoteMagnifier,
   onScaleChange,
   onOffsetChange,
   onDimensionsChange,
@@ -80,6 +84,7 @@ export default function ReviewCanvas({
   onSelect,
   onCreate,
   onUpdate,
+  onMagnifierChange,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -98,8 +103,13 @@ export default function ReviewCanvas({
   const magnifierVisibleRef = React.useRef(false);
   const [magnifierPosition, setMagnifierPosition] =
     React.useState<MagnifierPosition | null>(null);
+  const [remoteMagnifierPosition, setRemoteMagnifierPosition] =
+    React.useState<MagnifierPosition | null>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
+  const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(
+    null,
+  );
   const [textEditor, setTextEditor] = React.useState<{
     sessionId: string;
     x: number;
@@ -173,6 +183,7 @@ export default function ReviewCanvas({
 
   React.useEffect(() => {
     setImageSize({ width: 0, height: 0 });
+    setAnnotationSnapshot(null);
     setTextEditor(null);
   }, [image.id]);
 
@@ -193,7 +204,8 @@ export default function ReviewCanvas({
     magnifierPointerRef.current = null;
     magnifierVisibleRef.current = false;
     setMagnifierPosition(null);
-  }, []);
+    onMagnifierChange(null);
+  }, [onMagnifierChange]);
 
   React.useEffect(() => {
     if (activeTool !== "magnifier") stopMagnifier();
@@ -223,6 +235,43 @@ export default function ReviewCanvas({
       sourceHeight: imageRect.height,
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!remoteMagnifier) {
+      setRemoteMagnifierPosition(null);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const surface = imageSurfaceRef.current;
+      if (!surface) return;
+      const rect = surface.getBoundingClientRect();
+      setRemoteMagnifierPosition(
+        getMagnifierPosition(
+          rect.left + remoteMagnifier.x * rect.width,
+          rect.top + remoteMagnifier.y * rect.height,
+        ),
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    containerSize,
+    getMagnifierPosition,
+    offset,
+    remoteMagnifier,
+    renderedSize.height,
+    renderedSize.width,
+    scale,
+  ]);
+
+  const publishMagnifierPosition = React.useCallback(
+    (position: MagnifierPosition) => {
+      onMagnifierChange({
+        x: Math.max(0, Math.min(1, position.sourceX / position.sourceWidth)),
+        y: Math.max(0, Math.min(1, position.sourceY / position.sourceHeight)),
+      });
+    },
+    [onMagnifierChange],
+  );
 
   const finishTextEditing = React.useCallback(
     (commit: boolean) => {
@@ -299,6 +348,7 @@ export default function ReviewCanvas({
             if (!current) return;
             magnifierVisibleRef.current = true;
             setMagnifierPosition(current.position);
+            publishMagnifierPosition(current.position);
           }, 180);
           return;
         }
@@ -324,7 +374,10 @@ export default function ReviewCanvas({
           const position = getMagnifierPosition(event.clientX, event.clientY);
           if (position) {
             magnifier.position = position;
-            if (magnifierVisibleRef.current) setMagnifierPosition(position);
+            if (magnifierVisibleRef.current) {
+              setMagnifierPosition(position);
+              publishMagnifierPosition(position);
+            }
           }
           return;
         }
@@ -427,6 +480,7 @@ export default function ReviewCanvas({
                     before: annotation,
                   });
                 }}
+                onSnapshotChange={setAnnotationSnapshot}
                 onCreate={onCreate}
                 onUpdate={onUpdate}
               />
@@ -476,10 +530,11 @@ export default function ReviewCanvas({
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
-      {magnifierPosition ? (
+      {magnifierPosition || remoteMagnifierPosition ? (
         <ReviewMagnifierLens
           imageUrl={image.url}
-          position={magnifierPosition}
+          annotationSnapshot={annotationSnapshot}
+          position={(magnifierPosition || remoteMagnifierPosition)!}
           containerWidth={containerSize.width}
           containerHeight={containerSize.height}
         />

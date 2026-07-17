@@ -28,6 +28,7 @@ type ReviewAnnotationLayerProps = {
   onSelect(ids: string[]): void;
   onTextRequest(position: { x: number; y: number; strokeWidth: number }): void;
   onTextEditRequest(annotation: ReviewAnnotation, caretIndex: number): void;
+  onSnapshotChange(dataUrl: string): void;
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
@@ -177,6 +178,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
   const selectionRectRef = React.useRef<Konva.Rect | null>(null);
   const propsRef = React.useRef(props);
   propsRef.current = props;
+  const onSnapshotChange = props.onSnapshotChange;
 
   const pointInImage = React.useCallback((stage: Konva.Stage) => {
     const current = propsRef.current;
@@ -603,6 +605,11 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       stage.content.style.cursor = "";
     });
     layer.draw();
+    transformer.visible(false);
+    layer.draw();
+    onSnapshotChange(stage.toDataURL({ pixelRatio: 1 }));
+    transformer.visible(true);
+    layer.draw();
   }, [
     props.activeTool,
     props.annotations,
@@ -614,6 +621,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     props.imageHeight,
     props.imageWidth,
     props.lineStyle,
+    onSnapshotChange,
     props.selectedIds,
     props.viewportScale,
     props.width,

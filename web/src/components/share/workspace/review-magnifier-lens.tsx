@@ -11,6 +11,7 @@ type MagnifierPosition = {
 
 type ReviewMagnifierLensProps = {
   imageUrl: string;
+  annotationSnapshot: string | null;
   position: MagnifierPosition;
   containerWidth: number;
   containerHeight: number;
@@ -22,6 +23,7 @@ const GAP = 22;
 
 export default function ReviewMagnifierLens({
   imageUrl,
+  annotationSnapshot,
   position,
   containerWidth,
   containerHeight,
@@ -43,6 +45,16 @@ export default function ReviewMagnifierLens({
       position.pointerY - LENS_SIZE / 2,
     ),
   );
+  const backgroundPosition = `${LENS_SIZE / 2 - position.sourceX * MAGNIFICATION}px ${
+    LENS_SIZE / 2 - position.sourceY * MAGNIFICATION
+  }px`;
+  const backgroundSize = `${position.sourceWidth * MAGNIFICATION}px ${
+    position.sourceHeight * MAGNIFICATION
+  }px`;
+  const backgroundImages = [annotationSnapshot, imageUrl]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => `url(${JSON.stringify(value)})`)
+    .join(", ");
 
   return (
     <div
@@ -52,12 +64,14 @@ export default function ReviewMagnifierLens({
         top,
         width: LENS_SIZE,
         height: LENS_SIZE,
-        backgroundImage: `url(${JSON.stringify(imageUrl)})`,
+        backgroundImage: backgroundImages,
         backgroundRepeat: "no-repeat",
-        backgroundSize: `${position.sourceWidth * MAGNIFICATION}px ${position.sourceHeight * MAGNIFICATION}px`,
-        backgroundPosition: `${LENS_SIZE / 2 - position.sourceX * MAGNIFICATION}px ${
-          LENS_SIZE / 2 - position.sourceY * MAGNIFICATION
-        }px`,
+        backgroundSize: annotationSnapshot
+          ? `${backgroundSize}, ${backgroundSize}`
+          : backgroundSize,
+        backgroundPosition: annotationSnapshot
+          ? `${backgroundPosition}, ${backgroundPosition}`
+          : backgroundPosition,
       }}
       aria-hidden="true"
     />
