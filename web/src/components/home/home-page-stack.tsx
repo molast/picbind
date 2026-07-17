@@ -22,6 +22,7 @@ const ShareRoomPage = dynamic(
 type RoomHistoryState = {
   picbindRoomId?: string;
   picbindHomeScrollY?: number;
+  picbindRoomEntry?: "base" | "guard";
 };
 
 export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
@@ -50,8 +51,18 @@ export default function HomePageStack({ initialLang }: { initialLang: Lang }) {
       picbindHomeScrollY: window.scrollY,
     };
     window.history.replaceState(homeState, "", window.location.href);
+    const roomState = {
+      ...homeState,
+      picbindRoomId: room.roomId,
+      picbindRoomEntry: "base" as const,
+    };
     window.history.pushState(
-      { ...homeState, picbindRoomId: room.roomId },
+      roomState,
+      "",
+      `${target.pathname}${target.search}${target.hash}`,
+    );
+    window.history.pushState(
+      { ...roomState, picbindRoomEntry: "guard" },
       "",
       `${target.pathname}${target.search}${target.hash}`,
     );

@@ -102,6 +102,7 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   );
   const imagesRef = React.useRef<RoomImage[]>([]);
   const roomExitHandledRef = React.useRef(false);
+  const exitRequestSourceRef = React.useRef<"button" | "history" | null>(null);
   const transferAbortControllersRef = React.useRef(
     new Map<string, AbortController>(),
   );
@@ -376,25 +377,56 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
   }, [isShareDialogOpen]);
 
   React.useEffect(() => {
-    if (!embedded || !roomId || !role) return;
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
+    const state = window.history.state as {
+      picbindRoomId?: string;
+      picbindRoomEntry?: "base" | "guard";
+    } | null;
+    if (
+      state?.picbindRoomId === roomId &&
+      state.picbindRoomEntry === "guard"
+    ) {
+      return;
+    }
+    const roomState = {
+      ...window.history.state,
+      picbindRoomId: roomId,
+      picbindRoomEntry: "base" as const,
+    };
+    window.history.replaceState(roomState, "", window.location.href);
+    window.history.pushState(
+      { ...roomState, picbindRoomEntry: "guard" },
+      "",
+      window.location.href,
+    );
+  }, [roomId]);
+
+  React.useEffect(() => {
+    if (!roomId || !role) return;
     const handleHistoryBack = () => {
       if (roomExitHandledRef.current) return;
-      const sessionId = sessionIdRef.current;
-      if (!sessionId) return;
-      if (role === "owner") {
-        try {
-          markShareRoomTemporarilyAway(roomId);
-        } catch {
-          // The Worker heartbeat will still expire this session if local metadata is unavailable.
-        }
-        void leaveRealtimeRoomTemporarily(roomId, sessionId).catch(() => undefined);
-      } else {
-        void leaveRealtimeRoom(roomId, sessionId, true).catch(() => undefined);
-      }
+      const roomState = {
+        ...window.history.state,
+        picbindRoomId: roomId,
+        picbindRoomEntry: "guard" as const,
+      };
+      window.history.pushState(roomState, "", window.location.href);
+      exitRequestSourceRef.current = "history";
+      setIsExitDialogOpen(true);
     };
     window.addEventListener("popstate", handleHistoryBack);
     return () => window.removeEventListener("popstate", handleHistoryBack);
-  }, [embedded, role, roomId]);
+  }, [role, roomId]);
+
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (roomExitHandledRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   React.useEffect(() => {
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
@@ -824,7 +856,7 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
       await leaveRealtimeRoomTemporarily(roomId, sessionId);
       markShareRoomTemporarilyAway(roomId);
       roomExitHandledRef.current = true;
-      embedded ? window.history.back() : window.location.assign("/");
+      embedded ? window.history.go(-2) : window.location.assign("/");
     } catch (error) {
       setIsRoomActionPending(false);
       upsertActivity({
@@ -839,6 +871,7 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
 
   const requestExitRoom = () => {
     if (!roomId || !role || !sessionIdRef.current || isRoomActionPending) return;
+    exitRequestSourceRef.current = "button";
     setIsExitDialogOpen(true);
   };
 
@@ -855,7 +888,12 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
       }
       clearRoomPageState(roomId);
       roomExitHandledRef.current = true;
-      embedded ? window.history.back() : window.location.assign("/");
+      setIsExitDialogOpen(false);
+      if (embedded || exitRequestSourceRef.current === "history") {
+        window.history.go(-2);
+      } else {
+        window.location.assign("/");
+      }
     } catch (error) {
       setIsRoomActionPending(false);
       setIsExitDialogOpen(false);
@@ -1017,7 +1055,10 @@ export default function ShareRoomPage({ embedded = false }: { embedded?: boolean
         open={isExitDialogOpen}
         pending={isRoomActionPending}
         labels={labels}
-        onCancel={() => setIsExitDialogOpen(false)}
+        onCancel={() => {
+          exitRequestSourceRef.current = null;
+          setIsExitDialogOpen(false);
+        }}
         onConfirm={confirmExitRoom}
       />
       <ImageSourceDialog
