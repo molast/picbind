@@ -19,7 +19,13 @@ import {
   FiZoomIn,
   FiZoomOut,
 } from "react-icons/fi";
-import { LuMinus, LuMoveUpRight } from "react-icons/lu";
+import {
+  LuMinus,
+  LuMoveUpRight,
+  LuPaintBucket,
+  LuSearch,
+  LuUsersRound,
+} from "react-icons/lu";
 import { PiHandPalmBold } from "react-icons/pi";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { middleEllipsisFileName } from "../share-room-formatters";
@@ -30,19 +36,7 @@ import type {
 } from "@/utils/review-collaboration";
 import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
 import ReviewStrokeStyleTool from "./review-stroke-style-tool";
-
-const ANNOTATION_COLORS = [
-  "#000000",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#06b6d4",
-  "#2563eb",
-  "#7c3aed",
-  "#db2777",
-  "#ffffff",
-] as const;
+import ReviewColorTool from "./review-color-tool";
 
 const LINE_THICKNESSES = [0.0015, 0.003, 0.005, 0.008] as const;
 
@@ -58,6 +52,7 @@ type ReviewToolbarProps = {
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
   annotationColor: string;
+  fillColor: string | null;
   lineThickness: number;
   lineThicknessDisabled: boolean;
   arrowStyle: ReviewStrokeStyle;
@@ -69,6 +64,7 @@ type ReviewToolbarProps = {
   onRedo(): void;
   onModeChange(mode: ReviewMode): void;
   onColorChange(color: string): void;
+  onFillColorChange(color: string | null): void;
   onLineThicknessChange(value: number): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
@@ -130,6 +126,7 @@ export default function ReviewToolbar({
   remoteReviewActive,
   workspaceLocked,
   annotationColor,
+  fillColor,
   lineThickness,
   lineThicknessDisabled,
   arrowStyle,
@@ -141,6 +138,7 @@ export default function ReviewToolbar({
   onRedo,
   onModeChange,
   onColorChange,
+  onFillColorChange,
   onLineThicknessChange,
   onArrowStyleChange,
   onLineStyleChange,
@@ -151,7 +149,13 @@ export default function ReviewToolbar({
   onReset,
 }: ReviewToolbarProps) {
   const [openPanel, setOpenPanel] = React.useState<
-    "emoji" | "color" | "line" | "arrowStyle" | "lineStyle" | null
+    | "emoji"
+    | "color"
+    | "fill"
+    | "line"
+    | "arrowStyle"
+    | "lineStyle"
+    | null
   >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -173,6 +177,7 @@ export default function ReviewToolbar({
   const navigationTools: ToolButtonProps[] = [
     { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: workspaceLocked },
     { icon: PiHandPalmBold, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
+    { icon: LuSearch, label: labels.magnifierTool, onClick: () => onToolChange("magnifier"), active: activeTool === "magnifier", disabled: workspaceLocked },
   ];
   const annotationTools: ToolButtonProps[] = [
     { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: workspaceLocked },
@@ -322,48 +327,34 @@ export default function ReviewToolbar({
             </div>
           ) : null}
         </div>
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            disabled={workspaceLocked}
-            onClick={() => setOpenPanel((current) => current === "color" ? null : "color")}
-            className={`flex h-9 w-9 items-center justify-center rounded-md transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 ${openPanel === "color" ? "bg-blue-50" : ""}`}
-            aria-label={labels.annotationColor}
-            title={labels.annotationColor}
-          >
-            <span
-              className="h-5 w-5 rounded-full border border-slate-300 shadow-sm"
-              style={{ backgroundColor: annotationColor }}
-              aria-hidden="true"
-            />
-          </button>
-          {openPanel === "color" ? (
-            <div className="absolute left-0 top-11 z-50 grid w-44 grid-cols-5 gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-xl">
-              {ANNOTATION_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  className={`h-6 w-6 rounded-full border shadow-sm transition hover:scale-110 ${annotationColor === color ? "ring-2 ring-blue-500 ring-offset-2" : "border-slate-300"}`}
-                  style={{ backgroundColor: color }}
-                  onClick={() => {
-                    onColorChange(color);
-                    setOpenPanel(null);
-                  }}
-                  aria-label={`${labels.annotationColor} ${color}`}
-                />
-              ))}
-              <label className="relative flex h-6 w-6 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-dashed border-slate-400 bg-[conic-gradient(red,yellow,lime,aqua,blue,magenta,red)]" title={labels.annotationColor}>
-                <input
-                  type="color"
-                  value={annotationColor}
-                  onChange={(event) => onColorChange(event.target.value)}
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                  aria-label={labels.annotationColor}
-                />
-              </label>
-            </div>
-          ) : null}
-        </div>
+        <ReviewColorTool
+          label={labels.annotationColor}
+          color={annotationColor}
+          panelOpen={openPanel === "color"}
+          disabled={workspaceLocked}
+          onToggle={() =>
+            setOpenPanel((current) => current === "color" ? null : "color")
+          }
+          onChange={(color) => {
+            if (color) onColorChange(color);
+            setOpenPanel(null);
+          }}
+        />
+        <ReviewColorTool
+          label={labels.annotationFill}
+          clearLabel={labels.noFill}
+          icon={LuPaintBucket}
+          color={fillColor}
+          panelOpen={openPanel === "fill"}
+          disabled={workspaceLocked}
+          onToggle={() =>
+            setOpenPanel((current) => current === "fill" ? null : "fill")
+          }
+          onChange={(color) => {
+            onFillColorChange(color);
+            setOpenPanel(null);
+          }}
+        />
         <ToolButton icon={FiRadio} label={labels.laserTool} disabled />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={workspaceLocked || !canUndo} />
@@ -374,6 +365,22 @@ export default function ReviewToolbar({
         <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={workspaceLocked} />
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={workspaceLocked} />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
+        <div
+          className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+            remoteReviewActive ? "text-emerald-600" : "text-slate-400"
+          }`}
+          role="status"
+          aria-label={remoteReviewActive ? labels.reviewLive : labels.reviewWaiting}
+          title={remoteReviewActive ? labels.reviewLive : labels.reviewWaiting}
+        >
+          <LuUsersRound className="h-[18px] w-[18px]" aria-hidden="true" />
+          <span
+            className={`absolute bottom-1.5 right-1.5 h-2 w-2 rounded-full border-2 border-white ${
+              remoteReviewActive ? "bg-emerald-500" : "bg-slate-300"
+            }`}
+            aria-hidden="true"
+          />
+        </div>
         <ToolButton
           icon={FiUserCheck}
           label={labels.followPresenter}

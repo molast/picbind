@@ -8,6 +8,7 @@ import type {
   ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
+import ReviewMagnifierLens from "./review-magnifier-lens";
 
 const ReviewAnnotationLayer = dynamic(
   () => import("./review-annotation-layer"),
@@ -16,7 +17,24 @@ const ReviewAnnotationLayer = dynamic(
 
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
+function estimateTextWidth(text: string, fontSize: number) {
+  const units = Array.from(text || " ").reduce((total, character) => {
+    if (/\s/.test(character)) return total + 0.34;
+    if (/[\u2e80-\u9fff\uf900-\ufaff]/.test(character)) return total + 1;
+    return total + 0.58;
+  }, 0);
+  return units * fontSize + fontSize * 0.45;
+}
+
 export type ReviewViewportOffset = { x: number; y: number };
+type MagnifierPosition = {
+  pointerX: number;
+  pointerY: number;
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
 
 type ReviewCanvasProps = {
   image: RoomImage;
@@ -27,6 +45,7 @@ type ReviewCanvasProps = {
   selectedIds: string[];
   actorId: string;
   defaultColor: string;
+  defaultFill: string | null;
   defaultStrokeRatio: number;
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
@@ -49,6 +68,7 @@ export default function ReviewCanvas({
   selectedIds,
   actorId,
   defaultColor,
+  defaultFill,
   defaultStrokeRatio,
   arrowStyle,
   lineStyle,
@@ -62,6 +82,7 @@ export default function ReviewCanvas({
   onUpdate,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
   const dragRef = React.useRef<{
     pointerId: number;
     x: number;
@@ -69,6 +90,14 @@ export default function ReviewCanvas({
     originX: number;
     originY: number;
   } | null>(null);
+  const magnifierPointerRef = React.useRef<{
+    pointerId: number;
+    position: MagnifierPosition;
+  } | null>(null);
+  const magnifierTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const magnifierVisibleRef = React.useRef(false);
+  const [magnifierPosition, setMagnifierPosition] =
+    React.useState<MagnifierPosition | null>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
   const [textEditor, setTextEditor] = React.useState<{
@@ -101,6 +130,29 @@ export default function ReviewCanvas({
     width: Math.max(1, Math.round(imageSize.width * fitRatio)),
     height: Math.max(1, Math.round(imageSize.height * fitRatio)),
   };
+  const textEditorFontSize = textEditor
+    ? Math.max(
+        14,
+        (textEditor.height
+          ? textEditor.height * 0.8 * (textEditor.scaleY || 1)
+          : textEditor.strokeWidth * 5) *
+          (renderedSize.height / Math.max(1, imageSize.height)),
+      )
+    : 14;
+  const textEditorLeft = textEditor
+    ? (textEditor.x / Math.max(1, imageSize.width)) * renderedSize.width
+    : 0;
+  const textEditorWidth = textEditor
+    ? Math.max(
+        64,
+        Math.min(
+          Math.max(64, renderedSize.width - textEditorLeft - 8),
+          estimateTextWidth(textEditor.value, textEditorFontSize) *
+            ((textEditor.scaleX || 1) / (textEditor.scaleY || 1)) +
+            16,
+        ),
+      )
+    : 64;
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -135,6 +187,43 @@ export default function ReviewCanvas({
     return () => window.cancelAnimationFrame(frame);
   }, [textEditorSessionId]);
 
+  const stopMagnifier = React.useCallback(() => {
+    if (magnifierTimerRef.current) clearTimeout(magnifierTimerRef.current);
+    magnifierTimerRef.current = null;
+    magnifierPointerRef.current = null;
+    magnifierVisibleRef.current = false;
+    setMagnifierPosition(null);
+  }, []);
+
+  React.useEffect(() => {
+    if (activeTool !== "magnifier") stopMagnifier();
+    return stopMagnifier;
+  }, [activeTool, stopMagnifier]);
+
+  const getMagnifierPosition = React.useCallback((clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    const surface = imageSurfaceRef.current;
+    if (!container || !surface) return null;
+    const containerRect = container.getBoundingClientRect();
+    const imageRect = surface.getBoundingClientRect();
+    if (
+      clientX < imageRect.left ||
+      clientX > imageRect.right ||
+      clientY < imageRect.top ||
+      clientY > imageRect.bottom
+    ) {
+      return null;
+    }
+    return {
+      pointerX: clientX - containerRect.left,
+      pointerY: clientY - containerRect.top,
+      sourceX: clientX - imageRect.left,
+      sourceY: clientY - imageRect.top,
+      sourceWidth: imageRect.width,
+      sourceHeight: imageRect.height,
+    };
+  }, []);
+
   const finishTextEditing = React.useCallback(
     (commit: boolean) => {
       const current = textEditorRef.current;
@@ -147,10 +236,7 @@ export default function ReviewCanvas({
         onUpdate(current.before, {
           ...current.before,
           text: value,
-          width: Math.max(
-            current.before.width,
-            value.length * fontSize * 0.62,
-          ),
+          width: Math.max(fontSize * 1.5, estimateTextWidth(value, fontSize)),
         });
         return;
       }
@@ -160,7 +246,7 @@ export default function ReviewCanvas({
         type: "text",
         x: current.x,
         y: current.y,
-        width: Math.max(current.strokeWidth * 12, value.length * fontSize * 0.62),
+        width: Math.max(fontSize * 1.5, estimateTextWidth(value, fontSize)),
         height: fontSize * 1.35,
         scaleX: 1,
         scaleY: 1,
@@ -184,6 +270,8 @@ export default function ReviewCanvas({
             ? "cursor-default"
             : activeTool === "hand"
               ? "cursor-grab active:cursor-grabbing"
+              : activeTool === "magnifier"
+                ? "cursor-zoom-in"
             : activeTool === "text"
               ? "cursor-text"
             : "cursor-crosshair"
@@ -196,6 +284,24 @@ export default function ReviewCanvas({
         onScaleChange(Math.min(4, Math.max(0.25, scale * zoomFactor)));
       }}
       onPointerDown={(event) => {
+        if (
+          activeTool === "magnifier" &&
+          !interactionDisabled &&
+          event.button === 0
+        ) {
+          const position = getMagnifierPosition(event.clientX, event.clientY);
+          if (!position) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          magnifierPointerRef.current = { pointerId: event.pointerId, position };
+          if (magnifierTimerRef.current) clearTimeout(magnifierTimerRef.current);
+          magnifierTimerRef.current = setTimeout(() => {
+            const current = magnifierPointerRef.current;
+            if (!current) return;
+            magnifierVisibleRef.current = true;
+            setMagnifierPosition(current.position);
+          }, 180);
+          return;
+        }
         if (
           activeTool !== "hand" ||
           interactionDisabled ||
@@ -213,6 +319,15 @@ export default function ReviewCanvas({
         };
       }}
       onPointerMove={(event) => {
+        const magnifier = magnifierPointerRef.current;
+        if (magnifier?.pointerId === event.pointerId) {
+          const position = getMagnifierPosition(event.clientX, event.clientY);
+          if (position) {
+            magnifier.position = position;
+            if (magnifierVisibleRef.current) setMagnifierPosition(position);
+          }
+          return;
+        }
         const drag = dragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
         onOffsetChange({
@@ -221,9 +336,14 @@ export default function ReviewCanvas({
         });
       }}
       onPointerUp={(event) => {
+        if (magnifierPointerRef.current?.pointerId === event.pointerId) {
+          stopMagnifier();
+          return;
+        }
         if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
       }}
       onPointerCancel={() => {
+        stopMagnifier();
         dragRef.current = null;
       }}
     >
@@ -234,6 +354,7 @@ export default function ReviewCanvas({
         }}
       >
         <div
+          ref={imageSurfaceRef}
           className="relative shadow-2xl"
           style={{
             width: renderedSize.width,
@@ -273,6 +394,7 @@ export default function ReviewCanvas({
                 selectedIds={selectedIds}
                 actorId={actorId}
                 defaultColor={defaultColor}
+                defaultFill={defaultFill}
                 defaultStrokeRatio={defaultStrokeRatio}
                 arrowStyle={arrowStyle}
                 lineStyle={lineStyle}
@@ -320,14 +442,7 @@ export default function ReviewCanvas({
               style={{
                 left: `${(textEditor.x / Math.max(1, imageSize.width)) * 100}%`,
                 top: `${(textEditor.y / Math.max(1, imageSize.height)) * 100}%`,
-                width: textEditor.width
-                  ? Math.max(
-                      80,
-                      textEditor.width *
-                        (textEditor.scaleX || 1) *
-                        (renderedSize.width / Math.max(1, imageSize.width)),
-                    )
-                  : Math.max(120, renderedSize.width * 0.28),
+                width: textEditorWidth,
                 height: textEditor.height
                   ? Math.max(
                       32,
@@ -336,13 +451,7 @@ export default function ReviewCanvas({
                         (renderedSize.height / Math.max(1, imageSize.height)),
                     )
                   : undefined,
-                fontSize: Math.max(
-                  14,
-                  (textEditor.height
-                    ? textEditor.height * 0.8 * (textEditor.scaleY || 1)
-                    : textEditor.strokeWidth * 5) *
-                    (renderedSize.height / Math.max(1, imageSize.height)),
-                ),
+                fontSize: textEditorFontSize,
                 color: textEditor.color,
                 transform: `rotate(${textEditor.rotation || 0}deg)`,
                 transformOrigin: "top left",
@@ -367,6 +476,14 @@ export default function ReviewCanvas({
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
+      {magnifierPosition ? (
+        <ReviewMagnifierLens
+          imageUrl={image.url}
+          position={magnifierPosition}
+          containerWidth={containerSize.width}
+          containerHeight={containerSize.height}
+        />
+      ) : null}
     </div>
   );
 }

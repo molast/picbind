@@ -5,6 +5,7 @@ import type { RealtimeMessageChannel } from "./weak-network-socket";
 export type ReviewTool =
   | "select"
   | "hand"
+  | "magnifier"
   | "arrow"
   | "line"
   | "rectangle"
@@ -18,7 +19,7 @@ export type ReviewStrokeStyle = "solid" | "dashed" | "dotted";
 
 export type ReviewAnnotation = {
   id: string;
-  type: Exclude<ReviewTool, "select" | "hand">;
+  type: Exclude<ReviewTool, "select" | "hand" | "magnifier">;
   x: number;
   y: number;
   width: number;
@@ -30,6 +31,7 @@ export type ReviewAnnotation = {
   text?: string;
   emoji?: string;
   stroke: string;
+  fill?: string | null;
   strokeWidth: number;
   strokeStyle?: ReviewStrokeStyle;
   createdBy: string;
@@ -140,6 +142,10 @@ function validAnnotation(value: unknown): value is ReviewAnnotation {
     validFinite(annotation.rotation) &&
     typeof annotation.stroke === "string" &&
     /^#[0-9a-f]{6}$/i.test(annotation.stroke) &&
+    (annotation.fill === undefined ||
+      annotation.fill === null ||
+      (typeof annotation.fill === "string" &&
+        /^#[0-9a-f]{6}$/i.test(annotation.fill))) &&
     validFinite(annotation.strokeWidth) &&
     (!annotation.strokeStyle ||
       ["solid", "dashed", "dotted"].includes(annotation.strokeStyle)) &&

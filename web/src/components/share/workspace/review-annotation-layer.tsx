@@ -21,6 +21,7 @@ type ReviewAnnotationLayerProps = {
   selectedIds: string[];
   actorId: string;
   defaultColor: string;
+  defaultFill: string | null;
   defaultStrokeRatio: number;
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
@@ -32,12 +33,13 @@ type ReviewAnnotationLayerProps = {
 };
 
 function annotationAtPoint(
-  tool: Exclude<ReviewTool, "select" | "hand">,
+  tool: Exclude<ReviewTool, "select" | "hand" | "magnifier">,
   actorId: string,
   x: number,
   y: number,
   strokeWidth: number,
   stroke: string,
+  fill: string | null,
   strokeStyle?: ReviewStrokeStyle,
 ): ReviewAnnotation {
   return {
@@ -54,6 +56,7 @@ function annotationAtPoint(
     text: tool === "text" ? "Text" : undefined,
     emoji: tool === "emoji" ? "👍" : undefined,
     stroke,
+    fill: tool === "rectangle" || tool === "circle" ? fill : undefined,
     strokeWidth,
     strokeStyle,
     createdBy: actorId,
@@ -64,6 +67,13 @@ function createAnnotationNode(
   annotation: ReviewAnnotation,
   selectable: boolean,
 ) {
+  const hitEntireBounds = (context: Konva.Context, shape: Konva.Shape) => {
+    const bounds = shape.getSelfRect();
+    context.beginPath();
+    context.rect(bounds.x, bounds.y, bounds.width, bounds.height);
+    context.closePath();
+    context.fillStrokeShape(shape);
+  };
   const dash =
     annotation.strokeStyle === "dashed"
       ? [annotation.strokeWidth * 4, annotation.strokeWidth * 2.5]
@@ -90,6 +100,7 @@ function createAnnotationNode(
       pointerWidth: annotation.strokeWidth * 3,
       strokeScaleEnabled: false,
       dash,
+      hitFunc: hitEntireBounds,
       lineCap: "round",
       lineJoin: "round",
     });
@@ -99,9 +110,11 @@ function createAnnotationNode(
       ...shared,
       points: annotation.points || [0, 0, annotation.width, annotation.height],
       stroke: annotation.stroke,
+      fill: "rgba(0, 0, 0, 0)",
       strokeWidth: annotation.strokeWidth,
       strokeScaleEnabled: false,
       dash,
+      hitFunc: hitEntireBounds,
       lineCap: "round",
       lineJoin: "round",
     });
@@ -112,6 +125,7 @@ function createAnnotationNode(
       width: annotation.width,
       height: annotation.height,
       stroke: annotation.stroke,
+      fill: annotation.fill ?? "rgba(0, 0, 0, 0)",
       strokeWidth: annotation.strokeWidth,
       strokeScaleEnabled: false,
     });
@@ -122,6 +136,7 @@ function createAnnotationNode(
       radiusX: Math.max(0, annotation.width / 2),
       radiusY: Math.max(0, annotation.height / 2),
       stroke: annotation.stroke,
+      fill: annotation.fill ?? "rgba(0, 0, 0, 0)",
       strokeWidth: annotation.strokeWidth,
       strokeScaleEnabled: false,
     });
@@ -244,7 +259,12 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
 
     const start = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const currentProps = propsRef.current;
-      if (currentProps.activeTool === "hand") return;
+      if (
+        currentProps.activeTool === "hand" ||
+        currentProps.activeTool === "magnifier"
+      ) {
+        return;
+      }
       if (currentProps.activeTool === "select") {
         if (event.target === stage) {
           currentProps.onSelect([]);
@@ -283,6 +303,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         current.y,
         strokeWidth,
         currentProps.defaultColor,
+        currentProps.defaultFill,
         currentProps.activeTool === "arrow"
           ? currentProps.arrowStyle
           : currentProps.activeTool === "line"
@@ -519,6 +540,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const transformer = new Konva.Transformer({
       flipEnabled: false,
       keepRatio: false,
+      shouldOverdrawWholeArea: selectedNodes.length > 1,
       rotateEnabled: true,
       rotateAnchorCursor: ROTATE_CURSOR,
       rotateAnchorOffset: 12 / controlScale,
@@ -547,6 +569,15 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     transformerRef.current = transformer;
     layer.add(transformer);
     if (selectedNodes.length) transformer.nodes(selectedNodes);
+    const transformerBack = transformer.findOne<Konva.Shape>(".back");
+    if (selectedNodes.length > 1) {
+      transformerBack?.on("mouseenter", () => {
+        stage.content.style.cursor = "move";
+      });
+      transformerBack?.on("mouseleave", () => {
+        stage.content.style.cursor = "";
+      });
+    }
     const rotateAnchor = transformer.findOne<Konva.Rect>(".rotater");
     rotateAnchor?.on("mouseenter", () => {
       stage.content.style.cursor = ROTATE_CURSOR;
@@ -560,6 +591,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     props.annotations,
     props.arrowStyle,
     props.defaultColor,
+    props.defaultFill,
     props.defaultStrokeRatio,
     props.height,
     props.imageHeight,

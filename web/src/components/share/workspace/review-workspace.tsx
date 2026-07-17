@@ -7,6 +7,7 @@ import type {
   ReviewAnnotation,
   ReviewCollaborationMessage,
   ReviewMode,
+  ReviewOperation,
   ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
@@ -14,8 +15,13 @@ import ReviewCanvas, { type ReviewViewportOffset } from "./review-canvas";
 import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
 import { useReviewHistory } from "./use-review-history";
+import {
+  loadReviewHistory,
+  saveReviewHistory,
+} from "@/utils/realtime-review-history-store";
 
 type ReviewWorkspaceProps = {
+  roomId: string;
   image: RoomImage;
   labels: ShareRoomLabels;
   actorId: string;
@@ -37,7 +43,19 @@ type IncomingState = {
   >;
 };
 
+function mergeReviewOperations(
+  primary: ReviewOperation[],
+  secondary: ReviewOperation[],
+) {
+  const ids = new Set(primary.map((operation) => operation.id));
+  return [
+    ...primary,
+    ...secondary.filter((operation) => !ids.has(operation.id)),
+  ];
+}
+
 export default function ReviewWorkspace({
+  roomId,
   image,
   labels,
   actorId,
@@ -52,6 +70,7 @@ export default function ReviewWorkspace({
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
+  const [defaultFill, setDefaultFill] = React.useState<string | null>(null);
   const [defaultStrokeRatio, setDefaultStrokeRatio] = React.useState(0.0015);
   const [arrowStyle, setArrowStyle] = React.useState<ReviewStrokeStyle>("solid");
   const [lineStyle, setLineStyle] = React.useState<ReviewStrokeStyle>("solid");
@@ -61,7 +80,11 @@ export default function ReviewWorkspace({
   const [incomingMessages, setIncomingMessages] = React.useState<
     Array<{ sequence: number; message: ReviewCollaborationMessage }>
   >([]);
+  const [hydratedHistoryKey, setHydratedHistoryKey] = React.useState<string | null>(
+    null,
+  );
   const {
+    operations,
     operationsRef,
     cursorRef,
     annotations,
@@ -129,6 +152,8 @@ export default function ReviewWorkspace({
   }, []);
 
   React.useEffect(() => {
+    const cacheKey = `${roomId}:${image.id}`;
+    let cancelled = false;
     resetViewport();
     setDimensions({ width: 0, height: 0 });
     setSelectedIds([]);
@@ -136,16 +161,33 @@ export default function ReviewWorkspace({
     setLocalMode(null);
     setRemoteMode(null);
     setRemoteReviewActive(false);
+    setHydratedHistoryKey(null);
     replace([], 0);
     incomingStatesRef.current.clear();
-    onSendMessage({
-      ...baseMessage(),
-      type: "REVIEW_PRESENCE",
-      active: true,
-      request: true,
-    });
-    onSendMessage({ ...baseMessage(), type: "REVIEW_STATE_REQUEST" });
+    void (async () => {
+      let cached: Awaited<ReturnType<typeof loadReviewHistory>> = null;
+      try {
+        cached = await loadReviewHistory(roomId, image.id);
+      } catch {
+        cached = null;
+      }
+      if (cancelled) return;
+      if (cached) {
+        const current = operationsRef.current;
+        const merged = mergeReviewOperations(cached.operations, current);
+        replace(merged, current.length ? merged.length : cached.cursor);
+      }
+      setHydratedHistoryKey(cacheKey);
+      onSendMessage({
+        ...baseMessage(),
+        type: "REVIEW_PRESENCE",
+        active: true,
+        request: true,
+      });
+      onSendMessage({ ...baseMessage(), type: "REVIEW_STATE_REQUEST" });
+    })();
     return () => {
+      cancelled = true;
       onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
       onSendMessage({
         ...baseMessage(),
@@ -154,7 +196,20 @@ export default function ReviewWorkspace({
         request: false,
       });
     };
-  }, [baseMessage, onSendMessage, replace, resetViewport]);
+  }, [
+    baseMessage,
+    image.id,
+    onSendMessage,
+    operationsRef,
+    replace,
+    resetViewport,
+    roomId,
+  ]);
+
+  React.useEffect(() => {
+    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
+    void saveReviewHistory(roomId, image.id, operations, cursor).catch(() => undefined);
+  }, [cursor, hydratedHistoryKey, image.id, operations, roomId]);
 
   React.useEffect(() => {
     if (localMode !== "present") return;
@@ -251,12 +306,19 @@ export default function ReviewWorkspace({
       const state = incomingStatesRef.current.get(message.transferId);
       incomingStatesRef.current.delete(message.transferId);
       if (state && state.operations.every(Boolean)) {
-        replace(
-          state.operations.filter(
-            (operation): operation is NonNullable<typeof operation> => Boolean(operation),
-          ),
-          state.cursor,
+        const receivedOperations = state.operations.filter(
+          (operation): operation is NonNullable<typeof operation> => Boolean(operation),
         );
+        const current = operationsRef.current;
+        if (receivedOperations.length) {
+          const merged = mergeReviewOperations(current, receivedOperations);
+          replace(
+            merged,
+            merged.length === receivedOperations.length ? state.cursor : merged.length,
+          );
+        } else if (!current.length) {
+          replace([], 0);
+        }
       }
       return;
     }
@@ -337,6 +399,16 @@ export default function ReviewWorkspace({
     )
       ? selectedAnnotations[0].stroke
       : defaultColor;
+  const selectedFillAnnotations = selectedAnnotations.filter(
+    (annotation) => annotation.type === "rectangle" || annotation.type === "circle",
+  );
+  const displayedFill =
+    selectedFillAnnotations.length > 0 &&
+    selectedFillAnnotations.every(
+      (annotation) => annotation.fill === selectedFillAnnotations[0].fill,
+    )
+      ? selectedFillAnnotations[0].fill ?? null
+      : defaultFill;
   const changeAnnotationColor = React.useCallback(
     (color: string) => {
       if (selectedAnnotations.length) {
@@ -367,6 +439,21 @@ export default function ReviewWorkspace({
       }
     },
     [commitUpdate, dimensions, selectedAnnotations],
+  );
+
+  const changeFillColor = React.useCallback(
+    (fill: string | null) => {
+      setDefaultFill(fill);
+      selectedAnnotations
+        .filter(
+          (annotation) =>
+            annotation.type === "rectangle" || annotation.type === "circle",
+        )
+        .forEach((annotation) => {
+          commitUpdate(annotation, { ...annotation, fill });
+        });
+    },
+    [commitUpdate, selectedAnnotations],
   );
 
   const changeStrokeStyle = React.useCallback(
@@ -488,6 +575,7 @@ export default function ReviewWorkspace({
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
         annotationColor={displayedColor}
+        fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
         lineThicknessDisabled={false}
         arrowStyle={
@@ -508,6 +596,7 @@ export default function ReviewWorkspace({
         onRedo={() => moveHistoryCursor(cursor + 1)}
         onModeChange={changeMode}
         onColorChange={changeAnnotationColor}
+        onFillColorChange={changeFillColor}
         onLineThicknessChange={changeLineThickness}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
@@ -526,6 +615,7 @@ export default function ReviewWorkspace({
         selectedIds={selectedIds}
         actorId={actorId}
         defaultColor={defaultColor}
+        defaultFill={defaultFill}
         defaultStrokeRatio={defaultStrokeRatio}
         arrowStyle={arrowStyle}
         lineStyle={lineStyle}

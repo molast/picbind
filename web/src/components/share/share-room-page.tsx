@@ -1157,6 +1157,7 @@ export default function ShareRoomPage({
           />
           {reviewImage ? (
             <ReviewWorkspace
+              roomId={roomId ?? "unknown-room"}
               image={reviewImage}
               labels={labels}
               actorId={role || "unknown"}
