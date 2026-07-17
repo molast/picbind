@@ -54,6 +54,10 @@ export function generate_share_placeholder(input: Uint8Array): object;
 
 export function generate_share_placeholder_from_rgba(width: number, height: number, sample_width: number, sample_height: number, rgba: Uint8Array): object;
 
+export function generate_share_preview_thumbnail(input: Uint8Array, container_width: number, container_height: number): Uint8Array;
+
+export function generate_share_preview_thumbnail_from_rgba(width: number, height: number, rgba: Uint8Array): Uint8Array;
+
 export function generate_share_thumbnail(input: Uint8Array): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -74,6 +78,8 @@ export interface InitOutput {
     readonly generate_favicon: (a: number, b: number) => [number, number, number];
     readonly generate_share_placeholder: (a: number, b: number) => [number, number, number];
     readonly generate_share_placeholder_from_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly generate_share_preview_thumbnail: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly generate_share_preview_thumbnail_from_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
     readonly lodepng_add_itext: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly lodepng_add_text: (a: number, b: number, c: number) => number;

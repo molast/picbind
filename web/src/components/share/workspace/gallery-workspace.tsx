@@ -17,6 +17,7 @@ type GalleryWorkspaceProps = {
   onFiles(files: FileList | File[]): void | Promise<void>;
   onDraggingChange(dragging: boolean): void;
   onPreview(imageId: string): void;
+  onPlaceholderMeasured(imageId: string, width: number, height: number): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
   onCancelTransfer(image: RoomImage): void;
@@ -34,6 +35,7 @@ export default function GalleryWorkspace({
   onFiles,
   onDraggingChange,
   onPreview,
+  onPlaceholderMeasured,
   onReview,
   onSend,
   onCancelTransfer,
@@ -99,6 +101,7 @@ export default function GalleryWorkspace({
                 isSending={isSending}
                 labels={labels}
                 onPreview={onPreview}
+                onPlaceholderMeasured={onPlaceholderMeasured}
                 onReview={onReview}
                 onSend={onSend}
                 onCancelTransfer={onCancelTransfer}

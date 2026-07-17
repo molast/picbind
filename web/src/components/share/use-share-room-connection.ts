@@ -33,6 +33,7 @@ import {
   RealtimeImageReceiver,
   createImageTransferMeta,
   sendImagePlaceholder,
+  sendImageThumbnail,
   sendImageReady,
   sendImageReceipt,
 } from "@/utils/realtime-image-transfer";
@@ -47,6 +48,7 @@ import {
   sendPeerMessage,
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
+import { generateShareThumbnail } from "@/utils/share-thumbnail";
 import { downloadFileFromR2 } from "@/utils/realtime-r2-transfer";
 import { clearRoomPageState } from "@/utils/realtime-room-page-store";
 import {
@@ -175,6 +177,7 @@ export function useShareRoomConnection({
     let controlChannel: RTCDataChannel | null = null;
     let instructionChannel: RTCDataChannel | null = null;
     let fileChannel: RTCDataChannel | null = null;
+    let thumbnailChannel: RTCDataChannel | null = null;
     let probeChannel: RTCDataChannel | null = null;
     let probeTimer: number | undefined;
     const pendingProbes = new Map<string, number>();
@@ -182,6 +185,7 @@ export function useShareRoomConnection({
     let socketRelay: WeakNetworkSocket | null = null;
     let adaptiveControl: AdaptiveMessageChannel | null = null;
     let adaptiveInstruction: AdaptiveMessageChannel | null = null;
+    let adaptiveThumbnail: AdaptiveMessageChannel | null = null;
     let iceServers: RTCIceServer[] = [];
     let currentPeerSessionId: string | null = null;
     let currentOfferSdp: string | null = null;
@@ -234,6 +238,7 @@ export function useShareRoomConnection({
     };
 
     const notifiedIncomingImages = new Set<string>();
+    const thumbnailRequests = new Map<string, string>();
     const notifyIncomingImage = (id: string, name: string) => {
       if (notifiedIncomingImages.has(id)) return;
       notifiedIncomingImages.add(id);
@@ -265,6 +270,7 @@ export function useShareRoomConnection({
           previewOnly: false,
           placeholderOnly: true,
           placeholder,
+          thumbnail: current?.thumbnail,
           createdAt: current?.createdAt || Date.now(),
         };
         notifyIncomingImage(meta.id, meta.name);
@@ -303,6 +309,46 @@ export function useShareRoomConnection({
         } catch (error) {
           console.warn("Failed to cache image preview", error);
         }
+      },
+      onPlaceholderAck(id, width, height) {
+        const requestKey = `${width}x${height}`;
+        if (thumbnailRequests.get(id) === requestKey) return;
+        thumbnailRequests.set(id, requestKey);
+        void (async () => {
+          try {
+            const image = imagesRef.current.find(
+              (candidate) =>
+                candidate.id === id &&
+                candidate.direction === "sent" &&
+                !candidate.placeholderOnly,
+            );
+            if (!image) return;
+            const thumbnail = await generateShareThumbnail(
+              image.blob,
+              width,
+              height,
+            );
+            if (thumbnailRequests.get(id) !== requestKey) return;
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              if (adaptiveThumbnail?.readyState === "open") {
+                await sendImageThumbnail(adaptiveThumbnail, id, thumbnail);
+                return;
+              }
+              await new Promise((resolve) => window.setTimeout(resolve, 100));
+            }
+            throw new Error("Image file channel is not open");
+          } catch (error) {
+            if (thumbnailRequests.get(id) === requestKey) {
+              thumbnailRequests.delete(id);
+            }
+            console.warn("Failed to send image thumbnail", error);
+          }
+        })();
+      },
+      async onThumbnail(id, thumbnail) {
+        const current = imagesRef.current.find((image) => image.id === id);
+        if (!current || current.direction !== "received") return;
+        updateRoomImage(id, { thumbnail }, true);
       },
       onStart(meta) {
         notifyIncomingImage(meta.id, meta.name);
@@ -351,6 +397,7 @@ export function useShareRoomConnection({
           previewOnly: false,
           placeholderOnly: false,
           placeholder: current?.placeholder,
+          thumbnail: current?.thumbnail,
           transferMode: current?.transferMode || "p2p",
           createdAt: current?.createdAt || Date.now(),
         };
@@ -499,6 +546,7 @@ export function useShareRoomConnection({
             previewOnly: false,
             placeholderOnly: false,
             placeholder: current?.placeholder,
+            thumbnail: current?.thumbnail,
             transferMode: "r2",
             createdAt: current?.createdAt || Date.now(),
           };
@@ -818,6 +866,15 @@ export function useShareRoomConnection({
       }
     };
 
+    const attachThumbnailChannel = (nextChannel: RTCDataChannel) => {
+      thumbnailChannel = nextChannel;
+      adaptiveThumbnail?.setDataChannel(nextChannel);
+      thumbnailChannel.onmessage = (event) => receiver.handle(event.data);
+      thumbnailChannel.onclose = () => {
+        adaptiveThumbnail?.setDataChannel(null);
+      };
+    };
+
     const resetProbeStats = () => {
       pendingProbes.forEach((timeoutId) => window.clearTimeout(timeoutId));
       pendingProbes.clear();
@@ -897,6 +954,10 @@ export function useShareRoomConnection({
         fileChannel.onclose = null;
         fileChannel.close();
       }
+      if (thumbnailChannel) {
+        thumbnailChannel.onclose = null;
+        thumbnailChannel.close();
+      }
       if (probeChannel) {
         probeChannel.onclose = null;
         probeChannel.close();
@@ -915,11 +976,13 @@ export function useShareRoomConnection({
       controlChannel = null;
       instructionChannel = null;
       fileChannel = null;
+      thumbnailChannel = null;
       probeChannel = null;
       connection = null;
       outgoingChannelRef.current = null;
       adaptiveControl?.setDataChannel(null);
       adaptiveInstruction?.setDataChannel(null);
+      adaptiveThumbnail?.setDataChannel(null);
       currentPeerSessionId = null;
       currentOfferSdp = null;
       appliedRemoteCandidates.clear();
@@ -999,6 +1062,9 @@ export function useShareRoomConnection({
           attachInstructionChannel(event.channel);
         }
         else if (event.channel.label === "picbind-files") attachFileChannel(event.channel);
+        else if (event.channel.label === "picbind-thumbnails") {
+          attachThumbnailChannel(event.channel);
+        }
         else if (event.channel.label === "picbind-network-probe") {
           attachProbeChannel(event.channel);
         }
@@ -1095,6 +1161,9 @@ export function useShareRoomConnection({
         );
         attachFileChannel(
           peer.createDataChannel("picbind-files", { ordered: false }),
+        );
+        attachThumbnailChannel(
+          peer.createDataChannel("picbind-thumbnails", { ordered: true }),
         );
         attachProbeChannel(
           peer.createDataChannel("picbind-network-probe", {
@@ -1242,7 +1311,8 @@ export function useShareRoomConnection({
           onMessage(channel, payload) {
             const event = new MessageEvent("message", { data: payload });
             if (channel === "control") handleControlMessage(event);
-            else handleInstructionMessage(event);
+            else if (channel === "instruction") handleInstructionMessage(event);
+            else receiver.handle(payload);
           },
           onRoomClosed() {
             forceRoomNavigation("closed");
@@ -1289,6 +1359,10 @@ export function useShareRoomConnection({
         adaptiveControl = new AdaptiveMessageChannel("control", socketRelay);
         adaptiveInstruction = new AdaptiveMessageChannel(
           "instruction",
+          socketRelay,
+        );
+        adaptiveThumbnail = new AdaptiveMessageChannel(
+          "thumbnail",
           socketRelay,
         );
         controlChannelRef.current = adaptiveControl;
@@ -1404,6 +1478,7 @@ export function useShareRoomConnection({
       socketRelay = null;
       adaptiveControl = null;
       adaptiveInstruction = null;
+      adaptiveThumbnail = null;
       controlChannelRef.current = null;
       instructionChannelRef.current = null;
       onMessageTransportChange("p2p");

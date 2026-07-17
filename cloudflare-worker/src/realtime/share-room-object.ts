@@ -862,7 +862,9 @@ export class ShareRoomObject {
     }
     if (
       relay.type !== "RELAY" ||
-      (relay.channel !== "control" && relay.channel !== "instruction") ||
+      (relay.channel !== "control" &&
+        relay.channel !== "instruction" &&
+        relay.channel !== "thumbnail") ||
       typeof relay.payload !== "string"
     ) {
       return;

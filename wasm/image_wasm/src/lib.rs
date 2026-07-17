@@ -1,4 +1,5 @@
 use image::codecs::ico::IcoEncoder;
+use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
 use image::{ColorType, DynamicImage, GenericImageView, ImageEncoder, ImageFormat};
 use js_sys::{Array, Reflect, Uint8Array};
@@ -11,6 +12,7 @@ mod share_placeholder;
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_INPUT_MB_TEXT: &str = "5 MB";
 const MAX_SHARE_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+const MAX_SHARE_THUMBNAIL_BYTES: usize = 10 * 1024;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -170,6 +172,79 @@ pub fn generate_share_thumbnail(input: &[u8]) -> Result<Vec<u8>, JsValue> {
     generate_png_size(&square_crop(decoded), 32)
 }
 
+fn encode_webp(img: &DynamicImage) -> Result<Vec<u8>, JsValue> {
+    let rgba = img.to_rgba8();
+    let mut out = Vec::new();
+    WebPEncoder::new_lossless(&mut out)
+        .write_image(
+            rgba.as_raw(),
+            rgba.width(),
+            rgba.height(),
+            ColorType::Rgba8.into(),
+        )
+        .map_err(|err| JsValue::from_str(&format!("WebP encode failed: {err}")))?;
+    Ok(out)
+}
+
+#[wasm_bindgen]
+pub fn generate_share_preview_thumbnail(
+    input: &[u8],
+    container_width: u32,
+    container_height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Share image must be 50 MB or smaller"));
+    }
+    if container_width == 0 || container_height == 0 {
+        return Err(JsValue::from_str("Thumbnail dimensions must be positive"));
+    }
+
+    let decoded = image::load_from_memory(input)
+        .map_err(|err| JsValue::from_str(&format!("Thumbnail decode failed: {err}")))?;
+    generate_share_preview_thumbnail_from_image(decoded, container_width, container_height)
+}
+
+fn generate_share_preview_thumbnail_from_image(
+    decoded: DynamicImage,
+    container_width: u32,
+    container_height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let mut width = container_width.min(2048);
+    let mut height = container_height.min(2048);
+
+    loop {
+        let resized = decoded.resize_to_fill(width, height, FilterType::Triangle);
+        let encoded = encode_webp(&resized)?;
+        if encoded.len() <= MAX_SHARE_THUMBNAIL_BYTES || (width == 1 && height == 1) {
+            return Ok(encoded);
+        }
+        width = (width.saturating_mul(4) / 5).max(1);
+        height = (height.saturating_mul(4) / 5).max(1);
+    }
+}
+
+#[wasm_bindgen]
+pub fn generate_share_preview_thumbnail_from_rgba(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<Vec<u8>, JsValue> {
+    if width == 0 || height == 0 || width > 2048 || height > 2048 {
+        return Err(JsValue::from_str("Invalid RGBA thumbnail dimensions"));
+    }
+    let expected_len = usize::try_from(width)
+        .ok()
+        .and_then(|value| value.checked_mul(usize::try_from(height).ok()?))
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| JsValue::from_str("RGBA thumbnail dimensions overflow"))?;
+    if rgba.len() != expected_len {
+        return Err(JsValue::from_str("Invalid RGBA thumbnail data"));
+    }
+    let image = image::RgbaImage::from_raw(width, height, rgba.to_vec())
+        .ok_or_else(|| JsValue::from_str("Could not create RGBA thumbnail"))?;
+    generate_share_preview_thumbnail_from_image(DynamicImage::ImageRgba8(image), width, height)
+}
+
 #[wasm_bindgen]
 pub fn generate_share_placeholder(input: &[u8]) -> Result<js_sys::Object, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
@@ -302,5 +377,18 @@ mod tests {
             .expect("decode thumbnail");
 
         assert_eq!(decoded.dimensions(), (32, 32));
+    }
+
+    #[test]
+    fn share_preview_thumbnail_is_webp_and_under_ten_kib() {
+        let source = DynamicImage::new_rgba8(800, 600);
+        let input = encode_png(&source).expect("encode source");
+        let thumbnail =
+            generate_share_preview_thumbnail(&input, 320, 240).expect("generate preview thumbnail");
+        let decoded = image::load_from_memory_with_format(&thumbnail, ImageFormat::WebP)
+            .expect("decode WebP thumbnail");
+
+        assert!(thumbnail.len() <= MAX_SHARE_THUMBNAIL_BYTES);
+        assert_eq!(decoded.dimensions(), (320, 240));
     }
 }

@@ -10,6 +10,8 @@ const FRAME_HEADER_BYTES = TRANSFER_ID_BYTES + CHUNK_INDEX_BYTES;
 export const WEAK_NETWORK_CHUNK_SIZE = 1200 - FRAME_HEADER_BYTES;
 const MAX_DATA_CHANNEL_PAYLOAD_BYTES = 1200;
 const MAX_THUMBNAIL_BYTES = 256;
+const MAX_PREVIEW_THUMBNAIL_BYTES = 10 * 1024;
+const PREVIEW_THUMBNAIL_CHUNK_SIZE = 600;
 // Keep the SCTP queue deliberately small for mobile and Wi-Fi connections.
 // Pause at the high-water mark, then wait for a real drain before resuming.
 const BUFFER_HIGH_WATER_BYTES = 256 * 1024;
@@ -34,6 +36,24 @@ type TransferInstruction =
       type: "IMAGE_PREVIEW";
       payload: ImageTransferMeta & { thumbnailBase64: string };
     }
+  | {
+      type: "IMAGE_PLACEHOLDER_ACK";
+      payload: { id: string; width: number; height: number };
+    }
+  | {
+      type: "IMAGE_THUMBNAIL_START";
+      payload: {
+        id: string;
+        transferId: string;
+        size: number;
+        totalChunks: number;
+      };
+    }
+  | {
+      type: "IMAGE_THUMBNAIL_CHUNK";
+      payload: { transferId: string; index: number; data: string };
+    }
+  | { type: "IMAGE_THUMBNAIL_COMPLETE"; payload: { transferId: string } }
   | { type: "IMAGE_START"; payload: ImageTransferMeta }
   | { type: "IMAGE_READY"; payload: { id: string } }
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
@@ -54,6 +74,16 @@ type IncomingTransfer = {
   completeRequested: boolean;
 };
 
+type IncomingThumbnail = {
+  imageId: string;
+  transferId: string;
+  size: number;
+  totalChunks: number;
+  chunks: Map<number, Uint8Array>;
+  receivedBytes: number;
+  completeRequested: boolean;
+};
+
 export type TransferProgress = ImageTransferMeta & {
   transferredBytes: number;
   progress: number;
@@ -66,6 +96,8 @@ export type ImageReceiverCallbacks = {
     placeholder: ImagePlaceholderMetadata,
   ): void | Promise<void>;
   onPreview?(meta: ImageTransferMeta, thumbnail: Blob): void | Promise<void>;
+  onPlaceholderAck?(id: string, width: number, height: number): void;
+  onThumbnail?(id: string, thumbnail: Blob): void | Promise<void>;
   onProgress(progress: TransferProgress): void;
   onComplete(meta: ImageTransferMeta, blob: Blob): void | Promise<void>;
   onError(meta: ImageTransferMeta | null, reason: string): void;
@@ -105,6 +137,16 @@ function bytesToBase64(bytes: Uint8Array) {
     binary += String.fromCharCode(byte);
   }
   return btoa(binary);
+}
+
+function base64ToBytes(value: string, maxBytes: number) {
+  try {
+    const binary = atob(value);
+    if (binary.length > maxBytes) return null;
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
 }
 
 function transferIdToBytes(id: string) {
@@ -214,6 +256,22 @@ export function sendImagePlaceholder(
   });
 }
 
+export function sendImagePlaceholderAck(
+  channel: RealtimeMessageChannel,
+  id: string,
+  width: number,
+  height: number,
+) {
+  if (channel.readyState !== "open") return false;
+  const normalizedWidth = Math.max(1, Math.min(4096, Math.round(width)));
+  const normalizedHeight = Math.max(1, Math.min(4096, Math.round(height)));
+  sendInstruction(channel, {
+    type: "IMAGE_PLACEHOLDER_ACK",
+    payload: { id, width: normalizedWidth, height: normalizedHeight },
+  });
+  return true;
+}
+
 export function sendImageDelete(channel: RealtimeMessageChannel, id: string) {
   if (channel.readyState === "open") {
     sendInstruction(channel, { type: "IMAGE_DELETE", payload: { id } });
@@ -255,6 +313,54 @@ export function sendImagePreview(
   sendInstruction(channel, {
     type: "IMAGE_PREVIEW",
     payload: { ...meta, thumbnailBase64: bytesToBase64(thumbnail) },
+  });
+}
+
+export async function sendImageThumbnail(
+  thumbnailChannel: RealtimeMessageChannel,
+  imageId: string,
+  thumbnail: Uint8Array,
+) {
+  if (thumbnailChannel.readyState !== "open") {
+    throw new Error("Image thumbnail channel is not open");
+  }
+  if (thumbnail.byteLength === 0 || thumbnail.byteLength > MAX_PREVIEW_THUMBNAIL_BYTES) {
+    throw new Error("Generated WebP thumbnail is invalid");
+  }
+  const transferId = createTransferId();
+  const totalChunks = Math.ceil(
+    thumbnail.byteLength / PREVIEW_THUMBNAIL_CHUNK_SIZE,
+  );
+  sendInstruction(thumbnailChannel, {
+    type: "IMAGE_THUMBNAIL_START",
+    payload: {
+      id: imageId,
+      transferId,
+      size: thumbnail.byteLength,
+      totalChunks,
+    },
+  });
+  for (
+    let offset = 0;
+    offset < thumbnail.byteLength;
+    offset += PREVIEW_THUMBNAIL_CHUNK_SIZE
+  ) {
+    const chunk = thumbnail.subarray(
+      offset,
+      offset + PREVIEW_THUMBNAIL_CHUNK_SIZE,
+    );
+    sendInstruction(thumbnailChannel, {
+      type: "IMAGE_THUMBNAIL_CHUNK",
+      payload: {
+        transferId,
+        index: offset / PREVIEW_THUMBNAIL_CHUNK_SIZE,
+        data: bytesToBase64(chunk),
+      },
+    });
+  }
+  sendInstruction(thumbnailChannel, {
+    type: "IMAGE_THUMBNAIL_COMPLETE",
+    payload: { transferId },
   });
 }
 
@@ -367,6 +473,7 @@ export async function sendImageFile(
 
 export class RealtimeImageReceiver {
   private incoming: IncomingTransfer | null = null;
+  private readonly incomingThumbnails = new Map<string, IncomingThumbnail>();
 
   constructor(
     private readonly callbacks: ImageReceiverCallbacks,
@@ -416,6 +523,91 @@ export class RealtimeImageReceiver {
         return;
       }
       void this.callbacks.onPreview?.(message.payload, thumbnail);
+      return;
+    }
+
+    if (message.type === "IMAGE_PLACEHOLDER_ACK") {
+      const { id, width, height } = message.payload || {};
+      if (
+        typeof id === "string" &&
+        /^[a-f0-9]{32}$/.test(id) &&
+        Number.isInteger(width) &&
+        width >= 1 &&
+        width <= 4096 &&
+        Number.isInteger(height) &&
+        height >= 1 &&
+        height <= 4096
+      ) {
+        this.callbacks.onPlaceholderAck?.(id, width, height);
+      }
+      return;
+    }
+
+    if (message.type === "IMAGE_THUMBNAIL_START") {
+      const { id, transferId, size, totalChunks } =
+        message.payload || {};
+      if (
+        typeof id !== "string" ||
+        !/^[a-f0-9]{32}$/.test(id) ||
+        typeof transferId !== "string" ||
+        !/^[a-f0-9]{32}$/.test(transferId) ||
+        !Number.isSafeInteger(size) ||
+        size < 1 ||
+        size > MAX_PREVIEW_THUMBNAIL_BYTES ||
+        totalChunks !== Math.ceil(size / PREVIEW_THUMBNAIL_CHUNK_SIZE)
+      ) {
+        this.callbacks.onError(null, "Received invalid thumbnail metadata");
+        return;
+      }
+      this.incomingThumbnails.set(transferId, {
+        imageId: id,
+        transferId,
+        size,
+        totalChunks,
+        chunks: new Map(),
+        receivedBytes: 0,
+        completeRequested: false,
+      });
+      return;
+    }
+
+    if (message.type === "IMAGE_THUMBNAIL_CHUNK") {
+      const { transferId, index, data } = message.payload || {};
+      const thumbnail =
+        typeof transferId === "string"
+          ? this.incomingThumbnails.get(transferId)
+          : undefined;
+      const chunk =
+        typeof data === "string"
+          ? base64ToBytes(data, PREVIEW_THUMBNAIL_CHUNK_SIZE)
+          : null;
+      if (
+        !thumbnail ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= thumbnail.totalChunks ||
+        !chunk ||
+        thumbnail.chunks.has(index) ||
+        thumbnail.receivedBytes + chunk.byteLength > thumbnail.size
+      ) {
+        if (thumbnail) this.incomingThumbnails.delete(thumbnail.transferId);
+        this.callbacks.onError(null, "Received an invalid thumbnail chunk");
+        return;
+      }
+      thumbnail.chunks.set(index, chunk);
+      thumbnail.receivedBytes += chunk.byteLength;
+      if (
+        thumbnail.completeRequested &&
+        thumbnail.receivedBytes === thumbnail.size
+      ) {
+        this.completeThumbnail(thumbnail.transferId);
+      }
+      return;
+    }
+
+    if (message.type === "IMAGE_THUMBNAIL_COMPLETE") {
+      const transferId = message.payload?.transferId;
+      if (typeof transferId === "string") this.completeThumbnail(transferId);
       return;
     }
 
@@ -556,6 +748,32 @@ export class RealtimeImageReceiver {
     if (this.incoming.completeRequested && receivedBytes === meta.size) {
       this.complete(meta.id);
     }
+  }
+
+  private completeThumbnail(transferId: string) {
+    const thumbnail = this.incomingThumbnails.get(transferId);
+    if (!thumbnail) return;
+    if (thumbnail.receivedBytes !== thumbnail.size) {
+      thumbnail.completeRequested = true;
+      return;
+    }
+    this.incomingThumbnails.delete(transferId);
+    if (thumbnail.chunks.size !== thumbnail.totalChunks) {
+      this.callbacks.onError(null, "Thumbnail data is incomplete");
+      return;
+    }
+    const chunks = Array.from(
+      { length: thumbnail.totalChunks },
+      (_, index) => thumbnail.chunks.get(index),
+    );
+    if (chunks.some((chunk) => !chunk)) {
+      this.callbacks.onError(null, "Thumbnail chunks are incomplete");
+      return;
+    }
+    void this.callbacks.onThumbnail?.(
+      thumbnail.imageId,
+      new Blob(chunks as BlobPart[], { type: "image/webp" }),
+    );
   }
 
   private complete(id: string) {

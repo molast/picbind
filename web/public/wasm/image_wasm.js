@@ -260,6 +260,42 @@ export function generate_share_placeholder_from_rgba(width, height, sample_width
 
 /**
  * @param {Uint8Array} input
+ * @param {number} container_width
+ * @param {number} container_height
+ * @returns {Uint8Array}
+ */
+export function generate_share_preview_thumbnail(input, container_width, container_height) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.generate_share_preview_thumbnail(ptr0, len0, container_width, container_height);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * @param {number} width
+ * @param {number} height
+ * @param {Uint8Array} rgba
+ * @returns {Uint8Array}
+ */
+export function generate_share_preview_thumbnail_from_rgba(width, height, rgba) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.generate_share_preview_thumbnail_from_rgba(width, height, ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * @param {Uint8Array} input
  * @returns {Uint8Array}
  */
 export function generate_share_thumbnail(input) {

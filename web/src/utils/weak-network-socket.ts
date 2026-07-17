@@ -11,7 +11,7 @@ export type RealtimeMessageChannel = {
   send(data: string): void;
 };
 
-export type RelayChannelName = "control" | "instruction";
+export type RelayChannelName = "control" | "instruction" | "thumbnail";
 
 type WeakNetworkSocketOptions = {
   roomId: string;
@@ -149,7 +149,9 @@ export class WeakNetworkSocket {
         this.setRelayReady(message.ready === true);
       } else if (
         message.type === "RELAY" &&
-        (message.channel === "control" || message.channel === "instruction") &&
+        (message.channel === "control" ||
+          message.channel === "instruction" ||
+          message.channel === "thumbnail") &&
         typeof message.payload === "string"
       ) {
         this.options.onMessage(message.channel, message.payload);

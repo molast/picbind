@@ -1,8 +1,10 @@
 "use client";
 
+import React from "react";
 import {
   FiDownload,
   FiEye,
+  FiImage,
   FiMaximize2,
   FiSend,
   FiTrash2,
@@ -20,6 +22,7 @@ type GalleryImageCardProps = {
   isSending: boolean;
   labels: ShareRoomLabels;
   onPreview(imageId: string): void;
+  onPlaceholderMeasured(imageId: string, width: number, height: number): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
   onCancelTransfer(image: RoomImage): void;
@@ -43,11 +46,29 @@ export default function GalleryImageCard({
   isSending,
   labels,
   onPreview,
+  onPlaceholderMeasured,
   onReview,
   onSend,
   onCancelTransfer,
   onDelete,
 }: GalleryImageCardProps) {
+  const mediaRef = React.useRef<HTMLDivElement | null>(null);
+  const [showThumbnail, setShowThumbnail] = React.useState(false);
+  React.useEffect(() => {
+    const media = mediaRef.current;
+    if (!media || image.direction !== "received" || !image.placeholder) return;
+    const reportSize = () => {
+      const rect = media.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        onPlaceholderMeasured(image.id, rect.width, rect.height);
+      }
+    };
+    reportSize();
+    const observer = new ResizeObserver(reportSize);
+    observer.observe(media);
+    return () => observer.disconnect();
+  }, [image.direction, image.id, image.placeholder, onPlaceholderMeasured]);
+
   const status =
     image.transferStatus ||
     (image.direction === "sent" ? "sent" : "received");
@@ -91,6 +112,7 @@ export default function GalleryImageCard({
   return (
     <article className="relative overflow-hidden rounded-md border border-slate-200 bg-white">
       <div
+        ref={mediaRef}
         className="relative aspect-square w-full overflow-hidden bg-slate-100"
         onDoubleClick={() => canReview && onReview(image.id)}
       >
@@ -111,6 +133,51 @@ export default function GalleryImageCard({
             }`}
           />
         )}
+        {showThumbnail && image.thumbnailUrl ? (
+          // Blob URLs are local browser assets and cannot use the Next image optimizer.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={image.thumbnailUrl}
+            alt=""
+            className="pointer-events-none absolute inset-0 z-[5] h-full w-full object-cover"
+            aria-hidden="true"
+          />
+        ) : null}
+        {image.direction === "received" && image.thumbnailUrl ? (
+          <button
+            type="button"
+            className="absolute bottom-2 left-2 z-10 flex h-8 w-8 touch-none items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf]"
+            aria-label={labels.holdThumbnail}
+            title={labels.holdThumbnail}
+            onContextMenu={(event) => event.preventDefault()}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setShowThumbnail(true);
+            }}
+            onPointerUp={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              setShowThumbnail(false);
+            }}
+            onPointerCancel={() => setShowThumbnail(false)}
+            onKeyDown={(event) => {
+              if (event.key === " " || event.key === "Enter") {
+                event.preventDefault();
+                setShowThumbnail(true);
+              }
+            }}
+            onKeyUp={(event) => {
+              if (event.key === " " || event.key === "Enter") {
+                setShowThumbnail(false);
+              }
+            }}
+            onBlur={() => setShowThumbnail(false)}
+          >
+            <FiImage className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
         {canReview ? (
           <button
             type="button"

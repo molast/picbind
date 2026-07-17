@@ -48,6 +48,7 @@ import {
   sendImageDelete,
   sendImageCancel,
   sendImagePlaceholder,
+  sendImagePlaceholderAck,
   sendImageFile,
   sendR2ImageAvailable,
   type TransferProgress,
@@ -117,6 +118,7 @@ export default function ShareRoomPage({
   const imageReadyWaitersRef = React.useRef(
     new Map<string, { resolve(): void; timeoutId: number }>(),
   );
+  const placeholderAckDimensionsRef = React.useRef(new Map<string, string>());
   const imagesRef = React.useRef<RoomImage[]>([]);
   const roomExitHandledRef = React.useRef(false);
   const minimizedRef = React.useRef(false);
@@ -339,7 +341,11 @@ export default function ShareRoomPage({
     };
     const url = URL.createObjectURL(image.blob);
     objectUrlsRef.current.add(url);
-    const nextImage = { ...normalized, url };
+    const thumbnailUrl = image.thumbnail
+      ? URL.createObjectURL(image.thumbnail)
+      : undefined;
+    if (thumbnailUrl) objectUrlsRef.current.add(thumbnailUrl);
+    const nextImage = { ...normalized, url, thumbnailUrl };
     const existingIndex = imagesRef.current.findIndex(
       (current) => current.id === image.id,
     );
@@ -351,6 +357,10 @@ export default function ShareRoomPage({
       const existing = imagesRef.current[existingIndex];
       URL.revokeObjectURL(existing.url);
       objectUrlsRef.current.delete(existing.url);
+      if (existing.thumbnailUrl) {
+        URL.revokeObjectURL(existing.thumbnailUrl);
+        objectUrlsRef.current.delete(existing.thumbnailUrl);
+      }
       next = [...imagesRef.current];
       next[existingIndex] = nextImage;
     }
@@ -369,11 +379,23 @@ export default function ShareRoomPage({
         return;
       }
       const next = [...imagesRef.current];
-      next[index] = { ...next[index], ...patch };
+      const current = next[index];
+      let thumbnailUrl = current.thumbnailUrl;
+      if ("thumbnail" in patch) {
+        if (thumbnailUrl) {
+          URL.revokeObjectURL(thumbnailUrl);
+          objectUrlsRef.current.delete(thumbnailUrl);
+        }
+        thumbnailUrl = patch.thumbnail
+          ? URL.createObjectURL(patch.thumbnail)
+          : undefined;
+        if (thumbnailUrl) objectUrlsRef.current.add(thumbnailUrl);
+      }
+      next[index] = { ...current, ...patch, thumbnailUrl };
       imagesRef.current = next;
       setImages(next);
       if (persist) {
-        const { url: _url, ...cached } = next[index];
+        const { url: _url, thumbnailUrl: _thumbnailUrl, ...cached } = next[index];
         void storeRoomImage(cached).catch((error) => {
           console.warn("Failed to persist image transfer state", error);
         });
@@ -387,6 +409,10 @@ export default function ShareRoomPage({
     if (!image) return;
     URL.revokeObjectURL(image.url);
     objectUrlsRef.current.delete(image.url);
+    if (image.thumbnailUrl) {
+      URL.revokeObjectURL(image.thumbnailUrl);
+      objectUrlsRef.current.delete(image.thumbnailUrl);
+    }
     imageIdsRef.current.delete(id);
     const next = imagesRef.current.filter((current) => current.id !== id);
     imagesRef.current = next;
@@ -399,6 +425,7 @@ export default function ShareRoomPage({
     const objectUrls = objectUrlsRef.current;
     const imageIds = imageIdsRef.current;
     const deletedImageIds = deletedImageIdsRef.current;
+    const placeholderAckDimensions = placeholderAckDimensionsRef.current;
     const transferAbortControllers = transferAbortControllersRef.current;
     setLang(getLang());
     setRoomId(readRoomId());
@@ -409,6 +436,7 @@ export default function ShareRoomPage({
       objectUrls.clear();
       imageIds.clear();
       deletedImageIds.clear();
+      placeholderAckDimensions.clear();
       transferAbortControllers.forEach((controller) => controller.abort());
       transferAbortControllers.clear();
       imagesRef.current = [];
@@ -598,6 +626,19 @@ export default function ShareRoomPage({
       });
     },
     [labels.sending, updateRoomImage, upsertActivity],
+  );
+
+  const handlePlaceholderMeasured = React.useCallback(
+    (imageId: string, width: number, height: number) => {
+      const key = `${Math.round(width)}x${Math.round(height)}`;
+      if (placeholderAckDimensionsRef.current.get(imageId) === key) return;
+      const channel = instructionChannelRef.current;
+      if (!channel || !sendImagePlaceholderAck(channel, imageId, width, height)) {
+        return;
+      }
+      placeholderAckDimensionsRef.current.set(imageId, key);
+    },
+    [],
   );
 
   const addFilesToGallery = async (fileList: FileList | File[]) => {
@@ -1076,6 +1117,7 @@ export default function ShareRoomPage({
               onFiles={handleLocalFiles}
               onDraggingChange={setIsDragging}
               onPreview={setPreviewImageId}
+              onPlaceholderMeasured={handlePlaceholderMeasured}
               onReview={handleReviewImage}
               onSend={handleSendImage}
               onCancelTransfer={handleCancelTransfer}

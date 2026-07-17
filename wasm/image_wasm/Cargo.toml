@@ -23,3 +23,6 @@ wasm-bindgen-test = "0.3"
 [profile.release]
 opt-level = "s"  # 优化Wasm大小
 lto = true       # 链接时优化
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

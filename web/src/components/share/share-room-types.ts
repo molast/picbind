@@ -21,6 +21,7 @@ export type ActivityItem = {
 
 export type RoomImage = CachedRoomImage & {
   url: string;
+  thumbnailUrl?: string;
 };
 
 export type FloatingEmoji = {

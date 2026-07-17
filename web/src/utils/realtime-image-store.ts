@@ -29,6 +29,7 @@ export type CachedRoomImage = {
   previewOnly?: boolean;
   placeholderOnly?: boolean;
   placeholder?: ImagePlaceholderMetadata;
+  thumbnail?: Blob;
   createdAt: number;
 };
 
