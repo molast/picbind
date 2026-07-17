@@ -58,6 +58,10 @@ import { generateShareThumbnail } from "@/utils/share-thumbnail";
 import { downloadFileFromR2 } from "@/utils/realtime-r2-transfer";
 import { clearRoomPageState } from "@/utils/realtime-room-page-store";
 import {
+  parseReviewCollaborationMessage,
+  type ReviewCollaborationMessage,
+} from "@/utils/review-collaboration";
+import {
   AdaptiveMessageChannel,
   WeakNetworkSocket,
   type RealtimeMessageChannel,
@@ -128,6 +132,7 @@ type UseShareRoomConnectionOptions = {
   onForcedNavigation(): boolean;
   onWeakNetworkChange(weakNetwork: boolean): void;
   onMessageTransportChange(mode: MessageTransportMode): void;
+  onReviewMessage(message: ReviewCollaborationMessage): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -159,6 +164,7 @@ export function useShareRoomConnection({
   onForcedNavigation,
   onWeakNetworkChange,
   onMessageTransportChange,
+  onReviewMessage,
   setActivities,
   setConnection,
   setConnectionError,
@@ -814,6 +820,11 @@ export function useShareRoomConnection({
               : activity,
           ),
         );
+        return;
+      }
+      const reviewMessage = parseReviewCollaborationMessage(event.data);
+      if (reviewMessage) {
+        onReviewMessage(reviewMessage);
         return;
       }
       receiver.handle(event.data);
@@ -1552,6 +1563,7 @@ export function useShareRoomConnection({
     onForcedNavigation,
     onWeakNetworkChange,
     onMessageTransportChange,
+    onReviewMessage,
     removeRoomImage,
     roomId,
     sessionIdRef,

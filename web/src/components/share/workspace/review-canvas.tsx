@@ -1,7 +1,17 @@
 "use client";
 
 import React from "react";
+import dynamic from "next/dynamic";
 import type { RoomImage } from "../share-room-types";
+import type {
+  ReviewAnnotation,
+  ReviewTool,
+} from "@/utils/review-collaboration";
+
+const ReviewAnnotationLayer = dynamic(
+  () => import("./review-annotation-layer"),
+  { ssr: false },
+);
 
 export type ReviewViewportOffset = { x: number; y: number };
 
@@ -9,18 +19,34 @@ type ReviewCanvasProps = {
   image: RoomImage;
   scale: number;
   offset: ReviewViewportOffset;
+  activeTool: ReviewTool;
+  annotations: ReviewAnnotation[];
+  selectedId: string | null;
+  actorId: string;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
+  onCanvasSizeChange(dimensions: { width: number; height: number }): void;
+  onSelect(id: string | null): void;
+  onCreate(annotation: ReviewAnnotation): void;
+  onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
 
 export default function ReviewCanvas({
   image,
   scale,
   offset,
+  activeTool,
+  annotations,
+  selectedId,
+  actorId,
   onScaleChange,
   onOffsetChange,
   onDimensionsChange,
+  onCanvasSizeChange,
+  onSelect,
+  onCreate,
+  onUpdate,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const dragRef = React.useRef<{
@@ -48,16 +74,18 @@ export default function ReviewCanvas({
     const container = containerRef.current;
     if (!container) return;
     const updateSize = () => {
-      setContainerSize({
+      const next = {
         width: container.clientWidth,
         height: container.clientHeight,
-      });
+      };
+      setContainerSize(next);
+      onCanvasSizeChange(next);
     };
     updateSize();
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [onCanvasSizeChange]);
 
   React.useEffect(() => {
     setImageSize({ width: 0, height: 0 });
@@ -66,14 +94,22 @@ export default function ReviewCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative min-h-0 flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px]"
+      className={`relative min-h-0 flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
+        activeTool === "select" ? "cursor-grab" : "cursor-crosshair"
+      }`}
       onWheel={(event) => {
         event.preventDefault();
         const direction = event.deltaY > 0 ? -0.1 : 0.1;
         onScaleChange(Math.min(4, Math.max(0.25, scale + direction)));
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0) return;
+        if (
+          activeTool !== "select" ||
+          event.button !== 0 ||
+          event.target instanceof HTMLCanvasElement
+        ) {
+          return;
+        }
         event.currentTarget.setPointerCapture(event.pointerId);
         dragRef.current = {
           pointerId: event.pointerId,
@@ -128,7 +164,23 @@ export default function ReviewCanvas({
             }}
             className="block h-full w-full select-none object-contain"
           />
-          <div className="pointer-events-none absolute inset-0" data-layer="annotations" />
+          {fitRatio ? (
+            <div className="absolute inset-0" data-layer="annotations">
+              <ReviewAnnotationLayer
+                width={renderedSize.width}
+                height={renderedSize.height}
+                imageWidth={imageSize.width}
+                imageHeight={imageSize.height}
+                annotations={annotations}
+                activeTool={activeTool}
+                selectedId={selectedId}
+                actorId={actorId}
+                onSelect={onSelect}
+                onCreate={onCreate}
+                onUpdate={onUpdate}
+              />
+            </div>
+          ) : null}
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>

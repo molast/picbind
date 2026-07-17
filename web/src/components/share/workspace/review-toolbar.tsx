@@ -5,6 +5,8 @@ import {
   FiArrowLeft,
   FiArrowUpRight,
   FiCircle,
+  FiCornerUpLeft,
+  FiCornerUpRight,
   FiEdit3,
   FiMaximize,
   FiMousePointer,
@@ -19,12 +21,22 @@ import {
 } from "react-icons/fi";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { middleEllipsisFileName } from "../share-room-formatters";
+import type { ReviewMode, ReviewTool } from "@/utils/review-collaboration";
 
 type ReviewToolbarProps = {
   imageName: string;
   zoomPercent: number;
   labels: ShareRoomLabels;
+  activeTool: ReviewTool;
+  canUndo: boolean;
+  canRedo: boolean;
+  localMode: ReviewMode;
+  remoteMode: ReviewMode;
   onBack(): void;
+  onToolChange(tool: ReviewTool): void;
+  onUndo(): void;
+  onRedo(): void;
+  onModeChange(mode: ReviewMode): void;
   onZoomIn(): void;
   onZoomOut(): void;
   onFit(): void;
@@ -35,6 +47,7 @@ type ToolButtonProps = {
   icon: IconType;
   label: string;
   active?: boolean;
+  remoteActive?: boolean;
   disabled?: boolean;
   onClick?(): void;
 };
@@ -43,6 +56,7 @@ function ToolButton({
   icon: Icon,
   label,
   active = false,
+  remoteActive = false,
   disabled = false,
   onClick,
 }: ToolButtonProps) {
@@ -52,10 +66,14 @@ function ToolButton({
       onClick={onClick}
       disabled={disabled}
       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition ${
-        active
+        remoteActive
+          ? "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300"
+          : active
           ? "bg-blue-50 text-[#2f65cf]"
           : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-      } disabled:cursor-not-allowed disabled:opacity-35`}
+      } disabled:cursor-not-allowed disabled:opacity-35 ${
+        remoteActive ? "disabled:opacity-100" : ""
+      }`}
       aria-label={label}
       title={label}
     >
@@ -68,20 +86,29 @@ export default function ReviewToolbar({
   imageName,
   zoomPercent,
   labels,
+  activeTool,
+  canUndo,
+  canRedo,
+  localMode,
+  remoteMode,
   onBack,
+  onToolChange,
+  onUndo,
+  onRedo,
+  onModeChange,
   onZoomIn,
   onZoomOut,
   onFit,
   onReset,
 }: ReviewToolbarProps) {
   const annotationTools: ToolButtonProps[] = [
-    { icon: FiMousePointer, label: labels.selectTool, active: true },
-    { icon: FiArrowUpRight, label: labels.arrowTool, disabled: true },
-    { icon: FiSquare, label: labels.rectangleTool, disabled: true },
-    { icon: FiCircle, label: labels.circleTool, disabled: true },
-    { icon: FiEdit3, label: labels.penTool, disabled: true },
-    { icon: FiType, label: labels.textTool, disabled: true },
-    { icon: FiSmile, label: labels.emojiTool, disabled: true },
+    { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select" },
+    { icon: FiArrowUpRight, label: labels.arrowTool, onClick: () => onToolChange("arrow"), active: activeTool === "arrow" },
+    { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle" },
+    { icon: FiCircle, label: labels.circleTool, onClick: () => onToolChange("circle"), active: activeTool === "circle" },
+    { icon: FiEdit3, label: labels.penTool, onClick: () => onToolChange("pen"), active: activeTool === "pen" },
+    { icon: FiType, label: labels.textTool, onClick: () => onToolChange("text"), active: activeTool === "text" },
+    { icon: FiSmile, label: labels.emojiTool, onClick: () => onToolChange("emoji"), active: activeTool === "emoji" },
     { icon: FiRadio, label: labels.laserTool, disabled: true },
   ];
 
@@ -111,13 +138,30 @@ export default function ReviewToolbar({
           <ToolButton key={tool.label} {...tool} />
         ))}
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
+        <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={!canUndo} />
+        <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={!canRedo} />
+        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} />
         <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} />
         <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} />
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
-        <ToolButton icon={FiUserCheck} label={labels.followPresenter} disabled />
-        <ToolButton icon={FiRadio} label={labels.present} disabled />
+        <ToolButton
+          icon={FiUserCheck}
+          label={labels.followPresenter}
+          active={localMode === "follow"}
+          remoteActive={remoteMode === "follow"}
+          disabled={localMode === "present" || remoteMode === "follow"}
+          onClick={() => onModeChange(localMode === "follow" ? null : "follow")}
+        />
+        <ToolButton
+          icon={FiRadio}
+          label={labels.present}
+          active={localMode === "present"}
+          remoteActive={remoteMode === "present"}
+          disabled={localMode === "follow" || remoteMode === "present"}
+          onClick={() => onModeChange(localMode === "present" ? null : "present")}
+        />
       </div>
     </div>
   );

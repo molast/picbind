@@ -76,6 +76,10 @@ import {
   loadRoomPageState,
   saveRoomPageState,
 } from "@/utils/realtime-room-page-store";
+import {
+  sendReviewCollaborationMessage,
+  type ReviewCollaborationMessage,
+} from "@/utils/review-collaboration";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -171,6 +175,27 @@ export default function ShareRoomPage({
   const [isPageStateLoaded, setIsPageStateLoaded] = React.useState(false);
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
+  );
+  const [incomingReviewMessage, setIncomingReviewMessage] = React.useState<{
+    sequence: number;
+    message: ReviewCollaborationMessage;
+  } | null>(null);
+  const reviewMessageSequenceRef = React.useRef(0);
+
+  const handleReviewMessage = React.useCallback(
+    (message: ReviewCollaborationMessage) => {
+      setIncomingReviewMessage({
+        sequence: reviewMessageSequenceRef.current++,
+        message,
+      });
+    },
+    [],
+  );
+
+  const sendReviewMessage = React.useCallback(
+    (message: ReviewCollaborationMessage) =>
+      sendReviewCollaborationMessage(instructionChannelRef.current, message),
+    [],
   );
 
   const waitUntilImageReady = React.useCallback(
@@ -594,6 +619,7 @@ export default function ShareRoomPage({
     onForcedNavigation: handleForcedNavigation,
     onWeakNetworkChange: handleWeakNetworkChange,
     onMessageTransportChange: setMessageTransportMode,
+    onReviewMessage: handleReviewMessage,
     setPacketLossRate,
     setActivities,
     setConnection,
@@ -1100,6 +1126,9 @@ export default function ShareRoomPage({
             <ReviewWorkspace
               image={reviewImage}
               labels={labels}
+              actorId={role || "unknown"}
+              incomingMessage={incomingReviewMessage}
+              onSendMessage={sendReviewMessage}
               onBack={() => setReviewImageId(null)}
             />
           ) : (
