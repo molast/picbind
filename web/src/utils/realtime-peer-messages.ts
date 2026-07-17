@@ -1,5 +1,7 @@
 "use client";
 
+import type { RealtimeMessageChannel } from "./weak-network-socket";
+
 export const TEST_EMOJIS = [
   "👋",
   "👍",
@@ -37,7 +39,7 @@ export function createPeerMessageId() {
 }
 
 export function sendPeerMessage(
-  channel: RTCDataChannel | null,
+  channel: RealtimeMessageChannel | null,
   message: PeerMessage,
 ) {
   if (channel?.readyState !== "open") {

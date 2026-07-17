@@ -50,3 +50,11 @@ export function getShareRoomApiPath() {
 export function getShareRoomRealtimeApiPath(action: string) {
   return joinUrl(API_BASE_URL, `/api/realtime/room/${action}`);
 }
+
+export function getShareRoomSocketUrl(roomId: string, sessionId: string) {
+  const url = new URL(getShareRoomRealtimeApiPath("socket"));
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("roomId", roomId);
+  url.searchParams.set("sessionId", sessionId);
+  return url.toString();
+}

@@ -165,12 +165,14 @@ export function prepareRealtimeImageTransfer(
   sessionId: string,
   image: RealtimeR2Image,
   rttMs: number | null,
+  weakNetwork: boolean,
 ) {
   return roomRequest<RealtimeTransferPreparation>("r2-prepare", {
     roomId,
     sessionId,
     image,
     rttMs,
+    weakNetwork,
   });
 }
 

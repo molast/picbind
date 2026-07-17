@@ -63,6 +63,9 @@ import {
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
 import { uploadFileToR2 } from "@/utils/realtime-r2-transfer";
+import {
+  type RealtimeMessageChannel,
+} from "@/utils/weak-network-socket";
 import { queueFilesForCompression } from "@/utils/image-file-store";
 import {
   clearRoomPageState,
@@ -101,8 +104,8 @@ export default function ShareRoomPage({
   const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
   const emojiSequenceRef = React.useRef(0);
   const outgoingChannelRef = React.useRef<RTCDataChannel | null>(null);
-  const controlChannelRef = React.useRef<RTCDataChannel | null>(null);
-  const instructionChannelRef = React.useRef<RTCDataChannel | null>(null);
+  const controlChannelRef = React.useRef<RealtimeMessageChannel | null>(null);
+  const instructionChannelRef = React.useRef<RealtimeMessageChannel | null>(null);
   const transferChunkSizeRef = React.useRef(IMAGE_CHUNK_SIZE);
   const maxImageTransferSizeRef = React.useRef(0);
   const weakNetworkTransferRef = React.useRef(false);
@@ -182,19 +185,13 @@ export default function ShareRoomPage({
     [],
   );
 
-  React.useEffect(() => {
-    if (networkLatencyMs === null) return;
-    // Hysteresis prevents toggling the payload size on every small RTT change.
-    if (!weakNetworkTransferRef.current && networkLatencyMs >= 250) {
-      weakNetworkTransferRef.current = true;
-      setIsWeakNetwork(true);
-      transferChunkSizeRef.current = WEAK_NETWORK_CHUNK_SIZE;
-    } else if (weakNetworkTransferRef.current && networkLatencyMs <= 160) {
-      weakNetworkTransferRef.current = false;
-      setIsWeakNetwork(false);
-      transferChunkSizeRef.current = IMAGE_CHUNK_SIZE;
-    }
-  }, [networkLatencyMs]);
+  const handleWeakNetworkChange = React.useCallback((weakNetwork: boolean) => {
+    weakNetworkTransferRef.current = weakNetwork;
+    setIsWeakNetwork(weakNetwork);
+    transferChunkSizeRef.current = weakNetwork
+      ? WEAK_NETWORK_CHUNK_SIZE
+      : IMAGE_CHUNK_SIZE;
+  }, []);
 
   const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
   const isMinimized = minimized ?? isInternallyMinimized;
@@ -567,6 +564,7 @@ export default function ShareRoomPage({
     showFloatingEmoji,
     onIncomingNotification: handleIncomingNotification,
     onForcedNavigation: handleForcedNavigation,
+    onWeakNetworkChange: handleWeakNetworkChange,
     setActivities,
     setConnection,
     setConnectionError,
@@ -754,6 +752,7 @@ export default function ShareRoomPage({
         sessionIdRef.current!,
         transferImage,
         networkLatencyMs,
+        weakNetworkTransferRef.current,
       );
       abortController.signal.throwIfAborted();
       let meta: ReturnType<typeof createImageTransferMeta>;

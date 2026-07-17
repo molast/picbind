@@ -284,7 +284,11 @@ export async function handleShareRoomRealtime(
         typeof rawRtt === "number" && Number.isFinite(rawRtt)
           ? Math.max(0, rawRtt)
           : null;
-      const mode = decideFileTransferMode(env, rttMs);
+      const mode = decideFileTransferMode(
+        env,
+        rttMs,
+        typeof body.weakNetwork === "boolean" ? body.weakNetwork : undefined,
+      );
       if (mode === "p2p") return json({ mode });
       stage = "prepare-r2-upload";
       return json({
@@ -582,6 +586,32 @@ export async function handleShareRoomRealtime(
     const status = /not found|expired/i.test(message) ? 404 : 400;
     return json({ error: message, stage }, { status });
   }
+}
+
+export async function handleShareRoomSocket(
+  request: Request,
+  env: RealtimeRoomEnv,
+) {
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return json({ error: "WebSocket upgrade required" }, { status: 426 });
+  }
+  const url = new URL(request.url);
+  const roomId = url.searchParams.get("roomId");
+  const sessionId = url.searchParams.get("sessionId") || "";
+  if (!validRoomId(roomId) || !sessionId) {
+    return json({ error: "Invalid WebSocket session" }, { status: 400 });
+  }
+  const room = await requireRoom(env, roomId);
+  if (!memberForSession(room, sessionId)) {
+    return json({ error: "Invalid room session" }, { status: 403 });
+  }
+  const object = env.REALTIME_ROOMS.get(env.REALTIME_ROOMS.idFromName(roomId));
+  return object.fetch(
+    new Request(
+      `https://share-room/socket?sessionId=${encodeURIComponent(sessionId)}`,
+      request,
+    ),
+  );
 }
 
 export async function handleCreateShareRoom(

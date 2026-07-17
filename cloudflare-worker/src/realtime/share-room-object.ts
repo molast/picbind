@@ -1,6 +1,7 @@
 export const SHARE_ROOM_TTL_MS = 30 * 60 * 1000;
 export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 90 * 1000;
 const MAX_ACTIVE_R2_OBJECTS_PER_ROOM = 100;
+const MAX_RELAY_MESSAGE_BYTES = 16 * 1024;
 
 export type ShareRoomRole = "owner" | "guest";
 
@@ -156,7 +157,60 @@ export class ShareRoomObject {
     private readonly env: { SHARE_IMAGES_R2: R2Bucket },
   ) {}
 
+  private socketSessionTag(sessionId: string) {
+    return `session:${sessionId}`;
+  }
+
+  private socketStateMessage() {
+    const sessions = new Set(
+      this.state.getWebSockets().map((socket) => {
+        const attachment = socket.deserializeAttachment() as
+          | { sessionId?: string }
+          | null;
+        return attachment?.sessionId || "";
+      }),
+    );
+    sessions.delete("");
+    const ready = sessions.size >= 2;
+    return JSON.stringify({ type: "SOCKET_STATE", ready });
+  }
+
+  private broadcastSocketState() {
+    const message = this.socketStateMessage();
+    for (const socket of this.state.getWebSockets()) {
+      try {
+        socket.send(message);
+      } catch {
+        // The close callback removes stale sockets from the active set.
+      }
+    }
+  }
+
+  private closeSessionSockets(sessionId: string, eventType?: string) {
+    for (const socket of this.state.getWebSockets(this.socketSessionTag(sessionId))) {
+      try {
+        if (eventType) socket.send(JSON.stringify({ type: eventType }));
+        socket.close(1000, eventType || "Room session ended");
+      } catch {
+        // Socket is already closed.
+      }
+    }
+    this.broadcastSocketState();
+  }
+
+  private closeAllSockets(eventType: string) {
+    for (const socket of this.state.getWebSockets()) {
+      try {
+        socket.send(JSON.stringify({ type: eventType }));
+        socket.close(1000, eventType);
+      } catch {
+        // Socket is already closed.
+      }
+    }
+  }
+
   private async destroy(room?: ShareRoomState) {
+    this.closeAllSockets("ROOM_CLOSED");
     const currentRoom =
       room || (await this.state.storage.get<ShareRoomState>("room"));
     const objectKeys = (currentRoom?.r2Objects || [])
@@ -222,6 +276,33 @@ export class ShareRoomObject {
 
   async fetch(request: Request) {
     const { pathname } = new URL(request.url);
+
+    if (
+      request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+      pathname === "/socket"
+    ) {
+      const room = await this.state.storage.get<ShareRoomState>("room");
+      const sessionId = new URL(request.url).searchParams.get("sessionId") || "";
+      const member = room
+        ? normalizeMembers(room).find(
+            (candidate) =>
+              candidate.sessionId === sessionId && candidate.status === "online",
+          )
+        : null;
+      if (!room || !member) {
+        return json({ error: "Invalid room WebSocket session" }, { status: 403 });
+      }
+
+      this.closeSessionSockets(sessionId);
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      this.state.acceptWebSocket(server, [this.socketSessionTag(sessionId)]);
+      server.serializeAttachment({ sessionId });
+      member.lastSeen = Date.now();
+      await this.persistAndSchedule(room);
+      this.broadcastSocketState();
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     if (request.method === "POST" && pathname === "/initialize") {
       const existing = await this.state.storage.get<ShareRoomState>("room");
@@ -517,6 +598,7 @@ export class ShareRoomObject {
       leavingMember.status = "offline";
       leavingMember.ready = false;
       leavingMember.leftAt = Date.now();
+      this.closeSessionSockets(leavingMember.sessionId);
       delete room.signal;
       const retained = await this.persistAndSchedule(room);
       return json({ ok: true, roomRetained: retained });
@@ -693,6 +775,7 @@ export class ShareRoomObject {
       target.ready = false;
       target.lastSeen = Date.now();
       target.leftAt = Date.now();
+      this.closeSessionSockets(target.sessionId, "ROOM_KICKED");
       delete room.signal;
       await this.persistAndSchedule(room);
       return json({ ok: true });
@@ -739,6 +822,51 @@ export class ShareRoomObject {
     }
 
     return json({ error: "Not found" }, { status: 404 });
+  }
+
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
+    if (typeof message !== "string" || message.length > MAX_RELAY_MESSAGE_BYTES) {
+      socket.close(1009, "Relay message is too large or not text");
+      return;
+    }
+    let relay: { type?: unknown; channel?: unknown; payload?: unknown };
+    try {
+      relay = JSON.parse(message) as typeof relay;
+    } catch {
+      return;
+    }
+    if (
+      relay.type !== "RELAY" ||
+      (relay.channel !== "control" && relay.channel !== "instruction") ||
+      typeof relay.payload !== "string"
+    ) {
+      return;
+    }
+    for (const peer of this.state.getWebSockets()) {
+      if (peer === socket) continue;
+      const senderSession = (
+        socket.deserializeAttachment() as { sessionId?: string } | null
+      )?.sessionId;
+      const peerSession = (
+        peer.deserializeAttachment() as { sessionId?: string } | null
+      )?.sessionId;
+      if (!senderSession || !peerSession || senderSession === peerSession) continue;
+      try {
+        peer.send(message);
+      } catch {
+        // The peer will fall back to its DataChannel until Socket reconnects.
+      }
+    }
+  }
+
+  async webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+    wasClean: boolean,
+  ) {
+    socket.close(code, reason);
+    this.broadcastSocketState();
   }
 
   async alarm() {

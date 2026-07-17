@@ -3,7 +3,11 @@ import {
   MetricsCounter,
   type MetricsCounterState,
 } from "./metrics-counter";
-import { handleCreateShareRoom, handleShareRoomRealtime } from "./realtime/share-room";
+import {
+  handleCreateShareRoom,
+  handleShareRoomRealtime,
+  handleShareRoomSocket,
+} from "./realtime/share-room";
 import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 
@@ -259,6 +263,9 @@ function corsHeaders(env: Env, request: Request) {
 }
 
 function withCors(response: Response, env: Env, request: Request) {
+  if (response.status === 101) {
+    return response;
+  }
   const headers = new Headers(response.headers);
   headers.set("x-picbind-dev-mode", isDevMode(env) ? "1" : "0");
   for (const [key, value] of Object.entries(corsHeaders(env, request))) {
@@ -565,7 +572,9 @@ const worker = {
       } else if (pathname.startsWith("/api/realtime/room/")) {
         response = hasMissingOrInvalidOrigin(env, request)
           ? json({ error: "Invalid origin" }, { status: 403 })
-          : await handleShareRoomRealtime(request, env);
+          : pathname === "/api/realtime/room/socket"
+            ? await handleShareRoomSocket(request, env)
+            : await handleShareRoomRealtime(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }

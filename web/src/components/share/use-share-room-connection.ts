@@ -48,6 +48,11 @@ import {
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
 import { downloadFileFromR2 } from "@/utils/realtime-r2-transfer";
 import { clearRoomPageState } from "@/utils/realtime-room-page-store";
+import {
+  AdaptiveMessageChannel,
+  WeakNetworkSocket,
+  type RealtimeMessageChannel,
+} from "@/utils/weak-network-socket";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -82,8 +87,8 @@ async function readWebRtcLatency(
 type UseShareRoomConnectionOptions = {
   roomId: string | null;
   labels: ShareRoomLabels;
-  controlChannelRef: React.MutableRefObject<RTCDataChannel | null>;
-  instructionChannelRef: React.MutableRefObject<RTCDataChannel | null>;
+  controlChannelRef: React.MutableRefObject<RealtimeMessageChannel | null>;
+  instructionChannelRef: React.MutableRefObject<RealtimeMessageChannel | null>;
   outgoingChannelRef: React.MutableRefObject<RTCDataChannel | null>;
   transferChunkSizeRef: React.MutableRefObject<number>;
   maxImageTransferSizeRef: React.MutableRefObject<number>;
@@ -104,6 +109,7 @@ type UseShareRoomConnectionOptions = {
   showFloatingEmoji(id: string, emoji: string): void;
   onIncomingNotification?(notification: RoomDockNotification): void;
   onForcedNavigation(): void;
+  onWeakNetworkChange(weakNetwork: boolean): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -132,6 +138,7 @@ export function useShareRoomConnection({
   showFloatingEmoji,
   onIncomingNotification,
   onForcedNavigation,
+  onWeakNetworkChange,
   setActivities,
   setConnection,
   setConnectionError,
@@ -155,6 +162,9 @@ export function useShareRoomConnection({
     let controlChannel: RTCDataChannel | null = null;
     let instructionChannel: RTCDataChannel | null = null;
     let fileChannel: RTCDataChannel | null = null;
+    let socketRelay: WeakNetworkSocket | null = null;
+    let adaptiveControl: AdaptiveMessageChannel | null = null;
+    let adaptiveInstruction: AdaptiveMessageChannel | null = null;
     let iceServers: RTCIceServer[] = [];
     let currentPeerSessionId: string | null = null;
     let currentOfferSdp: string | null = null;
@@ -164,13 +174,21 @@ export function useShareRoomConnection({
     let handshakeAttempts = 0;
     let handshakeAcknowledged = false;
     let placeholdersPublished = false;
+    let networkMonitorStartedAt = 0;
+    let networkCheckInFlight = false;
     const imageReadyWaiters = imageReadyWaitersRef.current;
+
+    const forceRoomNavigation = (reason: "closed" | "kicked") => {
+      clearRoomPageState(roomId);
+      onForcedNavigation();
+      window.location.replace(
+        reason === "closed" ? "/?roomClosed=1" : "/?roomKicked=1",
+      );
+    };
 
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
-        clearRoomPageState(roomId);
-        onForcedNavigation();
-        window.location.replace("/?roomClosed=1");
+        forceRoomNavigation("closed");
         return true;
       }
       if (
@@ -178,9 +196,7 @@ export function useShareRoomConnection({
         error.status === 403 &&
         /removed|revoked/i.test(error.message)
       ) {
-        clearRoomPageState(roomId);
-        onForcedNavigation();
-        window.location.replace("/?roomKicked=1");
+        forceRoomNavigation("kicked");
         return true;
       }
       return false;
@@ -578,6 +594,7 @@ export function useShareRoomConnection({
     const sendHello = () => {
       if (handshakeAttempts >= 20) {
         const message = "P2P DataChannel handshake timed out";
+        socketRelay?.markUnavailable();
         setConnection("error");
         setConnectionError(message);
         setConnectionActivity("error", message);
@@ -712,50 +729,52 @@ export function useShareRoomConnection({
 
     const attachControlChannel = (nextChannel: RTCDataChannel) => {
       controlChannel = nextChannel;
+      adaptiveControl?.setDataChannel(nextChannel);
       controlChannel.onmessage = handleControlMessage;
       controlChannel.onopen = () => {
-        controlChannelRef.current = controlChannel;
+        controlChannelRef.current = adaptiveControl;
         startHandshake();
       };
       controlChannel.onclose = () => {
         stopHandshake();
         handshakeAcknowledged = false;
         placeholdersPublished = false;
-        controlChannelRef.current = null;
-        if (!disposed) {
+        adaptiveControl?.setDataChannel(null);
+        if (!disposed && !socketRelay?.canRelay) {
           setConnection("waiting");
           setConnectionActivity("waiting");
         }
       };
       if (controlChannel.readyState === "open") {
-        controlChannelRef.current = controlChannel;
+        controlChannelRef.current = adaptiveControl;
         startHandshake();
       }
     };
 
     const attachInstructionChannel = (nextChannel: RTCDataChannel) => {
       instructionChannel = nextChannel;
+      adaptiveInstruction?.setDataChannel(nextChannel);
       handshakeId = createPeerMessageId();
       handshakeAttempts = 0;
       handshakeAcknowledged = false;
       placeholdersPublished = false;
       instructionChannel.onmessage = handleInstructionMessage;
       instructionChannel.onopen = () => {
-        instructionChannelRef.current = instructionChannel;
+        instructionChannelRef.current = adaptiveInstruction;
         startHandshake();
       };
       instructionChannel.onclose = () => {
         stopHandshake();
         handshakeAcknowledged = false;
         placeholdersPublished = false;
-        instructionChannelRef.current = null;
-        if (!disposed) {
+        adaptiveInstruction?.setDataChannel(null);
+        if (!disposed && !socketRelay?.canRelay) {
           setConnection("waiting");
           setConnectionActivity("waiting");
         }
       };
       if (instructionChannel.readyState === "open") {
-        instructionChannelRef.current = instructionChannel;
+        instructionChannelRef.current = adaptiveInstruction;
         startHandshake();
       }
     };
@@ -770,7 +789,7 @@ export function useShareRoomConnection({
       };
       fileChannel.onclose = () => {
         outgoingChannelRef.current = null;
-        if (!disposed) {
+        if (!disposed && !socketRelay?.canRelay) {
           setConnection("waiting");
           setConnectionActivity("waiting");
         }
@@ -783,10 +802,6 @@ export function useShareRoomConnection({
     const closePeerConnection = () => {
       stopHandshake();
       for (const waiter of [...imageReadyWaiters.values()]) waiter.resolve();
-      if (statsTimer) {
-        window.clearInterval(statsTimer);
-        statsTimer = undefined;
-      }
       if (!disposed) setNetworkLatencyMs(null);
       if (controlChannel) {
         controlChannel.onclose = null;
@@ -811,14 +826,51 @@ export function useShareRoomConnection({
       fileChannel = null;
       connection = null;
       outgoingChannelRef.current = null;
-      controlChannelRef.current = null;
-      instructionChannelRef.current = null;
+      adaptiveControl?.setDataChannel(null);
+      adaptiveInstruction?.setDataChannel(null);
       currentPeerSessionId = null;
       currentOfferSdp = null;
       appliedRemoteCandidates.clear();
       handshakeAcknowledged = false;
       placeholdersPublished = false;
       negotiating = false;
+    };
+
+    const monitorNetwork = async () => {
+      if (disposed || networkCheckInFlight || !socketRelay) return;
+      const peer = connection;
+      const graceExpired =
+        networkMonitorStartedAt > 0 &&
+        Date.now() - networkMonitorStartedAt >= 10_000;
+      if (!peer) {
+        if (graceExpired) socketRelay.markUnavailable();
+        return;
+      }
+      if (
+        peer.connectionState === "failed" ||
+        peer.connectionState === "disconnected" ||
+        peer.connectionState === "closed"
+      ) {
+        setNetworkLatencyMs(null);
+        socketRelay.markUnavailable();
+        return;
+      }
+      if (peer.connectionState !== "connected" && !graceExpired) return;
+
+      networkCheckInFlight = true;
+      try {
+        const latencyMs = await readWebRtcLatency(peer);
+        if (disposed || connection !== peer) return;
+        setNetworkLatencyMs(latencyMs);
+        socketRelay.updateRtt(latencyMs);
+      } catch {
+        if (!disposed && connection === peer) {
+          setNetworkLatencyMs(null);
+          socketRelay.markUnavailable();
+        }
+      } finally {
+        networkCheckInFlight = false;
+      }
     };
 
     const createPeerConnection = () => {
@@ -831,12 +883,22 @@ export function useShareRoomConnection({
           return;
         }
         if (peer.connectionState === "failed") {
-          setConnection("error");
-          setConnectionActivity("error", "P2P connection failed");
+          socketRelay?.markUnavailable();
+          if (socketRelay?.canRelay) {
+            setConnection("connected");
+            setConnectionError(null);
+            setConnectionActivity("connected");
+          } else {
+            setConnection("error");
+            setConnectionActivity("error", "P2P connection failed");
+          }
           closePeerConnection();
         } else if (peer.connectionState === "disconnected") {
-          setConnection("waiting");
-          setConnectionActivity("waiting");
+          socketRelay?.markUnavailable();
+          if (!socketRelay?.canRelay) {
+            setConnection("waiting");
+            setConnectionActivity("waiting");
+          }
         }
       };
       peer.ondatachannel = (event) => {
@@ -847,17 +909,6 @@ export function useShareRoomConnection({
         else if (event.channel.label === "picbind-files") attachFileChannel(event.channel);
       };
       connection = peer;
-      const updateStats = () => {
-        void readWebRtcLatency(peer)
-          .then((latencyMs) => {
-            if (!disposed && connection === peer) {
-              setNetworkLatencyMs(latencyMs);
-            }
-          })
-          .catch(() => undefined);
-      };
-      updateStats();
-      statsTimer = window.setInterval(updateStats, 2000);
       return peer;
     };
 
@@ -1077,6 +1128,49 @@ export function useShareRoomConnection({
         setMaxImageTransferSize(joined.maxImageTransferSize);
         connectedRole = joined.role;
         setRole(joined.role);
+        socketRelay = new WeakNetworkSocket({
+          roomId,
+          sessionId: joined.sessionId,
+          onMessage(channel, payload) {
+            const event = new MessageEvent("message", { data: payload });
+            if (channel === "control") handleControlMessage(event);
+            else handleInstructionMessage(event);
+          },
+          onRoomClosed() {
+            forceRoomNavigation("closed");
+          },
+          onRoomKicked() {
+            forceRoomNavigation("kicked");
+          },
+          onWeakNetworkChange,
+          onRelayReadyChange(ready) {
+            if (disposed) return;
+            if (ready) {
+              stopHandshake();
+              handshakeAcknowledged = true;
+              setConnection("connected");
+              setConnectionError(null);
+              setConnectionActivity("connected");
+              void publishWaitingPlaceholders();
+            } else if (
+              controlChannel?.readyState !== "open" ||
+              instructionChannel?.readyState !== "open"
+            ) {
+              setConnection("waiting");
+              setConnectionActivity("waiting");
+            }
+          },
+        });
+        adaptiveControl = new AdaptiveMessageChannel("control", socketRelay);
+        adaptiveInstruction = new AdaptiveMessageChannel(
+          "instruction",
+          socketRelay,
+        );
+        controlChannelRef.current = adaptiveControl;
+        instructionChannelRef.current = adaptiveInstruction;
+        networkMonitorStartedAt = Date.now();
+        void monitorNetwork();
+        statsTimer = window.setInterval(() => void monitorNetwork(), 2000);
         if (joined.role === "owner") {
           clearTemporaryShareRoom(roomId);
         }
@@ -1181,6 +1275,12 @@ export function useShareRoomConnection({
         window.clearInterval(statsTimer);
       }
       closePeerConnection();
+      socketRelay?.disconnect();
+      socketRelay = null;
+      adaptiveControl = null;
+      adaptiveInstruction = null;
+      controlChannelRef.current = null;
+      instructionChannelRef.current = null;
       sessionIdRef.current = null;
     };
   }, [
@@ -1195,6 +1295,7 @@ export function useShareRoomConnection({
     outgoingChannelRef,
     onIncomingNotification,
     onForcedNavigation,
+    onWeakNetworkChange,
     removeRoomImage,
     roomId,
     sessionIdRef,

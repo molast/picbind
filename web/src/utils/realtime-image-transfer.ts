@@ -1,6 +1,7 @@
 "use client";
 
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
+import type { RealtimeMessageChannel } from "./weak-network-socket";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
 const TRANSFER_ID_BYTES = 16;
@@ -132,7 +133,7 @@ function decodeThumbnail(value: unknown) {
   }
 }
 
-function sendInstruction(channel: RTCDataChannel, message: TransferInstruction) {
+function sendInstruction(channel: RealtimeMessageChannel, message: TransferInstruction) {
   const payload = JSON.stringify(message);
   if (new TextEncoder().encode(payload).byteLength > MAX_DATA_CHANNEL_PAYLOAD_BYTES) {
     throw new Error("Image transfer instruction exceeds the 1200-byte payload limit");
@@ -187,20 +188,20 @@ function isValidPlaceholder(value: unknown): value is ImagePlaceholderMetadata {
   );
 }
 
-export function sendImageReceipt(channel: RTCDataChannel, id: string) {
+export function sendImageReceipt(channel: RealtimeMessageChannel, id: string) {
   if (channel.readyState === "open") {
     sendInstruction(channel, { type: "IMAGE_RECEIVED", payload: { id } });
   }
 }
 
-export function sendImageReady(channel: RTCDataChannel, id: string) {
+export function sendImageReady(channel: RealtimeMessageChannel, id: string) {
   if (channel.readyState === "open") {
     sendInstruction(channel, { type: "IMAGE_READY", payload: { id } });
   }
 }
 
 export function sendImagePlaceholder(
-  channel: RTCDataChannel,
+  channel: RealtimeMessageChannel,
   meta: ImageTransferMeta,
   placeholder: ImagePlaceholderMetadata,
 ) {
@@ -213,20 +214,20 @@ export function sendImagePlaceholder(
   });
 }
 
-export function sendImageDelete(channel: RTCDataChannel, id: string) {
+export function sendImageDelete(channel: RealtimeMessageChannel, id: string) {
   if (channel.readyState === "open") {
     sendInstruction(channel, { type: "IMAGE_DELETE", payload: { id } });
   }
 }
 
-export function sendImageCancel(channel: RTCDataChannel, id: string) {
+export function sendImageCancel(channel: RealtimeMessageChannel, id: string) {
   if (channel.readyState === "open") {
     sendInstruction(channel, { type: "IMAGE_CANCEL", payload: { id } });
   }
 }
 
 export function sendR2ImageAvailable(
-  channel: RTCDataChannel,
+  channel: RealtimeMessageChannel,
   meta: ImageTransferMeta,
   objectKey: string,
   expiresAt: number,
@@ -241,7 +242,7 @@ export function sendR2ImageAvailable(
 }
 
 export function sendImagePreview(
-  channel: RTCDataChannel,
+  channel: RealtimeMessageChannel,
   meta: ImageTransferMeta,
   thumbnail: Uint8Array,
 ) {
@@ -306,7 +307,7 @@ async function waitForWritableBuffer(
 }
 
 export async function sendImageFile(
-  instructionChannel: RTCDataChannel,
+  instructionChannel: RealtimeMessageChannel,
   fileChannel: RTCDataChannel,
   file: File,
   onProgress: (progress: TransferProgress) => void,

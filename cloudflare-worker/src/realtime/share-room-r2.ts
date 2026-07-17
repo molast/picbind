@@ -31,9 +31,13 @@ function configuredMode(env: ShareRoomR2Env): FileTransferMode {
 export function decideFileTransferMode(
   env: ShareRoomR2Env,
   rttMs: number | null,
+  weakNetwork?: boolean,
 ) {
   const mode = configuredMode(env);
   if (mode !== "auto") return mode;
+  if (typeof weakNetwork === "boolean") {
+    return weakNetwork ? "r2" : "p2p";
+  }
   const threshold = Number(env.R2_RTT_THRESHOLD_MS || 200);
   return rttMs !== null && Number.isFinite(rttMs) && rttMs > threshold
     ? "r2"
