@@ -69,28 +69,6 @@ export function consumeCreatedShareRoomPrompt(roomId: string) {
   return true;
 }
 
-export function transferShareRoomSession(
-  roomId: string,
-  targetStorage: Storage,
-) {
-  const keys = [
-    ownerTokenKey(roomId),
-    `${CLIENT_ID_PREFIX}${roomId}`,
-    `${OWNED_ROOM_PREFIX}${roomId}`,
-    `${CREATED_ROOM_PROMPT_PREFIX}${roomId}`,
-  ];
-  const entries = keys.flatMap((key) => {
-    const value = sessionStorage.getItem(key);
-    return value === null ? [] : [[key, value] as const];
-  });
-  for (const [key, value] of entries) {
-    targetStorage.setItem(key, value);
-  }
-  for (const [key] of entries) {
-    sessionStorage.removeItem(key);
-  }
-}
-
 export function getShareRoomOwnerToken(roomId: string) {
   return sessionStorage.getItem(ownerTokenKey(roomId));
 }

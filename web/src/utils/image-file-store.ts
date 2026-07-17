@@ -4,6 +4,7 @@ const DB_NAME = "picbind-image-queue";
 const DB_VERSION = 1;
 const STORE_NAME = "files";
 const COMPRESSION_HANDOFF_KEY = "picbind:compression-handoff";
+export const COMPRESSION_HANDOFF_EVENT = "picbind:compression-handoff-ready";
 
 type StoredImageFile = {
   id: string;
@@ -94,6 +95,7 @@ export async function queueFilesForCompression(files: File[]) {
     COMPRESSION_HANDOFF_KEY,
     JSON.stringify(entries.map(({ id }) => id)),
   );
+  window.dispatchEvent(new Event(COMPRESSION_HANDOFF_EVENT));
 }
 
 export async function consumeFilesForCompression() {

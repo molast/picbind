@@ -82,7 +82,7 @@ function readRoomId() {
   return segments[0] === "share" ? segments[1] || "" : "";
 }
 
-export default function ShareRoomPage() {
+export default function ShareRoomPage({ embedded = false }: { embedded?: boolean }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const activityListRef = React.useRef<HTMLDivElement | null>(null);
   const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
@@ -101,6 +101,7 @@ export default function ShareRoomPage() {
     new Map<string, { resolve(): void; timeoutId: number }>(),
   );
   const imagesRef = React.useRef<RoomImage[]>([]);
+  const roomExitHandledRef = React.useRef(false);
   const transferAbortControllersRef = React.useRef(
     new Map<string, AbortController>(),
   );
@@ -373,6 +374,27 @@ export default function ShareRoomPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isShareDialogOpen]);
+
+  React.useEffect(() => {
+    if (!embedded || !roomId || !role) return;
+    const handleHistoryBack = () => {
+      if (roomExitHandledRef.current) return;
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      if (role === "owner") {
+        try {
+          markShareRoomTemporarilyAway(roomId);
+        } catch {
+          // The Worker heartbeat will still expire this session if local metadata is unavailable.
+        }
+        void leaveRealtimeRoomTemporarily(roomId, sessionId).catch(() => undefined);
+      } else {
+        void leaveRealtimeRoom(roomId, sessionId, true).catch(() => undefined);
+      }
+    };
+    window.addEventListener("popstate", handleHistoryBack);
+    return () => window.removeEventListener("popstate", handleHistoryBack);
+  }, [embedded, role, roomId]);
 
   React.useEffect(() => {
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
@@ -801,7 +823,8 @@ export default function ShareRoomPage() {
     try {
       await leaveRealtimeRoomTemporarily(roomId, sessionId);
       markShareRoomTemporarilyAway(roomId);
-      window.location.assign("/");
+      roomExitHandledRef.current = true;
+      embedded ? window.history.back() : window.location.assign("/");
     } catch (error) {
       setIsRoomActionPending(false);
       upsertActivity({
@@ -831,7 +854,8 @@ export default function ShareRoomPage() {
         await leaveRealtimeRoom(roomId, sessionId);
       }
       clearRoomPageState(roomId);
-      window.location.assign("/");
+      roomExitHandledRef.current = true;
+      embedded ? window.history.back() : window.location.assign("/");
     } catch (error) {
       setIsRoomActionPending(false);
       setIsExitDialogOpen(false);

@@ -27,6 +27,7 @@ import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import { createUuid } from "@/utils/uuid";
 import {
+  COMPRESSION_HANDOFF_EVENT,
   consumeFilesForCompression,
   deleteQueuedImageFile,
   getQueuedImageFile,
@@ -723,7 +724,7 @@ export function useHomeCompression({
     [copy.uploadNotice, selectedFormats],
   );
 
-  React.useEffect(() => {
+  const loadCompressionHandoff = React.useCallback(() => {
     void consumeFilesForCompression()
       .then((files) => {
         if (files.length) return enqueueFiles(files);
@@ -732,6 +733,16 @@ export function useHomeCompression({
         if (IS_DEV) console.warn("Failed to load compression handoff", error);
       });
   }, [enqueueFiles]);
+
+  React.useEffect(() => {
+    loadCompressionHandoff();
+    window.addEventListener(COMPRESSION_HANDOFF_EVENT, loadCompressionHandoff);
+    return () =>
+      window.removeEventListener(
+        COMPRESSION_HANDOFF_EVENT,
+        loadCompressionHandoff,
+      );
+  }, [loadCompressionHandoff]);
 
   React.useEffect(() => {
     if (!items.length) {

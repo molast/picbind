@@ -1,5 +1,5 @@
-import HomeCompressLanding from "@/components/home/home-compress-landing";
+import HomePageStack from "@/components/home/home-page-stack";
 
 export default function Page() {
-  return <HomeCompressLanding initialLang="en" />;
+  return <HomePageStack initialLang="en" />;
 }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import CreateRoomButton from "@/components/share/create-room-button";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
+import type { ShareRoom } from "@/utils/share-room";
 
 type HomeHeroProps = {
   copy: HomeCompressLandingCopy;
@@ -25,6 +26,7 @@ type HomeHeroProps = {
   onFormatOptionsChange(open: boolean): void;
   onToggleFormat(format: OutputFormat): void;
   onSelectAllFormats(): void;
+  onRoomCreated?(room: ShareRoom): void;
 };
 
 export default function HomeHero({
@@ -45,6 +47,7 @@ export default function HomeHero({
   onFormatOptionsChange,
   onToggleFormat,
   onSelectAllFormats,
+  onRoomCreated,
 }: HomeHeroProps) {
   return (
     <section className="relative min-h-[470px] overflow-hidden bg-[#c8d8f2] sm:min-h-[520px] lg:min-h-[560px]">
@@ -80,7 +83,7 @@ export default function HomeHero({
                   >
                     {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
                   </Link>
-                  <CreateRoomButton lang={lang} />
+                  <CreateRoomButton lang={lang} onRoomCreated={onRoomCreated} />
                 </nav>
               </div>
               <div ref={langMenuRef} className="relative">
@@ -145,7 +148,11 @@ export default function HomeHero({
             <Link href="/favicon-converter" className="rounded-full px-3 py-1">
               {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
             </Link>
-            <CreateRoomButton lang={lang} mobile />
+            <CreateRoomButton
+              lang={lang}
+              mobile
+              onRoomCreated={onRoomCreated}
+            />
           </div>
         </header>
 

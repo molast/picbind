@@ -6,13 +6,16 @@ import HomeInfoSection from "./home-info-section";
 import HomeResults from "./home-results";
 import { useHomeCompression } from "./use-home-compression";
 import type { Lang } from "@/locales";
+import type { ShareRoom } from "@/utils/share-room";
 
 type HomeCompressLandingProps = {
   initialLang: Lang;
+  onRoomCreated?(room: ShareRoom): void;
 };
 
 export default function HomeCompressLanding({
   initialLang,
+  onRoomCreated,
 }: HomeCompressLandingProps) {
   const home = useHomeCompression({ initialLang });
 
@@ -40,6 +43,7 @@ export default function HomeCompressLanding({
         onFormatOptionsChange={home.setShowFormatOptions}
         onToggleFormat={home.handleToggleFormat}
         onSelectAllFormats={home.handleSelectAllFormats}
+        onRoomCreated={onRoomCreated}
       />
 
       <input
