@@ -103,6 +103,7 @@ type UseShareRoomConnectionOptions = {
   upsertActivity(activity: ActivityItem): void;
   showFloatingEmoji(id: string, emoji: string): void;
   onIncomingNotification?(notification: RoomDockNotification): void;
+  onForcedNavigation(): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -130,6 +131,7 @@ export function useShareRoomConnection({
   upsertActivity,
   showFloatingEmoji,
   onIncomingNotification,
+  onForcedNavigation,
   setActivities,
   setConnection,
   setConnectionError,
@@ -167,6 +169,7 @@ export function useShareRoomConnection({
     const redirectIfRoomClosed = (error: unknown) => {
       if (error instanceof RealtimeRoomRequestError && error.status === 404) {
         clearRoomPageState(roomId);
+        onForcedNavigation();
         window.location.replace("/?roomClosed=1");
         return true;
       }
@@ -176,6 +179,7 @@ export function useShareRoomConnection({
         /removed|revoked/i.test(error.message)
       ) {
         clearRoomPageState(roomId);
+        onForcedNavigation();
         window.location.replace("/?roomKicked=1");
         return true;
       }
@@ -1190,6 +1194,7 @@ export function useShareRoomConnection({
     labels,
     outgoingChannelRef,
     onIncomingNotification,
+    onForcedNavigation,
     removeRoomImage,
     roomId,
     sessionIdRef,

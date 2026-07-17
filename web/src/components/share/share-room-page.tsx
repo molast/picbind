@@ -233,6 +233,9 @@ export default function ShareRoomPage({
     },
     [],
   );
+  const handleForcedNavigation = React.useCallback(() => {
+    roomExitHandledRef.current = true;
+  }, []);
   const imageWorkspaceLabels = React.useMemo(
     () => getShareRoomLabels(lang, maxImageTransferSize),
     [lang, maxImageTransferSize],
@@ -563,6 +566,7 @@ export default function ShareRoomPage({
     upsertActivity,
     showFloatingEmoji,
     onIncomingNotification: handleIncomingNotification,
+    onForcedNavigation: handleForcedNavigation,
     setActivities,
     setConnection,
     setConnectionError,

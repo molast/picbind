@@ -1,9 +1,13 @@
 "use client";
 
+import React from "react";
 import HomeFooter from "./home-footer";
 import HomeHero from "./home-hero";
 import HomeInfoSection from "./home-info-section";
 import HomeResults from "./home-results";
+import RoomUnavailableDialog, {
+  type RoomUnavailableReason,
+} from "./room-unavailable-dialog";
 import { useHomeCompression } from "./use-home-compression";
 import type { Lang } from "@/locales";
 import type { ShareRoom } from "@/utils/share-room";
@@ -22,6 +26,26 @@ export default function HomeCompressLanding({
   onRestoreActiveRoom,
 }: HomeCompressLandingProps) {
   const home = useHomeCompression({ initialLang });
+  const [roomUnavailableReason, setRoomUnavailableReason] =
+    React.useState<RoomUnavailableReason | null>(null);
+
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const reason = url.searchParams.get("roomClosed") === "1"
+      ? "closed"
+      : url.searchParams.get("roomKicked") === "1"
+        ? "kicked"
+        : null;
+    if (!reason) return;
+    setRoomUnavailableReason(reason);
+    url.searchParams.delete("roomClosed");
+    url.searchParams.delete("roomKicked");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
 
   if (!home.langReady) {
     return <main className="min-h-screen w-full bg-[#ececec]" />;
@@ -94,6 +118,11 @@ export default function HomeCompressLanding({
         isCountBouncing={home.isCountBouncing}
       />
       <HomeFooter copy={home.copy} lang={home.lang} />
+      <RoomUnavailableDialog
+        lang={home.lang}
+        reason={roomUnavailableReason}
+        onClose={() => setRoomUnavailableReason(null)}
+      />
     </main>
   );
 }
