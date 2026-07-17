@@ -10,21 +10,32 @@ export type ImagePlaceholderMetadata = {
   height: number;
   dominantColor: string;
   blurHash: string;
+  pending?: boolean;
+};
+
+export const PENDING_SHARE_PLACEHOLDER: ImagePlaceholderMetadata = {
+  width: 1,
+  height: 1,
+  dominantColor: "#e2e8f0",
+  blurHash: "000000",
+  pending: true,
 };
 
 export async function generateSharePlaceholder(
   image: Blob,
 ): Promise<ImagePlaceholderMetadata> {
   const mod = await initWasm();
-  if (!mod || typeof mod.generate_share_placeholder !== "function") {
-    throw new Error("WASM module does not expose generate_share_placeholder");
-  }
   try {
+    return await generateSampledPlaceholder(mod, image);
+  } catch (error) {
+    if (
+      image.type === "image/avif" ||
+      typeof mod.generate_share_placeholder !== "function"
+    ) {
+      throw error;
+    }
     const input = new Uint8Array(await image.arrayBuffer());
     return validatePlaceholderMetadata(mod.generate_share_placeholder(input));
-  } catch (error) {
-    if (image.type !== "image/avif") throw error;
-    return generateAvifPlaceholder(mod, image);
   }
 }
 
@@ -46,7 +57,7 @@ function validatePlaceholderMetadata(value: unknown): ImagePlaceholderMetadata {
   return metadata as ImagePlaceholderMetadata;
 }
 
-async function generateAvifPlaceholder(
+async function generateSampledPlaceholder(
   mod: Record<string, unknown>,
   image: Blob,
 ): Promise<ImagePlaceholderMetadata> {
@@ -66,7 +77,7 @@ async function generateAvifPlaceholder(
     canvas.height = sampleHeight;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) {
-      throw new Error("Canvas is unavailable for AVIF decoding");
+      throw new Error("Canvas is unavailable for placeholder sampling");
     }
     context.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight);
     const rgba = context.getImageData(0, 0, sampleWidth, sampleHeight).data;

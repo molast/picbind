@@ -28,6 +28,7 @@ export type ImageTransferMeta = {
 };
 
 type TransferInstruction =
+  | { type: "IMAGE_PLACEHOLDER_PENDING"; payload: ImageTransferMeta }
   | {
       type: "IMAGE_PLACEHOLDER";
       payload: ImageTransferMeta & { placeholder: ImagePlaceholderMetadata };
@@ -95,6 +96,7 @@ export type ImageReceiverCallbacks = {
     meta: ImageTransferMeta,
     placeholder: ImagePlaceholderMetadata,
   ): void | Promise<void>;
+  onPlaceholderPending?(meta: ImageTransferMeta): void | Promise<void>;
   onPreview?(meta: ImageTransferMeta, thumbnail: Blob): void | Promise<void>;
   onPlaceholderAck?(id: string, width: number, height: number): void;
   onThumbnail?(id: string, thumbnail: Blob): void | Promise<void>;
@@ -253,6 +255,19 @@ export function sendImagePlaceholder(
   sendInstruction(channel, {
     type: "IMAGE_PLACEHOLDER",
     payload: { ...meta, placeholder },
+  });
+}
+
+export function sendImagePlaceholderPending(
+  channel: RealtimeMessageChannel,
+  meta: ImageTransferMeta,
+) {
+  if (channel.readyState !== "open") {
+    throw new Error("DataChannel is not open");
+  }
+  sendInstruction(channel, {
+    type: "IMAGE_PLACEHOLDER_PENDING",
+    payload: meta,
   });
 }
 
@@ -496,6 +511,15 @@ export class RealtimeImageReceiver {
       return;
     }
     const message = parsed as TransferInstruction;
+
+    if (message.type === "IMAGE_PLACEHOLDER_PENDING") {
+      if (!isValidMeta(message.payload, this.getMaxImageTransferSize())) {
+        this.callbacks.onError(null, "Received invalid pending placeholder");
+        return;
+      }
+      void this.callbacks.onPlaceholderPending?.(message.payload);
+      return;
+    }
 
     if (message.type === "IMAGE_PLACEHOLDER") {
       if (

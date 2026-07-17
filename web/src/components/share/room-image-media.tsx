@@ -24,6 +24,11 @@ export default function RoomImageMedia({
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (placeholder.pending) {
+      canvas.width = 1;
+      canvas.height = 1;
+      return;
+    }
     const scale = 32 / Math.max(placeholder.width, placeholder.height);
     const width = Math.max(1, Math.round(placeholder.width * scale));
     const height = Math.max(1, Math.round(placeholder.height * scale));
@@ -53,7 +58,7 @@ export default function RoomImageMedia({
     >
       <canvas
         ref={canvasRef}
-        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-0" : "opacity-100"}`}
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${loaded || placeholder.pending ? "opacity-0" : "opacity-100"}`}
         aria-hidden="true"
       />
       {src ? (

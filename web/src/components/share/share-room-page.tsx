@@ -48,6 +48,7 @@ import {
   sendImageDelete,
   sendImageCancel,
   sendImagePlaceholder,
+  sendImagePlaceholderPending,
   sendImagePlaceholderAck,
   sendImageFile,
   sendR2ImageAvailable,
@@ -64,6 +65,7 @@ import {
   sendPeerMessage,
 } from "@/utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "@/utils/share-placeholder";
+import { initWasm } from "@/utils/wasm-runtime";
 import { uploadFileToR2 } from "@/utils/realtime-r2-transfer";
 import {
   type RealtimeMessageChannel,
@@ -427,6 +429,7 @@ export default function ShareRoomPage({
     const deletedImageIds = deletedImageIdsRef.current;
     const placeholderAckDimensions = placeholderAckDimensionsRef.current;
     const transferAbortControllers = transferAbortControllersRef.current;
+    void initWasm().catch(() => undefined);
     setLang(getLang());
     setRoomId(readRoomId());
     return () => {
@@ -701,44 +704,47 @@ export default function ShareRoomPage({
         const initialPersist = storeRoomImage(image).catch((error) => {
           console.warn("Failed to cache pending image", error);
         });
-        try {
-          const placeholder = await generateSharePlaceholder(file);
-          if (
-            deletedImageIdsRef.current.has(meta.id) ||
-            !imagesRef.current.some((current) => current.id === meta.id)
-          ) {
-            continue;
-          }
-          updateRoomImage(meta.id, { placeholder });
-          const activeChannel = instructionChannelRef.current;
-          if (activeChannel?.readyState !== "open") {
-            throw new Error("Image instruction channel is not open");
-          }
-          sendImagePlaceholder(activeChannel, meta, placeholder);
-          await initialPersist;
-          if (
-            !deletedImageIdsRef.current.has(meta.id) &&
-            imagesRef.current.some((current) => current.id === meta.id)
-          ) {
-            updateRoomImage(meta.id, { placeholder }, true);
-          }
-        } catch (error) {
-          if (!deletedImageIdsRef.current.has(meta.id)) {
-            updateRoomImage(meta.id, { transferStatus: "failed" });
-            await initialPersist;
-            if (imagesRef.current.some((current) => current.id === meta.id)) {
-              updateRoomImage(meta.id, { transferStatus: "failed" }, true);
+        sendImagePlaceholderPending(channel, meta);
+        void (async () => {
+          try {
+            const placeholder = await generateSharePlaceholder(file);
+            if (
+              deletedImageIdsRef.current.has(meta.id) ||
+              !imagesRef.current.some((current) => current.id === meta.id)
+            ) {
+              return;
             }
-            upsertActivity({
-              id: `error-${Date.now()}-${file.name}`,
-              kind: "error",
-              title: file.name,
-              detail:
-                error instanceof Error ? error.message : labels.previewFailed,
-              createdAt: Date.now(),
-            });
+            updateRoomImage(meta.id, { placeholder });
+            const activeChannel = instructionChannelRef.current;
+            if (activeChannel?.readyState !== "open") {
+              throw new Error("Image instruction channel is not open");
+            }
+            sendImagePlaceholder(activeChannel, meta, placeholder);
+            await initialPersist;
+            if (
+              !deletedImageIdsRef.current.has(meta.id) &&
+              imagesRef.current.some((current) => current.id === meta.id)
+            ) {
+              updateRoomImage(meta.id, { placeholder }, true);
+            }
+          } catch (error) {
+            if (!deletedImageIdsRef.current.has(meta.id)) {
+              updateRoomImage(meta.id, { transferStatus: "failed" });
+              await initialPersist;
+              if (imagesRef.current.some((current) => current.id === meta.id)) {
+                updateRoomImage(meta.id, { transferStatus: "failed" }, true);
+              }
+              upsertActivity({
+                id: `error-${Date.now()}-${file.name}`,
+                kind: "error",
+                title: file.name,
+                detail:
+                  error instanceof Error ? error.message : labels.previewFailed,
+                createdAt: Date.now(),
+              });
+            }
           }
-        }
+        })();
       }
     } finally {
       if (inputRef.current) {

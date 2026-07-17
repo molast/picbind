@@ -33,9 +33,11 @@ import {
   RealtimeImageReceiver,
   createImageTransferMeta,
   sendImagePlaceholder,
+  sendImagePlaceholderPending,
   sendImageThumbnail,
   sendImageReady,
   sendImageReceipt,
+  type ImageTransferMeta,
 } from "@/utils/realtime-image-transfer";
 import {
   deleteRoomImage,
@@ -47,7 +49,11 @@ import {
   parsePeerMessage,
   sendPeerMessage,
 } from "@/utils/realtime-peer-messages";
-import { generateSharePlaceholder } from "@/utils/share-placeholder";
+import {
+  generateSharePlaceholder,
+  PENDING_SHARE_PLACEHOLDER,
+  type ImagePlaceholderMetadata,
+} from "@/utils/share-placeholder";
 import { generateShareThumbnail } from "@/utils/share-thumbnail";
 import { downloadFileFromR2 } from "@/utils/realtime-r2-transfer";
 import { clearRoomPageState } from "@/utils/realtime-room-page-store";
@@ -252,36 +258,52 @@ export function useShareRoomConnection({
       });
     };
 
+    const cacheIncomingPlaceholder = async (
+      meta: ImageTransferMeta,
+      placeholder: ImagePlaceholderMetadata,
+    ) => {
+      if (deletedImageIdsRef.current.has(meta.id)) return;
+      const current = imagesRef.current.find((image) => image.id === meta.id);
+      if (current && !current.previewOnly && !current.placeholderOnly) {
+        return;
+      }
+      if (current?.placeholderOnly) {
+        if (!placeholder.pending || current.placeholder?.pending) {
+          updateRoomImage(meta.id, { placeholder }, true);
+        }
+        return;
+      }
+      const image: CachedRoomImage = {
+        id: meta.id,
+        roomId,
+        name: meta.name,
+        type: meta.type,
+        size: meta.size,
+        blob: new Blob([], { type: meta.type }),
+        direction: "received",
+        transferStatus: "waiting",
+        progress: 0,
+        previewOnly: false,
+        placeholderOnly: true,
+        placeholder,
+        thumbnail: current?.thumbnail,
+        createdAt: current?.createdAt || Date.now(),
+      };
+      notifyIncomingImage(meta.id, meta.name);
+      if (!disposed) addRoomImage(image);
+      try {
+        await storeRoomImage(image);
+      } catch (error) {
+        console.warn("Failed to cache image placeholder", error);
+      }
+    };
+
     const receiver = new RealtimeImageReceiver({
-      async onPlaceholder(meta, placeholder) {
-        if (deletedImageIdsRef.current.has(meta.id)) return;
-        const current = imagesRef.current.find((image) => image.id === meta.id);
-        if (current && !current.previewOnly && !current.placeholderOnly) {
-          return;
-        }
-        const image: CachedRoomImage = {
-          id: meta.id,
-          roomId,
-          name: meta.name,
-          type: meta.type,
-          size: meta.size,
-          blob: new Blob([], { type: meta.type }),
-          direction: "received",
-          transferStatus: "waiting",
-          progress: 0,
-          previewOnly: false,
-          placeholderOnly: true,
-          placeholder,
-          thumbnail: current?.thumbnail,
-          createdAt: current?.createdAt || Date.now(),
-        };
-        notifyIncomingImage(meta.id, meta.name);
-        if (!disposed) addRoomImage(image);
-        try {
-          await storeRoomImage(image);
-        } catch (error) {
-          console.warn("Failed to cache image placeholder", error);
-        }
+      onPlaceholderPending(meta) {
+        return cacheIncomingPlaceholder(meta, PENDING_SHARE_PLACEHOLDER);
+      },
+      onPlaceholder(meta, placeholder) {
+        return cacheIncomingPlaceholder(meta, placeholder);
       },
       async onPreview(meta, thumbnail) {
         const current = imagesRef.current.find((image) => image.id === meta.id);
@@ -648,6 +670,7 @@ export function useShareRoomConnection({
             image.id,
             transferChunkSizeRef.current,
           );
+          sendImagePlaceholderPending(activeChannel, meta);
           const placeholder =
             image.placeholder || (await generateSharePlaceholder(file));
           if (!image.placeholder) {
