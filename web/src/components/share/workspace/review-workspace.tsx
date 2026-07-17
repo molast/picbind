@@ -49,8 +49,9 @@ export default function ReviewWorkspace({
   const [dimensions, setDimensions] = React.useState({ width: 0, height: 0 });
   const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
+  const [defaultStrokeRatio, setDefaultStrokeRatio] = React.useState(0.004);
   const [localMode, setLocalMode] = React.useState<ReviewMode>(null);
   const [remoteMode, setRemoteMode] = React.useState<ReviewMode>(null);
   const [remoteReviewActive, setRemoteReviewActive] = React.useState(false);
@@ -127,7 +128,7 @@ export default function ReviewWorkspace({
   React.useEffect(() => {
     resetViewport();
     setDimensions({ width: 0, height: 0 });
-    setSelectedId(null);
+    setSelectedIds([]);
     setActiveTool("select");
     setLocalMode(null);
     setRemoteMode(null);
@@ -289,7 +290,7 @@ export default function ReviewWorkspace({
   const commitCreate = React.useCallback(
     (annotation: ReviewAnnotation) => {
       const operation = commit("create", null, annotation);
-      setSelectedId(annotation.id);
+      setSelectedIds([annotation.id]);
       setActiveTool("select");
       onSendMessage({
         ...baseMessage(),
@@ -314,20 +315,65 @@ export default function ReviewWorkspace({
     [baseMessage, commit, geometryContext, onSendMessage],
   );
 
-  const selectedAnnotation = React.useMemo(
-    () => annotations.find((annotation) => annotation.id === selectedId) ?? null,
-    [annotations, selectedId],
+  const selectedAnnotations = React.useMemo(
+    () => annotations.filter((annotation) => selectedIds.includes(annotation.id)),
+    [annotations, selectedIds],
   );
+
+  const selectedLineAnnotation = selectedAnnotations.find(
+    (annotation) => annotation.type !== "text" && annotation.type !== "emoji",
+  );
+  const displayedTool =
+    selectedAnnotations.length > 0 &&
+    selectedAnnotations.every(
+      (annotation) => annotation.type === selectedAnnotations[0].type,
+    )
+      ? selectedAnnotations[0].type
+      : activeTool;
+  const displayedColor =
+    selectedAnnotations.length > 0 &&
+    selectedAnnotations.every(
+      (annotation) => annotation.stroke === selectedAnnotations[0].stroke,
+    )
+      ? selectedAnnotations[0].stroke
+      : defaultColor;
+  const displayedLineThickness =
+    selectedLineAnnotation && dimensions.width && dimensions.height
+      ? selectedLineAnnotation.strokeWidth /
+        Math.max(dimensions.width, dimensions.height)
+      : defaultStrokeRatio;
 
   const changeAnnotationColor = React.useCallback(
     (color: string) => {
-      if (selectedAnnotation) {
-        commitUpdate(selectedAnnotation, { ...selectedAnnotation, stroke: color });
+      if (selectedAnnotations.length) {
+        selectedAnnotations.forEach((annotation) => {
+          commitUpdate(annotation, { ...annotation, stroke: color });
+        });
         return;
       }
       setDefaultColor(color);
     },
-    [commitUpdate, selectedAnnotation],
+    [commitUpdate, selectedAnnotations],
+  );
+
+  const changeLineThickness = React.useCallback(
+    (ratio: number) => {
+      const lineAnnotations = selectedAnnotations.filter(
+        (annotation) => annotation.type !== "text" && annotation.type !== "emoji",
+      );
+      if (lineAnnotations.length && dimensions.width && dimensions.height) {
+        const strokeWidth = Math.max(
+          3,
+          Math.max(dimensions.width, dimensions.height) * ratio,
+        );
+        lineAnnotations.forEach((annotation) => {
+          commitUpdate(annotation, { ...annotation, strokeWidth });
+        });
+        return;
+      }
+      setDefaultStrokeRatio(ratio);
+    },
+    [commitUpdate, dimensions, selectedAnnotations],
   );
 
   const insertEmoji = React.useCallback(
@@ -359,7 +405,7 @@ export default function ReviewWorkspace({
   const moveHistoryCursor = React.useCallback(
     (nextCursor: number) => {
       moveCursor(nextCursor);
-      setSelectedId(null);
+      setSelectedIds([]);
       onSendMessage({ ...baseMessage(), type: "REVIEW_CURSOR", cursor: nextCursor });
     },
     [baseMessage, moveCursor, onSendMessage],
@@ -379,19 +425,21 @@ export default function ReviewWorkspace({
         }
         return;
       }
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedId) {
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedIds.length) {
         if (localMode === "follow") return;
-        const annotation = annotations.find((item) => item.id === selectedId);
-        if (!annotation) return;
+        const selected = annotations.filter((item) => selectedIds.includes(item.id));
+        if (!selected.length) return;
         event.preventDefault();
-        const operation = commit("delete", annotation, null);
-        setSelectedId(null);
-        onSendMessage({
-          ...baseMessage(),
-          ...geometryContext(),
-          type: "REVIEW_OPERATION",
-          operation,
+        selected.forEach((annotation) => {
+          const operation = commit("delete", annotation, null);
+          onSendMessage({
+            ...baseMessage(),
+            ...geometryContext(),
+            type: "REVIEW_OPERATION",
+            operation,
+          });
         });
+        setSelectedIds([]);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -407,7 +455,7 @@ export default function ReviewWorkspace({
     cursor,
     geometryContext,
     localMode,
-    selectedId,
+    selectedIds,
   ]);
 
   const changeMode = (mode: ReviewMode) => {
@@ -415,7 +463,7 @@ export default function ReviewWorkspace({
     setLocalMode(mode);
     if (mode === "follow") {
       setActiveTool("select");
-      setSelectedId(null);
+      setSelectedIds([]);
     }
     onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode });
   };
@@ -426,23 +474,31 @@ export default function ReviewWorkspace({
         imageName={image.name}
         zoomPercent={Math.round(scale * 100)}
         labels={labels}
-        activeTool={selectedAnnotation?.type ?? activeTool}
+        activeTool={displayedTool}
         canUndo={canUndo}
         canRedo={canRedo}
         localMode={localMode}
         remoteMode={remoteMode}
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
-        annotationColor={selectedAnnotation?.stroke ?? defaultColor}
+        annotationColor={displayedColor}
+        lineThickness={displayedLineThickness}
+        lineThicknessDisabled={
+          selectedAnnotations.length > 0 &&
+          selectedAnnotations.every(
+            (annotation) => annotation.type === "text" || annotation.type === "emoji",
+          )
+        }
         onBack={onBack}
         onToolChange={(tool) => {
-          setSelectedId(null);
+          setSelectedIds([]);
           setActiveTool(tool);
         }}
         onUndo={() => moveHistoryCursor(cursor - 1)}
         onRedo={() => moveHistoryCursor(cursor + 1)}
         onModeChange={changeMode}
         onColorChange={changeAnnotationColor}
+        onLineThicknessChange={changeLineThickness}
         onInsertEmoji={insertEmoji}
         onZoomIn={() => setScale((current) => Math.min(4, current + 0.25))}
         onZoomOut={() => setScale((current) => Math.max(0.25, current - 0.25))}
@@ -455,15 +511,16 @@ export default function ReviewWorkspace({
         offset={offset}
         activeTool={activeTool}
         annotations={annotations}
-        selectedId={selectedId}
+        selectedIds={selectedIds}
         actorId={actorId}
         defaultColor={defaultColor}
+        defaultStrokeRatio={defaultStrokeRatio}
         interactionDisabled={localMode === "follow"}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
         onDimensionsChange={setDimensions}
         onCanvasSizeChange={setCanvasSize}
-        onSelect={setSelectedId}
+        onSelect={setSelectedIds}
         onCreate={commitCreate}
         onUpdate={commitUpdate}
       />

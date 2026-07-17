@@ -7,6 +7,8 @@ import type {
   ReviewTool,
 } from "@/utils/review-collaboration";
 
+const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M18.5 8A7 7 0 1 0 19 15' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M16 4.5 19 8l-4.5 1' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, grab`;
+
 type ReviewAnnotationLayerProps = {
   width: number;
   height: number;
@@ -14,10 +16,11 @@ type ReviewAnnotationLayerProps = {
   imageHeight: number;
   annotations: ReviewAnnotation[];
   activeTool: ReviewTool;
-  selectedId: string | null;
+  selectedIds: string[];
   actorId: string;
   defaultColor: string;
-  onSelect(id: string | null): void;
+  defaultStrokeRatio: number;
+  onSelect(ids: string[]): void;
   onTextRequest(position: { x: number; y: number; strokeWidth: number }): void;
   onTextEditRequest(annotation: ReviewAnnotation, caretIndex: number): void;
   onCreate(annotation: ReviewAnnotation): void;
@@ -25,7 +28,7 @@ type ReviewAnnotationLayerProps = {
 };
 
 function annotationAtPoint(
-  tool: Exclude<ReviewTool, "select">,
+  tool: Exclude<ReviewTool, "select" | "hand">,
   actorId: string,
   x: number,
   y: number,
@@ -37,12 +40,12 @@ function annotationAtPoint(
     type: tool,
     x,
     y,
-    width: strokeWidth * 12,
-    height: strokeWidth * 12,
+    width: 0,
+    height: 0,
     scaleX: 1,
     scaleY: 1,
     rotation: 0,
-    points: tool === "arrow" || tool === "pen" ? [0, 0, 0, 0] : undefined,
+    points: tool === "arrow" || tool === "pen" ? [0, 0] : undefined,
     text: tool === "text" ? "Text" : undefined,
     emoji: tool === "emoji" ? "👍" : undefined,
     stroke,
@@ -73,6 +76,7 @@ function createAnnotationNode(
       strokeWidth: annotation.strokeWidth,
       pointerLength: annotation.strokeWidth * 4,
       pointerWidth: annotation.strokeWidth * 3,
+      strokeScaleEnabled: false,
       lineCap: "round",
       lineJoin: "round",
     });
@@ -84,15 +88,17 @@ function createAnnotationNode(
       height: annotation.height,
       stroke: annotation.stroke,
       strokeWidth: annotation.strokeWidth,
+      strokeScaleEnabled: false,
     });
   }
   if (annotation.type === "circle") {
     return new Konva.Ellipse({
       ...shared,
-      radiusX: Math.max(1, annotation.width / 2),
-      radiusY: Math.max(1, annotation.height / 2),
+      radiusX: Math.max(0, annotation.width / 2),
+      radiusY: Math.max(0, annotation.height / 2),
       stroke: annotation.stroke,
       strokeWidth: annotation.strokeWidth,
+      strokeScaleEnabled: false,
     });
   }
   if (annotation.type === "pen") {
@@ -101,6 +107,7 @@ function createAnnotationNode(
       points: annotation.points || [],
       stroke: annotation.stroke,
       strokeWidth: annotation.strokeWidth,
+      strokeScaleEnabled: false,
       lineCap: "round",
       lineJoin: "round",
       tension: 0.35,
@@ -121,10 +128,13 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const stageRef = React.useRef<Konva.Stage | null>(null);
   const layerRef = React.useRef<Konva.Layer | null>(null);
+  const selectionLayerRef = React.useRef<Konva.Layer | null>(null);
   const transformerRef = React.useRef<Konva.Transformer | null>(null);
   const draftRef = React.useRef<ReviewAnnotation | null>(null);
   const draftNodeRef = React.useRef<Konva.Node | null>(null);
   const drawOriginRef = React.useRef<{ x: number; y: number } | null>(null);
+  const selectionOriginRef = React.useRef<{ x: number; y: number } | null>(null);
+  const selectionRectRef = React.useRef<Konva.Rect | null>(null);
   const propsRef = React.useRef(props);
   propsRef.current = props;
 
@@ -168,22 +178,46 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       height: propsRef.current.height,
     });
     const layer = new Konva.Layer();
+    const selectionLayer = new Konva.Layer({ listening: false });
     stage.add(layer);
+    stage.add(selectionLayer);
     stageRef.current = stage;
     layerRef.current = layer;
+    selectionLayerRef.current = selectionLayer;
 
     const start = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const currentProps = propsRef.current;
+      if (currentProps.activeTool === "hand") return;
       if (currentProps.activeTool === "select") {
         if (event.target === stage) {
-          currentProps.onSelect(null);
+          currentProps.onSelect([]);
+          const current = pointInImage(stage);
+          selectionOriginRef.current = current;
+          selectionRectRef.current?.destroy();
+          const rect = new Konva.Rect({
+            x: current.x,
+            y: current.y,
+            width: 0,
+            height: 0,
+            fill: "rgba(37, 99, 235, 0.12)",
+            stroke: "#2563eb",
+            strokeWidth: Math.max(1, currentProps.imageWidth * 0.001),
+            dash: [6, 4],
+            strokeScaleEnabled: false,
+            listening: false,
+          });
+          selectionRectRef.current = rect;
+          selectionLayer.add(rect);
+          selectionLayer.batchDraw();
         }
         return;
       }
       const current = pointInImage(stage);
+      const strokeRatio =
+        currentProps.activeTool === "text" ? 0.004 : currentProps.defaultStrokeRatio;
       const strokeWidth = Math.max(
         3,
-        Math.max(currentProps.imageWidth, currentProps.imageHeight) * 0.004,
+        Math.max(currentProps.imageWidth, currentProps.imageHeight) * strokeRatio,
       );
       const next = annotationAtPoint(
         currentProps.activeTool,
@@ -194,7 +228,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         currentProps.defaultColor,
       );
       if (currentProps.activeTool === "text") {
-        currentProps.onSelect(null);
+        currentProps.onSelect([]);
         currentProps.onTextRequest({
           x: current.x,
           y: current.y,
@@ -208,6 +242,19 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     };
 
     const move = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      const selectionOrigin = selectionOriginRef.current;
+      const selectionRect = selectionRectRef.current;
+      if (selectionOrigin && selectionRect) {
+        const current = pointInImage(stage);
+        selectionRect.setAttrs({
+          x: Math.min(selectionOrigin.x, current.x),
+          y: Math.min(selectionOrigin.y, current.y),
+          width: Math.abs(current.x - selectionOrigin.x),
+          height: Math.abs(current.y - selectionOrigin.y),
+        });
+        selectionLayer.batchDraw();
+        return;
+      }
       const currentDraft = draftRef.current;
       const origin = drawOriginRef.current;
       if (!currentDraft || !origin) return;
@@ -276,6 +323,31 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     };
 
     const finish = () => {
+      const selectionRect = selectionRectRef.current;
+      if (selectionOriginRef.current && selectionRect) {
+        const box = selectionRect.getClientRect({ relativeTo: selectionLayer });
+        const selected =
+          box.width > 2 && box.height > 2
+            ? propsRef.current.annotations
+                .filter((annotation) => {
+                  const node = layer.findOne(`#${annotation.id}`);
+                  return Boolean(
+                    node &&
+                      Konva.Util.haveIntersection(
+                        box,
+                        node.getClientRect({ relativeTo: layer }),
+                      ),
+                  );
+                })
+                .map((annotation) => annotation.id)
+            : [];
+        selectionOriginRef.current = null;
+        selectionRectRef.current = null;
+        selectionRect.destroy();
+        selectionLayer.batchDraw();
+        propsRef.current.onSelect(selected);
+        return;
+      }
       const current = draftRef.current;
       draftRef.current = null;
       drawOriginRef.current = null;
@@ -302,6 +374,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       stage.destroy();
       stageRef.current = null;
       layerRef.current = null;
+      selectionLayerRef.current = null;
       transformerRef.current = null;
     };
   }, [drawDraft, pointInImage]);
@@ -316,14 +389,15 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const scaleX = props.width / Math.max(1, props.imageWidth);
     const scaleY = props.height / Math.max(1, props.imageHeight);
     layer.scale({ x: scaleX, y: scaleY });
+    selectionLayerRef.current?.scale({ x: scaleX, y: scaleY });
 
-    let selectedNode: Konva.Node | null = null;
+    const selectedNodes: Konva.Node[] = [];
     for (const annotation of props.annotations) {
       const node = createAnnotationNode(annotation, props.activeTool === "select");
       node.on("click tap", (event) => {
         event.cancelBubble = true;
         if (propsRef.current.activeTool === "select") {
-          propsRef.current.onSelect(annotation.id);
+          propsRef.current.onSelect([annotation.id]);
         }
       });
       if (annotation.type === "text") {
@@ -341,7 +415,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
                 ),
               )
             : text.length;
-          propsRef.current.onSelect(null);
+          propsRef.current.onSelect([]);
           propsRef.current.onTextEditRequest(annotation, caretIndex);
         });
       }
@@ -363,13 +437,14 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
         });
       });
       layer.add(node);
-      if (annotation.id === props.selectedId) selectedNode = node;
+      if (props.selectedIds.includes(annotation.id)) selectedNodes.push(node);
     }
 
     const transformer = new Konva.Transformer({
       flipEnabled: false,
+      keepRatio: false,
       rotateEnabled: true,
-      rotateAnchorCursor: "grab",
+      rotateAnchorCursor: ROTATE_CURSOR,
       rotateAnchorOffset: 22 / Math.max(scaleX, scaleY),
       rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
       rotationSnapTolerance: 4,
@@ -395,16 +470,24 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     });
     transformerRef.current = transformer;
     layer.add(transformer);
-    if (selectedNode) transformer.nodes([selectedNode]);
+    if (selectedNodes.length) transformer.nodes(selectedNodes);
+    const rotateAnchor = transformer.findOne<Konva.Rect>(".rotater");
+    rotateAnchor?.on("mouseenter", () => {
+      stage.content.style.cursor = ROTATE_CURSOR;
+    });
+    rotateAnchor?.on("mouseleave", () => {
+      stage.content.style.cursor = "";
+    });
     layer.draw();
   }, [
     props.activeTool,
     props.annotations,
     props.defaultColor,
+    props.defaultStrokeRatio,
     props.height,
     props.imageHeight,
     props.imageWidth,
-    props.selectedId,
+    props.selectedIds,
     props.width,
   ]);
 

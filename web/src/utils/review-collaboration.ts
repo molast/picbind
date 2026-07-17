@@ -4,6 +4,7 @@ import type { RealtimeMessageChannel } from "./weak-network-socket";
 
 export type ReviewTool =
   | "select"
+  | "hand"
   | "arrow"
   | "rectangle"
   | "circle"
@@ -15,7 +16,7 @@ export type ReviewMode = "present" | "follow" | null;
 
 export type ReviewAnnotation = {
   id: string;
-  type: Exclude<ReviewTool, "select">;
+  type: Exclude<ReviewTool, "select" | "hand">;
   x: number;
   y: number;
   width: number;

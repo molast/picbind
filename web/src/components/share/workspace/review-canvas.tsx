@@ -21,15 +21,16 @@ type ReviewCanvasProps = {
   offset: ReviewViewportOffset;
   activeTool: ReviewTool;
   annotations: ReviewAnnotation[];
-  selectedId: string | null;
+  selectedIds: string[];
   actorId: string;
   defaultColor: string;
+  defaultStrokeRatio: number;
   interactionDisabled: boolean;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
   onCanvasSizeChange(dimensions: { width: number; height: number }): void;
-  onSelect(id: string | null): void;
+  onSelect(ids: string[]): void;
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
@@ -40,9 +41,10 @@ export default function ReviewCanvas({
   offset,
   activeTool,
   annotations,
-  selectedId,
+  selectedIds,
   actorId,
   defaultColor,
+  defaultStrokeRatio,
   interactionDisabled,
   onScaleChange,
   onOffsetChange,
@@ -172,7 +174,9 @@ export default function ReviewCanvas({
         interactionDisabled
           ? "cursor-default"
           : activeTool === "select"
-            ? "cursor-grab"
+            ? "cursor-default"
+            : activeTool === "hand"
+              ? "cursor-grab active:cursor-grabbing"
             : activeTool === "text"
               ? "cursor-text"
             : "cursor-crosshair"
@@ -185,10 +189,9 @@ export default function ReviewCanvas({
       }}
       onPointerDown={(event) => {
         if (
-          activeTool !== "select" ||
+          activeTool !== "hand" ||
           interactionDisabled ||
-          event.button !== 0 ||
-          event.target instanceof HTMLCanvasElement
+          event.button !== 0
         ) {
           return;
         }
@@ -258,9 +261,10 @@ export default function ReviewCanvas({
                 imageHeight={imageSize.height}
                 annotations={annotations}
                 activeTool={activeTool}
-                selectedId={selectedId}
+                selectedIds={selectedIds}
                 actorId={actorId}
                 defaultColor={defaultColor}
+                defaultStrokeRatio={defaultStrokeRatio}
                 onSelect={onSelect}
                 onTextRequest={({ x, y, strokeWidth }) => {
                   textCaretRef.current = 0;

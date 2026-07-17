@@ -20,6 +20,7 @@ import {
   FiZoomIn,
   FiZoomOut,
 } from "react-icons/fi";
+import { MdPanToolAlt } from "react-icons/md";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { middleEllipsisFileName } from "../share-room-formatters";
 import type { ReviewMode, ReviewTool } from "@/utils/review-collaboration";
@@ -38,6 +39,8 @@ const ANNOTATION_COLORS = [
   "#ffffff",
 ] as const;
 
+const LINE_THICKNESSES = [0.0015, 0.003, 0.005, 0.008] as const;
+
 type ReviewToolbarProps = {
   imageName: string;
   zoomPercent: number;
@@ -50,12 +53,15 @@ type ReviewToolbarProps = {
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
   annotationColor: string;
+  lineThickness: number;
+  lineThicknessDisabled: boolean;
   onBack(): void;
   onToolChange(tool: ReviewTool): void;
   onUndo(): void;
   onRedo(): void;
   onModeChange(mode: ReviewMode): void;
   onColorChange(color: string): void;
+  onLineThicknessChange(value: number): void;
   onInsertEmoji(emoji: string): void;
   onZoomIn(): void;
   onZoomOut(): void;
@@ -114,19 +120,24 @@ export default function ReviewToolbar({
   remoteReviewActive,
   workspaceLocked,
   annotationColor,
+  lineThickness,
+  lineThicknessDisabled,
   onBack,
   onToolChange,
   onUndo,
   onRedo,
   onModeChange,
   onColorChange,
+  onLineThicknessChange,
   onInsertEmoji,
   onZoomIn,
   onZoomOut,
   onFit,
   onReset,
 }: ReviewToolbarProps) {
-  const [openPanel, setOpenPanel] = React.useState<"emoji" | "color" | null>(null);
+  const [openPanel, setOpenPanel] = React.useState<
+    "emoji" | "color" | "line" | null
+  >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
@@ -146,6 +157,7 @@ export default function ReviewToolbar({
 
   const annotationTools: ToolButtonProps[] = [
     { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: workspaceLocked },
+    { icon: MdPanToolAlt, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
     { icon: FiArrowUpRight, label: labels.arrowTool, onClick: () => onToolChange("arrow"), active: activeTool === "arrow", disabled: workspaceLocked },
     { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: workspaceLocked },
     { icon: FiCircle, label: labels.circleTool, onClick: () => onToolChange("circle"), active: activeTool === "circle", disabled: workspaceLocked },
@@ -200,6 +212,44 @@ export default function ReviewToolbar({
                   aria-label={`${labels.emojiTool} ${emoji}`}
                 >
                   {emoji}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            disabled={workspaceLocked || lineThicknessDisabled}
+            onClick={() => setOpenPanel((current) => current === "line" ? null : "line")}
+            className={`flex h-9 w-9 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 ${openPanel === "line" ? "bg-blue-50 text-blue-700" : ""}`}
+            aria-label={labels.lineThickness}
+            title={labels.lineThickness}
+          >
+            <span
+              className="block w-5 rounded-full bg-current"
+              style={{ height: Math.max(1, Math.min(6, lineThickness * 750)) }}
+              aria-hidden="true"
+            />
+          </button>
+          {openPanel === "line" ? (
+            <div className="absolute left-0 top-11 z-50 flex w-40 flex-col gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+              {LINE_THICKNESSES.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`flex h-8 items-center justify-center rounded transition hover:bg-slate-100 ${Math.abs(lineThickness - value) < 0.0001 ? "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200" : "text-slate-700"}`}
+                  onClick={() => {
+                    onLineThicknessChange(value);
+                    setOpenPanel(null);
+                  }}
+                  aria-label={labels.lineThickness}
+                >
+                  <span
+                    className="block w-24 rounded-full bg-current"
+                    style={{ height: Math.max(1, value * 750) }}
+                    aria-hidden="true"
+                  />
                 </button>
               ))}
             </div>
