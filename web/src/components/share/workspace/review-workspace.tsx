@@ -426,7 +426,7 @@ export default function ReviewWorkspace({
         imageName={image.name}
         zoomPercent={Math.round(scale * 100)}
         labels={labels}
-        activeTool={activeTool}
+        activeTool={selectedAnnotation?.type ?? activeTool}
         canUndo={canUndo}
         canRedo={canRedo}
         localMode={localMode}
@@ -435,7 +435,10 @@ export default function ReviewWorkspace({
         workspaceLocked={localMode === "follow"}
         annotationColor={selectedAnnotation?.stroke ?? defaultColor}
         onBack={onBack}
-        onToolChange={setActiveTool}
+        onToolChange={(tool) => {
+          setSelectedId(null);
+          setActiveTool(tool);
+        }}
         onUndo={() => moveHistoryCursor(cursor - 1)}
         onRedo={() => moveHistoryCursor(cursor + 1)}
         onModeChange={changeMode}

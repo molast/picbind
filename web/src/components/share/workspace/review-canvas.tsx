@@ -63,14 +63,24 @@ export default function ReviewCanvas({
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
   const [textEditor, setTextEditor] = React.useState<{
+    sessionId: string;
     x: number;
     y: number;
     strokeWidth: number;
     value: string;
+    color: string;
+    width?: number;
+    height?: number;
+    scaleX?: number;
+    scaleY?: number;
+    rotation?: number;
+    before?: ReviewAnnotation;
   } | null>(null);
   const textInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const textCaretRef = React.useRef(0);
   const textEditorRef = React.useRef(textEditor);
   textEditorRef.current = textEditor;
+  const textEditorSessionId = textEditor?.sessionId;
   const fitRatio =
     containerSize.width && containerSize.height && imageSize.width && imageSize.height
       ? Math.min(
@@ -106,10 +116,15 @@ export default function ReviewCanvas({
   }, [image.id]);
 
   React.useEffect(() => {
-    if (!textEditor) return;
-    const frame = window.requestAnimationFrame(() => textInputRef.current?.focus());
+    if (!textEditorSessionId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const input = textInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(textCaretRef.current, textCaretRef.current);
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [textEditor]);
+  }, [textEditorSessionId]);
 
   const finishTextEditing = React.useCallback(
     (commit: boolean) => {
@@ -118,6 +133,18 @@ export default function ReviewCanvas({
       setTextEditor(null);
       const value = current?.value.trim();
       if (!commit || !current || !value) return;
+      if (current.before) {
+        const fontSize = Math.max(12, current.before.height * 0.8);
+        onUpdate(current.before, {
+          ...current.before,
+          text: value,
+          width: Math.max(
+            current.before.width,
+            value.length * fontSize * 0.62,
+          ),
+        });
+        return;
+      }
       const fontSize = Math.max(12, current.strokeWidth * 5);
       onCreate({
         id: crypto.randomUUID().replace(/-/g, ""),
@@ -130,12 +157,12 @@ export default function ReviewCanvas({
         scaleY: 1,
         rotation: 0,
         text: value,
-        stroke: defaultColor,
+        stroke: current.color,
         strokeWidth: current.strokeWidth,
         createdBy: actorId,
       });
     },
-    [actorId, defaultColor, onCreate],
+    [actorId, onCreate, onUpdate],
   );
 
   return (
@@ -235,9 +262,34 @@ export default function ReviewCanvas({
                 actorId={actorId}
                 defaultColor={defaultColor}
                 onSelect={onSelect}
-                onTextRequest={({ x, y, strokeWidth }) =>
-                  setTextEditor({ x, y, strokeWidth, value: "" })
-                }
+                onTextRequest={({ x, y, strokeWidth }) => {
+                  textCaretRef.current = 0;
+                  setTextEditor({
+                    sessionId: crypto.randomUUID(),
+                    x,
+                    y,
+                    strokeWidth,
+                    value: "",
+                    color: defaultColor,
+                  });
+                }}
+                onTextEditRequest={(annotation, caretIndex) => {
+                  textCaretRef.current = caretIndex;
+                  setTextEditor({
+                    sessionId: crypto.randomUUID(),
+                    x: annotation.x,
+                    y: annotation.y,
+                    strokeWidth: annotation.strokeWidth,
+                    value: annotation.text || "",
+                    color: annotation.stroke,
+                    width: annotation.width,
+                    height: annotation.height,
+                    scaleX: annotation.scaleX,
+                    scaleY: annotation.scaleY,
+                    rotation: annotation.rotation,
+                    before: annotation,
+                  });
+                }}
                 onCreate={onCreate}
                 onUpdate={onUpdate}
               />
@@ -253,12 +305,32 @@ export default function ReviewCanvas({
               style={{
                 left: `${(textEditor.x / Math.max(1, imageSize.width)) * 100}%`,
                 top: `${(textEditor.y / Math.max(1, imageSize.height)) * 100}%`,
-                width: Math.max(120, renderedSize.width * 0.28),
+                width: textEditor.width
+                  ? Math.max(
+                      80,
+                      textEditor.width *
+                        (textEditor.scaleX || 1) *
+                        (renderedSize.width / Math.max(1, imageSize.width)),
+                    )
+                  : Math.max(120, renderedSize.width * 0.28),
+                height: textEditor.height
+                  ? Math.max(
+                      32,
+                      textEditor.height *
+                        (textEditor.scaleY || 1) *
+                        (renderedSize.height / Math.max(1, imageSize.height)),
+                    )
+                  : undefined,
                 fontSize: Math.max(
                   14,
-                  textEditor.strokeWidth * 5 * (renderedSize.height / Math.max(1, imageSize.height)),
+                  (textEditor.height
+                    ? textEditor.height * 0.8 * (textEditor.scaleY || 1)
+                    : textEditor.strokeWidth * 5) *
+                    (renderedSize.height / Math.max(1, imageSize.height)),
                 ),
-                color: defaultColor,
+                color: textEditor.color,
+                transform: `rotate(${textEditor.rotation || 0}deg)`,
+                transformOrigin: "top left",
               }}
               onChange={(event) =>
                 setTextEditor((current) =>

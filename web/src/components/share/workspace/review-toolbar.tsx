@@ -182,7 +182,7 @@ export default function ReviewToolbar({
           <ToolButton
             icon={FiSmile}
             label={labels.emojiTool}
-            active={openPanel === "emoji"}
+            active={activeTool === "emoji" || openPanel === "emoji"}
             disabled={workspaceLocked}
             onClick={() => setOpenPanel((current) => current === "emoji" ? null : "emoji")}
           />

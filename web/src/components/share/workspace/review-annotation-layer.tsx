@@ -19,6 +19,7 @@ type ReviewAnnotationLayerProps = {
   defaultColor: string;
   onSelect(id: string | null): void;
   onTextRequest(position: { x: number; y: number; strokeWidth: number }): void;
+  onTextEditRequest(annotation: ReviewAnnotation, caretIndex: number): void;
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
 };
@@ -206,7 +207,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       drawDraft(next);
     };
 
-    const move = () => {
+    const move = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const currentDraft = draftRef.current;
       const origin = drawOriginRef.current;
       if (!currentDraft || !origin) return;
@@ -228,22 +229,45 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       } else {
         const dx = current.x - origin.x;
         const dy = current.y - origin.y;
+        const constrained =
+          (currentDraft.type === "rectangle" || currentDraft.type === "circle") &&
+          event.evt.shiftKey;
+        const centered =
+          (currentDraft.type === "rectangle" || currentDraft.type === "circle") &&
+          event.evt.altKey;
+        const extent = Math.max(Math.abs(dx), Math.abs(dy));
+        const shapeDx = constrained
+          ? (dx < 0 ? -1 : 1) * extent
+          : dx;
+        const shapeDy = constrained
+          ? (dy < 0 ? -1 : 1) * extent
+          : dy;
+        const shapeWidth = Math.max(1, Math.abs(shapeDx) * (centered ? 2 : 1));
+        const shapeHeight = Math.max(1, Math.abs(shapeDy) * (centered ? 2 : 1));
         next = {
           ...currentDraft,
           points: currentDraft.type === "arrow" ? [0, 0, dx, dy] : undefined,
-          width: Math.max(1, Math.abs(dx)),
-          height: Math.max(1, Math.abs(dy)),
+          width: shapeWidth,
+          height: shapeHeight,
           x:
             currentDraft.type === "circle"
-              ? (origin.x + current.x) / 2
+              ? centered
+                ? origin.x
+                : origin.x + shapeDx / 2
               : currentDraft.type === "rectangle"
-                ? Math.min(origin.x, current.x)
+                ? centered
+                  ? origin.x - shapeWidth / 2
+                  : Math.min(origin.x, origin.x + shapeDx)
                 : origin.x,
           y:
             currentDraft.type === "circle"
-              ? (origin.y + current.y) / 2
+              ? centered
+                ? origin.y
+                : origin.y + shapeDy / 2
               : currentDraft.type === "rectangle"
-                ? Math.min(origin.y, current.y)
+                ? centered
+                  ? origin.y - shapeHeight / 2
+                  : Math.min(origin.y, origin.y + shapeDy)
                 : origin.y,
         };
       }
@@ -302,6 +326,25 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
           propsRef.current.onSelect(annotation.id);
         }
       });
+      if (annotation.type === "text") {
+        node.on("dblclick dbltap", (event) => {
+          event.cancelBubble = true;
+          if (propsRef.current.activeTool !== "select") return;
+          const pointer = node.getRelativePointerPosition();
+          const text = annotation.text || "";
+          const caretIndex = pointer
+            ? Math.max(
+                0,
+                Math.min(
+                  text.length,
+                  Math.round((pointer.x / Math.max(1, annotation.width)) * text.length),
+                ),
+              )
+            : text.length;
+          propsRef.current.onSelect(null);
+          propsRef.current.onTextEditRequest(annotation, caretIndex);
+        });
+      }
       node.on("dragend", () => {
         propsRef.current.onUpdate(annotation, {
           ...annotation,
@@ -326,6 +369,7 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const transformer = new Konva.Transformer({
       flipEnabled: false,
       rotateEnabled: true,
+      rotateAnchorCursor: "grab",
       rotateAnchorOffset: 22 / Math.max(scaleX, scaleY),
       rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
       rotationSnapTolerance: 4,
