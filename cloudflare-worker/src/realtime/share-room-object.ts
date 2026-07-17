@@ -1,5 +1,6 @@
 export const SHARE_ROOM_TTL_MS = 30 * 60 * 1000;
 export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 90 * 1000;
+export const SHARE_ROOM_RECOVERY_GRACE_MS = 10 * 60 * 1000;
 const MAX_ACTIVE_R2_OBJECTS_PER_ROOM = 100;
 const MAX_RELAY_MESSAGE_BYTES = 16 * 1024;
 
@@ -115,7 +116,6 @@ function normalizeMembers(room: ShareRoomState) {
 
 function pruneStaleMembers(room: ShareRoomState, now = Date.now()) {
   const members = normalizeMembers(room);
-  let ownerTimedOut = false;
   let changed = false;
   for (const member of members) {
     const timedOut =
@@ -126,19 +126,20 @@ function pruneStaleMembers(room: ShareRoomState, now = Date.now()) {
       member.ready = false;
       member.leftAt = now;
       changed = true;
-      if (member.role === "owner") {
-        ownerTimedOut = true;
-      }
     }
   }
   if (changed) {
     delete room.signal;
   }
-  return { changed, ownerTimedOut };
+  return { changed };
 }
 
 function onlineMembers(room: ShareRoomState) {
   return normalizeMembers(room).filter((member) => member.status === "online");
+}
+
+function extendRoomExpiry(room: ShareRoomState, now = Date.now()) {
+  room.expiresAt = new Date(now + SHARE_ROOM_TTL_MS).toISOString();
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -152,6 +153,8 @@ function json(data: unknown, init?: ResponseInit) {
 }
 
 export class ShareRoomObject {
+  private readonly socketPresencePersistedAt = new Map<string, number>();
+
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: { SHARE_IMAGES_R2: R2Bucket },
@@ -252,15 +255,18 @@ export class ShareRoomObject {
   }
 
   private async persistAndSchedule(room: ShareRoomState) {
+    const now = Date.now();
+    const members = normalizeMembers(room);
     const activeMembers = onlineMembers(room);
-    const hasOwner = activeMembers.some((member) => member.role === "owner");
-    const ownerLeftPermanently =
-      room.hadOwner && !hasOwner && !room.ownerTemporarilyAway;
-    const roomBecameEmpty =
-      room.hadParticipant &&
-      activeMembers.length === 0 &&
-      !room.ownerTemporarilyAway;
-    if (ownerLeftPermanently || roomBecameEmpty) {
+    const offlineOwner = members.find(
+      (member) => member.role === "owner" && member.status === "offline",
+    );
+    const ownerRecoveryDeadline =
+      room.hadOwner && offlineOwner && !room.ownerTemporarilyAway
+        ? (offlineOwner.leftAt || offlineOwner.lastSeen) +
+          SHARE_ROOM_RECOVERY_GRACE_MS
+        : null;
+    if (ownerRecoveryDeadline !== null && ownerRecoveryDeadline <= now) {
       await this.destroy(room);
       return false;
     }
@@ -272,6 +278,7 @@ export class ShareRoomObject {
         (member) =>
           member.lastSeen + SHARE_ROOM_PRESENCE_TIMEOUT_MS + 1,
       ),
+      ...(ownerRecoveryDeadline === null ? [] : [ownerRecoveryDeadline]),
       ...(room.r2Objects || [])
         .filter((object) => object.status !== "deleted")
         .map((object) =>
@@ -308,7 +315,10 @@ export class ShareRoomObject {
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server, [this.socketSessionTag(sessionId)]);
       server.serializeAttachment({ sessionId });
-      member.lastSeen = Date.now();
+      const now = Date.now();
+      member.lastSeen = now;
+      extendRoomExpiry(room, now);
+      this.socketPresencePersistedAt.set(sessionId, now);
       await this.persistAndSchedule(room);
       this.broadcastSocketState();
       return new Response(null, { status: 101, webSocket: client });
@@ -342,11 +352,7 @@ export class ShareRoomObject {
       }
       const presence = pruneStaleMembers(room);
       const r2Changed = await this.expireR2Objects(room);
-      if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
-        await this.destroy();
-        return json({ error: "Room not found" }, { status: 404 });
-      }
-      if (presence.changed && !presence.ownerTimedOut) {
+      if (presence.changed) {
         this.notifySockets("PEER_UNAVAILABLE");
       }
       if (presence.changed || r2Changed) {
@@ -378,16 +384,7 @@ export class ShareRoomObject {
         return json({ error: "Invalid join request" }, { status: 400 });
       }
 
-      const presence = pruneStaleMembers(room);
-      if (
-        presence.ownerTimedOut &&
-        room.hadOwner &&
-        !room.ownerTemporarilyAway
-      ) {
-        await this.destroy();
-        return json({ error: "Room not found" }, { status: 404 });
-      }
-
+      pruneStaleMembers(room);
       const members = normalizeMembers(room);
       const blockedMember = members.find(
         (member) =>
@@ -436,6 +433,7 @@ export class ShareRoomObject {
         room.hadOwner = true;
         room.ownerTemporarilyAway = false;
       }
+      extendRoomExpiry(room, now);
       delete room.signal;
       await this.persistAndSchedule(room);
       return json(room);
@@ -486,7 +484,9 @@ export class ShareRoomObject {
       } else {
         return json({ error: "Unexpected session description" }, { status: 409 });
       }
-      sender.lastSeen = Date.now();
+      const now = Date.now();
+      sender.lastSeen = now;
+      extendRoomExpiry(room, now);
       await this.persistAndSchedule(room);
       return json({ ok: true });
     }
@@ -537,7 +537,9 @@ export class ShareRoomObject {
       ) {
         candidates.push(body.candidate);
       }
-      sender.lastSeen = Date.now();
+      const now = Date.now();
+      sender.lastSeen = now;
+      extendRoomExpiry(room, now);
       await this.persistAndSchedule(room);
       return json({ ok: true });
     }
@@ -561,10 +563,12 @@ export class ShareRoomObject {
       if (member.status === "kicked") {
         return json({ error: "Room access was revoked" }, { status: 403 });
       }
+      const now = Date.now();
       member.ready = true;
-      member.lastSeen = Date.now();
+      member.lastSeen = now;
       member.status = "online";
       delete member.leftAt;
+      extendRoomExpiry(room, now);
       await this.persistAndSchedule(room);
       return json(room);
     }
@@ -588,9 +592,12 @@ export class ShareRoomObject {
       if (member.status === "kicked") {
         return json({ error: "Room access was revoked" }, { status: 403 });
       }
-      member.lastSeen = Date.now();
+      const now = Date.now();
+      member.lastSeen = now;
       member.status = "online";
+      member.ready = true;
       delete member.leftAt;
+      extendRoomExpiry(room, now);
       await this.persistAndSchedule(room);
       return json(room);
     }
@@ -858,6 +865,7 @@ export class ShareRoomObject {
       socket.send(
         JSON.stringify({ type: "PONG", id: (relay as { id: string }).id }),
       );
+      await this.touchSocketPresence(socket);
       return;
     }
     if (
@@ -884,6 +892,33 @@ export class ShareRoomObject {
         // The peer will fall back to its DataChannel until Socket reconnects.
       }
     }
+    await this.touchSocketPresence(socket);
+  }
+
+  private async touchSocketPresence(socket: WebSocket) {
+    const sessionId = (
+      socket.deserializeAttachment() as { sessionId?: string } | null
+    )?.sessionId;
+    if (!sessionId) return;
+    const now = Date.now();
+    if (now - (this.socketPresencePersistedAt.get(sessionId) || 0) < 15_000) {
+      return;
+    }
+    const room = await this.state.storage.get<ShareRoomState>("room");
+    const member = room
+      ? normalizeMembers(room).find(
+          (candidate) =>
+            candidate.sessionId === sessionId && candidate.status !== "kicked",
+        )
+      : null;
+    if (!room || !member || Date.parse(room.expiresAt) <= now) return;
+    member.lastSeen = now;
+    member.status = "online";
+    member.ready = true;
+    delete member.leftAt;
+    extendRoomExpiry(room, now);
+    this.socketPresencePersistedAt.set(sessionId, now);
+    await this.persistAndSchedule(room);
   }
 
   async webSocketClose(
@@ -892,6 +927,10 @@ export class ShareRoomObject {
     reason: string,
     wasClean: boolean,
   ) {
+    const sessionId = (
+      socket.deserializeAttachment() as { sessionId?: string } | null
+    )?.sessionId;
+    if (sessionId) this.socketPresencePersistedAt.delete(sessionId);
     socket.close(code, reason);
     this.broadcastSocketState();
   }
@@ -904,10 +943,6 @@ export class ShareRoomObject {
     }
     const presence = pruneStaleMembers(room);
     await this.expireR2Objects(room);
-    if (presence.ownerTimedOut && !room.ownerTemporarilyAway) {
-      await this.destroy();
-      return;
-    }
     if (presence.changed) this.notifySockets("PEER_UNAVAILABLE");
     await this.persistAndSchedule(room);
   }

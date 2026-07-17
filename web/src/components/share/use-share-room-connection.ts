@@ -170,6 +170,8 @@ export function useShareRoomConnection({
     let disposed = false;
     let pollTimer: number | undefined;
     let heartbeatTimer: number | undefined;
+    let heartbeatNow: ((refresh?: boolean) => void) | null = null;
+    let heartbeatRequest: Promise<void> | null = null;
     let handshakeTimer: number | undefined;
     let statsTimer: number | undefined;
     let connectedRole: RoomRole | null = null;
@@ -1385,15 +1387,6 @@ export function useShareRoomConnection({
           }
           return [...current, { clientId, role: joined.role, status: "online" }];
         });
-        heartbeatTimer = window.setInterval(() => {
-          void heartbeatRealtimeRoom(roomId, joined.sessionId).catch((error) => {
-            if (redirectIfRoomClosed(error)) {
-              return;
-            }
-            console.warn("Room heartbeat failed", error);
-          });
-        }, 15_000);
-
         const refreshStatus = async () => {
           const status = await getRealtimeRoomStatus(roomId, joined.sessionId);
           if (disposed) {
@@ -1406,6 +1399,30 @@ export function useShareRoomConnection({
             await ensureGuestConnection(joined.sessionId, status);
           }
         };
+
+        const sendHeartbeat = async (refresh = false) => {
+          if (!heartbeatRequest) {
+            heartbeatRequest = heartbeatRealtimeRoom(roomId, joined.sessionId)
+              .then(() => undefined)
+              .catch((error) => {
+                if (!redirectIfRoomClosed(error)) {
+                  console.warn("Room heartbeat failed", error);
+                }
+                throw error;
+              })
+              .finally(() => {
+                heartbeatRequest = null;
+              });
+          }
+          try {
+            await heartbeatRequest;
+            if (refresh && !disposed) await refreshStatus();
+          } catch {
+            // The heartbeat handler already reports or redirects the failure.
+          }
+        };
+        heartbeatNow = (refresh = false) => void sendHeartbeat(refresh);
+        heartbeatTimer = window.setInterval(() => heartbeatNow?.(), 15_000);
 
         const credentials = await getRealtimeIceServers(
           roomId,
@@ -1450,6 +1467,15 @@ export function useShareRoomConnection({
     };
 
     void connect();
+    const resumePresence = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        heartbeatNow?.(true);
+      }
+    };
+    document.addEventListener("visibilitychange", resumePresence);
+    window.addEventListener("online", resumePresence);
+    window.addEventListener("pageshow", resumePresence);
+    window.addEventListener("focus", resumePresence);
     const leaveGuest = () => {
       const sessionId = sessionIdRef.current;
       if (sessionId && connectedRole === "guest") {
@@ -1459,6 +1485,11 @@ export function useShareRoomConnection({
     window.addEventListener("pagehide", leaveGuest);
     return () => {
       disposed = true;
+      heartbeatNow = null;
+      document.removeEventListener("visibilitychange", resumePresence);
+      window.removeEventListener("online", resumePresence);
+      window.removeEventListener("pageshow", resumePresence);
+      window.removeEventListener("focus", resumePresence);
       window.removeEventListener("pagehide", leaveGuest);
       leaveGuest();
       if (pollTimer) {

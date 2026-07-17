@@ -265,7 +265,13 @@ export async function handleShareRoomRealtime(
     }
 
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    const member = memberForSession(room, sessionId);
+    const member =
+      action === "heartbeat"
+        ? roomMembers(room).find(
+            (candidate) =>
+              candidate.sessionId === sessionId && candidate.status !== "kicked",
+          )
+        : memberForSession(room, sessionId);
     if (!member) return json({ error: "Invalid room session" }, { status: 403 });
     const isOwnerSession = member.role === "owner";
 
