@@ -33,6 +33,7 @@ type RoomSidebarProps = {
   connection: ConnectionState;
   connectionError: string | null;
   networkLatencyMs: number | null;
+  packetLossRate: number | null;
   messageTransportMode: MessageTransportMode;
   roomId: string | null;
   role: RoomRole | null;
@@ -55,6 +56,7 @@ export default function RoomSidebar({
   connection,
   connectionError,
   networkLatencyMs,
+  packetLossRate,
   messageTransportMode,
   roomId,
   role,
@@ -108,8 +110,44 @@ export default function RoomSidebar({
                   : labels.waiting}
           </span>
         </div>
-        <div className="mt-2 text-[11px] font-medium text-slate-500">
-          {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] font-medium text-slate-500">
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                networkLatencyMs == null
+                  ? "bg-slate-300"
+                  : networkLatencyMs < 100
+                    ? "bg-emerald-500"
+                    : networkLatencyMs < 400
+                      ? "bg-amber-400"
+                      : "bg-red-500"
+              }`}
+              aria-hidden="true"
+            />
+            <span>
+              {labels.latency} {networkLatencyMs != null ? `${networkLatencyMs} ms` : "--"}
+            </span>
+          </span>
+          {messageTransportMode === "p2p" ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  packetLossRate == null
+                    ? "bg-slate-300"
+                    : packetLossRate < 1
+                      ? "bg-emerald-500"
+                      : packetLossRate < 5
+                        ? "bg-amber-400"
+                        : "bg-red-500"
+                }`}
+                aria-hidden="true"
+              />
+              <span>
+                {labels.packetLoss}{" "}
+                {packetLossRate != null ? `${packetLossRate.toFixed(1)}%` : "--"}
+              </span>
+            </span>
+          ) : null}
         </div>
         {connectionError ? (
           <p className="mt-2 text-xs text-red-600">{connectionError}</p>

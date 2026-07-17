@@ -836,6 +836,16 @@ export class ShareRoomObject {
       return;
     }
     if (
+      relay.type === "PING" &&
+      typeof (relay as { id?: unknown }).id === "string" &&
+      /^[a-f0-9]{32}$/.test((relay as { id: string }).id)
+    ) {
+      socket.send(
+        JSON.stringify({ type: "PONG", id: (relay as { id: string }).id }),
+      );
+      return;
+    }
+    if (
       relay.type !== "RELAY" ||
       (relay.channel !== "control" && relay.channel !== "instruction") ||
       typeof relay.payload !== "string"

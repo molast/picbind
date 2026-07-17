@@ -80,8 +80,16 @@ async function readWebRtcLatency(
   if (!selectedPair) return null;
 
   const roundTripTime = Number(selectedPair.currentRoundTripTime);
-  return Number.isFinite(roundTripTime) && roundTripTime >= 0
-    ? Math.round(roundTripTime * 1000)
+  if (Number.isFinite(roundTripTime) && roundTripTime >= 0) {
+    return Math.round(roundTripTime * 1000);
+  }
+  const totalRoundTripTime = Number(selectedPair.totalRoundTripTime);
+  const responsesReceived = Number(selectedPair.responsesReceived);
+  return Number.isFinite(totalRoundTripTime) &&
+    totalRoundTripTime >= 0 &&
+    Number.isFinite(responsesReceived) &&
+    responsesReceived > 0
+    ? Math.round((totalRoundTripTime / responsesReceived) * 1000)
     : null;
 }
 
@@ -117,6 +125,7 @@ type UseShareRoomConnectionOptions = {
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
   setMembers: React.Dispatch<React.SetStateAction<RoomMemberPresence[]>>;
   setNetworkLatencyMs: React.Dispatch<React.SetStateAction<number | null>>;
+  setPacketLossRate: React.Dispatch<React.SetStateAction<number | null>>;
   setMaxImageTransferSize: React.Dispatch<React.SetStateAction<number | null>>;
   setRole: React.Dispatch<React.SetStateAction<RoomRole | null>>;
 };
@@ -147,6 +156,7 @@ export function useShareRoomConnection({
   setConnectionError,
   setMembers,
   setNetworkLatencyMs,
+  setPacketLossRate,
   setMaxImageTransferSize,
   setRole,
 }: UseShareRoomConnectionOptions) {
@@ -165,6 +175,10 @@ export function useShareRoomConnection({
     let controlChannel: RTCDataChannel | null = null;
     let instructionChannel: RTCDataChannel | null = null;
     let fileChannel: RTCDataChannel | null = null;
+    let probeChannel: RTCDataChannel | null = null;
+    let probeTimer: number | undefined;
+    const pendingProbes = new Map<string, number>();
+    const probeResults: boolean[] = [];
     let socketRelay: WeakNetworkSocket | null = null;
     let adaptiveControl: AdaptiveMessageChannel | null = null;
     let adaptiveInstruction: AdaptiveMessageChannel | null = null;
@@ -804,6 +818,69 @@ export function useShareRoomConnection({
       }
     };
 
+    const resetProbeStats = () => {
+      pendingProbes.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      pendingProbes.clear();
+      probeResults.length = 0;
+      setPacketLossRate(null);
+    };
+
+    const recordProbeResult = (received: boolean) => {
+      probeResults.push(received);
+      if (probeResults.length > 20) probeResults.shift();
+      const lost = probeResults.filter((result) => !result).length;
+      setPacketLossRate((lost / probeResults.length) * 100);
+    };
+
+    const attachProbeChannel = (nextChannel: RTCDataChannel) => {
+      probeChannel = nextChannel;
+      const sendProbe = () => {
+        if (probeChannel?.readyState !== "open" || socketRelay?.canRelay) return;
+        const id = crypto.randomUUID().replace(/-/g, "");
+        probeChannel.send(JSON.stringify({ type: "PING", id }));
+        const timeoutId = window.setTimeout(() => {
+          if (!pendingProbes.delete(id)) return;
+          recordProbeResult(false);
+        }, 3000);
+        pendingProbes.set(id, timeoutId);
+      };
+      const startProbes = () => {
+        resetProbeStats();
+        if (probeTimer) window.clearInterval(probeTimer);
+        sendProbe();
+        probeTimer = window.setInterval(sendProbe, 1000);
+      };
+      probeChannel.onmessage = (event) => {
+        if (typeof event.data !== "string") return;
+        let message: { type?: unknown; id?: unknown };
+        try {
+          message = JSON.parse(event.data) as typeof message;
+        } catch {
+          return;
+        }
+        if (message.type === "PING" && typeof message.id === "string") {
+          if (probeChannel?.readyState === "open") {
+            probeChannel.send(JSON.stringify({ type: "PONG", id: message.id }));
+          }
+          return;
+        }
+        if (message.type === "PONG" && typeof message.id === "string") {
+          const timeoutId = pendingProbes.get(message.id);
+          if (timeoutId === undefined) return;
+          window.clearTimeout(timeoutId);
+          pendingProbes.delete(message.id);
+          recordProbeResult(true);
+        }
+      };
+      probeChannel.onopen = startProbes;
+      probeChannel.onclose = () => {
+        if (probeTimer) window.clearInterval(probeTimer);
+        probeTimer = undefined;
+        resetProbeStats();
+      };
+      if (probeChannel.readyState === "open") startProbes();
+    };
+
     const closePeerConnection = () => {
       stopHandshake();
       for (const waiter of [...imageReadyWaiters.values()]) waiter.resolve();
@@ -820,6 +897,15 @@ export function useShareRoomConnection({
         fileChannel.onclose = null;
         fileChannel.close();
       }
+      if (probeChannel) {
+        probeChannel.onclose = null;
+        probeChannel.close();
+      }
+      if (probeTimer) {
+        window.clearInterval(probeTimer);
+        probeTimer = undefined;
+      }
+      resetProbeStats();
       if (connection) {
         connection.ondatachannel = null;
         connection.onconnectionstatechange = null;
@@ -829,6 +915,7 @@ export function useShareRoomConnection({
       controlChannel = null;
       instructionChannel = null;
       fileChannel = null;
+      probeChannel = null;
       connection = null;
       outgoingChannelRef.current = null;
       adaptiveControl?.setDataChannel(null);
@@ -866,7 +953,7 @@ export function useShareRoomConnection({
       try {
         const latencyMs = await readWebRtcLatency(peer);
         if (disposed || connection !== peer) return;
-        setNetworkLatencyMs(latencyMs);
+        if (!socketRelay.canRelay) setNetworkLatencyMs(latencyMs);
         socketRelay.updateRtt(latencyMs);
       } catch {
         if (!disposed && connection === peer) {
@@ -912,6 +999,9 @@ export function useShareRoomConnection({
           attachInstructionChannel(event.channel);
         }
         else if (event.channel.label === "picbind-files") attachFileChannel(event.channel);
+        else if (event.channel.label === "picbind-network-probe") {
+          attachProbeChannel(event.channel);
+        }
       };
       connection = peer;
       return peer;
@@ -1003,6 +1093,12 @@ export function useShareRoomConnection({
         );
         attachFileChannel(
           peer.createDataChannel("picbind-files", { ordered: false }),
+        );
+        attachProbeChannel(
+          peer.createDataChannel("picbind-network-probe", {
+            ordered: false,
+            maxRetransmits: 0,
+          }),
         );
         try {
           await peer.setLocalDescription(await peer.createOffer());
@@ -1148,10 +1244,16 @@ export function useShareRoomConnection({
             forceRoomNavigation("kicked");
           },
           onWeakNetworkChange,
+          onSocketLatencyChange(latencyMs) {
+            if (!disposed && socketRelay?.canRelay) {
+              setNetworkLatencyMs(latencyMs);
+            }
+          },
           onRelayReadyChange(ready) {
             if (disposed) return;
             onMessageTransportChange(ready ? "relay" : "p2p");
             if (ready) {
+              resetProbeStats();
               stopHandshake();
               handshakeAcknowledged = true;
               setConnection("connected");
@@ -1165,6 +1267,7 @@ export function useShareRoomConnection({
               setConnection("waiting");
               setConnectionActivity("waiting");
             }
+            if (!ready) setNetworkLatencyMs(null);
           },
         });
         adaptiveControl = new AdaptiveMessageChannel("control", socketRelay);
@@ -1313,6 +1416,7 @@ export function useShareRoomConnection({
     setMembers,
     setMaxImageTransferSize,
     setNetworkLatencyMs,
+    setPacketLossRate,
     setRole,
     showFloatingEmoji,
     transferChunkSizeRef,

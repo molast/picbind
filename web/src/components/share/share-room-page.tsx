@@ -140,6 +140,7 @@ export default function ShareRoomPage({
   );
   const [messageTransportMode, setMessageTransportMode] =
     React.useState<MessageTransportMode>("p2p");
+  const [packetLossRate, setPacketLossRate] = React.useState<number | null>(null);
   const [maxImageTransferSize, setMaxImageTransferSize] = React.useState<
     number | null
   >(null);
@@ -569,6 +570,7 @@ export default function ShareRoomPage({
     onForcedNavigation: handleForcedNavigation,
     onWeakNetworkChange: handleWeakNetworkChange,
     onMessageTransportChange: setMessageTransportMode,
+    setPacketLossRate,
     setActivities,
     setConnection,
     setConnectionError,
@@ -1083,6 +1085,7 @@ export default function ShareRoomPage({
           connection={connection}
           connectionError={connectionError}
           networkLatencyMs={networkLatencyMs}
+          packetLossRate={packetLossRate}
           messageTransportMode={messageTransportMode}
           roomId={roomId}
           role={role}
