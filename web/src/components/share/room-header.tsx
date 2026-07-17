@@ -17,8 +17,7 @@ type RoomHeaderProps = {
   labels: ShareRoomLabels;
   onCopy(): void | Promise<void>;
   onTemporaryLeave(): void | Promise<void>;
-  onGuestLeave(): void | Promise<void>;
-  onCloseRoom(): void | Promise<void>;
+  onExitRoom(): void | Promise<void>;
 };
 
 export default function RoomHeader({
@@ -29,8 +28,7 @@ export default function RoomHeader({
   labels,
   onCopy,
   onTemporaryLeave,
-  onGuestLeave,
-  onCloseRoom,
+  onExitRoom,
 }: RoomHeaderProps) {
   const wordmark = (
     <Image
@@ -58,7 +56,7 @@ export default function RoomHeader({
             {wordmark}
           </button>
         ) : (
-          <button type="button" onClick={() => void onGuestLeave()} className="shrink-0">
+          <button type="button" onClick={() => void onExitRoom()} className="shrink-0">
             {wordmark}
           </button>
         )}
@@ -98,7 +96,7 @@ export default function RoomHeader({
             </button>
             <button
               type="button"
-              onClick={() => void onCloseRoom()}
+              onClick={() => void onExitRoom()}
               disabled={actionPending}
               className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
               aria-label={labels.closeRoom}
@@ -110,7 +108,7 @@ export default function RoomHeader({
         ) : (
           <button
             type="button"
-            onClick={() => void onGuestLeave()}
+            onClick={() => void onExitRoom()}
             className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
             aria-label={labels.back}
             title={labels.back}

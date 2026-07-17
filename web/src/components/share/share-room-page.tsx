@@ -598,7 +598,7 @@ export default function ShareRoomPage() {
   const goCompressImages = async (files: File[] = []) => {
     if (files.length) await queueFilesForCompression(files);
     if (role === "owner") await handleTemporaryLeave();
-    else await handleGuestLeave();
+    else await handleExitRoom();
   };
 
   const handleSendImage = async (image: RoomImage) => {
@@ -812,13 +812,18 @@ export default function ShareRoomPage() {
     }
   };
 
-  const handleGuestLeave = async () => {
+  const handleExitRoom = async () => {
     const sessionId = sessionIdRef.current;
-    if (!roomId || role !== "guest" || !sessionId || isRoomActionPending) return;
+    if (!roomId || !role || !sessionId || isRoomActionPending) return;
     if (!window.confirm(labels.confirmLeaveRoom)) return;
     setIsRoomActionPending(true);
     try {
-      await leaveRealtimeRoom(roomId, sessionId);
+      if (role === "owner") {
+        await closeRealtimeRoom(roomId, sessionId);
+        clearOwnedShareRoom(roomId);
+      } else {
+        await leaveRealtimeRoom(roomId, sessionId);
+      }
       clearRoomPageState(roomId);
       window.location.assign("/");
     } catch (error) {
@@ -826,36 +831,7 @@ export default function ShareRoomPage() {
       upsertActivity({
         id: `error-${Date.now()}`,
         kind: "error",
-        title: labels.back,
-        detail: error instanceof Error ? error.message : labels.failed,
-        createdAt: Date.now(),
-      });
-    }
-  };
-
-  const handleCloseRoom = async () => {
-    const sessionId = sessionIdRef.current;
-    if (
-      !roomId ||
-      role !== "owner" ||
-      !sessionId ||
-      isRoomActionPending ||
-      !window.confirm(labels.confirmLeaveRoom)
-    ) {
-      return;
-    }
-    setIsRoomActionPending(true);
-    try {
-      await closeRealtimeRoom(roomId, sessionId);
-      clearRoomPageState(roomId);
-      clearOwnedShareRoom(roomId);
-      window.location.assign("/");
-    } catch (error) {
-      setIsRoomActionPending(false);
-      upsertActivity({
-        id: `error-${Date.now()}`,
-        kind: "error",
-        title: labels.closeRoom,
+        title: role === "owner" ? labels.closeRoom : labels.back,
         detail: error instanceof Error ? error.message : labels.failed,
         createdAt: Date.now(),
       });
@@ -949,8 +925,7 @@ export default function ShareRoomPage() {
             labels={labels}
             onCopy={handleCopy}
             onTemporaryLeave={handleTemporaryLeave}
-            onGuestLeave={handleGuestLeave}
-            onCloseRoom={handleCloseRoom}
+            onExitRoom={handleExitRoom}
           />
           {reviewImage ? (
             <ReviewWorkspace
