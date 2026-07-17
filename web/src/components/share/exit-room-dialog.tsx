@@ -2,6 +2,7 @@
 
 import { FiGlobe, FiLoader } from "react-icons/fi";
 import type { ShareRoomLabels } from "./share-room-labels";
+import { useDialogEscape } from "./use-dialog-escape";
 
 type ExitRoomDialogProps = {
   open: boolean;
@@ -18,6 +19,7 @@ export default function ExitRoomDialog({
   onCancel,
   onConfirm,
 }: ExitRoomDialogProps) {
+  useDialogEscape(open, onCancel, !pending);
   if (!open) return null;
 
   return (

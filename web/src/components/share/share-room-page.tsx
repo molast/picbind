@@ -459,15 +459,6 @@ export default function ShareRoomPage({
   }, [roomId]);
 
   React.useEffect(() => {
-    if (!isShareDialogOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsShareDialogOpen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isShareDialogOpen]);
-
-  React.useEffect(() => {
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
     const state = window.history.state as {
       picbindRoomId?: string;

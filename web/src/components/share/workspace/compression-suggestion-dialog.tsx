@@ -2,6 +2,7 @@
 
 import { FiArrowRight, FiZap } from "react-icons/fi";
 import type { ShareRoomLabels } from "../share-room-labels";
+import { useDialogEscape } from "../use-dialog-escape";
 
 type CompressionSuggestionDialogProps = {
   open: boolean;
@@ -20,6 +21,7 @@ export default function CompressionSuggestionDialog({
   onCompress,
   onCancel,
 }: CompressionSuggestionDialogProps) {
+  useDialogEscape(open, onCancel);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">

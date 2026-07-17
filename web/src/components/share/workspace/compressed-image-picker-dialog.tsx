@@ -10,6 +10,7 @@ import {
 } from "@/utils/compressed-image-store";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes, middleEllipsisFileName } from "../share-room-formatters";
+import { useDialogEscape } from "../use-dialog-escape";
 
 type CompressedImagePickerDialogProps = {
   open: boolean;
@@ -30,6 +31,7 @@ export default function CompressedImagePickerDialog({
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState(false);
   const [urls, setUrls] = React.useState<Record<string, string>>({});
+  useDialogEscape(open, onClose);
 
   React.useEffect(() => {
     if (!open) return;

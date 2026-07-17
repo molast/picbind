@@ -2,6 +2,7 @@
 
 import { FiCheck, FiCopy, FiX } from "react-icons/fi";
 import type { ShareRoomLabels } from "./share-room-labels";
+import { useDialogEscape } from "./use-dialog-escape";
 
 type CreatedRoomDialogProps = {
   open: boolean;
@@ -22,6 +23,7 @@ export default function CreatedRoomDialog({
   onClose,
   onCopy,
 }: CreatedRoomDialogProps) {
+  useDialogEscape(open, onClose);
   if (!open) return null;
 
   return (
