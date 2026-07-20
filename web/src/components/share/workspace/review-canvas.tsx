@@ -11,12 +11,16 @@ import type {
 } from "@/utils/review-collaboration";
 import ReviewMagnifierLens from "./review-magnifier-lens";
 import type { ReviewLaserLayerController } from "./review-laser-layer";
+import type { ReviewRippleLayerController } from "./review-ripple-layer";
 
 const ReviewAnnotationLayer = dynamic(
   () => import("./review-annotation-layer"),
   { ssr: false },
 );
 const ReviewLaserLayer = dynamic(() => import("./review-laser-layer"), {
+  ssr: false,
+});
+const ReviewRippleLayer = dynamic(() => import("./review-ripple-layer"), {
   ssr: false,
 });
 
@@ -112,6 +116,7 @@ export default function ReviewCanvas({
     originY: number;
   } | null>(null);
   const laserLayerRef = React.useRef<ReviewLaserLayerController | null>(null);
+  const rippleLayerRef = React.useRef<ReviewRippleLayerController | null>(null);
   const laserPointerRef = React.useRef<{
     pointerId: number;
     position: MagnifierPosition;
@@ -322,6 +327,7 @@ export default function ReviewCanvas({
       x: position.pointerX,
       y: position.pointerY,
     });
+    rippleLayerRef.current?.emit(remoteLaserEvent.event);
   }, [getMagnifierPosition, remoteLaserEvent]);
 
   const finishTextEditing = React.useCallback(
@@ -398,6 +404,7 @@ export default function ReviewCanvas({
             x: position.pointerX,
             y: position.pointerY,
           });
+          rippleLayerRef.current?.emit(laserEvent);
           onLaserEvent(laserEvent);
           return;
         }
@@ -631,6 +638,11 @@ export default function ReviewCanvas({
               onBlur={() => finishTextEditing(true)}
             />
           ) : null}
+          <ReviewRippleLayer
+            imageUrl={image.url}
+            annotationSnapshot={annotationSnapshot}
+            controllerRef={rippleLayerRef}
+          />
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
