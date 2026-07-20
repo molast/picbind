@@ -1144,7 +1144,7 @@ export default function ShareRoomPage({
         className={`${isMinimized ? "hidden" : "block"} h-screen overflow-hidden bg-[#eef2f7] text-slate-800`}
       >
       <div className="grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:grid-rows-1">
-        <section className="flex min-h-0 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-col">
           <RoomHeader
             role={role}
             roomId={roomId}

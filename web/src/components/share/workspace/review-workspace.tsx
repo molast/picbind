@@ -642,7 +642,7 @@ export default function ReviewWorkspace({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-100">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col bg-slate-100">
       <ReviewToolbar
         imageName={image.name}
         zoomPercent={Math.round(scale * 100)}

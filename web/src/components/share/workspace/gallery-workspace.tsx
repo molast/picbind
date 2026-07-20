@@ -42,7 +42,7 @@ export default function GalleryWorkspace({
   onDelete,
 }: GalleryWorkspaceProps) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-y-auto p-4 sm:p-6">
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">{labels.gallery}</h1>

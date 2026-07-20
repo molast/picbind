@@ -133,8 +133,8 @@ export default function ReviewCanvas({
   const fitRatio =
     containerSize.width && containerSize.height && imageSize.width && imageSize.height
       ? Math.min(
-          (containerSize.width * 0.88) / imageSize.width,
-          (containerSize.height * 0.88) / imageSize.height,
+          Math.max(1, containerSize.width - 32) / imageSize.width,
+          Math.max(1, containerSize.height - 32) / imageSize.height,
         )
       : 0;
   const renderedSize = {
@@ -313,7 +313,7 @@ export default function ReviewCanvas({
   return (
     <div
       ref={containerRef}
-      className={`relative min-h-0 flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
+      className={`relative min-h-0 min-w-0 w-full flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
         interactionDisabled
           ? "cursor-default"
           : activeTool === "select"
