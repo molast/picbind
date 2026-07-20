@@ -15,6 +15,32 @@ type ReviewRippleLayerProps = {
 
 const RIPPLE_DURATION_MS = 1050;
 const MAX_ACTIVE_RIPPLES = 5;
+const RIPPLE_FILTER_PADDING = 2;
+const RIPPLE_FILTER_RESOLUTION = 1;
+
+function nextPowerOfTwo(value: number) {
+  return 2 ** Math.ceil(Math.log2(Math.max(1, value)));
+}
+
+function getFilterCenter(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const frameWidth = width + RIPPLE_FILTER_PADDING * 2;
+  const frameHeight = height + RIPPLE_FILTER_PADDING * 2;
+  const textureWidth =
+    nextPowerOfTwo(Math.ceil(frameWidth * RIPPLE_FILTER_RESOLUTION - 1e-6)) /
+    RIPPLE_FILTER_RESOLUTION;
+  const textureHeight =
+    nextPowerOfTwo(Math.ceil(frameHeight * RIPPLE_FILTER_RESOLUTION - 1e-6)) /
+    RIPPLE_FILTER_RESOLUTION;
+  return [
+    (RIPPLE_FILTER_PADDING + x * width) / textureWidth,
+    (RIPPLE_FILTER_PADDING + y * height) / textureHeight,
+  ];
+}
 
 const RIPPLE_FRAGMENT_SHADER = `
 in vec2 vTextureCoord;
@@ -156,6 +182,7 @@ export default function ReviewRippleLayer({
           if (event.phase !== "start" || !texture) return;
           const width = Math.max(1, container.clientWidth);
           const height = Math.max(1, container.clientHeight);
+          const center = getFilterCenter(event.x, event.y, width, height);
           const filter = pixi.Filter.from({
             gl: {
               vertex: pixi.defaultFilterVert,
@@ -164,7 +191,7 @@ export default function ReviewRippleLayer({
             resources: {
               rippleUniforms: {
                 uCenter: {
-                  value: new Float32Array([event.x, event.y]),
+                  value: new Float32Array(center),
                   type: "vec2<f32>",
                 },
                 uSize: {
@@ -175,7 +202,8 @@ export default function ReviewRippleLayer({
               },
             },
             antialias: "on",
-            padding: 2,
+            padding: RIPPLE_FILTER_PADDING,
+            resolution: RIPPLE_FILTER_RESOLUTION,
           });
           const sprite = new pixi.Sprite(texture);
           sprite.width = width;
