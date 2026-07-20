@@ -1266,7 +1266,7 @@ export default function ShareRoomPage({
               {roomHeaderContent}
             </div>
           </div>
-          <div className="group pointer-events-none fixed bottom-0 right-0 top-0 z-[134] w-[min(420px,calc(100vw-16px))]">
+          <div className="group pointer-events-none fixed bottom-0 right-0 top-0 z-[134] w-[clamp(320px,24vw,420px)] max-w-full">
             <div className="pointer-events-auto absolute bottom-0 right-0 top-0 w-3" aria-hidden="true" />
             <div className="pointer-events-auto absolute inset-0 translate-x-full bg-white shadow-2xl transition-transform duration-200 ease-out group-hover:translate-x-0 [&>aside]:h-full">
               {roomSidebarContent}
