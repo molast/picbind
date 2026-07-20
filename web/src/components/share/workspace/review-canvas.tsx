@@ -327,6 +327,10 @@ export default function ReviewCanvas({
       }`}
       onWheel={(event) => {
         if (interactionDisabled) return;
+        if (activeTool === "magnifier") {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         const normalizedDelta = Math.max(-80, Math.min(80, event.deltaY));
         const zoomFactor = Math.exp(-normalizedDelta * WHEEL_ZOOM_SENSITIVITY);

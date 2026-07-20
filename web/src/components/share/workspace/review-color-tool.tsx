@@ -1,6 +1,8 @@
 "use client";
 
+import React from "react";
 import type { IconType } from "react-icons";
+import ReviewToolbarPopover from "./review-toolbar-popover";
 
 const COLORS = [
   "#000000",
@@ -60,9 +62,11 @@ export default function ReviewColorTool({
   onToggle,
   onChange,
 }: ReviewColorToolProps) {
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   return (
     <div className="relative shrink-0">
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
         onClick={onToggle}
@@ -85,8 +89,8 @@ export default function ReviewColorTool({
           <ColorSwatch color={color} />
         )}
       </button>
-      {panelOpen ? (
-        <div className="absolute left-0 top-11 z-50 grid w-44 grid-cols-5 gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-xl">
+      <ReviewToolbarPopover anchorRef={buttonRef} open={panelOpen} width={176}>
+        <div className="grid grid-cols-5 gap-2 rounded-md border border-slate-200 bg-white p-3 shadow-xl">
           {clearLabel ? (
             <button
               type="button"
@@ -127,7 +131,7 @@ export default function ReviewColorTool({
             />
           </label>
         </div>
-      ) : null}
+      </ReviewToolbarPopover>
     </div>
   );
 }

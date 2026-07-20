@@ -37,6 +37,7 @@ import type {
 import { TEST_EMOJIS } from "@/utils/realtime-peer-messages";
 import ReviewStrokeStyleTool from "./review-stroke-style-tool";
 import ReviewColorTool from "./review-color-tool";
+import ReviewToolbarPopover from "./review-toolbar-popover";
 
 const LINE_THICKNESSES = [0.0015, 0.003, 0.005, 0.008] as const;
 
@@ -158,10 +159,14 @@ export default function ReviewToolbar({
     | null
   >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
+  const emojiAnchorRef = React.useRef<HTMLDivElement | null>(null);
+  const lineThicknessButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   React.useEffect(() => {
     const close = (event: PointerEvent) => {
-      if (!panelsRef.current?.contains(event.target as Node)) setOpenPanel(null);
+      const target = event.target as Element;
+      if (target.closest("[data-review-toolbar-popover='true']")) return;
+      if (!panelsRef.current?.contains(target)) setOpenPanel(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpenPanel(null);
@@ -207,7 +212,15 @@ export default function ReviewToolbar({
         </div>
       </div>
 
-      <div ref={panelsRef} className="relative flex h-12 items-center gap-1 overflow-visible px-3 sm:px-4">
+      <div ref={panelsRef} className="relative flex h-12 min-w-0 items-center bg-white">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-3 [scrollbar-width:thin] sm:px-4"
+          onWheel={(event) => {
+            if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+            event.currentTarget.scrollLeft += event.deltaY;
+            event.preventDefault();
+          }}
+        >
         {navigationTools.map((tool) => (
           <ToolButton key={tool.label} {...tool} />
         ))}
@@ -262,7 +275,7 @@ export default function ReviewToolbar({
         {annotationTools.map((tool) => (
           <ToolButton key={tool.label} {...tool} />
         ))}
-        <div className="relative shrink-0">
+        <div ref={emojiAnchorRef} className="relative shrink-0">
           <ToolButton
             icon={FiSmile}
             label={labels.emojiTool}
@@ -270,8 +283,12 @@ export default function ReviewToolbar({
             disabled={workspaceLocked}
             onClick={() => setOpenPanel((current) => current === "emoji" ? null : "emoji")}
           />
-          {openPanel === "emoji" ? (
-            <div className="absolute left-0 top-11 z-50 grid w-56 grid-cols-8 gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+          <ReviewToolbarPopover
+            anchorRef={emojiAnchorRef}
+            open={openPanel === "emoji"}
+            width={224}
+          >
+            <div className="grid grid-cols-8 gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
               {TEST_EMOJIS.map((emoji) => (
                 <button
                   key={emoji}
@@ -287,10 +304,11 @@ export default function ReviewToolbar({
                 </button>
               ))}
             </div>
-          ) : null}
+          </ReviewToolbarPopover>
         </div>
         <div className="relative shrink-0">
           <button
+            ref={lineThicknessButtonRef}
             type="button"
             disabled={workspaceLocked || lineThicknessDisabled}
             onClick={() => setOpenPanel((current) => current === "line" ? null : "line")}
@@ -304,8 +322,12 @@ export default function ReviewToolbar({
               aria-hidden="true"
             />
           </button>
-          {openPanel === "line" ? (
-            <div className="absolute left-0 top-11 z-50 flex w-40 flex-col gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+          <ReviewToolbarPopover
+            anchorRef={lineThicknessButtonRef}
+            open={openPanel === "line"}
+            width={160}
+          >
+            <div className="flex flex-col gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
               {LINE_THICKNESSES.map((value) => (
                 <button
                   key={value}
@@ -325,7 +347,7 @@ export default function ReviewToolbar({
                 </button>
               ))}
             </div>
-          ) : null}
+          </ReviewToolbarPopover>
         </div>
         <ReviewColorTool
           label={labels.annotationColor}
@@ -364,7 +386,8 @@ export default function ReviewToolbar({
         <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={workspaceLocked} />
         <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={workspaceLocked} />
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={workspaceLocked} />
-        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
+        </div>
+        <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
         <div
           className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
             remoteReviewActive ? "text-emerald-600" : "text-slate-400"
@@ -405,6 +428,7 @@ export default function ReviewToolbar({
           }
           onClick={() => onModeChange(localMode === "present" ? null : "present")}
         />
+        </div>
       </div>
     </div>
   );

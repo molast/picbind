@@ -9,6 +9,29 @@ import type {
 } from "@/utils/review-collaboration";
 
 const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M18.5 8A7 7 0 1 0 19 15' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M16 4.5 19 8l-4.5 1' fill='none' stroke='%230f172a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, grab`;
+const emojiCanvasCache = new Map<string, HTMLCanvasElement>();
+
+function renderEmojiCanvas(emoji: string) {
+  const cached = emojiCanvasCache.get(emoji);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.font =
+      '210px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    const measured = context.measureText(emoji).width;
+    if (measured > 232) {
+      context.font = `${Math.floor(210 * (232 / measured))}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    }
+    context.fillText(emoji, 128, 136);
+  }
+  emojiCanvasCache.set(emoji, canvas);
+  return canvas;
+}
 
 type ReviewAnnotationLayerProps = {
   width: number;
@@ -147,20 +170,33 @@ function createAnnotationNode(
       ...shared,
       points: annotation.points || [],
       stroke: annotation.stroke,
+      fill: "rgba(0, 0, 0, 0)",
       strokeWidth: annotation.strokeWidth,
       strokeScaleEnabled: false,
       lineCap: "round",
       lineJoin: "round",
       tension: 0.35,
+      hitFunc: hitEntireBounds,
+    });
+  }
+  if (annotation.type === "emoji") {
+    return new Konva.Image({
+      ...shared,
+      image: renderEmojiCanvas(annotation.emoji || "🙂"),
+      width: Math.max(1, annotation.width),
+      height: Math.max(1, annotation.height),
     });
   }
   return new Konva.Text({
     ...shared,
-    text: annotation.type === "emoji" ? annotation.emoji : annotation.text,
+    text: annotation.text,
     width: Math.max(1, annotation.width),
     height: Math.max(1, annotation.height),
     fontSize: Math.max(12, annotation.height * 0.8),
+    fontFamily: "Arial, sans-serif",
     fill: annotation.stroke,
+    align: "left",
+    lineHeight: 1,
     verticalAlign: "middle",
   });
 }
@@ -475,6 +511,8 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const stage = stageRef.current;
     const layer = layerRef.current;
     if (!stage || !layer) return;
+    stage.content.style.cursor =
+      props.activeTool === "magnifier" ? "zoom-in" : "";
     stage.size({ width: props.width, height: props.height });
     layer.destroyChildren();
     draftNodeRef.current = null;
@@ -496,10 +534,13 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       });
       if (annotation.type === "text") {
         node.on("mouseenter", () => {
-          stage.content.style.cursor = "text";
+          if (propsRef.current.activeTool === "select") {
+            stage.content.style.cursor = "text";
+          }
         });
         node.on("mouseleave", () => {
-          stage.content.style.cursor = "";
+          stage.content.style.cursor =
+            propsRef.current.activeTool === "magnifier" ? "zoom-in" : "";
         });
         node.on("dbltap", (event) => {
           event.cancelBubble = true;

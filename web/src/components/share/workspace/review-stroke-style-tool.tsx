@@ -1,7 +1,9 @@
 "use client";
 
+import React from "react";
 import type { IconType } from "react-icons";
 import type { ReviewStrokeStyle } from "@/utils/review-collaboration";
+import ReviewToolbarPopover from "./review-toolbar-popover";
 
 type ReviewStrokeStyleToolProps = {
   icon: IconType;
@@ -52,9 +54,11 @@ export default function ReviewStrokeStyleTool({
   onTogglePanel,
   onStyleChange,
 }: ReviewStrokeStyleToolProps) {
+  const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   return (
     <div className="relative shrink-0">
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
         onClick={() => {
@@ -71,8 +75,8 @@ export default function ReviewStrokeStyleTool({
       >
         <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
       </button>
-      {panelOpen ? (
-        <div className="absolute left-0 top-11 z-50 flex w-36 flex-col gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+      <ReviewToolbarPopover anchorRef={buttonRef} open={panelOpen} width={144}>
+        <div className="flex flex-col gap-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
           {STYLES.map((item) => (
             <button
               key={item}
@@ -90,7 +94,7 @@ export default function ReviewStrokeStyleTool({
             </button>
           ))}
         </div>
-      ) : null}
+      </ReviewToolbarPopover>
     </div>
   );
 }
