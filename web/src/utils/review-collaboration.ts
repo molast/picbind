@@ -24,6 +24,23 @@ export type ReviewLaserEvent = {
   color: string;
 };
 
+export type ReviewAnchorKind = "reaction" | "sticky" | "label";
+export type ReviewAnchor = {
+  id: string;
+  kind: ReviewAnchorKind;
+  x: number;
+  y: number;
+  reaction?: string;
+  comment?: string;
+  label?: string;
+  todo: boolean;
+  resolved: boolean;
+  endorsements: string[];
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type ReviewAnnotation = {
   id: string;
   type: Exclude<ReviewTool, "select" | "hand" | "magnifier" | "laser">;
@@ -90,12 +107,19 @@ export type ReviewCollaborationMessage =
       transferId: string;
       total: number;
       cursor: number;
+      anchorTotal: number;
     } & ReviewGeometryContext)
   | (ReviewMessageBase & {
       type: "REVIEW_STATE_OPERATION";
       transferId: string;
       index: number;
       operation: ReviewOperation;
+    })
+  | (ReviewMessageBase & {
+      type: "REVIEW_STATE_ANCHOR";
+      transferId: string;
+      index: number;
+      anchor: ReviewAnchor;
     })
   | (ReviewMessageBase & {
       type: "REVIEW_STATE_END";
@@ -121,6 +145,10 @@ export type ReviewCollaborationMessage =
   | (ReviewMessageBase & {
       type: "REVIEW_LASER";
       event: ReviewLaserEvent;
+    })
+  | (ReviewMessageBase & {
+      type: "REVIEW_ANCHOR_UPSERT";
+      anchor: ReviewAnchor;
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
@@ -131,10 +159,12 @@ const REVIEW_MESSAGE_TYPES = new Set([
   "REVIEW_STATE_REQUEST",
   "REVIEW_STATE_BEGIN",
   "REVIEW_STATE_OPERATION",
+  "REVIEW_STATE_ANCHOR",
   "REVIEW_STATE_END",
   "REVIEW_VIEWPORT",
   "REVIEW_MAGNIFIER",
   "REVIEW_LASER",
+  "REVIEW_ANCHOR_UPSERT",
 ]);
 
 function validId(value: unknown) {
@@ -188,6 +218,30 @@ function validOperation(value: unknown): value is ReviewOperation {
     (operation.before === null || validAnnotation(operation.before)) &&
     (operation.after === null || validAnnotation(operation.after)) &&
     validFinite(operation.createdAt)
+  );
+}
+
+function validAnchor(value: unknown): value is ReviewAnchor {
+  if (!value || typeof value !== "object") return false;
+  const anchor = value as Partial<ReviewAnchor>;
+  return (
+    validId(anchor.id) &&
+    ["reaction", "sticky", "label"].includes(anchor.kind || "") &&
+    validFinite(anchor.x) &&
+    Number(anchor.x) >= 0 &&
+    validFinite(anchor.y) &&
+    Number(anchor.y) >= 0 &&
+    typeof anchor.todo === "boolean" &&
+    typeof anchor.resolved === "boolean" &&
+    Array.isArray(anchor.endorsements) &&
+    anchor.endorsements.length <= 16 &&
+    anchor.endorsements.every(validId) &&
+    validId(anchor.createdBy) &&
+    validFinite(anchor.createdAt) &&
+    validFinite(anchor.updatedAt) &&
+    (!anchor.reaction || anchor.reaction.length <= 16) &&
+    (!anchor.comment || anchor.comment.length <= 1000) &&
+    (!anchor.label || anchor.label.length <= 40)
   );
 }
 
@@ -253,7 +307,10 @@ export function parseReviewCollaborationMessage(
       Number(message.total) > 5000 ||
       !Number.isInteger(message.cursor) ||
       Number(message.cursor) < 0 ||
-      Number(message.cursor) > Number(message.total))
+      Number(message.cursor) > Number(message.total) ||
+      !Number.isInteger(message.anchorTotal) ||
+      Number(message.anchorTotal) < 0 ||
+      Number(message.anchorTotal) > 1000)
   ) {
     return null;
   }
@@ -263,6 +320,16 @@ export function parseReviewCollaborationMessage(
       !Number.isInteger(message.index) ||
       Number(message.index) < 0 ||
       Number(message.index) >= 5000)
+  ) {
+    return null;
+  }
+  if (
+    message.type === "REVIEW_STATE_ANCHOR" &&
+    (!validId(message.transferId) ||
+      !Number.isInteger(message.index) ||
+      Number(message.index) < 0 ||
+      Number(message.index) >= 1000 ||
+      !validAnchor(message.anchor))
   ) {
     return null;
   }
@@ -319,6 +386,12 @@ export function parseReviewCollaborationMessage(
     ) {
       return null;
     }
+  }
+  if (
+    message.type === "REVIEW_ANCHOR_UPSERT" &&
+    !validAnchor(message.anchor)
+  ) {
+    return null;
   }
   if (
     (message.type === "REVIEW_OPERATION" ||

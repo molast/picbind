@@ -2,6 +2,8 @@
 
 import React from "react";
 import {
+  FiCheckCircle,
+  FiClock,
   FiDownload,
   FiEye,
   FiImage,
@@ -190,6 +192,31 @@ export default function GalleryImageCard({
           >
             <FiEye className="h-4 w-4" aria-hidden="true" />
           </button>
+        ) : null}
+        {image.reviewStatus ? (
+          <span
+            className={`absolute bottom-2 right-2 z-10 flex h-7 items-center gap-1 rounded-full px-2 text-[10px] font-semibold shadow-sm backdrop-blur ${
+              image.reviewStatus === "approved"
+                ? "bg-emerald-600/95 text-white"
+                : "bg-amber-100/95 text-amber-800"
+            }`}
+            title={
+              image.reviewStatus === "approved"
+                ? labels.reviewApproved
+                : labels.reviewInProgress
+            }
+          >
+            {image.reviewStatus === "approved" ? (
+              <FiCheckCircle className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <FiClock className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>
+              {image.reviewStatus === "approved"
+                ? labels.reviewApproved
+                : `${labels.reviewInProgress} ${image.reviewAnchorCount || 0}`}
+            </span>
+          </span>
         ) : null}
         {canReview ? (
           <button

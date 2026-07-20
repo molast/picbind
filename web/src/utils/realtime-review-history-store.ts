@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReviewOperation } from "./review-collaboration";
+import type { ReviewAnchor, ReviewOperation } from "./review-collaboration";
 
 const DB_NAME = "picbind-review-history";
 const DB_VERSION = 1;
@@ -11,6 +11,7 @@ type StoredReviewHistory = {
   roomId: string;
   imageId: string;
   operations: ReviewOperation[];
+  anchors?: ReviewAnchor[];
   cursor: number;
   updatedAt: number;
 };
@@ -44,7 +45,7 @@ function openDatabase() {
 
 export async function loadReviewHistory(roomId: string, imageId: string) {
   const db = await openDatabase();
-  return new Promise<Pick<StoredReviewHistory, "operations" | "cursor"> | null>(
+  return new Promise<Pick<StoredReviewHistory, "operations" | "cursor"> & { anchors: ReviewAnchor[] } | null>(
     (resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, "readonly");
       const request = transaction
@@ -58,6 +59,7 @@ export async function loadReviewHistory(roomId: string, imageId: string) {
         }
         resolve({
           operations: value.operations,
+          anchors: Array.isArray(value.anchors) ? value.anchors : [],
           cursor: Number.isInteger(value.cursor)
             ? Math.max(0, Math.min(value.operations.length, value.cursor))
             : value.operations.length,
@@ -74,6 +76,7 @@ export async function saveReviewHistory(
   imageId: string,
   operations: ReviewOperation[],
   cursor: number,
+  anchors: ReviewAnchor[] = [],
 ) {
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
@@ -83,6 +86,7 @@ export async function saveReviewHistory(
       roomId,
       imageId,
       operations,
+      anchors,
       cursor: Math.max(0, Math.min(operations.length, cursor)),
       updatedAt: Date.now(),
     } satisfies StoredReviewHistory);

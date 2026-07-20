@@ -9,6 +9,7 @@ import {
   FiCornerUpRight,
   FiEdit3,
   FiMaximize,
+  FiMessageSquare,
   FiMousePointer,
   FiRadio,
   FiRotateCcw,
@@ -54,6 +55,7 @@ type ReviewToolbarProps = {
   remoteMode: ReviewMode;
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
+  commentMode: boolean;
   annotationColor: string;
   fillColor: string | null;
   lineThickness: number;
@@ -73,6 +75,7 @@ type ReviewToolbarProps = {
   onLineThicknessChange(value: number): void;
   onMagnifierHighlightChange(enabled: boolean): void;
   onLaserColorChange(color: string): void;
+  onCommentModeChange(enabled: boolean): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -132,6 +135,7 @@ export default function ReviewToolbar({
   remoteMode,
   remoteReviewActive,
   workspaceLocked,
+  commentMode,
   annotationColor,
   fillColor,
   lineThickness,
@@ -151,6 +155,7 @@ export default function ReviewToolbar({
   onLineThicknessChange,
   onMagnifierHighlightChange,
   onLaserColorChange,
+  onCommentModeChange,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -192,15 +197,16 @@ export default function ReviewToolbar({
     };
   }, []);
 
+  const controlsDisabled = workspaceLocked || commentMode;
   const navigationTools: ToolButtonProps[] = [
-    { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: workspaceLocked },
-    { icon: PiHandPalmBold, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
+    { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: controlsDisabled },
+    { icon: PiHandPalmBold, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: controlsDisabled },
   ];
   const annotationTools: ToolButtonProps[] = [
-    { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: workspaceLocked },
-    { icon: FiCircle, label: labels.circleTool, onClick: () => onToolChange("circle"), active: activeTool === "circle", disabled: workspaceLocked },
-    { icon: FiEdit3, label: labels.penTool, onClick: () => onToolChange("pen"), active: activeTool === "pen", disabled: workspaceLocked },
-    { icon: FiType, label: labels.textTool, onClick: () => onToolChange("text"), active: activeTool === "text", disabled: workspaceLocked },
+    { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: controlsDisabled },
+    { icon: FiCircle, label: labels.circleTool, onClick: () => onToolChange("circle"), active: activeTool === "circle", disabled: controlsDisabled },
+    { icon: FiEdit3, label: labels.penTool, onClick: () => onToolChange("pen"), active: activeTool === "pen", disabled: controlsDisabled },
+    { icon: FiType, label: labels.textTool, onClick: () => onToolChange("text"), active: activeTool === "text", disabled: controlsDisabled },
   ];
 
   return (
@@ -241,7 +247,7 @@ export default function ReviewToolbar({
             icon={LuSearch}
             label={labels.magnifierTool}
             active={activeTool === "magnifier" || openPanel === "magnifier"}
-            disabled={workspaceLocked}
+            disabled={controlsDisabled}
             onClick={() => {
               onToolChange("magnifier");
               setOpenPanel((current) =>
@@ -288,7 +294,7 @@ export default function ReviewToolbar({
           style={arrowStyle}
           active={activeTool === "arrow"}
           panelOpen={openPanel === "arrowStyle"}
-          disabled={workspaceLocked}
+          disabled={controlsDisabled}
           styleLabels={{
             solid: labels.solidLine,
             dashed: labels.dashedLine,
@@ -312,7 +318,7 @@ export default function ReviewToolbar({
           style={lineStyle}
           active={activeTool === "line"}
           panelOpen={openPanel === "lineStyle"}
-          disabled={workspaceLocked}
+          disabled={controlsDisabled}
           styleLabels={{
             solid: labels.solidLine,
             dashed: labels.dashedLine,
@@ -337,7 +343,7 @@ export default function ReviewToolbar({
             icon={FiSmile}
             label={labels.emojiTool}
             active={activeTool === "emoji" || openPanel === "emoji"}
-            disabled={workspaceLocked}
+            disabled={controlsDisabled}
             onClick={() => setOpenPanel((current) => current === "emoji" ? null : "emoji")}
           />
           <ReviewToolbarPopover
@@ -367,7 +373,7 @@ export default function ReviewToolbar({
           <button
             ref={lineThicknessButtonRef}
             type="button"
-            disabled={workspaceLocked || lineThicknessDisabled}
+            disabled={controlsDisabled || lineThicknessDisabled}
             onClick={() => setOpenPanel((current) => current === "line" ? null : "line")}
             className={`flex h-9 w-9 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 ${openPanel === "line" ? "bg-blue-50 text-blue-700" : ""}`}
             aria-label={labels.lineThickness}
@@ -410,7 +416,7 @@ export default function ReviewToolbar({
           label={labels.annotationColor}
           color={annotationColor}
           panelOpen={openPanel === "color"}
-          disabled={workspaceLocked}
+          disabled={controlsDisabled}
           onToggle={() =>
             setOpenPanel((current) => current === "color" ? null : "color")
           }
@@ -425,7 +431,7 @@ export default function ReviewToolbar({
           icon={LuPaintBucket}
           color={fillColor}
           panelOpen={openPanel === "fill"}
-          disabled={workspaceLocked}
+          disabled={controlsDisabled}
           onToggle={() =>
             setOpenPanel((current) => current === "fill" ? null : "fill")
           }
@@ -440,7 +446,7 @@ export default function ReviewToolbar({
           color={laserColor}
           active={activeTool === "laser"}
           panelOpen={openPanel === "laserColor"}
-          disabled={workspaceLocked}
+          disabled={controlsDisabled}
           onToggle={() => {
             onToolChange("laser");
             setOpenPanel((current) =>
@@ -452,14 +458,24 @@ export default function ReviewToolbar({
             setOpenPanel(null);
           }}
         />
+        <ToolButton
+          icon={FiMessageSquare}
+          label={labels.anchorTool}
+          active={commentMode}
+          disabled={workspaceLocked}
+          onClick={() => {
+            setOpenPanel(null);
+            onCommentModeChange(!commentMode);
+          }}
+        />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
-        <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={workspaceLocked || !canUndo} />
-        <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={workspaceLocked || !canRedo} />
+        <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={controlsDisabled || !canUndo} />
+        <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={controlsDisabled || !canRedo} />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
-        <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} disabled={workspaceLocked} />
-        <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={workspaceLocked} />
-        <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={workspaceLocked} />
-        <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={workspaceLocked} />
+        <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} disabled={controlsDisabled} />
+        <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={controlsDisabled} />
+        <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={controlsDisabled} />
+        <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
         </div>
         <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
         <div
@@ -485,6 +501,7 @@ export default function ReviewToolbar({
           remoteActive={remoteMode === "follow"}
           disabled={
             !remoteReviewActive ||
+            commentMode ||
             localMode === "present" ||
             remoteMode === "follow"
           }
@@ -497,6 +514,7 @@ export default function ReviewToolbar({
           remoteActive={remoteMode === "present"}
           disabled={
             !remoteReviewActive ||
+            commentMode ||
             localMode === "follow" ||
             remoteMode === "present"
           }

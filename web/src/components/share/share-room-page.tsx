@@ -464,6 +464,21 @@ export default function ShareRoomPage({
     [],
   );
 
+  const handleReviewStatusChange = React.useCallback(
+    (
+      imageId: string,
+      status: "in-review" | "approved" | undefined,
+      anchorCount: number,
+    ) => {
+      updateRoomImage(
+        imageId,
+        { reviewStatus: status, reviewAnchorCount: anchorCount },
+        true,
+      );
+    },
+    [updateRoomImage],
+  );
+
   const removeRoomImage = React.useCallback((id: string) => {
     const image = imagesRef.current.find((current) => current.id === id);
     if (!image) return;
@@ -1163,6 +1178,7 @@ export default function ShareRoomPage({
               actorId={role || "unknown"}
               subscribeMessages={subscribeReviewMessages}
               onSendMessage={sendReviewMessage}
+              onReviewStatusChange={handleReviewStatusChange}
               onBack={() => setReviewImageId(null)}
             />
           ) : (

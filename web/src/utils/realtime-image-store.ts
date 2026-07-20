@@ -30,6 +30,8 @@ export type CachedRoomImage = {
   placeholderOnly?: boolean;
   placeholder?: ImagePlaceholderMetadata;
   thumbnail?: Blob;
+  reviewStatus?: "in-review" | "approved";
+  reviewAnchorCount?: number;
   createdAt: number;
 };
 

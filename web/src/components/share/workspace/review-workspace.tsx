@@ -4,6 +4,7 @@ import React from "react";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { RoomImage } from "../share-room-types";
 import type {
+  ReviewAnchor,
   ReviewAnnotation,
   ReviewCollaborationMessage,
   ReviewLaserEvent,
@@ -38,6 +39,11 @@ type ReviewWorkspaceProps = {
     }) => void,
   ): () => void;
   onSendMessage(message: ReviewCollaborationMessage): boolean;
+  onReviewStatusChange(
+    imageId: string,
+    status: "in-review" | "approved" | undefined,
+    anchorCount: number,
+  ): void;
   onBack(): void;
 };
 
@@ -47,6 +53,7 @@ type IncomingState = {
   operations: Array<
     Extract<ReviewCollaborationMessage, { type: "REVIEW_OPERATION" }>["operation"] | null
   >;
+  anchors: Array<ReviewAnchor | null>;
 };
 
 function mergeReviewOperations(
@@ -60,6 +67,15 @@ function mergeReviewOperations(
   ];
 }
 
+function mergeReviewAnchors(primary: ReviewAnchor[], secondary: ReviewAnchor[]) {
+  const anchors = new Map(primary.map((anchor) => [anchor.id, anchor]));
+  secondary.forEach((anchor) => {
+    const current = anchors.get(anchor.id);
+    if (!current || anchor.updatedAt > current.updatedAt) anchors.set(anchor.id, anchor);
+  });
+  return [...anchors.values()];
+}
+
 export default function ReviewWorkspace({
   roomId,
   image,
@@ -67,6 +83,7 @@ export default function ReviewWorkspace({
   actorId,
   subscribeMessages,
   onSendMessage,
+  onReviewStatusChange,
   onBack,
 }: ReviewWorkspaceProps) {
   const [scale, setScale] = React.useState(1);
@@ -74,6 +91,8 @@ export default function ReviewWorkspace({
   const [dimensions, setDimensions] = React.useState({ width: 0, height: 0 });
   const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
+  const [commentMode, setCommentMode] = React.useState(false);
+  const [anchors, setAnchors] = React.useState<ReviewAnchor[]>([]);
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
   const [defaultFill, setDefaultFill] = React.useState<string | null>(null);
@@ -115,6 +134,8 @@ export default function ReviewWorkspace({
   const pendingMagnifierRef = React.useRef<ReviewMagnifierPoint | null>(null);
   const laserFrameRef = React.useRef<number | null>(null);
   const pendingLaserRef = React.useRef<ReviewLaserEvent | null>(null);
+  const anchorsRef = React.useRef(anchors);
+  anchorsRef.current = anchors;
   viewportRef.current = { scale, offset, dimensions, canvasSize };
 
   React.useEffect(
@@ -239,6 +260,8 @@ export default function ReviewWorkspace({
     setDimensions({ width: 0, height: 0 });
     setSelectedIds([]);
     setActiveTool("select");
+    setCommentMode(false);
+    setAnchors([]);
     setLocalMode(null);
     setRemoteMode(null);
     setRemoteReviewActive(false);
@@ -258,6 +281,9 @@ export default function ReviewWorkspace({
         const current = operationsRef.current;
         const merged = mergeReviewOperations(cached.operations, current);
         replace(merged, current.length ? merged.length : cached.cursor);
+        setAnchors((currentAnchors) =>
+          mergeReviewAnchors(currentAnchors, cached.anchors),
+        );
       }
       setHydratedHistoryKey(cacheKey);
       onSendMessage({
@@ -298,8 +324,18 @@ export default function ReviewWorkspace({
 
   React.useEffect(() => {
     if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
-    void saveReviewHistory(roomId, image.id, operations, cursor).catch(() => undefined);
-  }, [cursor, hydratedHistoryKey, image.id, operations, roomId]);
+    void saveReviewHistory(roomId, image.id, operations, cursor, anchors).catch(() => undefined);
+  }, [anchors, cursor, hydratedHistoryKey, image.id, operations, roomId]);
+
+  React.useEffect(() => {
+    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
+    const status = anchors.length
+      ? anchors.every((anchor) => anchor.resolved)
+        ? "approved"
+        : "in-review"
+      : undefined;
+    onReviewStatusChange(image.id, status, anchors.length);
+  }, [anchors, hydratedHistoryKey, image.id, onReviewStatusChange, roomId]);
 
   React.useEffect(() => {
     if (localMode !== "present") return;
@@ -362,6 +398,10 @@ export default function ReviewWorkspace({
       });
       return;
     }
+    if (message.type === "REVIEW_ANCHOR_UPSERT") {
+      setAnchors((current) => mergeReviewAnchors(current, [message.anchor]));
+      return;
+    }
     if (message.type === "REVIEW_OPERATION") {
       applyRemoteOperation(message.operation);
       return;
@@ -379,6 +419,7 @@ export default function ReviewWorkspace({
         transferId,
         total: operationsRef.current.length,
         cursor: cursorRef.current,
+        anchorTotal: anchorsRef.current.length,
       });
       operationsRef.current.forEach((operation, index) => {
         onSendMessage({
@@ -387,6 +428,15 @@ export default function ReviewWorkspace({
           transferId,
           index,
           operation,
+        });
+      });
+      anchorsRef.current.forEach((anchor, index) => {
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_STATE_ANCHOR",
+          transferId,
+          index,
+          anchor,
         });
       });
       onSendMessage({
@@ -403,6 +453,7 @@ export default function ReviewWorkspace({
         total: message.total,
         cursor: message.cursor,
         operations: Array.from({ length: message.total }, () => null),
+        anchors: Array.from({ length: message.anchorTotal }, () => null),
       });
       return;
     }
@@ -410,6 +461,13 @@ export default function ReviewWorkspace({
       const state = incomingStatesRef.current.get(message.transferId);
       if (state && message.index >= 0 && message.index < state.total) {
         state.operations[message.index] = message.operation;
+      }
+      return;
+    }
+    if (message.type === "REVIEW_STATE_ANCHOR") {
+      const state = incomingStatesRef.current.get(message.transferId);
+      if (state && message.index >= 0 && message.index < state.anchors.length) {
+        state.anchors[message.index] = message.anchor;
       }
       return;
     }
@@ -429,6 +487,16 @@ export default function ReviewWorkspace({
           );
         } else if (!current.length) {
           replace([], 0);
+        }
+        if (state.anchors.every(Boolean)) {
+          setAnchors((currentAnchors) =>
+            mergeReviewAnchors(
+              currentAnchors,
+              state.anchors.filter(
+                (anchor): anchor is ReviewAnchor => Boolean(anchor),
+              ),
+            ),
+          );
         }
       }
       return;
@@ -462,6 +530,18 @@ export default function ReviewWorkspace({
     sendViewport,
     cursorRef,
   ]);
+
+  const upsertAnchor = React.useCallback(
+    (anchor: ReviewAnchor) => {
+      setAnchors((current) => mergeReviewAnchors(current, [anchor]));
+      onSendMessage({
+        ...baseMessage(),
+        type: "REVIEW_ANCHOR_UPSERT",
+        anchor,
+      });
+    },
+    [baseMessage, onSendMessage],
+  );
 
   const commitCreate = React.useCallback(
     (annotation: ReviewAnnotation) => {
@@ -700,6 +780,7 @@ export default function ReviewWorkspace({
         remoteMode={remoteMode}
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
+        commentMode={commentMode}
         annotationColor={displayedColor}
         fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
@@ -728,6 +809,11 @@ export default function ReviewWorkspace({
         onLineThicknessChange={changeLineThickness}
         onMagnifierHighlightChange={setMagnifierHighlightEnabled}
         onLaserColorChange={setLaserColor}
+        onCommentModeChange={(enabled) => {
+          setCommentMode(enabled);
+          setSelectedIds([]);
+          if (enabled) setActiveTool("select");
+        }}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}
@@ -738,6 +824,7 @@ export default function ReviewWorkspace({
       />
       <ReviewCanvas
         image={image}
+        labels={labels}
         scale={scale}
         offset={offset}
         activeTool={activeTool}
@@ -750,6 +837,8 @@ export default function ReviewWorkspace({
         arrowStyle={arrowStyle}
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
+        commentMode={commentMode}
+        anchors={anchors}
         remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
         laserColor={laserColor}
         remoteLaserEvent={remoteLaserEvent}
@@ -762,6 +851,7 @@ export default function ReviewWorkspace({
         onUpdate={commitUpdate}
         onMagnifierChange={sendMagnifier}
         onLaserEvent={sendLaser}
+        onAnchorUpsert={upsertAnchor}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
     </div>

@@ -3,7 +3,9 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import type { RoomImage } from "../share-room-types";
+import type { ShareRoomLabels } from "../share-room-labels";
 import type {
+  ReviewAnchor,
   ReviewAnnotation,
   ReviewLaserEvent,
   ReviewStrokeStyle,
@@ -21,6 +23,9 @@ const ReviewLaserLayer = dynamic(() => import("./review-laser-layer"), {
   ssr: false,
 });
 const ReviewRippleLayer = dynamic(() => import("./review-ripple-layer"), {
+  ssr: false,
+});
+const ReviewAnchorLayer = dynamic(() => import("./review-anchor-layer"), {
   ssr: false,
 });
 
@@ -58,6 +63,7 @@ type MagnifierPosition = {
 
 type ReviewCanvasProps = {
   image: RoomImage;
+  labels: ShareRoomLabels;
   scale: number;
   offset: ReviewViewportOffset;
   activeTool: ReviewTool;
@@ -70,6 +76,8 @@ type ReviewCanvasProps = {
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
+  commentMode: boolean;
+  anchors: ReviewAnchor[];
   remoteMagnifier: ReviewRemoteMagnifier | null;
   laserColor: string;
   remoteLaserEvent: ReviewRemoteLaserEvent | null;
@@ -82,10 +90,12 @@ type ReviewCanvasProps = {
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
   onMagnifierChange(position: ReviewMagnifierPoint | null): void;
   onLaserEvent(event: ReviewLaserEvent): void;
+  onAnchorUpsert(anchor: ReviewAnchor): void;
 };
 
 export default function ReviewCanvas({
   image,
+  labels,
   scale,
   offset,
   activeTool,
@@ -98,6 +108,8 @@ export default function ReviewCanvas({
   arrowStyle,
   lineStyle,
   interactionDisabled,
+  commentMode,
+  anchors,
   remoteMagnifier,
   laserColor,
   remoteLaserEvent,
@@ -110,6 +122,7 @@ export default function ReviewCanvas({
   onUpdate,
   onMagnifierChange,
   onLaserEvent,
+  onAnchorUpsert,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -382,6 +395,8 @@ export default function ReviewCanvas({
       className={`relative min-h-0 min-w-0 w-full flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
         interactionDisabled
           ? "cursor-default"
+          : commentMode
+            ? "cursor-crosshair"
           : activeTool === "select"
             ? "cursor-default"
             : activeTool === "hand"
@@ -653,6 +668,20 @@ export default function ReviewCanvas({
             annotationSnapshot={annotationSnapshot}
             controllerRef={rippleLayerRef}
           />
+          {fitRatio ? (
+            <ReviewAnchorLayer
+              width={renderedSize.width}
+              height={renderedSize.height}
+              imageWidth={imageSize.width}
+              imageHeight={imageSize.height}
+              actorId={actorId}
+              commentMode={commentMode}
+              readOnly={interactionDisabled}
+              anchors={anchors}
+              labels={labels}
+              onUpsert={onAnchorUpsert}
+            />
+          ) : null}
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
