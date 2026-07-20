@@ -57,7 +57,7 @@ type ReviewAnnotationLayerProps = {
 };
 
 function annotationAtPoint(
-  tool: Exclude<ReviewTool, "select" | "hand" | "magnifier">,
+  tool: Exclude<ReviewTool, "select" | "hand" | "magnifier" | "laser">,
   actorId: string,
   x: number,
   y: number,
@@ -299,7 +299,8 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       const currentProps = propsRef.current;
       if (
         currentProps.activeTool === "hand" ||
-        currentProps.activeTool === "magnifier"
+        currentProps.activeTool === "magnifier" ||
+        currentProps.activeTool === "laser"
       ) {
         return;
       }

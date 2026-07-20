@@ -58,6 +58,7 @@ type ReviewToolbarProps = {
   lineThickness: number;
   lineThicknessDisabled: boolean;
   magnifierHighlightEnabled: boolean;
+  laserColor: string;
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
   hasSelection: boolean;
@@ -70,6 +71,7 @@ type ReviewToolbarProps = {
   onFillColorChange(color: string | null): void;
   onLineThicknessChange(value: number): void;
   onMagnifierHighlightChange(enabled: boolean): void;
+  onLaserColorChange(color: string): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -134,6 +136,7 @@ export default function ReviewToolbar({
   lineThickness,
   lineThicknessDisabled,
   magnifierHighlightEnabled,
+  laserColor,
   arrowStyle,
   lineStyle,
   hasSelection,
@@ -146,6 +149,7 @@ export default function ReviewToolbar({
   onFillColorChange,
   onLineThicknessChange,
   onMagnifierHighlightChange,
+  onLaserColorChange,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -162,6 +166,7 @@ export default function ReviewToolbar({
     | "arrowStyle"
     | "lineStyle"
     | "magnifier"
+    | "laserColor"
     | null
   >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
@@ -428,7 +433,24 @@ export default function ReviewToolbar({
             setOpenPanel(null);
           }}
         />
-        <ToolButton icon={FiRadio} label={labels.laserTool} disabled />
+        <ReviewColorTool
+          label={labels.laserTool}
+          icon={FiRadio}
+          color={laserColor}
+          active={activeTool === "laser"}
+          panelOpen={openPanel === "laserColor"}
+          disabled={workspaceLocked}
+          onToggle={() => {
+            onToolChange("laser");
+            setOpenPanel((current) =>
+              current === "laserColor" ? null : "laserColor",
+            );
+          }}
+          onChange={(color) => {
+            if (color) onLaserColorChange(color);
+            setOpenPanel(null);
+          }}
+        />
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={workspaceLocked || !canUndo} />
         <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={workspaceLocked || !canRedo} />

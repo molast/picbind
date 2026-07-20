@@ -6,6 +6,7 @@ export type ReviewTool =
   | "select"
   | "hand"
   | "magnifier"
+  | "laser"
   | "arrow"
   | "line"
   | "rectangle"
@@ -16,10 +17,16 @@ export type ReviewTool =
 
 export type ReviewMode = "present" | "follow" | null;
 export type ReviewStrokeStyle = "solid" | "dashed" | "dotted";
+export type ReviewLaserEvent = {
+  phase: "start" | "move" | "end";
+  x: number;
+  y: number;
+  color: string;
+};
 
 export type ReviewAnnotation = {
   id: string;
-  type: Exclude<ReviewTool, "select" | "hand" | "magnifier">;
+  type: Exclude<ReviewTool, "select" | "hand" | "magnifier" | "laser">;
   x: number;
   y: number;
   width: number;
@@ -110,6 +117,10 @@ export type ReviewCollaborationMessage =
       x: number;
       y: number;
       highlight: boolean;
+    })
+  | (ReviewMessageBase & {
+      type: "REVIEW_LASER";
+      event: ReviewLaserEvent;
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
@@ -123,6 +134,7 @@ const REVIEW_MESSAGE_TYPES = new Set([
   "REVIEW_STATE_END",
   "REVIEW_VIEWPORT",
   "REVIEW_MAGNIFIER",
+  "REVIEW_LASER",
 ]);
 
 function validId(value: unknown) {
@@ -290,6 +302,23 @@ export function parseReviewCollaborationMessage(
       Number(message.y) > 1)
   ) {
     return null;
+  }
+  if (message.type === "REVIEW_LASER") {
+    const event = message.event as Partial<ReviewLaserEvent> | undefined;
+    if (
+      !event ||
+      !["start", "move", "end"].includes(event.phase || "") ||
+      !validFinite(event.x) ||
+      Number(event.x) < 0 ||
+      Number(event.x) > 1 ||
+      !validFinite(event.y) ||
+      Number(event.y) < 0 ||
+      Number(event.y) > 1 ||
+      typeof event.color !== "string" ||
+      !/^#[0-9a-f]{6}$/i.test(event.color)
+    ) {
+      return null;
+    }
   }
   if (
     (message.type === "REVIEW_OPERATION" ||

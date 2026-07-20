@@ -23,6 +23,7 @@ type ReviewColorToolProps = {
   icon?: IconType;
   color: string | null;
   panelOpen: boolean;
+  active?: boolean;
   disabled: boolean;
   onToggle(): void;
   onChange(color: string | null): void;
@@ -58,6 +59,7 @@ export default function ReviewColorTool({
   icon: Icon,
   color,
   panelOpen,
+  active = false,
   disabled,
   onToggle,
   onChange,
@@ -71,7 +73,7 @@ export default function ReviewColorTool({
         disabled={disabled}
         onClick={onToggle}
         className={`flex h-9 w-9 items-center justify-center rounded-md transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 ${
-          panelOpen ? "bg-blue-50" : ""
+          panelOpen || active ? "bg-blue-50 text-blue-700" : ""
         }`}
         aria-label={label}
         title={label}

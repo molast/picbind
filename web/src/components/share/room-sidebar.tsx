@@ -318,7 +318,7 @@ export default function RoomSidebar({
                         : "bg-slate-50"
                   }`}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2">
                     <span
                       className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
                         activity.kind === "error"
@@ -333,10 +333,16 @@ export default function RoomSidebar({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2 leading-4">
                         <span
-                          className="min-w-0 truncate text-xs font-semibold text-slate-800"
+                          className={`min-w-0 flex-1 text-xs font-semibold text-slate-800 ${
+                            activity.kind === "message"
+                              ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                              : "truncate"
+                          }`}
                           title={activity.title}
                         >
-                          {middleEllipsisFileName(activity.title, 32)}
+                          {activity.kind === "message"
+                            ? activity.title
+                            : middleEllipsisFileName(activity.title, 32)}
                         </span>
                         <span className="shrink-0 text-[10px] text-slate-400">
                           {formatTime(activity.createdAt)}
@@ -344,7 +350,11 @@ export default function RoomSidebar({
                       </div>
                       {activity.detail ? (
                         <p
-                          className="truncate text-[11px] leading-4 text-slate-500"
+                          className={`text-[11px] leading-4 text-slate-500 ${
+                            activity.kind === "message"
+                              ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                              : "truncate"
+                          }`}
                           title={activity.detail}
                         >
                           {activity.detail}

@@ -6,6 +6,7 @@ import type { RoomImage } from "../share-room-types";
 import type {
   ReviewAnnotation,
   ReviewCollaborationMessage,
+  ReviewLaserEvent,
   ReviewMode,
   ReviewOperation,
   ReviewStrokeStyle,
@@ -14,6 +15,7 @@ import type {
 import ReviewCanvas, {
   type ReviewMagnifierPoint,
   type ReviewRemoteMagnifier,
+  type ReviewRemoteLaserEvent,
   type ReviewViewportOffset,
 } from "./review-canvas";
 import ReviewStatusBar from "./review-status-bar";
@@ -85,6 +87,9 @@ export default function ReviewWorkspace({
     React.useState<ReviewRemoteMagnifier | null>(null);
   const [magnifierHighlightEnabled, setMagnifierHighlightEnabled] =
     React.useState(true);
+  const [laserColor, setLaserColor] = React.useState("#eab308");
+  const [remoteLaserEvent, setRemoteLaserEvent] =
+    React.useState<ReviewRemoteLaserEvent | null>(null);
   const [incomingMessages, setIncomingMessages] = React.useState<
     Array<{ sequence: number; message: ReviewCollaborationMessage }>
   >([]);
@@ -108,6 +113,8 @@ export default function ReviewWorkspace({
   const viewportRef = React.useRef({ scale, offset, dimensions, canvasSize });
   const magnifierFrameRef = React.useRef<number | null>(null);
   const pendingMagnifierRef = React.useRef<ReviewMagnifierPoint | null>(null);
+  const laserFrameRef = React.useRef<number | null>(null);
+  const pendingLaserRef = React.useRef<ReviewLaserEvent | null>(null);
   viewportRef.current = { scale, offset, dimensions, canvasSize };
 
   React.useEffect(
@@ -168,6 +175,33 @@ export default function ReviewWorkspace({
       });
     },
     [baseMessage, magnifierHighlightEnabled, onSendMessage],
+  );
+
+  const sendLaser = React.useCallback(
+    (event: ReviewLaserEvent) => {
+      if (event.phase !== "move") {
+        pendingLaserRef.current = null;
+        if (laserFrameRef.current !== null) {
+          window.cancelAnimationFrame(laserFrameRef.current);
+          laserFrameRef.current = null;
+        }
+        onSendMessage({ ...baseMessage(), type: "REVIEW_LASER", event });
+        return;
+      }
+      pendingLaserRef.current = event;
+      if (laserFrameRef.current !== null) return;
+      laserFrameRef.current = window.requestAnimationFrame(() => {
+        laserFrameRef.current = null;
+        const current = pendingLaserRef.current;
+        if (!current) return;
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_LASER",
+          event: current,
+        });
+      });
+    },
+    [baseMessage, onSendMessage],
   );
 
   const sendViewport = React.useCallback(() => {
@@ -240,6 +274,10 @@ export default function ReviewWorkspace({
         window.cancelAnimationFrame(magnifierFrameRef.current);
         magnifierFrameRef.current = null;
       }
+      if (laserFrameRef.current !== null) {
+        window.cancelAnimationFrame(laserFrameRef.current);
+        laserFrameRef.current = null;
+      }
       onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
       onSendMessage({
         ...baseMessage(),
@@ -271,7 +309,8 @@ export default function ReviewWorkspace({
 
   React.useEffect(() => {
     if (!incomingMessages.length) return;
-    const message = incomingMessages[0].message;
+    const incomingMessage = incomingMessages[0];
+    const message = incomingMessage.message;
     setIncomingMessages((current) => current.slice(1));
     if (message.imageId !== image.id || message.actorId === actorId) return;
 
@@ -314,6 +353,13 @@ export default function ReviewWorkspace({
             }
           : null,
       );
+      return;
+    }
+    if (message.type === "REVIEW_LASER") {
+      setRemoteLaserEvent({
+        sequence: incomingMessage.sequence,
+        event: message.event,
+      });
       return;
     }
     if (message.type === "REVIEW_OPERATION") {
@@ -659,6 +705,7 @@ export default function ReviewWorkspace({
         lineThickness={defaultStrokeRatio}
         lineThicknessDisabled={false}
         magnifierHighlightEnabled={magnifierHighlightEnabled}
+        laserColor={laserColor}
         arrowStyle={
           selectedAnnotations.find((annotation) => annotation.type === "arrow")
             ?.strokeStyle ?? arrowStyle
@@ -680,6 +727,7 @@ export default function ReviewWorkspace({
         onFillColorChange={changeFillColor}
         onLineThicknessChange={changeLineThickness}
         onMagnifierHighlightChange={setMagnifierHighlightEnabled}
+        onLaserColorChange={setLaserColor}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}
@@ -703,6 +751,8 @@ export default function ReviewWorkspace({
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
         remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
+        laserColor={laserColor}
+        remoteLaserEvent={remoteLaserEvent}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
         onDimensionsChange={setDimensions}
@@ -711,6 +761,7 @@ export default function ReviewWorkspace({
         onCreate={commitCreate}
         onUpdate={commitUpdate}
         onMagnifierChange={sendMagnifier}
+        onLaserEvent={sendLaser}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
     </div>

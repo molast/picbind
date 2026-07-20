@@ -5,15 +5,20 @@ import dynamic from "next/dynamic";
 import type { RoomImage } from "../share-room-types";
 import type {
   ReviewAnnotation,
+  ReviewLaserEvent,
   ReviewStrokeStyle,
   ReviewTool,
 } from "@/utils/review-collaboration";
 import ReviewMagnifierLens from "./review-magnifier-lens";
+import type { ReviewLaserLayerController } from "./review-laser-layer";
 
 const ReviewAnnotationLayer = dynamic(
   () => import("./review-annotation-layer"),
   { ssr: false },
 );
+const ReviewLaserLayer = dynamic(() => import("./review-laser-layer"), {
+  ssr: false,
+});
 
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
@@ -29,6 +34,10 @@ function estimateTextWidth(text: string, fontSize: number) {
 export type ReviewViewportOffset = { x: number; y: number };
 export type ReviewMagnifierPoint = { x: number; y: number };
 export type ReviewRemoteMagnifier = ReviewMagnifierPoint & { highlight: boolean };
+export type ReviewRemoteLaserEvent = {
+  sequence: number;
+  event: ReviewLaserEvent;
+};
 type MagnifierPosition = {
   pointerX: number;
   pointerY: number;
@@ -53,6 +62,8 @@ type ReviewCanvasProps = {
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
   remoteMagnifier: ReviewRemoteMagnifier | null;
+  laserColor: string;
+  remoteLaserEvent: ReviewRemoteLaserEvent | null;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
@@ -61,6 +72,7 @@ type ReviewCanvasProps = {
   onCreate(annotation: ReviewAnnotation): void;
   onUpdate(before: ReviewAnnotation, after: ReviewAnnotation): void;
   onMagnifierChange(position: ReviewMagnifierPoint | null): void;
+  onLaserEvent(event: ReviewLaserEvent): void;
 };
 
 export default function ReviewCanvas({
@@ -78,6 +90,8 @@ export default function ReviewCanvas({
   lineStyle,
   interactionDisabled,
   remoteMagnifier,
+  laserColor,
+  remoteLaserEvent,
   onScaleChange,
   onOffsetChange,
   onDimensionsChange,
@@ -86,6 +100,7 @@ export default function ReviewCanvas({
   onCreate,
   onUpdate,
   onMagnifierChange,
+  onLaserEvent,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -95,6 +110,11 @@ export default function ReviewCanvas({
     y: number;
     originX: number;
     originY: number;
+  } | null>(null);
+  const laserLayerRef = React.useRef<ReviewLaserLayerController | null>(null);
+  const laserPointerRef = React.useRef<{
+    pointerId: number;
+    position: MagnifierPosition;
   } | null>(null);
   const magnifierPointerRef = React.useRef<{
     pointerId: number;
@@ -274,6 +294,36 @@ export default function ReviewCanvas({
     [onMagnifierChange],
   );
 
+  const createLaserEvent = React.useCallback(
+    (
+      phase: ReviewLaserEvent["phase"],
+      position: MagnifierPosition,
+      color = laserColor,
+    ): ReviewLaserEvent => ({
+      phase,
+      x: Math.max(0, Math.min(1, position.sourceX / position.sourceWidth)),
+      y: Math.max(0, Math.min(1, position.sourceY / position.sourceHeight)),
+      color,
+    }),
+    [laserColor],
+  );
+
+  React.useEffect(() => {
+    if (!remoteLaserEvent) return;
+    const surface = imageSurfaceRef.current;
+    if (!surface) return;
+    const rect = surface.getBoundingClientRect();
+    const position = getMagnifierPosition(
+      rect.left + remoteLaserEvent.event.x * rect.width,
+      rect.top + remoteLaserEvent.event.y * rect.height,
+    );
+    if (!position) return;
+    laserLayerRef.current?.emit("remote", remoteLaserEvent.event, {
+      x: position.pointerX,
+      y: position.pointerY,
+    });
+  }, [getMagnifierPosition, remoteLaserEvent]);
+
   const finishTextEditing = React.useCallback(
     (commit: boolean) => {
       const current = textEditorRef.current;
@@ -328,7 +378,7 @@ export default function ReviewCanvas({
       }`}
       onWheel={(event) => {
         if (interactionDisabled) return;
-        if (activeTool === "magnifier") {
+        if (activeTool === "magnifier" || activeTool === "laser") {
           event.preventDefault();
           return;
         }
@@ -338,6 +388,19 @@ export default function ReviewCanvas({
         onScaleChange(Math.min(4, Math.max(0.25, scale * zoomFactor)));
       }}
       onPointerDown={(event) => {
+        if (activeTool === "laser" && !interactionDisabled && event.button === 0) {
+          const position = getMagnifierPosition(event.clientX, event.clientY);
+          if (!position) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          laserPointerRef.current = { pointerId: event.pointerId, position };
+          const laserEvent = createLaserEvent("start", position);
+          laserLayerRef.current?.emit("local", laserEvent, {
+            x: position.pointerX,
+            y: position.pointerY,
+          });
+          onLaserEvent(laserEvent);
+          return;
+        }
         if (
           activeTool === "magnifier" &&
           !interactionDisabled &&
@@ -374,6 +437,19 @@ export default function ReviewCanvas({
         };
       }}
       onPointerMove={(event) => {
+        const laser = laserPointerRef.current;
+        if (laser?.pointerId === event.pointerId) {
+          const position = getMagnifierPosition(event.clientX, event.clientY);
+          if (!position) return;
+          laser.position = position;
+          const laserEvent = createLaserEvent("move", position);
+          laserLayerRef.current?.emit("local", laserEvent, {
+            x: position.pointerX,
+            y: position.pointerY,
+          });
+          onLaserEvent(laserEvent);
+          return;
+        }
         const magnifier = magnifierPointerRef.current;
         if (magnifier?.pointerId === event.pointerId) {
           const position = getMagnifierPosition(event.clientX, event.clientY);
@@ -394,6 +470,19 @@ export default function ReviewCanvas({
         });
       }}
       onPointerUp={(event) => {
+        const laser = laserPointerRef.current;
+        if (laser?.pointerId === event.pointerId) {
+          const position =
+            getMagnifierPosition(event.clientX, event.clientY) || laser.position;
+          const laserEvent = createLaserEvent("end", position);
+          laserLayerRef.current?.emit("local", laserEvent, {
+            x: position.pointerX,
+            y: position.pointerY,
+          });
+          onLaserEvent(laserEvent);
+          laserPointerRef.current = null;
+          return;
+        }
         if (magnifierPointerRef.current?.pointerId === event.pointerId) {
           stopMagnifier();
           return;
@@ -401,6 +490,16 @@ export default function ReviewCanvas({
         if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
       }}
       onPointerCancel={() => {
+        const laser = laserPointerRef.current;
+        if (laser) {
+          const laserEvent = createLaserEvent("end", laser.position);
+          laserLayerRef.current?.emit("local", laserEvent, {
+            x: laser.position.pointerX,
+            y: laser.position.pointerY,
+          });
+          onLaserEvent(laserEvent);
+          laserPointerRef.current = null;
+        }
         stopMagnifier();
         dragRef.current = null;
       }}
@@ -535,6 +634,7 @@ export default function ReviewCanvas({
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
+      <ReviewLaserLayer controllerRef={laserLayerRef} />
       {magnifierPosition || remoteMagnifierPosition ? (
         <ReviewMagnifierLens
           imageUrl={image.url}
