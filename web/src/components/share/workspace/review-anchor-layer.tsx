@@ -196,9 +196,11 @@ export default function ReviewAnchorLayer({
       }
     : null;
 
+  if (!commentMode) return null;
+
   return (
     <div
-      className={`absolute inset-0 z-30 ${commentMode ? "pointer-events-auto cursor-crosshair" : "pointer-events-none"}`}
+      className="pointer-events-auto absolute inset-0 z-30 cursor-crosshair"
       onPointerDown={(event) => {
         if (!commentMode || event.button !== 0 || event.target !== event.currentTarget) return;
         if (draft || editingId || selectedId) {
@@ -221,7 +223,7 @@ export default function ReviewAnchorLayer({
         const style = anchorStyle(anchor, imageWidth, imageHeight);
         if (anchor.kind === "reaction") {
           return (
-            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-x-1/2 -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
               <button
                 type="button"
                 onClick={(event) => {
@@ -237,7 +239,7 @@ export default function ReviewAnchorLayer({
                 className={`flex h-9 w-9 items-center justify-center rounded-full border bg-white text-xl shadow-md ${anchor.resolved ? "border-emerald-400 opacity-65" : "border-white"}`}
                 title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : anchor.resolved ? labels.anchorResolved : labels.anchorOpen}
               >
-                {commentMode ? anchor.reaction : <FiMessageSquare className="h-4 w-4 text-slate-600" aria-hidden="true" />}
+                {anchor.reaction}
               </button>
               {selectedId === anchor.id ? (
                 <AnchorStatusMenu anchor={anchor} labels={labels} onUpdate={(patch) => updateAnchor(anchor, patch)} />
@@ -250,7 +252,7 @@ export default function ReviewAnchorLayer({
         if (anchor.kind === "label") {
           const endorsed = anchor.endorsements.includes(actorId);
           return (
-            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
               <div className="group relative flex items-center">
                 <button
                   type="button"
@@ -270,13 +272,11 @@ export default function ReviewAnchorLayer({
                   className={`h-7 rounded-full border px-3 pr-7 text-xs font-semibold shadow-md ${anchor.resolved ? "border-emerald-300 bg-emerald-50 text-emerald-700" : endorsed ? "border-blue-400 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
                   title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : labels.anchorEndorse}
                 >
-                  {commentMode ? anchor.label : <FiTag className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {anchor.label}
                 </button>
-                {commentMode ? (
-                  <span className="pointer-events-none absolute right-1 top-[-7px] flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-bold text-white">
-                    {anchor.endorsements.length}
-                  </span>
-                ) : null}
+                <span className="pointer-events-none absolute right-1 top-[-7px] flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-bold text-white">
+                  {anchor.endorsements.length}
+                </span>
                 <button
                   type="button"
                   onClick={(event) => {
@@ -296,7 +296,7 @@ export default function ReviewAnchorLayer({
         }
 
         return (
-          <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-x-1/2 -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
+          <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
             <button
               type="button"
               onClick={(event) => {
@@ -315,12 +315,10 @@ export default function ReviewAnchorLayer({
               title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : undefined}
             >
               {anchor.todo ? <FiFlag className="h-4 w-4" aria-hidden="true" /> : <FiFileText className="h-4 w-4" aria-hidden="true" />}
-              {commentMode ? (
-                <span className="pointer-events-none absolute bottom-11 left-1/2 hidden w-56 -translate-x-1/2 rounded bg-slate-950 px-2.5 py-2 text-left text-xs font-normal text-white shadow-xl group-hover:block">
-                  <span className="block whitespace-pre-wrap break-words">{anchor.comment}</span>
-                  <span className="mt-1 block text-[10px] text-slate-300">{formatAnchorTime(anchor.createdAt)} · {anchor.resolved ? labels.anchorResolved : anchor.todo ? labels.anchorTodo : labels.anchorOpen}</span>
-                </span>
-              ) : null}
+              <span className="pointer-events-none absolute bottom-11 left-1/2 hidden w-56 -translate-x-1/2 rounded bg-slate-950 px-2.5 py-2 text-left text-xs font-normal text-white shadow-xl group-hover:block">
+                <span className="block whitespace-pre-wrap break-words">{anchor.comment}</span>
+                <span className="mt-1 block text-[10px] text-slate-300">{formatAnchorTime(anchor.createdAt)} · {anchor.resolved ? labels.anchorResolved : anchor.todo ? labels.anchorTodo : labels.anchorOpen}</span>
+              </span>
             </button>
             {editingId === anchor.id ? (
               <div className="absolute left-5 top-5">

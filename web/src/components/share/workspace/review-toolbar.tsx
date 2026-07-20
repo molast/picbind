@@ -473,6 +473,16 @@ export default function ReviewToolbar({
             onCommentModeChange(!commentMode);
           }}
         />
+        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
+        <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={controlsDisabled || !canUndo} />
+        <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={controlsDisabled || !canRedo} />
+        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
+        <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} disabled={controlsDisabled} />
+        <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={controlsDisabled} />
+        <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={controlsDisabled} />
+        <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
+        </div>
+        <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
         {commentMode ? (
           <button
             type="button"
@@ -488,16 +498,6 @@ export default function ReviewToolbar({
             <FiTrash2 className="h-4 w-4" aria-hidden="true" />
           </button>
         ) : null}
-        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
-        <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={controlsDisabled || !canUndo} />
-        <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={controlsDisabled || !canRedo} />
-        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
-        <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} disabled={controlsDisabled} />
-        <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={controlsDisabled} />
-        <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={controlsDisabled} />
-        <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
-        </div>
-        <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
         <div
           className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
             remoteReviewActive ? "text-emerald-600" : "text-slate-400"
