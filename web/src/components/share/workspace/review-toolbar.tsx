@@ -24,6 +24,7 @@ import {
   LuMoveUpRight,
   LuPaintBucket,
   LuSearch,
+  LuSparkles,
   LuUsersRound,
 } from "react-icons/lu";
 import { PiHandPalmBold } from "react-icons/pi";
@@ -56,6 +57,7 @@ type ReviewToolbarProps = {
   fillColor: string | null;
   lineThickness: number;
   lineThicknessDisabled: boolean;
+  magnifierHighlightEnabled: boolean;
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
   hasSelection: boolean;
@@ -67,6 +69,7 @@ type ReviewToolbarProps = {
   onColorChange(color: string): void;
   onFillColorChange(color: string | null): void;
   onLineThicknessChange(value: number): void;
+  onMagnifierHighlightChange(enabled: boolean): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -130,6 +133,7 @@ export default function ReviewToolbar({
   fillColor,
   lineThickness,
   lineThicknessDisabled,
+  magnifierHighlightEnabled,
   arrowStyle,
   lineStyle,
   hasSelection,
@@ -141,6 +145,7 @@ export default function ReviewToolbar({
   onColorChange,
   onFillColorChange,
   onLineThicknessChange,
+  onMagnifierHighlightChange,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -156,10 +161,12 @@ export default function ReviewToolbar({
     | "line"
     | "arrowStyle"
     | "lineStyle"
+    | "magnifier"
     | null
   >(null);
   const panelsRef = React.useRef<HTMLDivElement | null>(null);
   const emojiAnchorRef = React.useRef<HTMLDivElement | null>(null);
+  const magnifierAnchorRef = React.useRef<HTMLDivElement | null>(null);
   const lineThicknessButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   React.useEffect(() => {
@@ -182,7 +189,6 @@ export default function ReviewToolbar({
   const navigationTools: ToolButtonProps[] = [
     { icon: FiMousePointer, label: labels.selectTool, onClick: () => onToolChange("select"), active: activeTool === "select", disabled: workspaceLocked },
     { icon: PiHandPalmBold, label: labels.handTool, onClick: () => onToolChange("hand"), active: activeTool === "hand", disabled: workspaceLocked },
-    { icon: LuSearch, label: labels.magnifierTool, onClick: () => onToolChange("magnifier"), active: activeTool === "magnifier", disabled: workspaceLocked },
   ];
   const annotationTools: ToolButtonProps[] = [
     { icon: FiSquare, label: labels.rectangleTool, onClick: () => onToolChange("rectangle"), active: activeTool === "rectangle", disabled: workspaceLocked },
@@ -224,6 +230,51 @@ export default function ReviewToolbar({
         {navigationTools.map((tool) => (
           <ToolButton key={tool.label} {...tool} />
         ))}
+        <div ref={magnifierAnchorRef} className="relative shrink-0">
+          <ToolButton
+            icon={LuSearch}
+            label={labels.magnifierTool}
+            active={activeTool === "magnifier" || openPanel === "magnifier"}
+            disabled={workspaceLocked}
+            onClick={() => {
+              onToolChange("magnifier");
+              setOpenPanel((current) =>
+                current === "magnifier" ? null : "magnifier",
+              );
+            }}
+          />
+          <ReviewToolbarPopover
+            anchorRef={magnifierAnchorRef}
+            open={openPanel === "magnifier"}
+            width={76}
+          >
+            <div className="flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={magnifierHighlightEnabled}
+                aria-label={labels.magnifierHighlight}
+                title={labels.magnifierHighlight}
+                onClick={() =>
+                  onMagnifierHighlightChange(!magnifierHighlightEnabled)
+                }
+                className={`relative flex h-7 w-12 items-center rounded-full transition ${
+                  magnifierHighlightEnabled ? "bg-blue-600" : "bg-slate-300"
+                }`}
+              >
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full bg-white text-blue-600 shadow transition-transform ${
+                    magnifierHighlightEnabled
+                      ? "translate-x-6"
+                      : "translate-x-1"
+                  }`}
+                >
+                  <LuSparkles className="h-3 w-3" aria-hidden="true" />
+                </span>
+              </button>
+            </div>
+          </ReviewToolbarPopover>
+        </div>
         <ReviewStrokeStyleTool
           icon={LuMoveUpRight}
           label={labels.arrowTool}

@@ -28,6 +28,7 @@ function estimateTextWidth(text: string, fontSize: number) {
 
 export type ReviewViewportOffset = { x: number; y: number };
 export type ReviewMagnifierPoint = { x: number; y: number };
+export type ReviewRemoteMagnifier = ReviewMagnifierPoint & { highlight: boolean };
 type MagnifierPosition = {
   pointerX: number;
   pointerY: number;
@@ -51,7 +52,7 @@ type ReviewCanvasProps = {
   arrowStyle: ReviewStrokeStyle;
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
-  remoteMagnifier: ReviewMagnifierPoint | null;
+  remoteMagnifier: ReviewRemoteMagnifier | null;
   onScaleChange(scale: number): void;
   onOffsetChange(offset: ReviewViewportOffset): void;
   onDimensionsChange(dimensions: { width: number; height: number }): void;
@@ -541,7 +542,11 @@ export default function ReviewCanvas({
           position={(magnifierPosition || remoteMagnifierPosition)!}
           containerWidth={containerSize.width}
           containerHeight={containerSize.height}
-          dimBackground={Boolean(remoteMagnifierPosition && !magnifierPosition)}
+          dimBackground={Boolean(
+            remoteMagnifierPosition &&
+              remoteMagnifier?.highlight &&
+              !magnifierPosition,
+          )}
         />
       ) : null}
     </div>

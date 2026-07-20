@@ -13,6 +13,7 @@ import type {
 } from "@/utils/review-collaboration";
 import ReviewCanvas, {
   type ReviewMagnifierPoint,
+  type ReviewRemoteMagnifier,
   type ReviewViewportOffset,
 } from "./review-canvas";
 import ReviewStatusBar from "./review-status-bar";
@@ -81,7 +82,9 @@ export default function ReviewWorkspace({
   const [remoteMode, setRemoteMode] = React.useState<ReviewMode>(null);
   const [remoteReviewActive, setRemoteReviewActive] = React.useState(false);
   const [remoteMagnifier, setRemoteMagnifier] =
-    React.useState<ReviewMagnifierPoint | null>(null);
+    React.useState<ReviewRemoteMagnifier | null>(null);
+  const [magnifierHighlightEnabled, setMagnifierHighlightEnabled] =
+    React.useState(true);
   const [incomingMessages, setIncomingMessages] = React.useState<
     Array<{ sequence: number; message: ReviewCollaborationMessage }>
   >([]);
@@ -144,6 +147,7 @@ export default function ReviewWorkspace({
           active: false,
           x: 0,
           y: 0,
+          highlight: magnifierHighlightEnabled,
         });
         return;
       }
@@ -159,10 +163,11 @@ export default function ReviewWorkspace({
           active: true,
           x: current.x,
           y: current.y,
+          highlight: magnifierHighlightEnabled,
         });
       });
     },
-    [baseMessage, onSendMessage],
+    [baseMessage, magnifierHighlightEnabled, onSendMessage],
   );
 
   const sendViewport = React.useCallback(() => {
@@ -301,7 +306,13 @@ export default function ReviewWorkspace({
     }
     if (message.type === "REVIEW_MAGNIFIER") {
       setRemoteMagnifier(
-        message.active ? { x: message.x, y: message.y } : null,
+        message.active
+          ? {
+              x: message.x,
+              y: message.y,
+              highlight: message.highlight,
+            }
+          : null,
       );
       return;
     }
@@ -647,6 +658,7 @@ export default function ReviewWorkspace({
         fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
         lineThicknessDisabled={false}
+        magnifierHighlightEnabled={magnifierHighlightEnabled}
         arrowStyle={
           selectedAnnotations.find((annotation) => annotation.type === "arrow")
             ?.strokeStyle ?? arrowStyle
@@ -667,6 +679,7 @@ export default function ReviewWorkspace({
         onColorChange={changeAnnotationColor}
         onFillColorChange={changeFillColor}
         onLineThicknessChange={changeLineThickness}
+        onMagnifierHighlightChange={setMagnifierHighlightEnabled}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}

@@ -109,6 +109,7 @@ export type ReviewCollaborationMessage =
       active: boolean;
       x: number;
       y: number;
+      highlight: boolean;
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
@@ -280,6 +281,7 @@ export function parseReviewCollaborationMessage(
   if (
     message.type === "REVIEW_MAGNIFIER" &&
     (typeof message.active !== "boolean" ||
+      typeof message.highlight !== "boolean" ||
       !validFinite(message.x) ||
       Number(message.x) < 0 ||
       Number(message.x) > 1 ||
