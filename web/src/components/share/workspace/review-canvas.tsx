@@ -78,7 +78,6 @@ type ReviewCanvasProps = {
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
   commentMode: boolean;
-  commentCleanupMode: boolean;
   anchors: ReviewAnchor[];
   remoteMagnifier: ReviewRemoteMagnifier | null;
   laserColor: string;
@@ -113,7 +112,6 @@ export default function ReviewCanvas({
   lineStyle,
   interactionDisabled,
   commentMode,
-  commentCleanupMode,
   anchors,
   remoteMagnifier,
   laserColor,
@@ -683,7 +681,6 @@ export default function ReviewCanvas({
               actorId={actorId}
               canDeleteAny={canDeleteAnyAnchor}
               commentMode={commentMode}
-              cleanupMode={commentCleanupMode}
               readOnly={interactionDisabled}
               anchors={anchors}
               labels={labels}

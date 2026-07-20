@@ -22,6 +22,7 @@ import ReviewCanvas, {
 } from "./review-canvas";
 import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
+import ReviewClearCommentsDialog from "./review-clear-comments-dialog";
 import { useReviewHistory } from "./use-review-history";
 import {
   loadReviewHistory,
@@ -95,9 +96,9 @@ export default function ReviewWorkspace({
   const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
   const [commentMode, setCommentMode] = React.useState(false);
-  const [commentCleanupMode, setCommentCleanupMode] = React.useState(false);
   const [anchors, setAnchors] = React.useState<ReviewAnchor[]>([]);
-  const [deletedAnchor, setDeletedAnchor] = React.useState<ReviewAnchor | null>(null);
+  const [deletedAnchors, setDeletedAnchors] = React.useState<ReviewAnchor[]>([]);
+  const [clearCommentsOpen, setClearCommentsOpen] = React.useState(false);
   const visibleAnchors = React.useMemo(
     () => anchors.filter((anchor) => !anchor.deleted),
     [anchors],
@@ -271,9 +272,9 @@ export default function ReviewWorkspace({
     setSelectedIds([]);
     setActiveTool("select");
     setCommentMode(false);
-    setCommentCleanupMode(false);
     setAnchors([]);
-    setDeletedAnchor(null);
+    setDeletedAnchors([]);
+    setClearCommentsOpen(false);
     if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
     undoDeleteTimerRef.current = null;
     setLocalMode(null);
@@ -571,43 +572,65 @@ export default function ReviewWorkspace({
     [baseMessage, onSendMessage],
   );
 
-  const deleteAnchor = React.useCallback(
-    (anchor: ReviewAnchor) => {
-      if (role !== "owner" && anchor.createdBy !== actorId) return;
-      const deletedAt = Date.now();
-      setAnchors((current) =>
-        mergeReviewAnchors(current, [
-          { ...anchor, deleted: true, updatedAt: deletedAt },
-        ]),
+  const deleteAnchors = React.useCallback(
+    (items: ReviewAnchor[]) => {
+      const deletable = items.filter(
+        (anchor) => role === "owner" || anchor.createdBy === actorId,
       );
-      onSendMessage({
-        ...baseMessage(),
-        type: "REVIEW_ANCHOR_DELETE",
-        anchorId: anchor.id,
-        deletedAt,
+      if (!deletable.length) return;
+      const deletedAt = Date.now();
+      const tombstones = deletable.map((anchor, index) => ({
+        ...anchor,
+        deleted: true,
+        updatedAt: Math.max(deletedAt + index, anchor.updatedAt + 1),
+      }));
+      setAnchors((current) =>
+        mergeReviewAnchors(current, tombstones),
+      );
+      tombstones.forEach((anchor) => {
+        onSendMessage({
+          ...baseMessage(),
+          type: "REVIEW_ANCHOR_DELETE",
+          anchorId: anchor.id,
+          deletedAt: anchor.updatedAt,
+        });
       });
       if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
-      setDeletedAnchor(anchor);
+      setDeletedAnchors(deletable);
       undoDeleteTimerRef.current = setTimeout(() => {
         undoDeleteTimerRef.current = null;
-        setDeletedAnchor(null);
+        setDeletedAnchors([]);
       }, 3000);
     },
     [actorId, baseMessage, onSendMessage, role],
   );
 
+  const deleteAnchor = React.useCallback(
+    (anchor: ReviewAnchor) => deleteAnchors([anchor]),
+    [deleteAnchors],
+  );
+
   const undoDeleteAnchor = React.useCallback(() => {
-    if (!deletedAnchor) return;
+    if (!deletedAnchors.length) return;
     if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
     undoDeleteTimerRef.current = null;
-    const restored = {
-      ...deletedAnchor,
+    const now = Date.now();
+    const restored = deletedAnchors.map((anchor, index) => ({
+      ...anchor,
       deleted: false,
-      updatedAt: Math.max(Date.now(), deletedAnchor.updatedAt + 1),
-    };
-    setDeletedAnchor(null);
-    upsertAnchor(restored);
-  }, [deletedAnchor, upsertAnchor]);
+      updatedAt: Math.max(now + index, anchor.updatedAt + 1),
+    }));
+    setDeletedAnchors([]);
+    restored.forEach(upsertAnchor);
+  }, [deletedAnchors, upsertAnchor]);
+
+  const clearableAnchors = React.useMemo(
+    () =>
+      role === "owner"
+        ? visibleAnchors
+        : visibleAnchors.filter((anchor) => anchor.createdBy === actorId),
+    [actorId, role, visibleAnchors],
+  );
 
   const commitCreate = React.useCallback(
     (annotation: ReviewAnnotation) => {
@@ -847,7 +870,6 @@ export default function ReviewWorkspace({
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
         commentMode={commentMode}
-        commentCleanupMode={commentCleanupMode}
         annotationColor={displayedColor}
         fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
@@ -878,11 +900,10 @@ export default function ReviewWorkspace({
         onLaserColorChange={setLaserColor}
         onCommentModeChange={(enabled) => {
           setCommentMode(enabled);
-          setCommentCleanupMode(false);
           setSelectedIds([]);
           if (enabled) setActiveTool("select");
         }}
-        onCommentCleanupModeChange={setCommentCleanupMode}
+        onClearComments={() => setClearCommentsOpen(true)}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}
@@ -908,7 +929,6 @@ export default function ReviewWorkspace({
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
         commentMode={commentMode}
-        commentCleanupMode={commentCleanupMode}
         anchors={visibleAnchors}
         remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
         laserColor={laserColor}
@@ -926,7 +946,7 @@ export default function ReviewWorkspace({
         onAnchorDelete={deleteAnchor}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
-      {deletedAnchor ? (
+      {deletedAnchors.length ? (
         <div className="fixed bottom-6 left-1/2 z-[140] flex -translate-x-1/2 items-center gap-4 rounded-md bg-slate-950 px-4 py-3 text-sm text-white shadow-2xl">
           <span>{labels.anchorDeleted}</span>
           <button
@@ -938,6 +958,16 @@ export default function ReviewWorkspace({
           </button>
         </div>
       ) : null}
+      <ReviewClearCommentsDialog
+        open={clearCommentsOpen}
+        count={clearableAnchors.length}
+        labels={labels}
+        onCancel={() => setClearCommentsOpen(false)}
+        onConfirm={() => {
+          setClearCommentsOpen(false);
+          deleteAnchors(clearableAnchors);
+        }}
+      />
     </div>
   );
 }

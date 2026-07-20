@@ -57,7 +57,6 @@ type ReviewToolbarProps = {
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
   commentMode: boolean;
-  commentCleanupMode: boolean;
   annotationColor: string;
   fillColor: string | null;
   lineThickness: number;
@@ -78,7 +77,7 @@ type ReviewToolbarProps = {
   onMagnifierHighlightChange(enabled: boolean): void;
   onLaserColorChange(color: string): void;
   onCommentModeChange(enabled: boolean): void;
-  onCommentCleanupModeChange(enabled: boolean): void;
+  onClearComments(): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -139,7 +138,6 @@ export default function ReviewToolbar({
   remoteReviewActive,
   workspaceLocked,
   commentMode,
-  commentCleanupMode,
   annotationColor,
   fillColor,
   lineThickness,
@@ -160,7 +158,7 @@ export default function ReviewToolbar({
   onMagnifierHighlightChange,
   onLaserColorChange,
   onCommentModeChange,
-  onCommentCleanupModeChange,
+  onClearComments,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -486,14 +484,10 @@ export default function ReviewToolbar({
         {commentMode ? (
           <button
             type="button"
-            onClick={() => onCommentCleanupModeChange(!commentCleanupMode)}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition ${
-              commentCleanupMode
-                ? "bg-red-600 text-white shadow-sm"
-                : "bg-red-50 text-red-600 hover:bg-red-100"
-            }`}
-            aria-label={labels.anchorCleanupMode}
-            title={labels.anchorCleanupMode}
+            onClick={onClearComments}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-600 transition hover:bg-red-100"
+            aria-label={labels.anchorClearAll}
+            title={labels.anchorClearAll}
           >
             <FiTrash2 className="h-4 w-4" aria-hidden="true" />
           </button>

@@ -23,7 +23,6 @@ type ReviewAnchorLayerProps = {
   actorId: string;
   canDeleteAny: boolean;
   commentMode: boolean;
-  cleanupMode: boolean;
   readOnly: boolean;
   anchors: ReviewAnchor[];
   labels: ShareRoomLabels;
@@ -84,7 +83,6 @@ export default function ReviewAnchorLayer({
   actorId,
   canDeleteAny,
   commentMode,
-  cleanupMode,
   readOnly,
   anchors,
   labels,
@@ -101,8 +99,8 @@ export default function ReviewAnchorLayer({
   const longPressTriggeredRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (!commentMode || cleanupMode) setDraft(null);
-  }, [cleanupMode, commentMode]);
+    if (!commentMode) setDraft(null);
+  }, [commentMode]);
 
   React.useEffect(
     () => () => {
@@ -203,12 +201,8 @@ export default function ReviewAnchorLayer({
       className="pointer-events-auto absolute inset-0 z-30 cursor-crosshair"
       onPointerDown={(event) => {
         if (!commentMode || event.button !== 0 || event.target !== event.currentTarget) return;
-        if (draft || editingId || selectedId) {
+        if (draft || editingId || selectedId || deleteMenuId) {
           closePanels();
-          return;
-        }
-        if (cleanupMode) {
-          setDeleteMenuId(null);
           return;
         }
         const rect = event.currentTarget.getBoundingClientRect();
@@ -223,21 +217,17 @@ export default function ReviewAnchorLayer({
         const style = anchorStyle(anchor, imageWidth, imageHeight);
         if (anchor.kind === "reaction") {
           return (
-            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2" style={style}>
               <button
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   if (consumeLongPress(anchor)) return;
-                  if (cleanupMode) {
-                    if (canDeleteAnchor(anchor)) onDelete(anchor);
-                    return;
-                  }
                   if (readOnly) return;
                   setSelectedId((current) => current === anchor.id ? null : anchor.id);
                 }}
                 className={`flex h-9 w-9 items-center justify-center rounded-full border bg-white text-xl shadow-md ${anchor.resolved ? "border-emerald-400 opacity-65" : "border-white"}`}
-                title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : anchor.resolved ? labels.anchorResolved : labels.anchorOpen}
+                title={anchor.resolved ? labels.anchorResolved : labels.anchorOpen}
               >
                 {anchor.reaction}
               </button>
@@ -252,17 +242,13 @@ export default function ReviewAnchorLayer({
         if (anchor.kind === "label") {
           const endorsed = anchor.endorsements.includes(actorId);
           return (
-            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className="pointer-events-auto absolute -translate-y-1/2" style={style}>
               <div className="group relative flex items-center">
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     if (consumeLongPress(anchor)) return;
-                    if (cleanupMode) {
-                      if (canDeleteAnchor(anchor)) onDelete(anchor);
-                      return;
-                    }
                     if (readOnly) return;
                     const endorsements = endorsed
                       ? anchor.endorsements.filter((id) => id !== actorId)
@@ -270,7 +256,7 @@ export default function ReviewAnchorLayer({
                     updateAnchor(anchor, { endorsements });
                   }}
                   className={`h-7 rounded-full border px-3 pr-7 text-xs font-semibold shadow-md ${anchor.resolved ? "border-emerald-300 bg-emerald-50 text-emerald-700" : endorsed ? "border-blue-400 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
-                  title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : labels.anchorEndorse}
+                  title={labels.anchorEndorse}
                 >
                   {anchor.label}
                 </button>
@@ -296,23 +282,18 @@ export default function ReviewAnchorLayer({
         }
 
         return (
-          <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}`} style={style}>
+          <div key={anchor.id} {...anchorPointerHandlers(anchor)} className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2" style={style}>
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 if (consumeLongPress(anchor)) return;
-                if (cleanupMode) {
-                  if (canDeleteAnchor(anchor)) onDelete(anchor);
-                  return;
-                }
                 if (readOnly) return;
                 setEditingId(anchor.id);
                 setSelectedId(null);
               }}
               className={`group relative flex h-9 w-9 items-center justify-center rounded-full border-2 bg-[#fff4a8] text-amber-900 shadow-md ${anchor.resolved ? "border-emerald-500" : anchor.todo ? "border-amber-600" : "border-white"}`}
               aria-label={labels.anchorStickyNote}
-              title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : undefined}
             >
               {anchor.todo ? <FiFlag className="h-4 w-4" aria-hidden="true" /> : <FiFileText className="h-4 w-4" aria-hidden="true" />}
               <span className="pointer-events-none absolute bottom-11 left-1/2 hidden w-56 -translate-x-1/2 rounded bg-slate-950 px-2.5 py-2 text-left text-xs font-normal text-white shadow-xl group-hover:block">
