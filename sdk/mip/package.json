@@ -1,0 +1,26 @@
+{
+  "name": "@picbind/mip",
+  "version": "0.1.0",
+  "description": "Motion Intent Protocol runtime for lightweight vector animation commands.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4173",
+    "check": "tsc --noEmit",
+    "build:sdk": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "build:preview": "vite build --outDir preview-dist",
+    "build": "pnpm run build:sdk && pnpm run build:preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0"
+  }
+}
