@@ -24,9 +24,13 @@ uniform sampler2D uTexture;
 uniform vec2 uCenter;
 uniform vec2 uSize;
 uniform float uProgress;
+uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
 
 void main() {
-  vec2 delta = vTextureCoord - uCenter;
+  vec2 textureScale = uOutputFrame.zw * uInputSize.zw;
+  vec2 normalizedUv = vTextureCoord / max(textureScale, vec2(0.0001));
+  vec2 delta = normalizedUv - uCenter;
   float aspect = uSize.x / max(1.0, uSize.y);
   vec2 metricDelta = vec2(delta.x * aspect, delta.y);
   float distanceFromCenter = length(metricDelta);
@@ -34,18 +38,19 @@ void main() {
     ? metricDelta / distanceFromCenter
     : vec2(0.0);
 
-  float radius = mix(0.015, 0.235, uProgress);
-  float packetWidth = mix(0.032, 0.014, uProgress);
+  float maximumRadius = min(0.11, 68.0 / max(1.0, uSize.y));
+  float radius = mix(0.005, maximumRadius, uProgress);
+  float packetWidth = mix(0.010, 0.0045, uProgress);
   float packet = exp(-pow((distanceFromCenter - radius) / packetWidth, 2.0));
   float innerPacket = exp(-pow((distanceFromCenter - radius * 0.72) / (packetWidth * 1.35), 2.0));
-  float phase = (distanceFromCenter - radius) * 210.0;
+  float phase = (distanceFromCenter - radius) * 320.0;
   float wave = sin(phase) * packet + sin(phase * 0.72 - 1.4) * innerPacket * 0.28;
   float life = smoothstep(1.0, 0.72, uProgress);
-  float displacement = wave * mix(0.013, 0.003, uProgress) * life;
+  float displacement = wave * mix(0.006, 0.0015, uProgress) * life;
 
   vec2 uvDirection = vec2(direction.x / max(0.0001, aspect), direction.y);
-  vec2 refractedUv = clamp(vTextureCoord - uvDirection * displacement, vec2(0.001), vec2(0.999));
-  vec4 refracted = texture(uTexture, refractedUv);
+  vec2 refractedUv = clamp(normalizedUv - uvDirection * displacement, vec2(0.001), vec2(0.999));
+  vec4 refracted = texture(uTexture, refractedUv * textureScale);
 
   float highlight = cos(phase) * packet * life;
   refracted.rgb += max(highlight, 0.0) * vec3(0.14, 0.18, 0.22);
@@ -175,7 +180,7 @@ export default function ReviewRippleLayer({
               },
             },
             antialias: "on",
-            padding: 2,
+            padding: 0,
           });
           const sprite = new pixi.Sprite(texture);
           sprite.width = width;
