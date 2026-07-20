@@ -24,13 +24,9 @@ uniform sampler2D uTexture;
 uniform vec2 uCenter;
 uniform vec2 uSize;
 uniform float uProgress;
-uniform vec4 uInputSize;
-uniform vec4 uOutputFrame;
 
 void main() {
-  vec2 textureScale = uOutputFrame.zw * uInputSize.zw;
-  vec2 imageCoord = vTextureCoord / textureScale;
-  vec2 delta = imageCoord - uCenter;
+  vec2 delta = vTextureCoord - uCenter;
   float aspect = uSize.x / max(1.0, uSize.y);
   vec2 metricDelta = vec2(delta.x * aspect, delta.y);
   float distanceFromCenter = length(metricDelta);
@@ -48,12 +44,8 @@ void main() {
   float displacement = wave * mix(0.013, 0.003, uProgress) * life;
 
   vec2 uvDirection = vec2(direction.x / max(0.0001, aspect), direction.y);
-  vec2 refractedImageCoord = clamp(
-    imageCoord - uvDirection * displacement,
-    vec2(0.001),
-    vec2(0.999)
-  );
-  vec4 refracted = texture(uTexture, refractedImageCoord * textureScale);
+  vec2 refractedUv = clamp(vTextureCoord - uvDirection * displacement, vec2(0.001), vec2(0.999));
+  vec4 refracted = texture(uTexture, refractedUv);
 
   float highlight = cos(phase) * packet * life;
   refracted.rgb += max(highlight, 0.0) * vec3(0.14, 0.18, 0.22);
@@ -183,7 +175,7 @@ export default function ReviewRippleLayer({
               },
             },
             antialias: "on",
-            padding: 0,
+            padding: 2,
           });
           const sprite = new pixi.Sprite(texture);
           sprite.width = width;
