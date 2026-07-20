@@ -74,7 +74,7 @@ void main() {
 
   float maximumRadius = min(72.0, min(uSize.x, uSize.y) * 0.12);
   float frontRadius = mix(3.0, maximumRadius, uProgress);
-  float waveWidth = mix(3.2, 2.1, uProgress);
+  float waveWidth = mix(6.4, 4.2, uProgress);
   float spacing = 10.0;
 
   float active1 = smoothstep(spacing, spacing + 3.0, frontRadius);
