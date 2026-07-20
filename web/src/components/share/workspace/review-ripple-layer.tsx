@@ -16,28 +16,8 @@ type ReviewRippleLayerProps = {
 const RIPPLE_DURATION_MS = 1050;
 const MAX_ACTIVE_RIPPLES = 5;
 
-const RIPPLE_VERTEX_SHADER = `
-in vec2 aPosition;
-out vec2 vTextureCoord;
-out vec2 vImageCoord;
-
-uniform vec4 uInputSize;
-uniform vec4 uOutputFrame;
-uniform vec4 uOutputTexture;
-
-void main() {
-  vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-  position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-  position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
-  gl_Position = vec4(position, 0.0, 1.0);
-  vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-  vImageCoord = aPosition;
-}
-`;
-
 const RIPPLE_FRAGMENT_SHADER = `
 in vec2 vTextureCoord;
-in vec2 vImageCoord;
 out vec4 finalColor;
 
 uniform sampler2D uTexture;
@@ -49,7 +29,8 @@ uniform vec4 uOutputFrame;
 
 void main() {
   vec2 textureScale = uOutputFrame.zw * uInputSize.zw;
-  vec2 delta = vImageCoord - uCenter;
+  vec2 imageCoord = vTextureCoord / textureScale;
+  vec2 delta = imageCoord - uCenter;
   float aspect = uSize.x / max(1.0, uSize.y);
   vec2 metricDelta = vec2(delta.x * aspect, delta.y);
   float distanceFromCenter = length(metricDelta);
@@ -57,23 +38,22 @@ void main() {
     ? metricDelta / distanceFromCenter
     : vec2(0.0);
 
-  float maximumRadius = min(0.11, 68.0 / max(1.0, uSize.y));
-  float radius = mix(0.005, maximumRadius, uProgress);
-  float packetWidth = mix(0.010, 0.0045, uProgress);
+  float radius = mix(0.015, 0.235, uProgress);
+  float packetWidth = mix(0.032, 0.014, uProgress);
   float packet = exp(-pow((distanceFromCenter - radius) / packetWidth, 2.0));
   float innerPacket = exp(-pow((distanceFromCenter - radius * 0.72) / (packetWidth * 1.35), 2.0));
-  float phase = (distanceFromCenter - radius) * 320.0;
+  float phase = (distanceFromCenter - radius) * 210.0;
   float wave = sin(phase) * packet + sin(phase * 0.72 - 1.4) * innerPacket * 0.28;
   float life = smoothstep(1.0, 0.72, uProgress);
-  float displacement = wave * mix(0.006, 0.0015, uProgress) * life;
+  float displacement = wave * mix(0.013, 0.003, uProgress) * life;
 
   vec2 uvDirection = vec2(direction.x / max(0.0001, aspect), direction.y);
-  vec2 refractedUv = clamp(
-    vTextureCoord - uvDirection * displacement * textureScale,
+  vec2 refractedImageCoord = clamp(
+    imageCoord - uvDirection * displacement,
     vec2(0.001),
-    textureScale - vec2(0.001)
+    vec2(0.999)
   );
-  vec4 refracted = texture(uTexture, refractedUv);
+  vec4 refracted = texture(uTexture, refractedImageCoord * textureScale);
 
   float highlight = cos(phase) * packet * life;
   refracted.rgb += max(highlight, 0.0) * vec3(0.14, 0.18, 0.22);
@@ -186,7 +166,7 @@ export default function ReviewRippleLayer({
           const height = Math.max(1, container.clientHeight);
           const filter = pixi.Filter.from({
             gl: {
-              vertex: RIPPLE_VERTEX_SHADER,
+              vertex: pixi.defaultFilterVert,
               fragment: RIPPLE_FRAGMENT_SHADER,
             },
             resources: {
