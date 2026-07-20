@@ -22,7 +22,7 @@ function nextPowerOfTwo(value: number) {
   return 2 ** Math.ceil(Math.log2(Math.max(1, value)));
 }
 
-function getFilterCenter(
+function getFilterGeometry(
   x: number,
   y: number,
   width: number,
@@ -36,10 +36,13 @@ function getFilterCenter(
   const textureHeight =
     nextPowerOfTwo(Math.ceil(frameHeight * RIPPLE_FILTER_RESOLUTION - 1e-6)) /
     RIPPLE_FILTER_RESOLUTION;
-  return [
-    (RIPPLE_FILTER_PADDING + x * width) / textureWidth,
-    (RIPPLE_FILTER_PADDING + y * height) / textureHeight,
-  ];
+  return {
+    center: [
+      (RIPPLE_FILTER_PADDING + x * width) / textureWidth,
+      (RIPPLE_FILTER_PADDING + y * height) / textureHeight,
+    ],
+    textureSize: [textureWidth, textureHeight],
+  };
 }
 
 const RIPPLE_FRAGMENT_SHADER = `
@@ -49,36 +52,61 @@ out vec4 finalColor;
 uniform sampler2D uTexture;
 uniform vec2 uCenter;
 uniform vec2 uSize;
+uniform vec2 uTextureSize;
 uniform float uProgress;
 
+float rippleWave(float distancePx, float radiusPx, float widthPx) {
+  float position = (distancePx - radiusPx) / widthPx;
+  return sin(position * 2.35) * exp(-position * position);
+}
+
+float rippleEnvelope(float distancePx, float radiusPx, float widthPx) {
+  float position = (distancePx - radiusPx) / widthPx;
+  return exp(-position * position);
+}
+
 void main() {
-  vec2 delta = vTextureCoord - uCenter;
-  float aspect = uSize.x / max(1.0, uSize.y);
-  vec2 metricDelta = vec2(delta.x * aspect, delta.y);
-  float distanceFromCenter = length(metricDelta);
-  vec2 direction = distanceFromCenter > 0.0001
-    ? metricDelta / distanceFromCenter
+  vec2 deltaPx = (vTextureCoord - uCenter) * uTextureSize;
+  float distancePx = length(deltaPx);
+  vec2 direction = distancePx > 0.0001
+    ? deltaPx / distancePx
     : vec2(0.0);
 
-  float radius = mix(0.015, 0.235, uProgress);
-  float packetWidth = mix(0.032, 0.014, uProgress);
-  float packet = exp(-pow((distanceFromCenter - radius) / packetWidth, 2.0));
-  float innerPacket = exp(-pow((distanceFromCenter - radius * 0.72) / (packetWidth * 1.35), 2.0));
-  float phase = (distanceFromCenter - radius) * 210.0;
-  float wave = sin(phase) * packet + sin(phase * 0.72 - 1.4) * innerPacket * 0.28;
-  float life = smoothstep(1.0, 0.72, uProgress);
-  float displacement = wave * mix(0.013, 0.003, uProgress) * life;
+  float maximumRadius = min(72.0, min(uSize.x, uSize.y) * 0.12);
+  float frontRadius = mix(3.0, maximumRadius, uProgress);
+  float waveWidth = mix(3.2, 2.1, uProgress);
+  float spacing = 10.0;
 
-  vec2 uvDirection = vec2(direction.x / max(0.0001, aspect), direction.y);
-  vec2 refractedUv = clamp(vTextureCoord - uvDirection * displacement, vec2(0.001), vec2(0.999));
+  float active1 = smoothstep(spacing, spacing + 3.0, frontRadius);
+  float active2 = smoothstep(spacing * 2.0, spacing * 2.0 + 3.0, frontRadius);
+  float active3 = smoothstep(spacing * 3.0, spacing * 3.0 + 3.0, frontRadius);
+  float wave0 = rippleWave(distancePx, frontRadius, waveWidth);
+  float wave1 = rippleWave(distancePx, frontRadius - spacing, waveWidth) * active1;
+  float wave2 = rippleWave(distancePx, frontRadius - spacing * 2.0, waveWidth) * active2;
+  float wave3 = rippleWave(distancePx, frontRadius - spacing * 3.0, waveWidth) * active3;
+  float envelope0 = rippleEnvelope(distancePx, frontRadius, waveWidth);
+  float envelope1 = rippleEnvelope(distancePx, frontRadius - spacing, waveWidth) * active1;
+  float envelope2 = rippleEnvelope(distancePx, frontRadius - spacing * 2.0, waveWidth) * active2;
+  float envelope3 = rippleEnvelope(distancePx, frontRadius - spacing * 3.0, waveWidth) * active3;
+
+  float wave = wave0 + wave1 * 0.68 + wave2 * 0.44 + wave3 * 0.28;
+  float envelope = envelope0 + envelope1 * 0.68 + envelope2 * 0.44 + envelope3 * 0.28;
+  float life = 1.0 - smoothstep(0.72, 1.0, uProgress);
+  float displacementPx = wave * mix(5.0, 1.6, uProgress) * life;
+
+  vec2 refractedUv = clamp(
+    vTextureCoord - direction * displacementPx / uTextureSize,
+    vec2(0.001),
+    vec2(0.999)
+  );
   vec4 refracted = texture(uTexture, refractedUv);
 
-  float highlight = cos(phase) * packet * life;
+  float highlight = wave * life;
   refracted.rgb += max(highlight, 0.0) * vec3(0.14, 0.18, 0.22);
   refracted.rgb -= max(-highlight, 0.0) * vec3(0.09, 0.12, 0.14);
 
-  float centerPulse = exp(-distanceFromCenter * 72.0) * smoothstep(0.22, 0.0, uProgress);
-  float effectMask = clamp((packet + innerPacket * 0.25) * life + centerPulse, 0.0, 1.0);
+  float centerPulse = exp(-distancePx * 0.24) * (1.0 - smoothstep(0.0, 0.22, uProgress));
+  float effectMask = clamp(envelope * life + centerPulse, 0.0, 1.0);
   finalColor = vec4(refracted.rgb * effectMask, refracted.a * effectMask);
 }
 `;
@@ -182,7 +210,7 @@ export default function ReviewRippleLayer({
           if (event.phase !== "start" || !texture) return;
           const width = Math.max(1, container.clientWidth);
           const height = Math.max(1, container.clientHeight);
-          const center = getFilterCenter(event.x, event.y, width, height);
+          const geometry = getFilterGeometry(event.x, event.y, width, height);
           const filter = pixi.Filter.from({
             gl: {
               vertex: pixi.defaultFilterVert,
@@ -191,11 +219,15 @@ export default function ReviewRippleLayer({
             resources: {
               rippleUniforms: {
                 uCenter: {
-                  value: new Float32Array(center),
+                  value: new Float32Array(geometry.center),
                   type: "vec2<f32>",
                 },
                 uSize: {
                   value: new Float32Array([width, height]),
+                  type: "vec2<f32>",
+                },
+                uTextureSize: {
+                  value: new Float32Array(geometry.textureSize),
                   type: "vec2<f32>",
                 },
                 uProgress: { value: 0, type: "f32" },
