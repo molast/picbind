@@ -42,6 +42,22 @@ npm run build
 
 构建输出会生成到 `web/out/`，可作为 Cloudflare Pages 的静态产物目录。
 
+## 完全本地开发
+
+本地开发不会请求已部署的 `api.picbind.com`，房间 API、Durable Object、
+KV 和 WebSocket 信令都由本机运行时模拟，房间文件默认通过 P2P 传输。
+
+首次使用先安装本地 API 依赖，之后从仓库根目录一键启动：
+
+```bash
+cd cloudflare-worker && pnpm install
+cd .. && ./dev-local.sh
+```
+
+前端地址为 `http://localhost:3000`，本地 API 地址为
+`http://127.0.0.1:8787`。按 `Ctrl+C` 会同时停止两个进程，不会残留 API
+端口。本地房间和状态保存在 `cloudflare-worker/.wrangler/state`。
+
 ## WASM 构建
 
 Rust WASM 代码位于 `wasm/image_wasm/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：

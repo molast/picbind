@@ -25,6 +25,7 @@ type MetricsConfig = {
 };
 
 type Env = RuntimeLogEnv & {
+  LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<void>;
@@ -226,6 +227,11 @@ function isDevApiHost(request: Request) {
   return new URL(request.url).hostname === "api-dev.picbind.com";
 }
 
+function isLocalApiHost(request: Request) {
+  const hostname = new URL(request.url).hostname;
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
 function allowedOrigins(env: Env, request: Request) {
   const values = new Set(
     (env.ALLOWED_ORIGINS || env.SITE_URL || "")
@@ -238,7 +244,7 @@ function allowedOrigins(env: Env, request: Request) {
 }
 
 function corsHeaders(env: Env, request: Request) {
-  if (isDevApiHost(request)) {
+  if (isDevApiHost(request) || isLocalApiHost(request)) {
     return {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
@@ -279,7 +285,7 @@ function withCors(response: Response, env: Env, request: Request) {
 }
 
 function hasMissingOrInvalidOrigin(env: Env, request: Request) {
-  if (isDevApiHost(request)) {
+  if (isDevApiHost(request) || isLocalApiHost(request)) {
     return false;
   }
   const origin = request.headers.get("origin");

@@ -17,6 +17,7 @@ import {
 
 export type RealtimeRoomEnv = RuntimeLogEnv & ShareRoomR2Env & {
   REALTIME_ROOMS: DurableObjectNamespace;
+  LOCAL_RUNTIME?: string;
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
   SITE_URL?: string;
@@ -80,6 +81,9 @@ async function roomState(env: RealtimeRoomEnv, roomId: string) {
 }
 
 async function generateTurnIceServers(env: RealtimeRoomEnv) {
+  if (env.LOCAL_RUNTIME?.trim() === "1") {
+    return [];
+  }
   if (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim()) {
     throw new Error("Cloudflare TURN is not configured");
   }
@@ -628,7 +632,10 @@ export async function handleCreateShareRoom(
     return json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  if (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim()) {
+  if (
+    env.LOCAL_RUNTIME?.trim() !== "1" &&
+    (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim())
+  ) {
     return json(
       { error: "Cloudflare TURN is not configured" },
       { status: 503 },

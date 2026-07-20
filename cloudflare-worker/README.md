@@ -47,9 +47,30 @@ Notes:
 
 `ADMIN_KEY` is a Worker env variable/secret, not a KV entry.
 
-For local development, copy `.env.example` to `.env` and fill in the TURN
-values. Do not prefix either value with `NEXT_PUBLIC_`. For production, store the
-API token as a Worker secret:
+## Fully local development
+
+Local development does not call the deployed Worker, Cloudflare TURN, or R2.
+Wrangler runs the Worker code, Durable Objects, KV, and WebSocket signaling on
+the local machine. Local state is persisted in `.wrangler/state`.
+
+Install dependencies once and start both the local API and Next.js app:
+
+```bash
+cd cloudflare-worker && pnpm install
+cd .. && ./dev-local.sh
+```
+
+Open `http://localhost:3000`. The frontend development default is
+`http://127.0.0.1:8787`; no frontend request is sent to `api.picbind.com`.
+Use two browser profiles or an incognito window to test owner and guest. Stop
+the command with `Ctrl+C`; the script also stops the local API process.
+
+`.dev.vars` sets `LOCAL_RUNTIME=1`, selects P2P transfer, and makes TURN/R2
+credentials optional. To
+reset all local rooms and metrics, stop the process and delete
+`cloudflare-worker/.wrangler/state`.
+
+For production, store the API tokens as Worker secrets:
 
 ```bash
 npx wrangler secret put TURN_API_TOKEN

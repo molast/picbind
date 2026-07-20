@@ -2,7 +2,7 @@
 
 const DEFAULT_API_BASE_BY_ENV =
   process.env.NODE_ENV === "development"
-    ? "https://api-dev.picbind.com"
+    ? "http://127.0.0.1:8787"
     : "https://api.picbind.com";
 
 function normalizeBaseUrl(value?: string) {
