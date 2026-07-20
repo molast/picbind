@@ -8,18 +8,60 @@ import type {
 
 let databasePromise: Promise<Database> | null = null;
 
+/**
+ * Webpack turns sqlite-wasm's nested OPFS workers into emitted worker chunks.
+ * In that transformation the runtime `?vfs=...` query can be dropped, while
+ * sqlite3-opfs-async-proxy.js requires it to decide which VFS to install.
+ */
+function preserveOpfsProxyWorkerVfs() {
+  const NativeWorker = globalThis.Worker;
+  let proxyWorkerIndex = 0;
+
+  class OpfsCompatibleWorker extends NativeWorker {
+    constructor(scriptURL: string | URL, options?: WorkerOptions) {
+      let resolvedURL: string | URL = scriptURL;
+      try {
+        const url = new URL(scriptURL.toString(), globalThis.location.href);
+        const filename = url.pathname.split("/").pop() ?? "";
+        if (
+          filename.startsWith("sqlite3-opfs-async-proxy") &&
+          filename.endsWith(".js") &&
+          !url.searchParams.has("vfs")
+        ) {
+          url.searchParams.set(
+            "vfs",
+            proxyWorkerIndex++ === 0 ? "opfs" : "opfs-wl",
+          );
+          resolvedURL = url;
+        }
+      } catch {
+        // Let the native Worker constructor report an invalid URL unchanged.
+      }
+      super(resolvedURL, options);
+    }
+  }
+
+  globalThis.Worker = OpfsCompatibleWorker;
+  return () => {
+    globalThis.Worker = NativeWorker;
+  };
+}
+
 function openDatabase() {
   if (!databasePromise) {
-    databasePromise = sqlite3InitModule().then((sqlite3) => {
-      if (!crossOriginIsolated || !("opfs" in sqlite3)) {
-        throw new Error(
-          "SQLite OPFS requires cross-origin isolation and OPFS support",
-        );
-      }
-      const database = new sqlite3.oo1.OpfsDb(DATABASE_FILE, "c");
-      database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-      return database;
-    });
+    const restoreWorker = preserveOpfsProxyWorkerVfs();
+    databasePromise = sqlite3InitModule()
+      .then((sqlite3) => {
+        if (!crossOriginIsolated || !("opfs" in sqlite3)) {
+          throw new Error(
+            "SQLite OPFS requires cross-origin isolation and OPFS support",
+          );
+        }
+        const database = new sqlite3.oo1.OpfsDb(DATABASE_FILE, "c");
+        database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+        return database;
+      })
+      .finally(restoreWorker);
   }
   return databasePromise;
 }
