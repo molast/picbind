@@ -541,6 +541,7 @@ export default function ReviewCanvas({
           position={(magnifierPosition || remoteMagnifierPosition)!}
           containerWidth={containerSize.width}
           containerHeight={containerSize.height}
+          dimBackground={Boolean(remoteMagnifierPosition && !magnifierPosition)}
         />
       ) : null}
     </div>

@@ -689,7 +689,7 @@ export default function ReviewWorkspace({
         arrowStyle={arrowStyle}
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
-        remoteMagnifier={remoteMagnifier}
+        remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
         onScaleChange={setScale}
         onOffsetChange={setOffset}
         onDimensionsChange={setDimensions}

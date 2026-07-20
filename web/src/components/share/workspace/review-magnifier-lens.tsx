@@ -15,6 +15,7 @@ type ReviewMagnifierLensProps = {
   position: MagnifierPosition;
   containerWidth: number;
   containerHeight: number;
+  dimBackground: boolean;
 };
 
 const LENS_SIZE = 168;
@@ -27,6 +28,7 @@ export default function ReviewMagnifierLens({
   position,
   containerWidth,
   containerHeight,
+  dimBackground,
 }: ReviewMagnifierLensProps) {
   const preferredLeft = position.pointerX + GAP;
   const left = Math.max(
@@ -57,23 +59,31 @@ export default function ReviewMagnifierLens({
     .join(", ");
 
   return (
-    <div
-      className="pointer-events-none absolute z-40 overflow-hidden rounded-full border-4 border-white bg-white shadow-2xl ring-2 ring-blue-500"
-      style={{
-        left,
-        top,
-        width: LENS_SIZE,
-        height: LENS_SIZE,
-        backgroundImage: backgroundImages,
-        backgroundRepeat: "no-repeat",
-        backgroundSize: annotationSnapshot
-          ? `${backgroundSize}, ${backgroundSize}`
-          : backgroundSize,
-        backgroundPosition: annotationSnapshot
-          ? `${backgroundPosition}, ${backgroundPosition}`
-          : backgroundPosition,
-      }}
-      aria-hidden="true"
-    />
+    <>
+      {dimBackground ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-30 bg-slate-950/40 backdrop-blur-[4px] backdrop-saturate-50"
+          aria-hidden="true"
+        />
+      ) : null}
+      <div
+        className="pointer-events-none absolute z-40 overflow-hidden rounded-full border-4 border-white bg-white shadow-2xl ring-2 ring-blue-500"
+        style={{
+          left,
+          top,
+          width: LENS_SIZE,
+          height: LENS_SIZE,
+          backgroundImage: backgroundImages,
+          backgroundRepeat: "no-repeat",
+          backgroundSize: annotationSnapshot
+            ? `${backgroundSize}, ${backgroundSize}`
+            : backgroundSize,
+          backgroundPosition: annotationSnapshot
+            ? `${backgroundPosition}, ${backgroundPosition}`
+            : backgroundPosition,
+        }}
+        aria-hidden="true"
+      />
+    </>
   );
 }
