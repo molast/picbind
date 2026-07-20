@@ -26,6 +26,11 @@ const ReviewRippleLayer = dynamic(() => import("./review-ripple-layer"), {
 
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
+function createLaserCursor(color: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M7 27 24 10" fill="none" stroke="${color}" stroke-width="10" stroke-linecap="round" opacity=".2"/><path d="M8 26 23 11" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" opacity=".5"/><path d="M10 24 23 11" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><path d="m6 28 5-5" fill="none" stroke="#0f172a" stroke-width="5" stroke-linecap="round"/><circle cx="24" cy="10" r="2.5" fill="${color}"/><circle cx="24" cy="10" r="1" fill="#fff"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 24 10, crosshair`;
+}
+
 function estimateTextWidth(text: string, fontSize: number) {
   const units = Array.from(text || " ").reduce((total, character) => {
     if (/\s/.test(character)) return total + 0.34;
@@ -369,6 +374,11 @@ export default function ReviewCanvas({
   return (
     <div
       ref={containerRef}
+      style={
+        activeTool === "laser" && !interactionDisabled
+          ? { cursor: createLaserCursor(laserColor) }
+          : undefined
+      }
       className={`relative min-h-0 min-w-0 w-full flex-1 touch-none overflow-hidden bg-[#dfe5ec] [background-image:linear-gradient(45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(-45deg,rgba(255,255,255,.28)_25%,transparent_25%),linear-gradient(45deg,transparent_75%,rgba(255,255,255,.28)_75%),linear-gradient(-45deg,transparent_75%,rgba(255,255,255,.28)_75%)] [background-position:0_0,0_8px,8px_-8px,-8px_0] [background-size:16px_16px] ${
         interactionDisabled
           ? "cursor-default"

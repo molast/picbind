@@ -23,6 +23,7 @@ import {
   LuMinus,
   LuMoveUpRight,
   LuPaintBucket,
+  LuHighlighter,
   LuSearch,
   LuSparkles,
   LuUsersRound,
@@ -435,7 +436,7 @@ export default function ReviewToolbar({
         />
         <ReviewColorTool
           label={labels.laserTool}
-          icon={FiRadio}
+          icon={LuHighlighter}
           color={laserColor}
           active={activeTool === "laser"}
           panelOpen={openPanel === "laserColor"}
