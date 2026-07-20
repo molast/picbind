@@ -1,6 +1,21 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
+  ...(process.env.NODE_ENV === "development"
+    ? {
+        async headers() {
+          return [
+            {
+              source: "/:path*",
+              headers: [
+                { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+                { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+              ],
+            },
+          ]
+        },
+      }
+    : {}),
   webpack(config) {
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
@@ -8,6 +23,10 @@ const nextConfig = {
     )
 
     config.module.rules.push(
+      {
+        test: /\.sql$/i,
+        type: 'asset/source',
+      },
       // Reapply the existing rule, but only for svg imports ending in ?url
       {
         ...fileLoaderRule,

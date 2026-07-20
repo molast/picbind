@@ -19,8 +19,12 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 .
 ├── cloudflare-worker/      # Cloudflare Worker API 服务骨架
 ├── wasm/image_wasm/        # Rust WASM 图片处理库
-└── web/                    # Next.js 前端应用
+└── web/                    # Next.js 前端应用（SQLite WASM + OPFS 本地存储）
 ```
+
+Web 端持久化文件统一写入 OPFS，SQLite 仅保存业务元数据和评审历史，页面通过
+Repository 访问数据。语言、房间会话和页面恢复等短期状态仍使用
+`localStorage/sessionStorage`。
 
 ## Web 应用
 
