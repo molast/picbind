@@ -16,8 +16,28 @@ type ReviewRippleLayerProps = {
 const RIPPLE_DURATION_MS = 1050;
 const MAX_ACTIVE_RIPPLES = 5;
 
+const RIPPLE_VERTEX_SHADER = `
+in vec2 aPosition;
+out vec2 vTextureCoord;
+out vec2 vImageCoord;
+
+uniform vec4 uInputSize;
+uniform vec4 uOutputFrame;
+uniform vec4 uOutputTexture;
+
+void main() {
+  vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+  position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+  position.y = position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) - uOutputTexture.z;
+  gl_Position = vec4(position, 0.0, 1.0);
+  vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
+  vImageCoord = aPosition;
+}
+`;
+
 const RIPPLE_FRAGMENT_SHADER = `
 in vec2 vTextureCoord;
+in vec2 vImageCoord;
 out vec4 finalColor;
 
 uniform sampler2D uTexture;
@@ -29,8 +49,7 @@ uniform vec4 uOutputFrame;
 
 void main() {
   vec2 textureScale = uOutputFrame.zw * uInputSize.zw;
-  vec2 normalizedUv = vTextureCoord / max(textureScale, vec2(0.0001));
-  vec2 delta = normalizedUv - uCenter;
+  vec2 delta = vImageCoord - uCenter;
   float aspect = uSize.x / max(1.0, uSize.y);
   vec2 metricDelta = vec2(delta.x * aspect, delta.y);
   float distanceFromCenter = length(metricDelta);
@@ -49,8 +68,12 @@ void main() {
   float displacement = wave * mix(0.006, 0.0015, uProgress) * life;
 
   vec2 uvDirection = vec2(direction.x / max(0.0001, aspect), direction.y);
-  vec2 refractedUv = clamp(normalizedUv - uvDirection * displacement, vec2(0.001), vec2(0.999));
-  vec4 refracted = texture(uTexture, refractedUv * textureScale);
+  vec2 refractedUv = clamp(
+    vTextureCoord - uvDirection * displacement * textureScale,
+    vec2(0.001),
+    textureScale - vec2(0.001)
+  );
+  vec4 refracted = texture(uTexture, refractedUv);
 
   float highlight = cos(phase) * packet * life;
   refracted.rgb += max(highlight, 0.0) * vec3(0.14, 0.18, 0.22);
@@ -163,7 +186,7 @@ export default function ReviewRippleLayer({
           const height = Math.max(1, container.clientHeight);
           const filter = pixi.Filter.from({
             gl: {
-              vertex: pixi.defaultFilterVert,
+              vertex: RIPPLE_VERTEX_SHADER,
               fragment: RIPPLE_FRAGMENT_SHADER,
             },
             resources: {
