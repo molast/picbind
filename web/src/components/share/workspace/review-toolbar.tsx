@@ -15,6 +15,7 @@ import {
   FiRotateCcw,
   FiSmile,
   FiSquare,
+  FiTrash2,
   FiType,
   FiUserCheck,
   FiZoomIn,
@@ -56,6 +57,7 @@ type ReviewToolbarProps = {
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
   commentMode: boolean;
+  commentCleanupMode: boolean;
   annotationColor: string;
   fillColor: string | null;
   lineThickness: number;
@@ -76,6 +78,7 @@ type ReviewToolbarProps = {
   onMagnifierHighlightChange(enabled: boolean): void;
   onLaserColorChange(color: string): void;
   onCommentModeChange(enabled: boolean): void;
+  onCommentCleanupModeChange(enabled: boolean): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -136,6 +139,7 @@ export default function ReviewToolbar({
   remoteReviewActive,
   workspaceLocked,
   commentMode,
+  commentCleanupMode,
   annotationColor,
   fillColor,
   lineThickness,
@@ -156,6 +160,7 @@ export default function ReviewToolbar({
   onMagnifierHighlightChange,
   onLaserColorChange,
   onCommentModeChange,
+  onCommentCleanupModeChange,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -468,6 +473,21 @@ export default function ReviewToolbar({
             onCommentModeChange(!commentMode);
           }}
         />
+        {commentMode ? (
+          <button
+            type="button"
+            onClick={() => onCommentCleanupModeChange(!commentCleanupMode)}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition ${
+              commentCleanupMode
+                ? "bg-red-600 text-white shadow-sm"
+                : "bg-red-50 text-red-600 hover:bg-red-100"
+            }`}
+            aria-label={labels.anchorCleanupMode}
+            title={labels.anchorCleanupMode}
+          >
+            <FiTrash2 className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={controlsDisabled || !canUndo} />
         <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={controlsDisabled || !canRedo} />

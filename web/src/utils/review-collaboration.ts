@@ -35,6 +35,7 @@ export type ReviewAnchor = {
   label?: string;
   todo: boolean;
   resolved: boolean;
+  deleted?: boolean;
   endorsements: string[];
   createdBy: string;
   createdAt: number;
@@ -149,6 +150,11 @@ export type ReviewCollaborationMessage =
   | (ReviewMessageBase & {
       type: "REVIEW_ANCHOR_UPSERT";
       anchor: ReviewAnchor;
+    })
+  | (ReviewMessageBase & {
+      type: "REVIEW_ANCHOR_DELETE";
+      anchorId: string;
+      deletedAt: number;
     });
 
 const REVIEW_MESSAGE_TYPES = new Set([
@@ -165,6 +171,7 @@ const REVIEW_MESSAGE_TYPES = new Set([
   "REVIEW_MAGNIFIER",
   "REVIEW_LASER",
   "REVIEW_ANCHOR_UPSERT",
+  "REVIEW_ANCHOR_DELETE",
 ]);
 
 function validId(value: unknown) {
@@ -233,6 +240,7 @@ function validAnchor(value: unknown): value is ReviewAnchor {
     Number(anchor.y) >= 0 &&
     typeof anchor.todo === "boolean" &&
     typeof anchor.resolved === "boolean" &&
+    (anchor.deleted === undefined || typeof anchor.deleted === "boolean") &&
     Array.isArray(anchor.endorsements) &&
     anchor.endorsements.length <= 16 &&
     anchor.endorsements.every(validId) &&
@@ -390,6 +398,12 @@ export function parseReviewCollaborationMessage(
   if (
     message.type === "REVIEW_ANCHOR_UPSERT" &&
     !validAnchor(message.anchor)
+  ) {
+    return null;
+  }
+  if (
+    message.type === "REVIEW_ANCHOR_DELETE" &&
+    (!validId(message.anchorId) || !validFinite(message.deletedAt))
   ) {
     return null;
   }

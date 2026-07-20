@@ -30,6 +30,7 @@ import { getLang, type Lang } from "@/locales";
 import {
   clearOwnedShareRoom,
   consumeCreatedShareRoomPrompt,
+  getShareRoomClientId,
 } from "@/utils/share-room";
 import {
   closeRealtimeRoom,
@@ -1175,7 +1176,8 @@ export default function ShareRoomPage({
               roomId={roomId ?? "unknown-room"}
               image={reviewImage}
               labels={labels}
-              actorId={role || "unknown"}
+              actorId={roomId ? getShareRoomClientId(roomId) : "unknown"}
+              role={role}
               subscribeMessages={subscribeReviewMessages}
               onSendMessage={sendReviewMessage}
               onReviewStatusChange={handleReviewStatusChange}

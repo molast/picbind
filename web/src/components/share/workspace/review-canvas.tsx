@@ -70,6 +70,7 @@ type ReviewCanvasProps = {
   annotations: ReviewAnnotation[];
   selectedIds: string[];
   actorId: string;
+  canDeleteAnyAnchor: boolean;
   defaultColor: string;
   defaultFill: string | null;
   defaultStrokeRatio: number;
@@ -77,6 +78,7 @@ type ReviewCanvasProps = {
   lineStyle: ReviewStrokeStyle;
   interactionDisabled: boolean;
   commentMode: boolean;
+  commentCleanupMode: boolean;
   anchors: ReviewAnchor[];
   remoteMagnifier: ReviewRemoteMagnifier | null;
   laserColor: string;
@@ -91,6 +93,7 @@ type ReviewCanvasProps = {
   onMagnifierChange(position: ReviewMagnifierPoint | null): void;
   onLaserEvent(event: ReviewLaserEvent): void;
   onAnchorUpsert(anchor: ReviewAnchor): void;
+  onAnchorDelete(anchor: ReviewAnchor): void;
 };
 
 export default function ReviewCanvas({
@@ -102,6 +105,7 @@ export default function ReviewCanvas({
   annotations,
   selectedIds,
   actorId,
+  canDeleteAnyAnchor,
   defaultColor,
   defaultFill,
   defaultStrokeRatio,
@@ -109,6 +113,7 @@ export default function ReviewCanvas({
   lineStyle,
   interactionDisabled,
   commentMode,
+  commentCleanupMode,
   anchors,
   remoteMagnifier,
   laserColor,
@@ -123,6 +128,7 @@ export default function ReviewCanvas({
   onMagnifierChange,
   onLaserEvent,
   onAnchorUpsert,
+  onAnchorDelete,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -675,11 +681,14 @@ export default function ReviewCanvas({
               imageWidth={imageSize.width}
               imageHeight={imageSize.height}
               actorId={actorId}
+              canDeleteAny={canDeleteAnyAnchor}
               commentMode={commentMode}
+              cleanupMode={commentCleanupMode}
               readOnly={interactionDisabled}
               anchors={anchors}
               labels={labels}
               onUpsert={onAnchorUpsert}
+              onDelete={onAnchorDelete}
             />
           ) : null}
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />

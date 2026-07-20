@@ -8,6 +8,7 @@ import {
   FiMessageSquare,
   FiSmile,
   FiTag,
+  FiTrash2,
   FiX,
 } from "react-icons/fi";
 import type { ReviewAnchor, ReviewAnchorKind } from "@/utils/review-collaboration";
@@ -20,11 +21,14 @@ type ReviewAnchorLayerProps = {
   imageWidth: number;
   imageHeight: number;
   actorId: string;
+  canDeleteAny: boolean;
   commentMode: boolean;
+  cleanupMode: boolean;
   readOnly: boolean;
   anchors: ReviewAnchor[];
   labels: ShareRoomLabels;
   onUpsert(anchor: ReviewAnchor): void;
+  onDelete(anchor: ReviewAnchor): void;
 };
 
 type DraftAnchor = {
@@ -78,31 +82,92 @@ export default function ReviewAnchorLayer({
   imageWidth,
   imageHeight,
   actorId,
+  canDeleteAny,
   commentMode,
+  cleanupMode,
   readOnly,
   anchors,
   labels,
   onUpsert,
+  onDelete,
 }: ReviewAnchorLayerProps) {
   const [draft, setDraft] = React.useState<DraftAnchor | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [customLabel, setCustomLabel] = React.useState("");
+  const [deleteMenuId, setDeleteMenuId] = React.useState<string | null>(null);
+  const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressOriginRef = React.useRef<{ x: number; y: number } | null>(null);
+  const longPressTriggeredRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (!commentMode) setDraft(null);
-  }, [commentMode]);
+    if (!commentMode || cleanupMode) setDraft(null);
+  }, [cleanupMode, commentMode]);
+
+  React.useEffect(
+    () => () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    },
+    [],
+  );
 
   const closePanels = () => {
     setDraft(null);
     setEditingId(null);
     setSelectedId(null);
     setCustomLabel("");
+    setDeleteMenuId(null);
   };
+
+  const canDeleteAnchor = (anchor: ReviewAnchor) =>
+    canDeleteAny || anchor.createdBy === actorId;
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+    longPressOriginRef.current = null;
+  };
+
+  const consumeLongPress = (anchor: ReviewAnchor) => {
+    if (longPressTriggeredRef.current !== anchor.id) return false;
+    longPressTriggeredRef.current = null;
+    return true;
+  };
+
+  const anchorPointerHandlers = (anchor: ReviewAnchor) => ({
+    onContextMenu: (event: React.MouseEvent) => {
+      if (!commentMode || readOnly) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (canDeleteAnchor(anchor)) setDeleteMenuId(anchor.id);
+    },
+    onPointerDown: (event: React.PointerEvent) => {
+      if (!commentMode || readOnly || event.button !== 0 || !canDeleteAnchor(anchor)) return;
+      clearLongPress();
+      longPressOriginRef.current = { x: event.clientX, y: event.clientY };
+      longPressTimerRef.current = setTimeout(() => {
+        longPressTimerRef.current = null;
+        longPressTriggeredRef.current = anchor.id;
+        setDeleteMenuId(anchor.id);
+      }, 550);
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      const origin = longPressOriginRef.current;
+      if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 8) {
+        clearLongPress();
+      }
+    },
+    onPointerUp: clearLongPress,
+    onPointerCancel: clearLongPress,
+  });
 
   const updateAnchor = (anchor: ReviewAnchor, patch: Partial<ReviewAnchor>) => {
     if (readOnly) return;
-    onUpsert({ ...anchor, ...patch, updatedAt: Date.now() });
+    onUpsert({
+      ...anchor,
+      ...patch,
+      updatedAt: Math.max(Date.now(), anchor.updatedAt + 1),
+    });
   };
 
   const createReaction = (reaction: string) => {
@@ -140,6 +205,10 @@ export default function ReviewAnchorLayer({
           closePanels();
           return;
         }
+        if (cleanupMode) {
+          setDeleteMenuId(null);
+          return;
+        }
         const rect = event.currentTarget.getBoundingClientRect();
         setDraft({
           x: Math.max(0, Math.min(imageWidth, ((event.clientX - rect.left) / rect.width) * imageWidth)),
@@ -152,22 +221,28 @@ export default function ReviewAnchorLayer({
         const style = anchorStyle(anchor, imageWidth, imageHeight);
         if (anchor.kind === "reaction") {
           return (
-            <div key={anchor.id} className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2" style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-x-1/2 -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
               <button
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (consumeLongPress(anchor)) return;
+                  if (cleanupMode) {
+                    if (canDeleteAnchor(anchor)) onDelete(anchor);
+                    return;
+                  }
                   if (readOnly) return;
                   setSelectedId((current) => current === anchor.id ? null : anchor.id);
                 }}
                 className={`flex h-9 w-9 items-center justify-center rounded-full border bg-white text-xl shadow-md ${anchor.resolved ? "border-emerald-400 opacity-65" : "border-white"}`}
-                title={anchor.resolved ? labels.anchorResolved : labels.anchorOpen}
+                title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : anchor.resolved ? labels.anchorResolved : labels.anchorOpen}
               >
-                {anchor.reaction}
+                {commentMode ? anchor.reaction : <FiMessageSquare className="h-4 w-4 text-slate-600" aria-hidden="true" />}
               </button>
               {selectedId === anchor.id ? (
                 <AnchorStatusMenu anchor={anchor} labels={labels} onUpdate={(patch) => updateAnchor(anchor, patch)} />
               ) : null}
+              {deleteMenuId === anchor.id ? <AnchorDeleteMenu labels={labels} onDelete={() => onDelete(anchor)} /> : null}
             </div>
           );
         }
@@ -175,12 +250,17 @@ export default function ReviewAnchorLayer({
         if (anchor.kind === "label") {
           const endorsed = anchor.endorsements.includes(actorId);
           return (
-            <div key={anchor.id} className="pointer-events-auto absolute -translate-y-1/2" style={style}>
+            <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
               <div className="group relative flex items-center">
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (consumeLongPress(anchor)) return;
+                    if (cleanupMode) {
+                      if (canDeleteAnchor(anchor)) onDelete(anchor);
+                      return;
+                    }
                     if (readOnly) return;
                     const endorsements = endorsed
                       ? anchor.endorsements.filter((id) => id !== actorId)
@@ -188,13 +268,15 @@ export default function ReviewAnchorLayer({
                     updateAnchor(anchor, { endorsements });
                   }}
                   className={`h-7 rounded-full border px-3 pr-7 text-xs font-semibold shadow-md ${anchor.resolved ? "border-emerald-300 bg-emerald-50 text-emerald-700" : endorsed ? "border-blue-400 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
-                  title={labels.anchorEndorse}
+                  title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : labels.anchorEndorse}
                 >
-                  {anchor.label}
+                  {commentMode ? anchor.label : <FiTag className="h-3.5 w-3.5" aria-hidden="true" />}
                 </button>
-                <span className="pointer-events-none absolute right-1 top-[-7px] flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-bold text-white">
-                  {anchor.endorsements.length}
-                </span>
+                {commentMode ? (
+                  <span className="pointer-events-none absolute right-1 top-[-7px] flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1 text-[10px] font-bold text-white">
+                    {anchor.endorsements.length}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   onClick={(event) => {
@@ -208,28 +290,37 @@ export default function ReviewAnchorLayer({
                   <FiCheck className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
+              {deleteMenuId === anchor.id ? <AnchorDeleteMenu labels={labels} onDelete={() => onDelete(anchor)} /> : null}
             </div>
           );
         }
 
         return (
-          <div key={anchor.id} className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2" style={style}>
+          <div key={anchor.id} {...anchorPointerHandlers(anchor)} className={`absolute -translate-x-1/2 -translate-y-1/2 ${commentMode ? `pointer-events-auto ${cleanupMode ? canDeleteAnchor(anchor) ? "cursor-pointer" : "cursor-not-allowed" : ""}` : "pointer-events-none"}`} style={style}>
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
+                if (consumeLongPress(anchor)) return;
+                if (cleanupMode) {
+                  if (canDeleteAnchor(anchor)) onDelete(anchor);
+                  return;
+                }
                 if (readOnly) return;
                 setEditingId(anchor.id);
                 setSelectedId(null);
               }}
               className={`group relative flex h-9 w-9 items-center justify-center rounded-full border-2 bg-[#fff4a8] text-amber-900 shadow-md ${anchor.resolved ? "border-emerald-500" : anchor.todo ? "border-amber-600" : "border-white"}`}
               aria-label={labels.anchorStickyNote}
+              title={cleanupMode && !canDeleteAnchor(anchor) ? labels.anchorDeleteUnavailable : undefined}
             >
               {anchor.todo ? <FiFlag className="h-4 w-4" aria-hidden="true" /> : <FiFileText className="h-4 w-4" aria-hidden="true" />}
-              <span className="pointer-events-none absolute bottom-11 left-1/2 hidden w-56 -translate-x-1/2 rounded bg-slate-950 px-2.5 py-2 text-left text-xs font-normal text-white shadow-xl group-hover:block">
-                <span className="block whitespace-pre-wrap break-words">{anchor.comment}</span>
-                <span className="mt-1 block text-[10px] text-slate-300">{formatAnchorTime(anchor.createdAt)} · {anchor.resolved ? labels.anchorResolved : anchor.todo ? labels.anchorTodo : labels.anchorOpen}</span>
-              </span>
+              {commentMode ? (
+                <span className="pointer-events-none absolute bottom-11 left-1/2 hidden w-56 -translate-x-1/2 rounded bg-slate-950 px-2.5 py-2 text-left text-xs font-normal text-white shadow-xl group-hover:block">
+                  <span className="block whitespace-pre-wrap break-words">{anchor.comment}</span>
+                  <span className="mt-1 block text-[10px] text-slate-300">{formatAnchorTime(anchor.createdAt)} · {anchor.resolved ? labels.anchorResolved : anchor.todo ? labels.anchorTodo : labels.anchorOpen}</span>
+                </span>
+              ) : null}
             </button>
             {editingId === anchor.id ? (
               <div className="absolute left-5 top-5">
@@ -247,6 +338,7 @@ export default function ReviewAnchorLayer({
                 />
               </div>
             ) : null}
+            {deleteMenuId === anchor.id ? <AnchorDeleteMenu labels={labels} onDelete={() => onDelete(anchor)} /> : null}
           </div>
         );
       })}
@@ -315,6 +407,30 @@ function AnchorStatusMenu({ anchor, labels, onUpdate }: { anchor: ReviewAnchor; 
       <button type="button" onClick={() => onUpdate({ resolved: !anchor.resolved })} className="flex h-8 items-center gap-2 rounded px-2 text-left font-semibold text-slate-700 hover:bg-slate-100">
         {anchor.resolved ? <FiFlag className="h-4 w-4" /> : <FiCheck className="h-4 w-4 text-emerald-600" />}
         {anchor.resolved ? labels.anchorReopen : labels.anchorMarkResolved}
+      </button>
+    </div>
+  );
+}
+
+function AnchorDeleteMenu({
+  labels,
+  onDelete,
+}: {
+  labels: ShareRoomLabels;
+  onDelete(): void;
+}) {
+  return (
+    <div
+      className="absolute left-10 top-0 z-20 w-36 rounded-md border border-red-100 bg-white p-1.5 shadow-xl"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        onClick={onDelete}
+        className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50"
+      >
+        <FiTrash2 className="h-4 w-4" aria-hidden="true" />
+        {labels.anchorDelete}
       </button>
     </div>
   );

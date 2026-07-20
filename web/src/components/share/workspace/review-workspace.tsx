@@ -3,6 +3,7 @@
 import React from "react";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { RoomImage } from "../share-room-types";
+import type { RoomRole } from "@/utils/realtime-room";
 import type {
   ReviewAnchor,
   ReviewAnnotation,
@@ -32,6 +33,7 @@ type ReviewWorkspaceProps = {
   image: RoomImage;
   labels: ShareRoomLabels;
   actorId: string;
+  role: RoomRole | null;
   subscribeMessages(
     listener: (event: {
       sequence: number;
@@ -81,6 +83,7 @@ export default function ReviewWorkspace({
   image,
   labels,
   actorId,
+  role,
   subscribeMessages,
   onSendMessage,
   onReviewStatusChange,
@@ -92,7 +95,13 @@ export default function ReviewWorkspace({
   const [canvasSize, setCanvasSize] = React.useState({ width: 0, height: 0 });
   const [activeTool, setActiveTool] = React.useState<ReviewTool>("select");
   const [commentMode, setCommentMode] = React.useState(false);
+  const [commentCleanupMode, setCommentCleanupMode] = React.useState(false);
   const [anchors, setAnchors] = React.useState<ReviewAnchor[]>([]);
+  const [deletedAnchor, setDeletedAnchor] = React.useState<ReviewAnchor | null>(null);
+  const visibleAnchors = React.useMemo(
+    () => anchors.filter((anchor) => !anchor.deleted),
+    [anchors],
+  );
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
   const [defaultFill, setDefaultFill] = React.useState<string | null>(null);
@@ -135,6 +144,7 @@ export default function ReviewWorkspace({
   const laserFrameRef = React.useRef<number | null>(null);
   const pendingLaserRef = React.useRef<ReviewLaserEvent | null>(null);
   const anchorsRef = React.useRef(anchors);
+  const undoDeleteTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   anchorsRef.current = anchors;
   viewportRef.current = { scale, offset, dimensions, canvasSize };
 
@@ -261,7 +271,11 @@ export default function ReviewWorkspace({
     setSelectedIds([]);
     setActiveTool("select");
     setCommentMode(false);
+    setCommentCleanupMode(false);
     setAnchors([]);
+    setDeletedAnchor(null);
+    if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
+    undoDeleteTimerRef.current = null;
     setLocalMode(null);
     setRemoteMode(null);
     setRemoteReviewActive(false);
@@ -304,6 +318,10 @@ export default function ReviewWorkspace({
         window.cancelAnimationFrame(laserFrameRef.current);
         laserFrameRef.current = null;
       }
+      if (undoDeleteTimerRef.current) {
+        clearTimeout(undoDeleteTimerRef.current);
+        undoDeleteTimerRef.current = null;
+      }
       onSendMessage({ ...baseMessage(), type: "REVIEW_MODE", mode: null });
       onSendMessage({
         ...baseMessage(),
@@ -329,13 +347,13 @@ export default function ReviewWorkspace({
 
   React.useEffect(() => {
     if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
-    const status = anchors.length
-      ? anchors.every((anchor) => anchor.resolved)
+    const status = visibleAnchors.length
+      ? visibleAnchors.every((anchor) => anchor.resolved)
         ? "approved"
         : "in-review"
       : undefined;
-    onReviewStatusChange(image.id, status, anchors.length);
-  }, [anchors, hydratedHistoryKey, image.id, onReviewStatusChange, roomId]);
+    onReviewStatusChange(image.id, status, visibleAnchors.length);
+  }, [hydratedHistoryKey, image.id, onReviewStatusChange, roomId, visibleAnchors]);
 
   React.useEffect(() => {
     if (localMode !== "present") return;
@@ -400,6 +418,16 @@ export default function ReviewWorkspace({
     }
     if (message.type === "REVIEW_ANCHOR_UPSERT") {
       setAnchors((current) => mergeReviewAnchors(current, [message.anchor]));
+      return;
+    }
+    if (message.type === "REVIEW_ANCHOR_DELETE") {
+      setAnchors((current) =>
+        current.map((anchor) =>
+          anchor.id === message.anchorId && message.deletedAt >= anchor.updatedAt
+            ? { ...anchor, deleted: true, updatedAt: message.deletedAt }
+            : anchor,
+        ),
+      );
       return;
     }
     if (message.type === "REVIEW_OPERATION") {
@@ -542,6 +570,44 @@ export default function ReviewWorkspace({
     },
     [baseMessage, onSendMessage],
   );
+
+  const deleteAnchor = React.useCallback(
+    (anchor: ReviewAnchor) => {
+      if (role !== "owner" && anchor.createdBy !== actorId) return;
+      const deletedAt = Date.now();
+      setAnchors((current) =>
+        mergeReviewAnchors(current, [
+          { ...anchor, deleted: true, updatedAt: deletedAt },
+        ]),
+      );
+      onSendMessage({
+        ...baseMessage(),
+        type: "REVIEW_ANCHOR_DELETE",
+        anchorId: anchor.id,
+        deletedAt,
+      });
+      if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
+      setDeletedAnchor(anchor);
+      undoDeleteTimerRef.current = setTimeout(() => {
+        undoDeleteTimerRef.current = null;
+        setDeletedAnchor(null);
+      }, 3000);
+    },
+    [actorId, baseMessage, onSendMessage, role],
+  );
+
+  const undoDeleteAnchor = React.useCallback(() => {
+    if (!deletedAnchor) return;
+    if (undoDeleteTimerRef.current) clearTimeout(undoDeleteTimerRef.current);
+    undoDeleteTimerRef.current = null;
+    const restored = {
+      ...deletedAnchor,
+      deleted: false,
+      updatedAt: Math.max(Date.now(), deletedAnchor.updatedAt + 1),
+    };
+    setDeletedAnchor(null);
+    upsertAnchor(restored);
+  }, [deletedAnchor, upsertAnchor]);
 
   const commitCreate = React.useCallback(
     (annotation: ReviewAnnotation) => {
@@ -781,6 +847,7 @@ export default function ReviewWorkspace({
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
         commentMode={commentMode}
+        commentCleanupMode={commentCleanupMode}
         annotationColor={displayedColor}
         fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
@@ -811,9 +878,11 @@ export default function ReviewWorkspace({
         onLaserColorChange={setLaserColor}
         onCommentModeChange={(enabled) => {
           setCommentMode(enabled);
+          setCommentCleanupMode(false);
           setSelectedIds([]);
           if (enabled) setActiveTool("select");
         }}
+        onCommentCleanupModeChange={setCommentCleanupMode}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}
@@ -831,6 +900,7 @@ export default function ReviewWorkspace({
         annotations={annotations}
         selectedIds={selectedIds}
         actorId={actorId}
+        canDeleteAnyAnchor={role === "owner"}
         defaultColor={defaultColor}
         defaultFill={defaultFill}
         defaultStrokeRatio={defaultStrokeRatio}
@@ -838,7 +908,8 @@ export default function ReviewWorkspace({
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
         commentMode={commentMode}
-        anchors={anchors}
+        commentCleanupMode={commentCleanupMode}
+        anchors={visibleAnchors}
         remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
         laserColor={laserColor}
         remoteLaserEvent={remoteLaserEvent}
@@ -852,8 +923,21 @@ export default function ReviewWorkspace({
         onMagnifierChange={sendMagnifier}
         onLaserEvent={sendLaser}
         onAnchorUpsert={upsertAnchor}
+        onAnchorDelete={deleteAnchor}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
+      {deletedAnchor ? (
+        <div className="fixed bottom-6 left-1/2 z-[140] flex -translate-x-1/2 items-center gap-4 rounded-md bg-slate-950 px-4 py-3 text-sm text-white shadow-2xl">
+          <span>{labels.anchorDeleted}</span>
+          <button
+            type="button"
+            onClick={undoDeleteAnchor}
+            className="font-semibold text-blue-300 hover:text-blue-200"
+          >
+            {labels.anchorUndo}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
