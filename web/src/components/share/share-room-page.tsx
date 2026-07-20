@@ -7,6 +7,7 @@ import ExitRoomDialog from "./exit-room-dialog";
 import GalleryWorkspace from "./workspace/gallery-workspace";
 import { canReviewRoomImage } from "./workspace/gallery-image-card";
 import ReviewWorkspace from "./workspace/review-workspace";
+import FullscreenEdgePanel from "./workspace/fullscreen-edge-panel";
 import ImageSourceDialog from "./workspace/image-source-dialog";
 import CompressedImagePickerDialog from "./workspace/compressed-image-picker-dialog";
 import CompressionSuggestionDialog from "./workspace/compression-suggestion-dialog";
@@ -1260,18 +1261,12 @@ export default function ShareRoomPage({
       </div>
       {reviewFullscreenActive ? (
         <>
-          <div className="group pointer-events-none fixed inset-x-0 top-0 z-[135] h-16">
-            <div className="pointer-events-auto absolute inset-x-0 top-0 h-3" aria-hidden="true" />
-            <div className="pointer-events-auto absolute inset-x-0 top-0 -translate-y-full shadow-2xl transition-transform duration-200 ease-out group-hover:translate-y-0">
-              {roomHeaderContent}
-            </div>
-          </div>
-          <div className="group pointer-events-none fixed bottom-0 right-0 top-0 z-[134] w-[clamp(320px,24vw,420px)] max-w-full">
-            <div className="pointer-events-auto absolute bottom-0 right-0 top-0 w-3" aria-hidden="true" />
-            <div className="pointer-events-auto absolute inset-0 translate-x-full bg-white shadow-2xl transition-transform duration-200 ease-out group-hover:translate-x-0 [&>aside]:h-full">
-              {roomSidebarContent}
-            </div>
-          </div>
+          <FullscreenEdgePanel side="top" hideDelayMs={0}>
+            {roomHeaderContent}
+          </FullscreenEdgePanel>
+          <FullscreenEdgePanel side="right">
+            {roomSidebarContent}
+          </FullscreenEdgePanel>
         </>
       ) : null}
       <CreatedRoomDialog
