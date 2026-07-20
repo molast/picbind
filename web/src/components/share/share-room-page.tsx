@@ -158,6 +158,8 @@ export default function ShareRoomPage({
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
+  const [reviewWorkspaceFullscreen, setReviewWorkspaceFullscreen] =
+    React.useState(false);
   const [isSending, setIsSending] = React.useState(false);
   const [isWeakNetwork, setIsWeakNetwork] = React.useState(false);
   const [isSourceDialogOpen, setIsSourceDialogOpen] = React.useState(false);
@@ -322,6 +324,10 @@ export default function ShareRoomPage({
     images.find(
       (image) => image.id === reviewImageId && canReviewRoomImage(image),
     ) || null;
+
+  React.useEffect(() => {
+    if (!reviewImage) setReviewWorkspaceFullscreen(false);
+  }, [reviewImage]);
 
   const upsertActivity = React.useCallback((activity: ActivityItem) => {
     setActivities((current) => {
@@ -1117,6 +1123,7 @@ export default function ShareRoomPage({
     const image = imagesRef.current.find((current) => current.id === imageId);
     if (!image || !canReviewRoomImage(image)) return;
     setPreviewImageId(null);
+    setReviewWorkspaceFullscreen(false);
     setReviewImageId(imageId);
   };
 
@@ -1136,6 +1143,46 @@ export default function ShareRoomPage({
       });
     }
   };
+
+  const reviewFullscreenActive = Boolean(
+    reviewImage && reviewWorkspaceFullscreen,
+  );
+  const roomHeaderContent = (
+    <RoomHeader
+      role={role}
+      roomId={roomId}
+      copied={copied}
+      actionPending={isRoomActionPending}
+      labels={labels}
+      onCopy={handleCopy}
+      onTemporaryLeave={handleTemporaryLeave}
+      onExitRoom={requestExitRoom}
+    />
+  );
+  const roomSidebarContent = (
+    <RoomSidebar
+      activityListRef={activityListRef}
+      emojiScrollerRef={emojiScrollerRef}
+      connection={connection}
+      connectionError={connectionError}
+      networkLatencyMs={networkLatencyMs}
+      packetLossRate={packetLossRate}
+      messageTransportMode={messageTransportMode}
+      roomId={roomId}
+      role={role}
+      members={members}
+      activities={activities}
+      kickingClientId={kickingClientId}
+      textMessage={textMessage}
+      pressedEmoji={pressedEmoji}
+      labels={labels}
+      onKick={handleKickMember}
+      onTextChange={setTextMessage}
+      onTextSubmit={handleTextMessage}
+      onEmoji={handleEmoji}
+      onClearActivities={handleClearActivities}
+    />
+  );
 
   if (roomId !== null && !validRoomId) {
     return (
@@ -1159,18 +1206,19 @@ export default function ShareRoomPage({
       <main
         className={`${isMinimized ? "hidden" : "block"} h-screen overflow-hidden bg-[#eef2f7] text-slate-800`}
       >
-      <div className="grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:grid-rows-1">
-        <section className="flex min-h-0 min-w-0 flex-col">
-          <RoomHeader
-            role={role}
-            roomId={roomId}
-            copied={copied}
-            actionPending={isRoomActionPending}
-            labels={labels}
-            onCopy={handleCopy}
-            onTemporaryLeave={handleTemporaryLeave}
-            onExitRoom={requestExitRoom}
-          />
+      <div
+        className={
+          reviewFullscreenActive
+            ? "relative h-full"
+            : "grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:grid-rows-1"
+        }
+      >
+        <section
+          className={`flex min-h-0 min-w-0 flex-col ${
+            reviewFullscreenActive ? "h-full" : ""
+          }`}
+        >
+          {!reviewFullscreenActive ? roomHeaderContent : null}
           {reviewImage ? (
             <ReviewWorkspace
               roomId={roomId ?? "unknown-room"}
@@ -1178,10 +1226,15 @@ export default function ShareRoomPage({
               labels={labels}
               actorId={roomId ? getShareRoomClientId(roomId) : "unknown"}
               role={role}
+              fullscreen={reviewFullscreenActive}
               subscribeMessages={subscribeReviewMessages}
               onSendMessage={sendReviewMessage}
               onReviewStatusChange={handleReviewStatusChange}
-              onBack={() => setReviewImageId(null)}
+              onFullscreenChange={setReviewWorkspaceFullscreen}
+              onBack={() => {
+                setReviewWorkspaceFullscreen(false);
+                setReviewImageId(null);
+              }}
             />
           ) : (
             <GalleryWorkspace
@@ -1203,29 +1256,24 @@ export default function ShareRoomPage({
             />
           )}
         </section>
-        <RoomSidebar
-          activityListRef={activityListRef}
-          emojiScrollerRef={emojiScrollerRef}
-          connection={connection}
-          connectionError={connectionError}
-          networkLatencyMs={networkLatencyMs}
-          packetLossRate={packetLossRate}
-          messageTransportMode={messageTransportMode}
-          roomId={roomId}
-          role={role}
-          members={members}
-          activities={activities}
-          kickingClientId={kickingClientId}
-          textMessage={textMessage}
-          pressedEmoji={pressedEmoji}
-          labels={labels}
-          onKick={handleKickMember}
-          onTextChange={setTextMessage}
-          onTextSubmit={handleTextMessage}
-          onEmoji={handleEmoji}
-          onClearActivities={handleClearActivities}
-        />
+        {!reviewFullscreenActive ? roomSidebarContent : null}
       </div>
+      {reviewFullscreenActive ? (
+        <>
+          <div className="group pointer-events-none fixed inset-x-0 top-0 z-[135] h-16">
+            <div className="pointer-events-auto absolute inset-x-0 top-0 h-3" aria-hidden="true" />
+            <div className="pointer-events-auto absolute inset-x-0 top-0 -translate-y-full shadow-2xl transition-transform duration-200 ease-out group-hover:translate-y-0">
+              {roomHeaderContent}
+            </div>
+          </div>
+          <div className="group pointer-events-none fixed bottom-0 right-0 top-0 z-[134] w-[min(420px,calc(100vw-16px))]">
+            <div className="pointer-events-auto absolute bottom-0 right-0 top-0 w-3" aria-hidden="true" />
+            <div className="pointer-events-auto absolute inset-0 translate-x-full bg-white shadow-2xl transition-transform duration-200 ease-out group-hover:translate-x-0 [&>aside]:h-full">
+              {roomSidebarContent}
+            </div>
+          </div>
+        </>
+      ) : null}
       <CreatedRoomDialog
         open={isShareDialogOpen}
         roomId={roomId}

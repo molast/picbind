@@ -35,6 +35,7 @@ type ReviewWorkspaceProps = {
   labels: ShareRoomLabels;
   actorId: string;
   role: RoomRole | null;
+  fullscreen: boolean;
   subscribeMessages(
     listener: (event: {
       sequence: number;
@@ -47,6 +48,7 @@ type ReviewWorkspaceProps = {
     status: "in-review" | "approved" | undefined,
     anchorCount: number,
   ): void;
+  onFullscreenChange(fullscreen: boolean): void;
   onBack(): void;
 };
 
@@ -85,9 +87,11 @@ export default function ReviewWorkspace({
   labels,
   actorId,
   role,
+  fullscreen,
   subscribeMessages,
   onSendMessage,
   onReviewStatusChange,
+  onFullscreenChange,
   onBack,
 }: ReviewWorkspaceProps) {
   const [scale, setScale] = React.useState(1);
@@ -870,6 +874,7 @@ export default function ReviewWorkspace({
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
         commentMode={commentMode}
+        fullscreen={fullscreen}
         annotationColor={displayedColor}
         fillColor={displayedFill}
         lineThickness={defaultStrokeRatio}
@@ -904,6 +909,7 @@ export default function ReviewWorkspace({
           if (enabled) setActiveTool("select");
         }}
         onClearComments={() => setClearCommentsOpen(true)}
+        onFullscreenChange={onFullscreenChange}
         onArrowStyleChange={(style) => changeStrokeStyle("arrow", style)}
         onLineStyleChange={(style) => changeStrokeStyle("line", style)}
         onInsertEmoji={insertEmoji}

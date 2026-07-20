@@ -8,7 +8,8 @@ import {
   FiCornerUpLeft,
   FiCornerUpRight,
   FiEdit3,
-  FiMaximize,
+  FiMaximize2,
+  FiMinimize2,
   FiMessageSquare,
   FiMousePointer,
   FiRadio,
@@ -21,6 +22,7 @@ import {
   FiZoomIn,
   FiZoomOut,
 } from "react-icons/fi";
+import { MdOutlineFitScreen } from "react-icons/md";
 import {
   LuMinus,
   LuMoveUpRight,
@@ -57,6 +59,7 @@ type ReviewToolbarProps = {
   remoteReviewActive: boolean;
   workspaceLocked: boolean;
   commentMode: boolean;
+  fullscreen: boolean;
   annotationColor: string;
   fillColor: string | null;
   lineThickness: number;
@@ -78,6 +81,7 @@ type ReviewToolbarProps = {
   onLaserColorChange(color: string): void;
   onCommentModeChange(enabled: boolean): void;
   onClearComments(): void;
+  onFullscreenChange(fullscreen: boolean): void;
   onArrowStyleChange(style: ReviewStrokeStyle): void;
   onLineStyleChange(style: ReviewStrokeStyle): void;
   onInsertEmoji(emoji: string): void;
@@ -138,6 +142,7 @@ export default function ReviewToolbar({
   remoteReviewActive,
   workspaceLocked,
   commentMode,
+  fullscreen,
   annotationColor,
   fillColor,
   lineThickness,
@@ -159,6 +164,7 @@ export default function ReviewToolbar({
   onLaserColorChange,
   onCommentModeChange,
   onClearComments,
+  onFullscreenChange,
   onArrowStyleChange,
   onLineStyleChange,
   onInsertEmoji,
@@ -477,7 +483,14 @@ export default function ReviewToolbar({
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiZoomOut} label={labels.zoomOut} onClick={onZoomOut} disabled={controlsDisabled} />
         <ToolButton icon={FiZoomIn} label={labels.zoomIn} onClick={onZoomIn} disabled={controlsDisabled} />
-        <ToolButton icon={FiMaximize} label={labels.fitView} onClick={onFit} disabled={controlsDisabled} />
+        <ToolButton icon={MdOutlineFitScreen} label={labels.fitView} onClick={onFit} disabled={controlsDisabled} />
+        <ToolButton
+          icon={fullscreen ? FiMinimize2 : FiMaximize2}
+          label={fullscreen ? labels.exitWorkspaceFullscreen : labels.workspaceFullscreen}
+          active={fullscreen}
+          onClick={() => onFullscreenChange(!fullscreen)}
+          disabled={controlsDisabled}
+        />
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
         </div>
         <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
