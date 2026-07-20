@@ -293,6 +293,7 @@ export default function RoomSidebar({
         >
           {activities.length ? (
             activities.map((activity) => {
+              const isTextMessage = activity.id.startsWith("message-");
               const Icon =
                 activity.kind === "sending"
                   ? FiUploadCloud
@@ -334,13 +335,13 @@ export default function RoomSidebar({
                       <div className="flex items-center justify-between gap-2 leading-4">
                         <span
                           className={`min-w-0 flex-1 text-xs font-semibold text-slate-800 ${
-                            activity.kind === "message"
+                            isTextMessage
                               ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                               : "truncate"
                           }`}
                           title={activity.title}
                         >
-                          {activity.kind === "message"
+                          {isTextMessage
                             ? activity.title
                             : middleEllipsisFileName(activity.title, 32)}
                         </span>
@@ -351,7 +352,7 @@ export default function RoomSidebar({
                       {activity.detail ? (
                         <p
                           className={`text-[11px] leading-4 text-slate-500 ${
-                            activity.kind === "message"
+                            isTextMessage
                               ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                               : "truncate"
                           }`}
