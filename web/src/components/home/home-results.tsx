@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React from "react";
+import { FiColumns } from "react-icons/fi";
 import {
   extToBadge,
   formatDeltaPercent,
@@ -12,9 +13,10 @@ import {
   getDoneVariants,
   isTransparencyBlocked,
   type HomeItem,
+  type CompareAsset,
   type OutputVariant,
 } from "./home-compression-types";
-import type { HomeCompressLandingCopy } from "@/locales";
+import type { HomeCompressLandingCopy, Lang } from "@/locales";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
@@ -28,11 +30,14 @@ type HomeResultsProps = {
   canDownloadZip: boolean;
   whyVariantId: string | null;
   metricsVariantId: string | null;
+  lang: Lang;
+  compareAssets: CompareAsset[];
   onDownloadZip(): void;
   onWhyVariantChange: React.Dispatch<React.SetStateAction<string | null>>;
   onMetricsVariantChange: React.Dispatch<React.SetStateAction<string | null>>;
   onLoadVariantMetrics(item: HomeItem, variant: OutputVariant): void | Promise<void>;
   onConvertAnyway(itemId: string, variantId: string): void;
+  onAddVariantToCompare(item: HomeItem, variant: OutputVariant): void | Promise<void>;
 };
 
 export default function HomeResults({
@@ -45,11 +50,14 @@ export default function HomeResults({
   canDownloadZip,
   whyVariantId,
   metricsVariantId,
+  lang,
+  compareAssets,
   onDownloadZip,
   onWhyVariantChange,
   onMetricsVariantChange,
   onLoadVariantMetrics,
   onConvertAnyway,
+  onAddVariantToCompare,
 }: HomeResultsProps) {
   const blockedCopy = copy.errorOverlay;
   const metricsCopy = copy.metricsOverlay;
@@ -167,7 +175,7 @@ export default function HomeResults({
                               variant.status === "done"
                                 ? `${formatSize(variant.outputSize || 0)}`
                                 : variant.status === "processing"
-                                  ? `${copy.optimizing} ${Math.round(variant.progress)}%`
+                                  ? copy.optimizing
                                   : variant.status === "queued"
                                     ? copy.queued
                                     : isTransparencyBlocked(
@@ -222,18 +230,56 @@ export default function HomeResults({
                                             : undefined
                                         }
                                       >
-                                        <a
-                                          href={variant.outputUrl}
-                                          download={
-                                            variant.outputName || item.fileName
-                                          }
-                                          className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
-                                        >
-                                          <span className="text-[11px]">⬇</span>
-                                          <span>
-                                            {extToBadge(variant.outputExt)}
-                                          </span>
-                                        </a>
+                                        <div className="flex items-center gap-1">
+                                          <a
+                                            href={variant.outputUrl}
+                                            download={
+                                              variant.outputName || item.fileName
+                                            }
+                                            className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
+                                          >
+                                            <span className="text-[11px]">⬇</span>
+                                            <span>
+                                              {extToBadge(variant.outputExt)}
+                                            </span>
+                                          </a>
+                                          {IS_DEV && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                void onAddVariantToCompare(
+                                                  item,
+                                                  variant,
+                                                )
+                                              }
+                                              className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition ${
+                                                compareAssets.some(
+                                                  (asset) =>
+                                                    asset.variantId ===
+                                                      variant.id &&
+                                                    asset.itemId === item.id,
+                                                )
+                                                  ? "bg-[#3f80ea] text-white"
+                                                  : "bg-[#dde9ff] text-[#5374a8] hover:bg-[#cbdfff]"
+                                              }`}
+                                              title={
+                                                lang === "zh"
+                                                  ? "加入图片对比"
+                                                  : "Add to image comparison"
+                                              }
+                                              aria-label={
+                                                lang === "zh"
+                                                  ? "加入图片对比"
+                                                  : "Add to image comparison"
+                                              }
+                                            >
+                                              <FiColumns
+                                                aria-hidden="true"
+                                                className="h-3.5 w-3.5"
+                                              />
+                                            </button>
+                                          )}
+                                        </div>
                                         {IS_DEV &&
                                           metricsVariantId === variant.id && (
                                           <div className="absolute right-0 top-[calc(100%+10px)] z-20 w-[220px] rounded-xl bg-white p-4 text-left shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5">

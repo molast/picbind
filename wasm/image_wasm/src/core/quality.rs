@@ -1,9 +1,152 @@
 use image::DynamicImage;
-use ravif::BitDepth as RavifBitDepth;
+use js_sys::{Array, Object, Reflect};
+use wasm_bindgen::JsValue;
 
 use super::analysis::analyze_dynamic_image;
 
 const PNG_TO_JPEG_MIN_QUALITY_FLOOR: u8 = 80;
+
+pub struct JpegPerceptualThresholds {
+    pub min_ms_ssim: f64,
+    pub max_blur_loss_percent: f64,
+    pub max_perceptual_distance: f64,
+    pub max_p99_delta_e: f64,
+    pub max_p95_luminance_error: f64,
+    pub max_p95_chroma_error: f64,
+}
+
+pub struct PngQuantizationPlan {
+    pub color_candidates: [u32; 4],
+    pub dithering_level: f32,
+    pub min_ms_ssim: f64,
+    pub max_perceptual_distance: f64,
+    pub max_p99_delta_e: f64,
+    pub max_p95_luminance_error: f64,
+    pub max_p95_chroma_error: f64,
+    pub max_p95_alpha_error: f64,
+    pub max_p99_alpha_error: f64,
+}
+
+pub struct AvifEncodingPlan {
+    pub quality_candidates: Vec<u8>,
+    pub speed: u8,
+    pub bit_depth: u8,
+    pub subsample: u8,
+    pub tune: u8,
+    pub chroma_delta_q: bool,
+    pub sharpness: u8,
+    pub enable_sharp_yuv: bool,
+    pub tile_cols_log2: u8,
+    pub tile_rows_log2: u8,
+    pub alpha_quality_floor: u8,
+    pub min_ms_ssim: f64,
+    pub max_blur_loss_percent: f64,
+    pub max_perceptual_distance: f64,
+    pub max_p99_delta_e: f64,
+    pub max_p95_luminance_error: f64,
+    pub max_p95_chroma_error: f64,
+    pub max_p95_alpha_error: f64,
+    pub max_p99_alpha_error: f64,
+}
+
+impl AvifEncodingPlan {
+    pub fn to_js_value(&self) -> Result<JsValue, JsValue> {
+        let obj = Object::new();
+        let candidates = Array::new();
+        for quality in &self.quality_candidates {
+            candidates.push(&JsValue::from_f64(*quality as f64));
+        }
+        Reflect::set(&obj, &"qualityCandidates".into(), &candidates)?;
+        Reflect::set(&obj, &"speed".into(), &(self.speed as f64).into())?;
+        Reflect::set(&obj, &"bitDepth".into(), &(self.bit_depth as f64).into())?;
+        for (key, value) in [
+            ("subsample", self.subsample as f64),
+            ("tune", self.tune as f64),
+            ("sharpness", self.sharpness as f64),
+            ("tileColsLog2", self.tile_cols_log2 as f64),
+            ("tileRowsLog2", self.tile_rows_log2 as f64),
+            ("alphaQualityFloor", self.alpha_quality_floor as f64),
+            ("minMsSsim", self.min_ms_ssim),
+            ("maxBlurLossPercent", self.max_blur_loss_percent),
+            ("maxPerceptualDistance", self.max_perceptual_distance),
+            ("maxP99DeltaE", self.max_p99_delta_e),
+            ("maxP95LuminanceError", self.max_p95_luminance_error),
+            ("maxP95ChromaError", self.max_p95_chroma_error),
+            ("maxP95AlphaError", self.max_p95_alpha_error),
+            ("maxP99AlphaError", self.max_p99_alpha_error),
+        ] {
+            Reflect::set(&obj, &key.into(), &value.into())?;
+        }
+        Reflect::set(
+            &obj,
+            &"chromaDeltaQ".into(),
+            &JsValue::from_bool(self.chroma_delta_q),
+        )?;
+        Reflect::set(
+            &obj,
+            &"enableSharpYuv".into(),
+            &JsValue::from_bool(self.enable_sharp_yuv),
+        )?;
+        Ok(obj.into())
+    }
+}
+
+pub fn png_quantization_plan(img: &DynamicImage, source_size_bytes: usize) -> PngQuantizationPlan {
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "png");
+    let is_flat_gradient = analysis.flat_coverage >= 0.18;
+    let is_color_rich = analysis.color_complexity >= 0.95 && analysis.detail_coverage >= 0.40;
+    let is_edge_heavy = analysis.edge_strength >= 0.38 && analysis.flat_coverage < 0.18;
+
+    if is_flat_gradient {
+        PngQuantizationPlan {
+            color_candidates: [64, 128, 192, 256],
+            dithering_level: 0.75,
+            min_ms_ssim: 0.995,
+            max_perceptual_distance: 1.80,
+            max_p99_delta_e: 3.80,
+            max_p95_luminance_error: 0.80,
+            max_p95_chroma_error: 3.10,
+            max_p95_alpha_error: 0.02,
+            max_p99_alpha_error: 0.04,
+        }
+    } else if is_color_rich {
+        PngQuantizationPlan {
+            color_candidates: [64, 128, 192, 256],
+            dithering_level: 0.75,
+            min_ms_ssim: 0.992,
+            max_perceptual_distance: 3.0,
+            max_p99_delta_e: 5.30,
+            max_p95_luminance_error: 1.30,
+            max_p95_chroma_error: 4.80,
+            max_p95_alpha_error: 0.02,
+            max_p99_alpha_error: 0.04,
+        }
+    } else if is_edge_heavy {
+        PngQuantizationPlan {
+            color_candidates: [64, 128, 192, 256],
+            dithering_level: 0.0,
+            min_ms_ssim: 0.980,
+            max_perceptual_distance: 5.0,
+            max_p99_delta_e: 10.0,
+            max_p95_luminance_error: 1.75,
+            max_p95_chroma_error: 7.60,
+            max_p95_alpha_error: 0.02,
+            max_p99_alpha_error: 0.04,
+        }
+    } else {
+        PngQuantizationPlan {
+            color_candidates: [64, 128, 192, 256],
+            dithering_level: 0.55,
+            min_ms_ssim: 0.990,
+            max_perceptual_distance: 3.20,
+            max_p99_delta_e: 6.0,
+            max_p95_luminance_error: 1.30,
+            max_p95_chroma_error: 5.50,
+            max_p95_alpha_error: 0.02,
+            max_p99_alpha_error: 0.04,
+        }
+    }
+}
 
 pub fn quality_candidates(quality: u8) -> [u8; 5] {
     [
@@ -187,106 +330,153 @@ pub fn jpeg_to_jpeg_quality_candidates(
     let adaptive = adaptive.clamp(78, 94) as u8;
     let mut candidates = vec![
         adaptive,
-        adaptive.saturating_sub(1),
-        adaptive.saturating_sub(3),
-        adaptive.saturating_sub(5),
         adaptive.saturating_sub(7),
-        adaptive.saturating_sub(9),
-        adaptive.saturating_sub(12),
-        adaptive.saturating_sub(15),
-        adaptive.saturating_sub(18),
-        adaptive.saturating_sub(22),
-        adaptive.saturating_sub(26),
+        adaptive.saturating_sub(13),
+        adaptive.saturating_sub(19),
+        adaptive.saturating_sub(25),
     ];
-    candidates.retain(|quality| *quality >= 60);
+    candidates.retain(|quality| *quality >= 52);
     candidates.sort_unstable();
     candidates.dedup();
     candidates.reverse();
     candidates
 }
 
-pub fn jpeg_to_jpeg_quality_thresholds(img: &DynamicImage, source_size_bytes: usize) -> (f64, f64) {
-    let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
-    let min_ms_ssim = if analysis.detail_coverage >= 0.30 || analysis.edge_strength >= 0.38 {
-        0.982
-    } else if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
-        0.966
-    } else {
-        0.972
-    };
-
-    let max_blur_loss_percent = if analysis.detail_coverage >= 0.30 {
-        5.5
-    } else if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
-        9.0
-    } else {
-        7.0
-    };
-
-    (min_ms_ssim, max_blur_loss_percent)
-}
-
-pub fn jpeg_to_jpeg_rescue_qualities(
+pub fn jpeg_to_jpeg_quality_thresholds(
     img: &DynamicImage,
     source_size_bytes: usize,
-    min_candidate_quality: u8,
-) -> Vec<u8> {
+) -> JpegPerceptualThresholds {
     let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
-    let mut rescue_qualities = vec![58u8, 54, 50, 46, 42];
-    let is_large_jpeg = analysis.source_size_mb >= 1.5 || analysis.pixel_count >= 3_000_000;
-    let is_medium_jpeg = analysis.source_size_mb >= 0.8 || analysis.pixel_count >= 1_500_000;
-
-    if is_large_jpeg {
-        let mut search_quality = min_candidate_quality.saturating_sub(2);
-        while search_quality >= 6 {
-            rescue_qualities.push(search_quality);
-            if search_quality <= 7 {
-                break;
-            }
-            search_quality = search_quality.saturating_sub(2);
+    if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
+        JpegPerceptualThresholds {
+            min_ms_ssim: 0.975,
+            max_blur_loss_percent: 5.0,
+            max_perceptual_distance: 2.40,
+            max_p99_delta_e: 4.80,
+            max_p95_luminance_error: 1.0,
+            max_p95_chroma_error: 4.30,
         }
-    } else if is_medium_jpeg {
-        rescue_qualities.extend([38u8, 34, 30, 26, 22, 18, 14, 10]);
+    } else if analysis.detail_coverage >= 0.30 || analysis.edge_strength >= 0.38 {
+        JpegPerceptualThresholds {
+            min_ms_ssim: 0.982,
+            max_blur_loss_percent: 6.0,
+            max_perceptual_distance: 3.20,
+            max_p99_delta_e: 6.0,
+            max_p95_luminance_error: 1.25,
+            max_p95_chroma_error: 5.50,
+        }
     } else {
-        rescue_qualities = vec![58u8, 50, 42, 34, 26, 18];
+        JpegPerceptualThresholds {
+            min_ms_ssim: 0.978,
+            max_blur_loss_percent: 5.5,
+            max_perceptual_distance: 2.80,
+            max_p99_delta_e: 5.50,
+            max_p95_luminance_error: 1.10,
+            max_p95_chroma_error: 5.0,
+        }
     }
-
-    rescue_qualities.sort_unstable();
-    rescue_qualities.dedup();
-    rescue_qualities.reverse();
-    rescue_qualities
 }
 
 pub fn avif_speed_for_pixels(pixel_count: usize) -> u8 {
     if pixel_count <= 900_000 {
-        5
+        4
     } else if pixel_count <= 2_500_000 {
-        6
-    } else if pixel_count <= 5_000_000 {
-        7
+        5
     } else {
-        8
+        6
     }
 }
 
-pub fn avif_quality_candidates(quality: u8, pixel_count: usize) -> Vec<u8> {
-    // AVIF at the same "quality" number is often visually stronger than JPEG/WebP.
-    // Slightly lowering target quality tends to improve byte size while keeping acceptable output.
-    let base = quality.clamp(1, 100).saturating_sub(10).clamp(24, 92);
-    let mut candidates = vec![base];
+pub fn avif_encoding_plan(
+    img: &DynamicImage,
+    requested_quality: u8,
+    source_size_bytes: usize,
+) -> AvifEncodingPlan {
+    let analysis = analyze_dynamic_image(img, source_size_bytes, "avif");
+    let photo_like = analysis.detail_coverage >= 0.24
+        || analysis.brightness_variance >= 0.30
+        || (analysis.color_complexity >= 0.34 && analysis.flat_coverage < 0.28);
+    let ui_like = analysis.edge_strength >= 0.30
+        && analysis.flat_coverage >= 0.18
+        && analysis.detail_coverage < 0.34;
+    let near_lossless_candidate = analysis.pixel_count <= 1_500_000
+        && analysis.flat_coverage >= 0.52
+        && analysis.color_complexity <= 0.24;
 
-    if pixel_count <= 3_000_000 {
-        candidates.push(base.saturating_sub(8).clamp(20, 88));
+    let mut predicted = requested_quality.clamp(55, 96) as i32 - if photo_like { 35 } else { 22 };
+    predicted += if analysis.detail_coverage >= 0.36 {
+        if photo_like { 7 } else { 8 }
+    } else if analysis.detail_coverage >= 0.24 {
+        if photo_like { 4 } else { 5 }
+    } else {
+        0
+    };
+    predicted += if analysis.edge_strength >= 0.40 {
+        5
+    } else if analysis.edge_strength >= 0.28 {
+        2
+    } else {
+        0
+    };
+    predicted += if ui_like { 5 } else { 0 };
+    let predicted = predicted.clamp(if photo_like { 36 } else { 48 }, 94) as u8;
+
+    // Search from the smallest likely acceptable candidate toward conservative quality.
+    // Most photos pass on the first or second encode; the final candidate is the guardrail.
+    let mut quality_candidates = if near_lossless_candidate {
+        vec![predicted.max(76), predicted.saturating_add(8).min(96)]
+    } else if photo_like {
+        vec![
+            predicted,
+            predicted.saturating_add(3).min(96),
+            predicted.saturating_add(6).min(98),
+        ]
+    } else {
+        vec![
+            predicted.saturating_sub(8).max(32),
+            predicted,
+            predicted.saturating_add(7).min(97),
+        ]
+    };
+    // Quality 100 is the final near-lossless guardrail. It is only encoded if
+    // all predicted lossy candidates fail the visual comparison.
+    quality_candidates.push(100);
+    quality_candidates.sort_unstable();
+    quality_candidates.dedup();
+
+    AvifEncodingPlan {
+        quality_candidates,
+        speed: avif_speed_for_pixels(analysis.pixel_count),
+        bit_depth: 8,
+        subsample: if ui_like && !photo_like {
+            3
+        } else if !photo_like && analysis.color_complexity >= 0.42 {
+            2
+        } else {
+            1
+        },
+        tune: 2,
+        chroma_delta_q: photo_like,
+        sharpness: if photo_like { 1 } else { 0 },
+        enable_sharp_yuv: true,
+        tile_cols_log2: if analysis.pixel_count >= 2_000_000 {
+            1
+        } else {
+            0
+        },
+        tile_rows_log2: if analysis.pixel_count >= 4_000_000 {
+            1
+        } else {
+            0
+        },
+        alpha_quality_floor: if analysis.has_alpha { 90 } else { 1 },
+        min_ms_ssim: if ui_like { 0.994 } else { 0.993 },
+        max_blur_loss_percent: if ui_like { 2.8 } else { 4.5 },
+        max_perceptual_distance: if ui_like { 1.9 } else { 2.05 },
+        max_p99_delta_e: if ui_like { 3.5 } else { 3.4 },
+        max_p95_luminance_error: if ui_like { 0.75 } else { 0.8 },
+        max_p95_chroma_error: if ui_like { 3.0 } else { 2.9 },
+        max_p95_alpha_error: 0.02,
+        max_p99_alpha_error: 0.04,
     }
-    if pixel_count <= 1_200_000 {
-        candidates.push(base.saturating_sub(14).clamp(18, 84));
-    }
-
-    candidates.sort_unstable();
-    candidates.dedup();
-    candidates
-}
-
-pub fn avif_bit_depth_for_pixels(_pixel_count: usize) -> RavifBitDepth {
-    RavifBitDepth::Auto
 }

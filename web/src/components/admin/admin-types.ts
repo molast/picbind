@@ -7,7 +7,6 @@ export type AdminDashboardState = {
     { count: number; totalSavedBytes: number }
   >;
   showCompressedCount: boolean;
-  showCompareSection: boolean;
   updatedAt: string;
 };
 
@@ -22,7 +21,6 @@ export const EMPTY_ADMIN_STATE: AdminDashboardState = {
     avif: { count: 0, totalSavedBytes: 0 },
   },
   showCompressedCount: true,
-  showCompareSection: true,
   updatedAt: new Date(0).toISOString(),
 };
 

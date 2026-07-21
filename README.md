@@ -185,3 +185,7 @@ site.webmanifest
 - 前端页面保持可静态导出，减少部署复杂度。
 - 动态统计和管理能力迁移到 Cloudflare Worker。
 - 不再使用 Docker 部署。
+
+## 高清图片下载
+https://www.pexels.com/
+选好图图片以后，在图片上右键 Copy Image link，拿到连接以后再地址栏中拷贝链接，然后在末尾加上?auto=compress&fm=webp&w=1920

@@ -11,9 +11,6 @@ export function useAdminDashboard() {
   const [showCompressedCount, setShowCompressedCount] = React.useState(
     EMPTY_ADMIN_STATE.showCompressedCount,
   );
-  const [showCompareSection, setShowCompareSection] = React.useState(
-    EMPTY_ADMIN_STATE.showCompareSection,
-  );
   const [statusText, setStatusText] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -39,7 +36,6 @@ export function useAdminDashboard() {
   const applyState = React.useCallback((next: AdminDashboardState) => {
     setState(next);
     setShowCompressedCount(next.showCompressedCount);
-    setShowCompareSection(next.showCompareSection);
   }, []);
 
   const refreshState = React.useCallback(async () => {
@@ -83,7 +79,7 @@ export function useAdminDashboard() {
           "Content-Type": "application/json",
           "x-admin-key": adminKey,
         },
-        body: JSON.stringify({ showCompressedCount, showCompareSection }),
+        body: JSON.stringify({ showCompressedCount }),
       });
       if (!response.ok) {
         if (response.status === 404) {
@@ -98,7 +94,7 @@ export function useAdminDashboard() {
     } finally {
       setIsSaving(false);
     }
-  }, [adminKey, applyState, showCompareSection, showCompressedCount, stateUrl]);
+  }, [adminKey, applyState, showCompressedCount, stateUrl]);
 
   React.useEffect(() => setIsMounted(true), []);
   React.useEffect(() => {
@@ -113,8 +109,6 @@ export function useAdminDashboard() {
     stateUrl,
     showCompressedCount,
     setShowCompressedCount,
-    showCompareSection,
-    setShowCompareSection,
     statusText,
     isSaving,
     isLoading,

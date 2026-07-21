@@ -129,7 +129,7 @@ const zh = {
     heroTitle: "一次上传，自动压缩 PNG、JPEG、WebP 和 AVIF",
     heroDesc: "打开首页即可开始处理图片，在同一页面完成上传、压缩和下载，减少操作路径，让交付更高效。",
     dropTitle: "将图片拖到这里开始压缩",
-    dropDesc: "最多 20 张图片，单张不超过 10 MB",
+    dropDesc: "最多 20 张图片，单张不超过 5 MB",
     faviconEntry: "Favicon",
     autoLabel: "上传后自动开始压缩",
     selectAll: "全选",
@@ -143,7 +143,7 @@ const zh = {
     uploadNotice: {
       tooManyFiles: "最多只能同时处理 20 张图片。",
       unsupportedFiles: "部分文件已跳过，目前仅支持 PNG、JPEG 和 WebP。",
-      fileTooLarge: "部分文件已跳过，单张图片不能超过 10 MB。",
+      fileTooLarge: "部分文件已跳过，单张图片不能超过 5 MB。",
     },
     downloadZip: "打包下载 ZIP",
     cards: [

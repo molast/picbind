@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   formatSize,
   getBestDoneVariant,
+  type CompareAsset,
+  type HomeCompareCopy,
   type HomeItem,
   type MetricsRequestState,
   type OutputVariant,
@@ -45,20 +47,29 @@ import {
 } from "@/utils/wasm";
 
 const MAX_FILES = 20;
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
-const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const ALLOWED_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/avif",
+]);
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
 const COMPARE_IMAGE_SOURCE_NAME = "compare-original.png";
 const IS_DEV = process.env.NODE_ENV !== "production";
 const HEAVY_JPEG_RECOMPRESS_SIZE_BYTES = 1.5 * 1024 * 1024;
 
 function normalizeSourceFormat(file: File): OutputFormat {
+  const extension = file.name.split(".").pop()?.toLowerCase();
   if (file.type === "image/png") {
     return "png";
   }
   if (file.type === "image/webp") {
     return "webp";
+  }
+  if (file.type === "image/avif" || extension === "avif") {
+    return "avif";
   }
   return "jpeg";
 }
@@ -256,13 +267,11 @@ async function logCompressionAnalysis(
 export type UseHomeCompressionOptions = {
   initialLang?: Lang;
   showCompressedCount?: boolean;
-  showCompareSection?: boolean;
 };
 
 export function useHomeCompression({
   initialLang = "en",
   showCompressedCount = false,
-  showCompareSection = false,
 }: UseHomeCompressionOptions) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -271,6 +280,7 @@ export function useHomeCompression({
   const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
   const compareCompressedUrlRef = React.useRef<string | null>(null);
+  const compareSourceUrlsRef = React.useRef<Record<string, string>>({});
   const metricsRequestsRef = React.useRef<Record<string, MetricsRequestState>>(
     {},
   );
@@ -281,10 +291,15 @@ export function useHomeCompression({
   const [homeShowCompressedCount, setHomeShowCompressedCount] = React.useState(
     showCompressedCount,
   );
-  const [homeShowCompareSection, setHomeShowCompareSection] = React.useState(
-    showCompareSection,
-  );
+  const homeShowCompareSection = IS_DEV;
   const [compareSectionReady, setCompareSectionReady] = React.useState(false);
+  const [compareAssets, setCompareAssets] = React.useState<CompareAsset[]>([]);
+  const [compareLeftAssetId, setCompareLeftAssetId] = React.useState<
+    string | null
+  >(null);
+  const [compareRightAssetId, setCompareRightAssetId] = React.useState<
+    string | null
+  >(null);
   const [totalCompressedCount, setTotalCompressedCount] = React.useState(0);
   const [displayedCompressedCount, setDisplayedCompressedCount] =
     React.useState(0);
@@ -314,7 +329,7 @@ export function useHomeCompression({
   const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
   const blockedCopy = copy.errorOverlay;
   const metricsCopy = copy.metricsOverlay;
-  const compareCopy = React.useMemo(
+  const compareCopy = React.useMemo<HomeCompareCopy>(
     () =>
       lang === "zh"
         ? {
@@ -473,21 +488,17 @@ export function useHomeCompression({
   React.useEffect(() => {
     let cancelled = false;
 
-    void loadHomeDisplayConfig({
-      showCompressedCount,
-      showCompareSection,
-    }).then((config) => {
+    void loadHomeDisplayConfig({ showCompressedCount }).then((config) => {
       if (cancelled) {
         return;
       }
       setHomeShowCompressedCount(config.showCompressedCount);
-      setHomeShowCompareSection(config.showCompareSection);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [showCompareSection, showCompressedCount]);
+  }, [showCompressedCount]);
 
   React.useEffect(() => {
     if (!homeShowCompressedCount) {
@@ -648,6 +659,19 @@ export function useHomeCompression({
   }, [items]);
 
   React.useEffect(() => {
+    setCompareLeftAssetId((current) =>
+      current && compareAssets.some((asset) => asset.id === current)
+        ? current
+        : compareAssets[0]?.id || null,
+    );
+    setCompareRightAssetId((current) =>
+      current && compareAssets.some((asset) => asset.id === current)
+        ? current
+        : compareAssets[1]?.id || compareAssets[0]?.id || null,
+    );
+  }, [compareAssets]);
+
+  React.useEffect(() => {
     isUnmountedRef.current = false;
     const timerMap = timersRef.current;
     return () => {
@@ -656,6 +680,10 @@ export function useHomeCompression({
       void flushCompressedCountNow();
       Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
       terminateCompressionWorker();
+      Object.values(compareSourceUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+      compareSourceUrlsRef.current = {};
       itemsRef.current.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
         void deleteQueuedImageFile(item.fileId);
@@ -675,7 +703,8 @@ export function useHomeCompression({
       let hasTooLarge = false;
 
       const nextFiles = inputFiles.filter((file) => {
-        if (!ALLOWED_TYPES.has(file.type)) {
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        if (!ALLOWED_TYPES.has(file.type) && extension !== "avif") {
           hasUnsupported = true;
           return false;
         }
@@ -1149,6 +1178,50 @@ export function useHomeCompression({
     );
   };
 
+  const addVariantToCompare = React.useCallback(
+    async (item: HomeItem, variant: OutputVariant) => {
+      if (!IS_DEV || variant.status !== "done" || !variant.outputUrl) {
+        return;
+      }
+
+      const sourceAssetId = `${item.id}:original`;
+      let sourceUrl = compareSourceUrlsRef.current[item.id];
+      if (!sourceUrl) {
+        const sourceFile = await getQueuedImageFile(item.fileId);
+        if (!sourceFile || isUnmountedRef.current) {
+          return;
+        }
+        sourceUrl = URL.createObjectURL(sourceFile);
+        compareSourceUrlsRef.current[item.id] = sourceUrl;
+      }
+
+      const originalAsset: CompareAsset = {
+        id: sourceAssetId,
+        itemId: item.id,
+        label: `${item.fileName} · ORIGINAL`,
+        src: sourceUrl,
+        size: item.fileSize,
+        format: item.sourceFormat,
+        kind: "original",
+      };
+      const outputAsset: CompareAsset = {
+        id: `${item.id}:${variant.id}`,
+        itemId: item.id,
+        variantId: variant.id,
+        label: `${item.fileName} · ${variant.format.toUpperCase()}`,
+        src: variant.outputUrl,
+        size: variant.outputSize || 0,
+        format: variant.format,
+        kind: "output",
+      };
+
+      setCompareAssets([originalAsset, outputAsset]);
+      setCompareLeftAssetId(originalAsset.id);
+      setCompareRightAssetId(outputAsset.id);
+    },
+    [],
+  );
+
   return {
     langReady,
     copy,
@@ -1187,6 +1260,10 @@ export function useHomeCompression({
     compareSectionReady,
     compareCompressedSrc,
     compareSizes,
+    compareAssets,
+    compareLeftAssetId,
+    compareRightAssetId,
+    addVariantToCompare,
     homeShowCompressedCount,
     displayedCompressedCount,
     isCountBouncing,

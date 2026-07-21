@@ -35,6 +35,27 @@ export type HomeItem = {
   updatedAt: number;
 };
 
+export type CompareAsset = {
+  id: string;
+  itemId: string;
+  variantId?: string;
+  label: string;
+  src: string;
+  size: number;
+  format: string;
+  kind: "original" | "output";
+};
+
+export type HomeCompareCopy = {
+  kicker: string;
+  title: string;
+  desc: string;
+  original: string;
+  compressed: string;
+  hintLeft: string;
+  hintRight: string;
+};
+
 export function formatSize(size: number) {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   if (size >= 1024) {
