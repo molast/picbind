@@ -1,9 +1,10 @@
 pub mod analysis;
-pub mod avif;
 pub mod candidate;
+pub mod hvs;
 pub mod jpeg;
 pub mod metrics;
 pub mod pipeline;
 pub mod png;
+pub mod png_zopfli;
 pub mod quality;
 pub mod zip;

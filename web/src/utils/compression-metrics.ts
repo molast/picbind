@@ -33,7 +33,6 @@ let retryDelayMs = FLUSH_DELAY_MS;
 type MetricsReadResponse = {
   totalCompressed?: number;
   showCompressedCount?: boolean;
-  showCompareSection?: boolean;
 };
 
 function makeSessionId() {
@@ -197,7 +196,6 @@ async function readTotalCount() {
     return {
       totalCompressed: 0,
       showCompressedCount: false,
-      showCompareSection: false,
     };
   }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
@@ -346,7 +344,6 @@ export async function loadTotalCompressedCount() {
 
 export async function loadHomeDisplayConfig(defaults: {
   showCompressedCount: boolean;
-  showCompareSection: boolean;
 }) {
   if (!METRICS_ENABLED || !METRICS_API_PATH) {
     return defaults;
@@ -359,10 +356,6 @@ export async function loadHomeDisplayConfig(defaults: {
         typeof data.showCompressedCount === "boolean"
           ? data.showCompressedCount
           : defaults.showCompressedCount,
-      showCompareSection:
-        typeof data.showCompareSection === "boolean"
-          ? data.showCompareSection
-          : defaults.showCompareSection,
     };
   } catch (error) {
     console.error("Home display config read failed:", error);

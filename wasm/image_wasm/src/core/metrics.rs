@@ -2,6 +2,8 @@ use image::{DynamicImage, GrayImage, imageops::FilterType};
 use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 
+use super::hvs::compare_human_visual_distance;
+
 const SSIM_WINDOW: usize = 8;
 const SSIM_K1: f64 = 0.01;
 const SSIM_K2: f64 = 0.03;
@@ -22,6 +24,17 @@ pub struct QualityComparison {
     pub compressed_edge_energy: f64,
     pub original_laplacian_variance: f64,
     pub compressed_laplacian_variance: f64,
+    pub mean_delta_e: f64,
+    pub p95_delta_e: f64,
+    pub p99_delta_e: f64,
+    pub p95_masked_delta_e: f64,
+    pub p99_masked_delta_e: f64,
+    pub p95_luminance_error: f64,
+    pub p95_chroma_error: f64,
+    pub perceptual_distance: f64,
+    pub mean_alpha_error: f64,
+    pub p95_alpha_error: f64,
+    pub p99_alpha_error: f64,
 }
 
 impl QualityComparison {
@@ -49,6 +62,17 @@ impl QualityComparison {
             "compressedLaplacianVariance",
             self.compressed_laplacian_variance,
         )?;
+        set_number(&obj, "meanDeltaE", self.mean_delta_e)?;
+        set_number(&obj, "p95DeltaE", self.p95_delta_e)?;
+        set_number(&obj, "p99DeltaE", self.p99_delta_e)?;
+        set_number(&obj, "p95MaskedDeltaE", self.p95_masked_delta_e)?;
+        set_number(&obj, "p99MaskedDeltaE", self.p99_masked_delta_e)?;
+        set_number(&obj, "p95LuminanceError", self.p95_luminance_error)?;
+        set_number(&obj, "p95ChromaError", self.p95_chroma_error)?;
+        set_number(&obj, "perceptualDistance", self.perceptual_distance)?;
+        set_number(&obj, "meanAlphaError", self.mean_alpha_error)?;
+        set_number(&obj, "p95AlphaError", self.p95_alpha_error)?;
+        set_number(&obj, "p99AlphaError", self.p99_alpha_error)?;
         Ok(obj.into())
     }
 }
@@ -67,6 +91,22 @@ pub fn compare_image_quality(
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     compare_dynamic_images(&original, &compressed)
+}
+
+pub fn compare_image_quality_for_guardrails(
+    original_input: &[u8],
+    compressed_input: &[u8],
+) -> Result<QualityComparison, JsValue> {
+    let original_format =
+        image::guess_format(original_input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let compressed_format =
+        image::guess_format(compressed_input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let original = image::load_from_memory_with_format(original_input, original_format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let compressed = image::load_from_memory_with_format(compressed_input, compressed_format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    compare_dynamic_images_for_guardrails(&original, &compressed)
 }
 
 pub fn calculate_image_quality_score(
@@ -106,6 +146,8 @@ fn compare_dynamic_images_internal(
     let aligned_compressed = align_to_dimensions(&compressed, width, height);
     let original_rgb = original.to_rgb8();
     let compressed_rgb = aligned_compressed.to_rgb8();
+    let original_rgba = original.to_rgba8();
+    let compressed_rgba = aligned_compressed.to_rgba8();
     let original_gray = original.to_luma8();
     let compressed_gray = aligned_compressed.to_luma8();
 
@@ -136,6 +178,7 @@ fn compare_dynamic_images_internal(
     let overall_quality_score = (100.0
         * (0.44 * ssim + 0.24 * ms_ssim + 0.32 * (1.0 - blur_loss_percent / 100.0)))
         .clamp(0.0, 100.0);
+    let hvs = compare_human_visual_distance(&original_rgba, &compressed_rgba);
 
     Ok(QualityComparison {
         width,
@@ -152,6 +195,17 @@ fn compare_dynamic_images_internal(
         compressed_edge_energy,
         original_laplacian_variance,
         compressed_laplacian_variance,
+        mean_delta_e: hvs.mean_delta_e,
+        p95_delta_e: hvs.p95_delta_e,
+        p99_delta_e: hvs.p99_delta_e,
+        p95_masked_delta_e: hvs.p95_masked_delta_e,
+        p99_masked_delta_e: hvs.p99_masked_delta_e,
+        p95_luminance_error: hvs.p95_luminance_error,
+        p95_chroma_error: hvs.p95_chroma_error,
+        perceptual_distance: hvs.perceptual_distance,
+        mean_alpha_error: hvs.mean_alpha_error,
+        p95_alpha_error: hvs.p95_alpha_error,
+        p99_alpha_error: hvs.p99_alpha_error,
     })
 }
 

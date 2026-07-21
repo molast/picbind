@@ -1,5 +1,5 @@
 use image::{DynamicImage, RgbImage};
-use mozjpeg_rs::{Encoder as MozJpegEncoder, Subsampling};
+use mozjpeg_rs::{Encoder as MozJpegEncoder, Preset, Subsampling};
 use wasm_bindgen::JsValue;
 
 pub fn is_opaque(img: &DynamicImage) -> bool {
@@ -11,7 +11,7 @@ pub fn encode_jpeg_from_image(img: &DynamicImage, quality: u8) -> Result<Vec<u8>
     encode_jpeg_from_rgb_image(&rgb_img, quality)
 }
 
-fn encode_jpeg_from_rgb_image(rgb_img: &RgbImage, quality: u8) -> Result<Vec<u8>, JsValue> {
+pub fn encode_jpeg_from_rgb_image(rgb_img: &RgbImage, quality: u8) -> Result<Vec<u8>, JsValue> {
     let (width, height) = rgb_img.dimensions();
     let raw_pixels = rgb_img.as_raw();
     let subsampling = if quality >= 96 {
@@ -22,7 +22,7 @@ fn encode_jpeg_from_rgb_image(rgb_img: &RgbImage, quality: u8) -> Result<Vec<u8>
         Subsampling::S420
     };
 
-    MozJpegEncoder::max_compression()
+    MozJpegEncoder::new(Preset::ProgressiveBalanced)
         .quality(quality)
         .progressive(true)
         .subsampling(subsampling)

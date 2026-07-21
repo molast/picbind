@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@jsquash/avif':
+        specifier: ^2.1.1
+        version: 2.1.1
       '@jsquash/webp':
         specifier: ^1.5.0
         version: 1.5.0
@@ -1054,6 +1057,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@jsquash/avif@2.1.1':
+    resolution: {integrity: sha512-LMRxd0fMgfCLtobDh0/sFYJMMiRJTNYSEEWvRDKXlAeZ08t3gI5V+1thIT0XjXJ+SVG7Zug9B0XPyx0Ti5VRNA==}
 
   '@jsquash/webp@1.5.0':
     resolution: {integrity: sha512-KggLoj2MnRSfIqTeKe1EmbljTX2vuV7mh79k89PCL1pyqiDULcPM1L47twxXt0hkb68F70bXiL31MxsuoZtKFw==}
@@ -5195,6 +5201,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@jsquash/avif@2.1.1':
+    dependencies:
+      wasm-feature-detect: 1.8.0
 
   '@jsquash/webp@1.5.0':
     dependencies:

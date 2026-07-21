@@ -23,14 +23,26 @@ pub fn encode_quantized_png_from_image(
     img: &DynamicImage,
     quality: u8,
 ) -> Result<Vec<u8>, JsValue> {
+    encode_quantized_png_with_options(img, 256, quality, 0.0, 4)
+}
+
+pub fn encode_quantized_png_with_options(
+    img: &DynamicImage,
+    max_colors: u32,
+    quality: u8,
+    dithering_level: f32,
+    speed: i32,
+) -> Result<Vec<u8>, JsValue> {
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
     let mut attr = ImageQuant::new();
-    attr.set_max_colors(256)
+    attr.set_max_colors(max_colors.clamp(2, 256))
         .map_err(|e| JsValue::from_str(&format!("PNG quantization setup failed: {}", e)))?;
     attr.set_quality(0, quality.clamp(1, 100))
         .map_err(|e| JsValue::from_str(&format!("PNG quality setup failed: {}", e)))?;
+    attr.set_speed(speed.clamp(1, 10))
+        .map_err(|e| JsValue::from_str(&format!("PNG speed setup failed: {}", e)))?;
 
     let pixels: Vec<QuantRgba> = rgba
         .pixels()
@@ -51,7 +63,7 @@ pub fn encode_quantized_png_from_image(
         .quantize(&mut quant_image)
         .map_err(|e| JsValue::from_str(&format!("PNG quantization failed: {}", e)))?;
     quant_result
-        .set_dithering_level(0.0)
+        .set_dithering_level(dithering_level.clamp(0.0, 1.0))
         .map_err(|e| JsValue::from_str(&format!("PNG dithering setup failed: {}", e)))?;
 
     let (palette, indexed_pixels) = quant_result
@@ -68,6 +80,8 @@ pub fn encode_quantized_png_from_image(
     encoder
         .set_palette(&lode_palette)
         .map_err(|e| JsValue::from_str(&format!("PNG palette encode setup failed: {}", e)))?;
+    encoder.set_filter_strategy(FilterStrategy::MINSUM, true);
+    encoder.settings_mut().set_level(9);
 
     encoder
         .encode(&indexed_pixels, width as usize, height as usize)

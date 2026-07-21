@@ -22,6 +22,17 @@ export type ImageQualityComparison = {
   compressedEdgeEnergy: number;
   originalLaplacianVariance: number;
   compressedLaplacianVariance: number;
+  meanDeltaE: number;
+  p95DeltaE: number;
+  p99DeltaE: number;
+  p95MaskedDeltaE: number;
+  p99MaskedDeltaE: number;
+  p95LuminanceError: number;
+  p95ChromaError: number;
+  perceptualDistance: number;
+  meanAlphaError: number;
+  p95AlphaError: number;
+  p99AlphaError: number;
 };
 
 export type ImageAnalysisMetrics = {

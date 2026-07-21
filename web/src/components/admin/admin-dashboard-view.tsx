@@ -6,13 +6,11 @@ type AdminDashboardViewProps = {
   state: AdminDashboardState;
   stateUrl: string;
   showCompressedCount: boolean;
-  showCompareSection: boolean;
   statusText: string;
   isSaving: boolean;
   isLoading: boolean;
   isMounted: boolean;
   onCompressedCountChange(value: boolean): void;
-  onCompareSectionChange(value: boolean): void;
   onSave(): void | Promise<void>;
   onRefresh(): void | Promise<void>;
 };
@@ -21,13 +19,11 @@ export default function AdminDashboardView({
   state,
   stateUrl,
   showCompressedCount,
-  showCompareSection,
   statusText,
   isSaving,
   isLoading,
   isMounted,
   onCompressedCountChange,
-  onCompareSectionChange,
   onSave,
   onRefresh,
 }: AdminDashboardViewProps) {
@@ -40,7 +36,7 @@ export default function AdminDashboardView({
           </p>
           <h1 className="mt-3 text-3xl font-semibold text-slate-900">后台控制台</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            这里可以查看压缩统计、浏览次数，并控制首页数量组件和压缩对比组件的显示开关。
+            这里可以查看压缩统计、浏览次数，并控制首页数量组件的显示开关。
           </p>
         </header>
 
@@ -96,12 +92,6 @@ export default function AdminDashboardView({
               detail="控制首页底部累计压缩数量卡片是否展示。"
               checked={showCompressedCount}
               onChange={onCompressedCountChange}
-            />
-            <ToggleRow
-              title="显示压缩对比组件"
-              detail="控制首页图片前后对比滑块是否展示。"
-              checked={showCompareSection}
-              onChange={onCompareSectionChange}
             />
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-3">

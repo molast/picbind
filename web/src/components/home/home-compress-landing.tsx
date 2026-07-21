@@ -2,6 +2,7 @@
 
 import React from "react";
 import HomeFooter from "./home-footer";
+import HomeComparePanel from "./home-compare-panel";
 import HomeHero from "./home-hero";
 import HomeInfoSection from "./home-info-section";
 import HomeResults from "./home-results";
@@ -80,7 +81,7 @@ export default function HomeCompressLanding({
         ref={home.inputRef}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,image/avif,.avif"
         className="hidden"
         onChange={(event) => {
           home.enqueueFiles(event.target.files ?? []);
@@ -98,21 +99,34 @@ export default function HomeCompressLanding({
         canDownloadZip={home.zipItems.length > 0}
         whyVariantId={home.whyVariantId}
         metricsVariantId={home.metricsVariantId}
+        lang={home.lang}
+        allowCompareSelection={home.homeAllowCompareSelection}
+        showQualityMetrics={home.homeShowQualityMetrics}
+        compareAssets={home.compareAssets}
         onDownloadZip={home.handleDownloadZip}
         onWhyVariantChange={home.setWhyVariantId}
         onMetricsVariantChange={home.setMetricsVariantId}
         onLoadVariantMetrics={home.loadVariantMetrics}
         onConvertAnyway={home.handleConvertAnyway}
+        onAddVariantToCompare={home.addVariantToCompare}
       />
+
+      {home.homeShowCompareSection && (
+        <HomeComparePanel
+          copy={home.compareCopy}
+          ready={home.compareSectionReady}
+          defaultCompressedSrc={home.compareCompressedSrc}
+          defaultSizes={home.compareSizes}
+          assets={home.compareAssets}
+          leftAssetId={home.compareLeftAssetId}
+          rightAssetId={home.compareRightAssetId}
+          hasResults={home.sortedItems.length > 0}
+        />
+      )}
 
       <HomeInfoSection
         copy={home.copy}
         lang={home.lang}
-        compareCopy={home.compareCopy}
-        showCompareSection={home.homeShowCompareSection}
-        compareSectionReady={home.compareSectionReady}
-        compareCompressedSrc={home.compareCompressedSrc}
-        compareSizes={home.compareSizes}
         showCompressedCount={home.homeShowCompressedCount}
         displayedCompressedCount={home.displayedCompressedCount}
         isCountBouncing={home.isCountBouncing}
