@@ -52,10 +52,11 @@ function openDatabase() {
     const restoreWorker = preserveOpfsProxyWorkerVfs();
     databasePromise = sqlite3InitModule()
       .then((sqlite3) => {
-        if (!crossOriginIsolated || !("opfs" in sqlite3)) {
-          throw new Error(
-            "SQLite OPFS requires cross-origin isolation and OPFS support",
-          );
+        if (!crossOriginIsolated) {
+          throw new Error("SQLite OPFS requires cross-origin isolation");
+        }
+        if (!("opfs" in sqlite3)) {
+          throw new Error("SQLite OPFS VFS failed to initialize");
         }
         const database = new sqlite3.oo1.OpfsDb(DATABASE_FILE, "c");
         database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
