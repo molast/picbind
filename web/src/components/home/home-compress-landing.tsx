@@ -100,6 +100,8 @@ export default function HomeCompressLanding({
         whyVariantId={home.whyVariantId}
         metricsVariantId={home.metricsVariantId}
         lang={home.lang}
+        allowCompareSelection={home.homeAllowCompareSelection}
+        showQualityMetrics={home.homeShowQualityMetrics}
         compareAssets={home.compareAssets}
         onDownloadZip={home.handleDownloadZip}
         onWhyVariantChange={home.setWhyVariantId}

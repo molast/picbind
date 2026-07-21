@@ -27,6 +27,11 @@ import {
 import { reportPageViewOnce } from "@/utils/page-view";
 import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
+import {
+  COMPRESSION_QUALITY_METRICS_ENABLED,
+  IMAGE_COMPARE_ENABLED,
+  IMAGE_COMPARE_SELECTION_ENABLED,
+} from "@/utils/feature-flags";
 import { createUuid } from "@/utils/uuid";
 import {
   COMPRESSION_HANDOFF_EVENT,
@@ -291,7 +296,9 @@ export function useHomeCompression({
   const [homeShowCompressedCount, setHomeShowCompressedCount] = React.useState(
     showCompressedCount,
   );
-  const homeShowCompareSection = IS_DEV;
+  const homeShowCompareSection = IMAGE_COMPARE_ENABLED;
+  const homeAllowCompareSelection = IMAGE_COMPARE_SELECTION_ENABLED;
+  const homeShowQualityMetrics = COMPRESSION_QUALITY_METRICS_ENABLED;
   const [compareSectionReady, setCompareSectionReady] = React.useState(false);
   const [compareAssets, setCompareAssets] = React.useState<CompareAsset[]>([]);
   const [compareLeftAssetId, setCompareLeftAssetId] = React.useState<
@@ -354,7 +361,7 @@ export function useHomeCompression({
   );
   const loadVariantMetrics = React.useCallback(
     async (item: HomeItem, variant: OutputVariant) => {
-      if (!IS_DEV || variant.status !== "done" || !variant.outputUrl) {
+      if (!homeShowQualityMetrics || variant.status !== "done" || !variant.outputUrl) {
         return;
       }
 
@@ -424,7 +431,7 @@ export function useHomeCompression({
         }
       }
     },
-    [],
+    [homeShowQualityMetrics],
   );
 
   React.useEffect(() => {
@@ -1180,7 +1187,11 @@ export function useHomeCompression({
 
   const addVariantToCompare = React.useCallback(
     async (item: HomeItem, variant: OutputVariant) => {
-      if (!IS_DEV || variant.status !== "done" || !variant.outputUrl) {
+      if (
+        !homeAllowCompareSelection ||
+        variant.status !== "done" ||
+        !variant.outputUrl
+      ) {
         return;
       }
 
@@ -1219,7 +1230,7 @@ export function useHomeCompression({
       setCompareLeftAssetId(originalAsset.id);
       setCompareRightAssetId(outputAsset.id);
     },
-    [],
+    [homeAllowCompareSelection],
   );
 
   return {
@@ -1257,6 +1268,8 @@ export function useHomeCompression({
     handleDownloadZip,
     compareCopy,
     homeShowCompareSection,
+    homeAllowCompareSelection,
+    homeShowQualityMetrics,
     compareSectionReady,
     compareCompressedSrc,
     compareSizes,

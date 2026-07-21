@@ -18,8 +18,6 @@ import {
 } from "./home-compression-types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 
-const IS_DEV = process.env.NODE_ENV !== "production";
-
 type HomeResultsProps = {
   copy: HomeCompressLandingCopy;
   items: HomeItem[];
@@ -31,6 +29,8 @@ type HomeResultsProps = {
   whyVariantId: string | null;
   metricsVariantId: string | null;
   lang: Lang;
+  allowCompareSelection: boolean;
+  showQualityMetrics: boolean;
   compareAssets: CompareAsset[];
   onDownloadZip(): void;
   onWhyVariantChange: React.Dispatch<React.SetStateAction<string | null>>;
@@ -51,6 +51,8 @@ export default function HomeResults({
   whyVariantId,
   metricsVariantId,
   lang,
+  allowCompareSelection,
+  showQualityMetrics,
   compareAssets,
   onDownloadZip,
   onWhyVariantChange,
@@ -211,7 +213,7 @@ export default function HomeResults({
                                       <div
                                         className="relative"
                                         onMouseEnter={
-                                          IS_DEV
+                                          showQualityMetrics
                                             ? () => {
                                                 onMetricsVariantChange(variant.id);
                                                 void onLoadVariantMetrics(
@@ -222,7 +224,7 @@ export default function HomeResults({
                                             : undefined
                                         }
                                         onMouseLeave={
-                                          IS_DEV
+                                          showQualityMetrics
                                             ? () =>
                                                 onMetricsVariantChange((prev) =>
                                                   prev === variant.id ? null : prev,
@@ -243,7 +245,7 @@ export default function HomeResults({
                                               {extToBadge(variant.outputExt)}
                                             </span>
                                           </a>
-                                          {IS_DEV && (
+                                          {allowCompareSelection && (
                                             <button
                                               type="button"
                                               onClick={() =>
@@ -280,7 +282,7 @@ export default function HomeResults({
                                             </button>
                                           )}
                                         </div>
-                                        {IS_DEV &&
+                                        {showQualityMetrics &&
                                           metricsVariantId === variant.id && (
                                           <div className="absolute right-0 top-[calc(100%+10px)] z-20 w-[220px] rounded-xl bg-white p-4 text-left shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5">
                                             <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500">
