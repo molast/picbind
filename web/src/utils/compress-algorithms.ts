@@ -1,6 +1,8 @@
 "use client";
 
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import { createButteraugliEvaluator } from "@/utils/butteraugli";
+import { BUTTERAUGLI_ENABLED } from "@/utils/feature-flags";
 import { encodeWithLibavif } from "@/utils/libavif-codec";
 import { initWasm } from "@/utils/wasm-runtime";
 
@@ -61,6 +63,8 @@ type AvifEncodingPlan = {
   maxP95ChromaError: number;
   maxP95AlphaError: number;
   maxP99AlphaError: number;
+  butteraugliTarget: number;
+  butteraugliPnormTarget: number;
 };
 
 let cachedWebpCodec: Promise<JsQuashWebpModule> | null = null;
@@ -203,6 +207,44 @@ function passesPerceptualAvifGuardrail(
   );
 }
 
+type AvifCandidateResult = {
+  blob: Blob;
+};
+
+function nextAdaptiveAvifQuality(
+  tested: Map<number, boolean>,
+  plannedQualities: number[],
+) {
+  const passed = [...tested.entries()]
+    .filter(([, didPass]) => didPass)
+    .map(([quality]) => quality)
+    .sort((a, b) => a - b);
+  const failed = [...tested.entries()]
+    .filter(([, didPass]) => !didPass)
+    .map(([quality]) => quality)
+    .sort((a, b) => a - b);
+
+  if (passed.length > 0) {
+    const lowestPass = passed[0];
+    const closestFail = failed.filter((quality) => quality < lowestPass).at(-1);
+    if (closestFail !== undefined && lowestPass - closestFail > 1) {
+      return Math.ceil((closestFail + lowestPass) / 2);
+    }
+    const lowerProbe = Math.max(1, lowestPass - 4);
+    return tested.has(lowerProbe) ? null : lowerProbe;
+  }
+
+  const highestFailure = failed.at(-1);
+  return (
+    plannedQualities.find(
+      (quality) =>
+        quality !== 100 &&
+        !tested.has(quality) &&
+        (highestFailure === undefined || quality > highestFailure),
+    ) ?? null
+  );
+}
+
 async function compressPerceptualAvif(
   file: File,
   quality: number,
@@ -225,7 +267,13 @@ async function compressPerceptualAvif(
     file.size,
   ) as AvifEncodingPlan;
 
-  for (const candidateQuality of plan.qualityCandidates) {
+  const evaluator = BUTTERAUGLI_ENABLED
+    ? await createButteraugliEvaluator(source)
+    : null;
+  const testedQualities = new Map<number, boolean>();
+  const passingCandidates: AvifCandidateResult[] = [];
+
+  const evaluateCandidate = async (candidateQuality: number) => {
     const alphaQuality = Math.max(candidateQuality, plan.alphaQualityFloor);
     const imageData = {
       data: new Uint8ClampedArray(
@@ -253,13 +301,15 @@ async function compressPerceptualAvif(
     });
 
     if (sourceFormat === "avif" && encoded.byteLength >= file.size) {
-      continue;
+      testedQualities.set(candidateQuality, false);
+      return;
     }
 
     const candidateBlob = new Blob([toBlobPart(encoded)], { type: "image/avif" });
     const candidate = await decodeImageToRgba(candidateBlob);
     if (candidate.width !== source.width || candidate.height !== source.height) {
-      continue;
+      testedQualities.set(candidateQuality, false);
+      return;
     }
     const metrics = mod.compare_avif_candidate_rgba(
       source.bytes,
@@ -268,14 +318,66 @@ async function compressPerceptualAvif(
       source.height,
     ) as PerceptualMetrics;
 
-    if (passesPerceptualAvifGuardrail(metrics, plan)) {
-      return {
-        blob: candidateBlob,
-        mime: "image/avif",
-        ext: "avif",
-        fileName: buildCompressedFileName(file.name, "avif"),
-      };
+    let passes = passesPerceptualAvifGuardrail(metrics, plan);
+    if (passes && evaluator) {
+      const butteraugli = evaluator.compare(candidate);
+      passes =
+        butteraugli.score <= plan.butteraugliTarget &&
+        butteraugli.pnorm3 <= plan.butteraugliPnormTarget;
     }
+
+    testedQualities.set(candidateQuality, passes);
+    if (passes) {
+      passingCandidates.push({ blob: candidateBlob });
+    }
+  };
+
+  try {
+    if (!evaluator) {
+      for (const candidateQuality of plan.qualityCandidates) {
+        await evaluateCandidate(candidateQuality);
+        const candidate = passingCandidates.at(-1);
+        if (candidate) {
+          return {
+            blob: candidate.blob,
+            mime: "image/avif",
+            ext: "avif",
+            fileName: buildCompressedFileName(file.name, "avif"),
+          };
+        }
+      }
+    } else {
+      let candidateQuality: number | undefined = plan.qualityCandidates[0];
+      for (
+        let attempt = 0;
+        attempt < 3 && candidateQuality !== undefined;
+        attempt += 1
+      ) {
+        await evaluateCandidate(candidateQuality);
+        candidateQuality =
+          nextAdaptiveAvifQuality(testedQualities, plan.qualityCandidates) ?? undefined;
+      }
+
+      if (passingCandidates.length === 0 && !testedQualities.has(100)) {
+        await evaluateCandidate(100);
+      }
+
+      const best = passingCandidates.reduce<AvifCandidateResult | null>(
+        (smallest, candidate) =>
+          !smallest || candidate.blob.size < smallest.blob.size ? candidate : smallest,
+        null,
+      );
+      if (best) {
+        return {
+          blob: best.blob,
+          mime: "image/avif",
+          ext: "avif",
+          fileName: buildCompressedFileName(file.name, "avif"),
+        };
+      }
+    }
+  } finally {
+    evaluator?.free();
   }
 
   if (sourceFormat === "avif") {

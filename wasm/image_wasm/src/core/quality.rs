@@ -47,6 +47,8 @@ pub struct AvifEncodingPlan {
     pub max_p95_chroma_error: f64,
     pub max_p95_alpha_error: f64,
     pub max_p99_alpha_error: f64,
+    pub butteraugli_target: f64,
+    pub butteraugli_pnorm_target: f64,
 }
 
 impl AvifEncodingPlan {
@@ -74,6 +76,8 @@ impl AvifEncodingPlan {
             ("maxP95ChromaError", self.max_p95_chroma_error),
             ("maxP95AlphaError", self.max_p95_alpha_error),
             ("maxP99AlphaError", self.max_p99_alpha_error),
+            ("butteraugliTarget", self.butteraugli_target),
+            ("butteraugliPnormTarget", self.butteraugli_pnorm_target),
         ] {
             Reflect::set(&obj, &key.into(), &value.into())?;
         }
@@ -478,5 +482,19 @@ pub fn avif_encoding_plan(
         max_p95_chroma_error: if ui_like { 3.0 } else { 2.9 },
         max_p95_alpha_error: 0.02,
         max_p99_alpha_error: 0.04,
+        butteraugli_target: if ui_like {
+            1.0
+        } else if photo_like {
+            2.0
+        } else {
+            1.5
+        },
+        butteraugli_pnorm_target: if ui_like {
+            0.45
+        } else if photo_like {
+            0.80
+        } else {
+            0.65
+        },
     }
 }
