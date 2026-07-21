@@ -7,7 +7,7 @@ import ExitRoomDialog from "./exit-room-dialog";
 import GalleryWorkspace from "./workspace/gallery-workspace";
 import { canReviewRoomImage } from "./workspace/gallery-image-card";
 import ReviewWorkspace from "./workspace/review-workspace";
-import FullscreenEdgePanel from "./workspace/fullscreen-edge-panel";
+import FullscreenSidebarRail from "./workspace/fullscreen-sidebar-rail";
 import ImageSourceDialog from "./workspace/image-source-dialog";
 import CompressedImagePickerDialog from "./workspace/compressed-image-picker-dialog";
 import CompressionSuggestionDialog from "./workspace/compression-suggestion-dialog";
@@ -1210,65 +1210,72 @@ export default function ShareRoomPage({
       <div
         className={
           reviewFullscreenActive
-            ? "relative h-full"
+            ? "flex h-full flex-col"
             : "grid h-full grid-rows-[minmax(0,1fr)_300px] lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:grid-rows-1"
         }
       >
-        <section
-          className={`flex min-h-0 min-w-0 flex-col ${
-            reviewFullscreenActive ? "h-full" : ""
-          }`}
+        {reviewFullscreenActive ? roomHeaderContent : null}
+        <div
+          className={
+            reviewFullscreenActive
+              ? "relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_60px]"
+              : "contents"
+          }
         >
-          {!reviewFullscreenActive ? roomHeaderContent : null}
-          {reviewImage ? (
-            <ReviewWorkspace
-              roomId={roomId ?? "unknown-room"}
-              image={reviewImage}
-              labels={labels}
-              actorId={roomId ? getShareRoomClientId(roomId) : "unknown"}
-              role={role}
-              fullscreen={reviewFullscreenActive}
-              subscribeMessages={subscribeReviewMessages}
-              onSendMessage={sendReviewMessage}
-              onReviewStatusChange={handleReviewStatusChange}
-              onFullscreenChange={setReviewWorkspaceFullscreen}
-              onBack={() => {
-                setReviewWorkspaceFullscreen(false);
-                setReviewImageId(null);
-              }}
-            />
-          ) : (
-            <GalleryWorkspace
-              inputRef={inputRef}
-              images={images}
+          <section className="flex min-h-0 min-w-0 flex-col">
+            {!reviewFullscreenActive ? roomHeaderContent : null}
+            {reviewImage ? (
+              <ReviewWorkspace
+                roomId={roomId ?? "unknown-room"}
+                image={reviewImage}
+                labels={labels}
+                actorId={roomId ? getShareRoomClientId(roomId) : "unknown"}
+                role={role}
+                fullscreen={reviewFullscreenActive}
+                subscribeMessages={subscribeReviewMessages}
+                onSendMessage={sendReviewMessage}
+                onReviewStatusChange={handleReviewStatusChange}
+                onFullscreenChange={setReviewWorkspaceFullscreen}
+                onBack={() => {
+                  setReviewWorkspaceFullscreen(false);
+                  setReviewImageId(null);
+                }}
+              />
+            ) : (
+              <GalleryWorkspace
+                inputRef={inputRef}
+                images={images}
+                connection={connection}
+                isSending={isSending}
+                isDragging={isDragging}
+                labels={imageWorkspaceLabels}
+                onChooseImages={() => setIsSourceDialogOpen(true)}
+                onFiles={handleLocalFiles}
+                onDraggingChange={setIsDragging}
+                onPreview={setPreviewImageId}
+                onPlaceholderMeasured={handlePlaceholderMeasured}
+                onReview={handleReviewImage}
+                onSend={handleSendImage}
+                onCancelTransfer={handleCancelTransfer}
+                onDelete={handleDeleteImage}
+              />
+            )}
+          </section>
+          {reviewFullscreenActive ? (
+            <FullscreenSidebarRail
               connection={connection}
-              isSending={isSending}
-              isDragging={isDragging}
-              labels={imageWorkspaceLabels}
-              onChooseImages={() => setIsSourceDialogOpen(true)}
-              onFiles={handleLocalFiles}
-              onDraggingChange={setIsDragging}
-              onPreview={setPreviewImageId}
-              onPlaceholderMeasured={handlePlaceholderMeasured}
-              onReview={handleReviewImage}
-              onSend={handleSendImage}
-              onCancelTransfer={handleCancelTransfer}
-              onDelete={handleDeleteImage}
-            />
+              messageTransportMode={messageTransportMode}
+              memberCount={members.length}
+              activityCount={activities.length}
+              labels={labels}
+            >
+              {roomSidebarContent}
+            </FullscreenSidebarRail>
+          ) : (
+            roomSidebarContent
           )}
-        </section>
-        {!reviewFullscreenActive ? roomSidebarContent : null}
+        </div>
       </div>
-      {reviewFullscreenActive ? (
-        <>
-          <FullscreenEdgePanel side="top" hideDelayMs={0}>
-            {roomHeaderContent}
-          </FullscreenEdgePanel>
-          <FullscreenEdgePanel side="right">
-            {roomSidebarContent}
-          </FullscreenEdgePanel>
-        </>
-      ) : null}
       <CreatedRoomDialog
         open={isShareDialogOpen}
         roomId={roomId}
