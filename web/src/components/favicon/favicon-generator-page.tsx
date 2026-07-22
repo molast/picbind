@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import HomeFooter from "@/components/home/home-footer";
+import { getHomeCompressLandingCopy } from "@/locales";
 import {
   ColorPalette,
   contrastTextColor,
@@ -63,6 +65,8 @@ export default function FaviconGeneratorPage({
     return <main className="min-h-screen w-full bg-[#efefef]" />;
   }
 
+  const homeCopy = getHomeCompressLandingCopy(lang);
+
   return (
     <main className="w-full bg-[#efefef] text-[#1f2328]">
       <section className="border-b border-[#d9dce0] bg-[#f2f3f5] px-5 sm:px-8 lg:px-12">
@@ -85,14 +89,22 @@ export default function FaviconGeneratorPage({
             <button
               type="button"
               onClick={() => handleModeSwitch("image")}
-              className={`transition hover:text-[#1f2328] ${mode === "image" ? "text-[#1f2328]" : ""}`}
+              className={`rounded-full px-3 py-1 transition ${
+                mode === "image"
+                  ? "bg-[#c7dbff] text-[#2f65cf]"
+                  : "hover:bg-white/60 hover:text-[#1f2328]"
+              }`}
             >
               {copy.navConverter}
             </button>
             <button
               type="button"
               onClick={() => handleModeSwitch("text")}
-              className={`transition hover:text-[#1f2328] ${mode === "text" ? "text-[#1f2328]" : ""}`}
+              className={`rounded-full px-3 py-1 transition ${
+                mode === "text"
+                  ? "bg-[#c7dbff] text-[#2f65cf]"
+                  : "hover:bg-white/60 hover:text-[#1f2328]"
+              }`}
             >
               {copy.navGenerator}
             </button>
@@ -424,6 +436,8 @@ export default function FaviconGeneratorPage({
           event.target.value = "";
         }}
       />
+
+      <HomeFooter copy={homeCopy} lang={lang} />
     </main>
   );
 }
