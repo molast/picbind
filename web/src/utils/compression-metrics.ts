@@ -3,8 +3,13 @@
 import { getMetricsApiPath } from "@/utils/api-endpoints";
 
 const METRICS_API_PATH = getMetricsApiPath();
+const HAS_EXPLICIT_METRICS_API = Boolean(
+  process.env.NEXT_PUBLIC_METRICS_API_PATH ||
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+);
 const METRICS_ENABLED =
   Boolean(METRICS_API_PATH) &&
+  (process.env.NODE_ENV !== "development" || HAS_EXPLICIT_METRICS_API) &&
   process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
 const MAX_DELTA_PER_REQUEST = 20;
 const MAX_EVENTS_PER_REQUEST = 20;

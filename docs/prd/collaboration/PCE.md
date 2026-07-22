@@ -444,3 +444,24 @@ PicBind 不采用固定压缩参数，而是遵循：
 每张图片都会先经过特征分析，再生成最适合当前图片的压缩策略，最后由对应编码器执行压缩。
 
 整个系统以图片特征为驱动，而非以固定质量值或固定算法为核心，实现真正的智能压缩。
+
+### 新增优化，检测是否存在非255 Alpha值
+在 Feature Extractor 里面增加：
+```
+AlphaFeature {
+
+    has_alpha_channel: bool,
+
+    alpha_min: u8,
+
+    alpha_max: u8,
+
+    transparent_pixel_ratio: f32,
+
+    semi_transparent_ratio: f32,
+}
+```
+JPEG:
+has_alpha_channel=false
+直接就是RGB
+所以通过这个校验是否有Alpha通道以后，直接就可以决定透明层是否保留。
