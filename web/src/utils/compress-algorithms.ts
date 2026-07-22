@@ -3,18 +3,23 @@
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
 import { createButteraugliEvaluator } from "@/utils/butteraugli";
 import {
+  analyzeCompressionFeatures,
+  createCompressionPlan,
+  executeCompressionPlan,
+  extractCompressionFeatures,
+  selectCompressionEncoder,
+  sourceFormatFromFile,
+  type CompressResult,
+  type PerceptualEvaluator,
+} from "@/utils/compression-engine";
+import {
   BUTTERAUGLI_ENABLED,
   BUTTERAUGLI_TARGET_SCORE,
 } from "@/utils/feature-flags";
 import { encodeWithLibavif } from "@/utils/libavif-codec";
 import { initWasm } from "@/utils/wasm-runtime";
 
-export type CompressResult = {
-  blob: Blob;
-  mime: string;
-  ext: string;
-  fileName: string;
-};
+export type { CompressResult } from "@/utils/compression-engine";
 
 type WebpEncodeOptions = {
   quality?: number;
@@ -83,20 +88,6 @@ function toBlobPart(bytes: Uint8Array) {
 
 function clampQuality(quality: number) {
   return Math.max(0, Math.min(quality, 100));
-}
-
-function sourceFormatFromFile(file: File): OutputFormat {
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  if (file.type === "image/png") {
-    return "png";
-  }
-  if (file.type === "image/webp") {
-    return "webp";
-  }
-  if (file.type === "image/avif" || extension === "avif") {
-    return "avif";
-  }
-  return "jpeg";
 }
 
 function extForFormat(format: OutputFormat) {
@@ -222,21 +213,6 @@ function hasNonOpaqueAlpha(rgba: Uint8Array) {
     }
   }
   return false;
-}
-
-function butteraugliRetryQualities(quality: number) {
-  const initial = clampQuality(quality);
-  return Array.from(
-    new Set([initial, Math.min(100, initial + 10), Math.min(100, initial + 20)]),
-  );
-}
-
-async function measureButteraugli(
-  evaluator: Awaited<ReturnType<typeof createButteraugliEvaluator>>,
-  candidateBlob: Blob,
-) {
-  const candidate = await decodeImageToRgba(candidateBlob);
-  return evaluator.compare(candidate);
 }
 
 async function compressPerceptualAvif(
@@ -652,65 +628,53 @@ export async function compressImageWithAlgorithms(
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
 ): Promise<CompressResult> {
-  if (targetFormat === "avif") {
-    try {
-      return await compressPerceptualAvif(file, quality);
-    } catch (error) {
-      if (sourceFormatFromFile(file) === "avif") {
-        return originalFileResult(file, "avif");
+  const features = extractCompressionFeatures(
+    file,
+    targetFormat,
+    allowAlphaLoss,
+  );
+  const analysis = analyzeCompressionFeatures(features);
+  const plan = createCompressionPlan(analysis, quality, BUTTERAUGLI_ENABLED);
+  const encoder = selectCompressionEncoder(plan, {
+    wasm: (candidateQuality) =>
+      compressWithWasmCodec(
+        file,
+        candidateQuality,
+        targetFormat,
+        allowAlphaLoss,
+      ),
+    libwebp: (candidateQuality) =>
+      compressPerceptualWebp(file, candidateQuality),
+    libavif: async (candidateQuality) => {
+      try {
+        return await compressPerceptualAvif(file, candidateQuality);
+      } catch (error) {
+        if (plan.sameFormat) return originalFileResult(file, "avif");
+        throw error;
       }
-      throw error;
-    }
+    },
+  });
+
+  let evaluator: PerceptualEvaluator | null = null;
+  if (plan.evaluator === "butteraugli") {
+    const source = await decodeImageToRgba(file);
+    const butteraugli = await createButteraugliEvaluator(source);
+    evaluator = {
+      async score(candidateBlob) {
+        const candidate = await decodeImageToRgba(candidateBlob);
+        return (await butteraugli.compare(candidate)).score;
+      },
+      dispose() {
+        butteraugli.free();
+      },
+    };
   }
 
-  const compressAtQuality = (candidateQuality: number) =>
-    targetFormat === "webp"
-      ? compressPerceptualWebp(file, candidateQuality)
-      : compressWithWasmCodec(
-          file,
-          candidateQuality,
-          targetFormat,
-          allowAlphaLoss,
-        );
-
-  const shouldValidateWithButteraugli =
-    BUTTERAUGLI_ENABLED && (targetFormat === "png" || targetFormat === "jpeg");
-  if (!shouldValidateWithButteraugli) {
-    return compressAtQuality(quality);
-  }
-
-  const sourceFormat = sourceFormatFromFile(file);
-  const source = await decodeImageToRgba(file);
-  const evaluator = await createButteraugliEvaluator(source);
-  const retryQualities = butteraugliRetryQualities(quality);
-  let closestResult: CompressResult | null = null;
-  let closestScore = Number.POSITIVE_INFINITY;
-  let originalResult: CompressResult | null = null;
-  try {
-    for (const candidateQuality of retryQualities) {
-      const result = await compressAtQuality(candidateQuality);
-      if (result.blob === file) {
-        originalResult = result;
-        continue;
-      }
-      const butteraugli = await measureButteraugli(evaluator, result.blob);
-      if (butteraugli.score < closestScore) {
-        closestResult = result;
-        closestScore = butteraugli.score;
-      }
-      if (butteraugli.score <= BUTTERAUGLI_TARGET_SCORE) {
-        return result;
-      }
-    }
-  } finally {
-    evaluator.free();
-  }
-
-  if (closestResult) {
-    return closestResult;
-  }
-  if (originalResult || targetFormat === sourceFormat) {
-    return originalResult ?? originalFileResult(file, sourceFormat);
-  }
-  throw new Error(`${targetFormat.toUpperCase()} compression produced no candidate`);
+  return executeCompressionPlan(
+    file,
+    plan,
+    encoder,
+    evaluator,
+    BUTTERAUGLI_TARGET_SCORE,
+  );
 }

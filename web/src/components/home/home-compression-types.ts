@@ -33,6 +33,7 @@ export type HomeItem = {
   previewUrl: string;
   variants: OutputVariant[];
   updatedAt: number;
+  rejection?: "file-too-large";
 };
 
 export type CompareAsset = {

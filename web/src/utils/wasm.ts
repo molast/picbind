@@ -43,7 +43,13 @@ export type ImageAnalysisMetrics = {
   sourceSizeMb: number;
   sourceFormat: string;
   hasAlpha: boolean;
+  hasAlphaChannel: boolean;
+  hasRealAlpha: boolean;
+  alphaMin: number;
+  alphaMax: number;
   alphaRatio: number;
+  transparentPixelRatio: number;
+  semiTransparentRatio: number;
   sampleStride: number;
   sampleCount: number;
   edgeStrength: number;

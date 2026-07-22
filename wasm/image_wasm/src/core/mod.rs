@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod candidate;
+pub mod feature;
 pub mod hvs;
 pub mod jpeg;
 pub mod metrics;

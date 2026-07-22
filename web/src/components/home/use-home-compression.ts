@@ -104,6 +104,9 @@ function createVariant(format: OutputFormat): OutputVariant {
 }
 
 function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
+  if (item.rejection) {
+    return item;
+  }
   if (!selectedFormats.length) {
     return item;
   }
@@ -125,6 +128,24 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   return {
     ...item,
     variants: [...item.variants, ...missingVariants],
+  };
+}
+
+function createRejectedItem(file: File): HomeItem {
+  const now = Date.now();
+  const id = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
+  return {
+    id,
+    fileId: id,
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type,
+    fileLastModified: file.lastModified,
+    sourceFormat: normalizeSourceFormat(file),
+    previewUrl: "",
+    updatedAt: now,
+    variants: [],
+    rejection: "file-too-large",
   };
 }
 
@@ -701,7 +722,7 @@ export function useHomeCompression({
     async (fileList: FileList | File[]) => {
       const inputFiles = Array.from(fileList);
       let hasUnsupported = false;
-      let hasTooLarge = false;
+      const tooLargeFiles: File[] = [];
 
       const nextFiles = inputFiles.filter((file) => {
         const extension = file.name.split(".").pop()?.toLowerCase();
@@ -710,7 +731,7 @@ export function useHomeCompression({
           return false;
         }
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          hasTooLarge = true;
+          tooLargeFiles.push(file);
           return false;
         }
         return true;
@@ -720,34 +741,34 @@ export function useHomeCompression({
       if (hasUnsupported) {
         notices.push(copy.uploadNotice.unsupportedFiles);
       }
-      if (hasTooLarge) {
-        notices.push(copy.uploadNotice.fileTooLarge);
-      }
-
-      if (!nextFiles.length) {
+      if (!nextFiles.length && !tooLargeFiles.length) {
         setUploadNotice(notices[0] ?? null);
         return;
       }
 
-      const remain = MAX_FILES - itemsRef.current.length;
-      if (remain <= 0) {
-        setUploadNotice(copy.uploadNotice.tooManyFiles);
-        return;
+      const processableItemCount = itemsRef.current.filter(
+        (item) => !item.rejection,
+      ).length;
+      const remain = MAX_FILES - processableItemCount;
+      if (remain <= 0 && nextFiles.length) {
+        notices.push(copy.uploadNotice.tooManyFiles);
       }
-      if (nextFiles.length > remain) {
+      if (remain > 0 && nextFiles.length > remain) {
         notices.push(copy.uploadNotice.tooManyFiles);
       }
 
       try {
-        const acceptedFiles = nextFiles.slice(0, remain);
+        const acceptedFiles = nextFiles.slice(0, Math.max(0, remain));
         const nextItems = acceptedFiles.map((file) =>
           createItem(file, selectedFormats),
         );
+        const rejectedItems = tooLargeFiles.map(createRejectedItem);
         setUploadNotice(notices.length ? notices.join(" ") : null);
-        const optimisticItems = [...itemsRef.current, ...nextItems].slice(
-          0,
-          MAX_FILES,
-        );
+        const optimisticItems = [
+          ...itemsRef.current,
+          ...nextItems,
+          ...rejectedItems,
+        ];
         itemsRef.current = optimisticItems;
         setItems(optimisticItems);
 
@@ -1108,7 +1129,13 @@ export function useHomeCompression({
     item.variants.some((variant) => variant.status === "done"),
   );
   const sortedItems = React.useMemo(
-    () => [...items].sort((a, b) => b.updatedAt - a.updatedAt),
+    () =>
+      [...items].sort((a, b) => {
+        if (Boolean(a.rejection) !== Boolean(b.rejection)) {
+          return a.rejection ? 1 : -1;
+        }
+        return b.updatedAt - a.updatedAt;
+      }),
     [items],
   );
   const completedCount = completedItems.length;

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React from "react";
-import { FiColumns } from "react-icons/fi";
+import { FiColumns, FiLock } from "react-icons/fi";
 import {
   extToBadge,
   formatDeltaPercent,
@@ -68,32 +68,67 @@ export default function HomeResults({
       {items.length > 0 && (
         <section className="relative z-10 mx-auto -mt-8 w-full max-w-[1100px] px-4 pb-20 md:-mt-12">
           <div className="overflow-visible rounded-[18px] border border-[#c4d8fb] bg-[rgba(237,244,255,0.88)] text-[#334a72] shadow-[0_18px_48px_rgba(78,120,193,0.2)] backdrop-blur">
-            <div className="flex flex-col gap-5 border-b border-[#c9dbfb] px-6 py-5 md:flex-row md:items-start md:justify-between">
-              <div className="max-w-3xl">
-                <h3 className="text-[30px] font-semibold leading-tight text-[#2f4b7d]">
-                  {hasPendingItems
-                    ? copy.processingTitle
-                    : copy.completedTitle(
-                        totalSavedPercent,
-                        completedCount,
-                        formatSize(totalSavedBytes),
-                      )}
-                </h3>
+            {(hasPendingItems || completedCount > 0) && (
+              <div className="flex flex-col gap-5 border-b border-[#c9dbfb] px-6 py-5 md:flex-row md:items-start md:justify-between">
+                <div className="max-w-3xl">
+                  <h3 className="text-[30px] font-semibold leading-tight text-[#2f4b7d]">
+                    {hasPendingItems
+                      ? copy.processingTitle
+                      : copy.completedTitle(
+                          totalSavedPercent,
+                          completedCount,
+                          formatSize(totalSavedBytes),
+                        )}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={!canDownloadZip}
+                    onClick={onDownloadZip}
+                    className="rounded-xl bg-[#3f80ea] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#356fd0] disabled:cursor-not-allowed disabled:bg-[#9ab3d8] disabled:text-[#eef4ff]"
+                  >
+                    {copy.downloadZip}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!canDownloadZip}
-                  onClick={onDownloadZip}
-                  className="rounded-xl bg-[#3f80ea] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#356fd0] disabled:cursor-not-allowed disabled:bg-[#9ab3d8] disabled:text-[#eef4ff]"
-                >
-                  {copy.downloadZip}
-                </button>
-              </div>
-            </div>
+            )}
 
             <div className="bg-[rgba(248,251,255,0.9)] text-[#3b4a62]">
               {items.map((item) => {
+                if (item.rejection === "file-too-large") {
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex min-h-[84px] flex-col gap-3 border-t border-[#d6e3f9] bg-white px-5 py-3 first:border-t-0 sm:flex-row sm:items-center"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#f3f4f6] text-[#4a4f59] ring-1 ring-[#eceef1]">
+                          <FiLock aria-hidden="true" className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-[15px] font-semibold text-[#a0a3aa]">
+                            {item.fileName}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[12px] text-[#9b9ea5]">
+                            <span className="rounded-md bg-[#f7f5ff] px-2 py-0.5 font-semibold uppercase text-[#a691e8]">
+                              {item.sourceFormat}
+                            </span>
+                            <span>{formatSize(item.fileSize)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="sm:w-[48%] sm:text-center">
+                        <div className="text-[15px] font-semibold text-[#3f434c]">
+                          {copy.uploadNotice.fileTooLargeTitle}
+                        </div>
+                        <div className="mt-0.5 text-[13px] text-[#5f626b]">
+                          {copy.uploadNotice.fileTooLargeDescription}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
                 const bestVariant = getBestDoneVariant(item);
                 const doneVariants = getDoneVariants(item);
                 const activeVariant = getActiveVariant(item);
