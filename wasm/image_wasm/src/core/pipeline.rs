@@ -41,3 +41,11 @@ pub fn compress_image_to_format_with_options(
 ) -> Result<CompressionResult, JsValue> {
     to_format::compress_image_to_target_format(input, quality, target_format, allow_alpha_loss)
 }
+
+pub fn compress_dynamic_image_to_png(
+    img: &image::DynamicImage,
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<CompressionResult, JsValue> {
+    to_format::compress_dynamic_image_to_png(img, quality, source_size_bytes)
+}

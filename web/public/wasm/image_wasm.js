@@ -229,6 +229,24 @@ export function compress_png_with_deflate(input, compression_level) {
 }
 
 /**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @returns {CompressionResult}
+ */
+export function compress_rgba_to_png(rgba, width, height, quality, source_size_bytes) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_rgba_to_png(ptr0, len0, width, height, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
  * @param {Uint8Array} input
  * @param {number} quality
  * @param {number} source_size_bytes

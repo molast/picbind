@@ -552,11 +552,46 @@ async function compressWithWasmCodec(
     throw new Error("WASM module failed to load correctly");
   }
 
-  const buffer = await file.arrayBuffer();
-  const input = new Uint8Array(buffer);
   const sourceFormat = sourceFormatFromFile(file);
   const requestedFormat = targetFormat ?? sourceFormat;
   const requireSmaller = requiresSmallerResult(requestedFormat, sourceFormat);
+
+  if (
+    sourceFormat === "avif" &&
+    requestedFormat === "png" &&
+    typeof mod.compress_rgba_to_png === "function"
+  ) {
+    try {
+      const imageData = await decodeFileToImageData(file);
+      const output = mod.compress_rgba_to_png(
+        imageData.data,
+        imageData.width,
+        imageData.height,
+        quality,
+        file.size,
+      );
+      const bytes = output.bytes as Uint8Array;
+      const mime = output.mime as string;
+      const ext = output.ext as string;
+      return {
+        blob: new Blob([toBlobPart(bytes)], { type: mime }),
+        mime,
+        ext,
+        fileName: buildCompressedFileName(file.name, ext),
+      };
+    } catch (error) {
+      if (!shouldUsePngCanvasFallback(requestedFormat, error)) throw error;
+      return {
+        blob: await encodeCanvasPng(file),
+        mime: "image/png",
+        ext: "png",
+        fileName: buildCompressedFileName(file.name, "png"),
+      };
+    }
+  }
+
+  const buffer = await file.arrayBuffer();
+  const input = new Uint8Array(buffer);
   try {
     const output =
       targetFormat &&
