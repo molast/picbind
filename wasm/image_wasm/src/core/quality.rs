@@ -47,8 +47,6 @@ pub struct AvifEncodingPlan {
     pub max_p95_chroma_error: f64,
     pub max_p95_alpha_error: f64,
     pub max_p99_alpha_error: f64,
-    pub butteraugli_target: f64,
-    pub butteraugli_pnorm_target: f64,
 }
 
 impl AvifEncodingPlan {
@@ -76,8 +74,6 @@ impl AvifEncodingPlan {
             ("maxP95ChromaError", self.max_p95_chroma_error),
             ("maxP95AlphaError", self.max_p95_alpha_error),
             ("maxP99AlphaError", self.max_p99_alpha_error),
-            ("butteraugliTarget", self.butteraugli_target),
-            ("butteraugliPnormTarget", self.butteraugli_pnorm_target),
         ] {
             Reflect::set(&obj, &key.into(), &value.into())?;
         }
@@ -150,16 +146,6 @@ pub fn png_quantization_plan(img: &DynamicImage, source_size_bytes: usize) -> Pn
             max_p99_alpha_error: 0.04,
         }
     }
-}
-
-pub fn quality_candidates(quality: u8) -> [u8; 5] {
-    [
-        quality,
-        quality.saturating_sub(5),
-        quality.saturating_sub(10),
-        quality.saturating_sub(20),
-        quality.saturating_sub(30),
-    ]
 }
 
 pub fn png_to_jpeg_quality_candidates(
@@ -431,6 +417,7 @@ pub fn avif_encoding_plan(
         vec![predicted.max(76), predicted.saturating_add(8).min(96)]
     } else if photo_like {
         vec![
+            predicted.saturating_sub(6).max(32),
             predicted,
             predicted.saturating_add(3).min(96),
             predicted.saturating_add(6).min(98),
@@ -474,27 +461,17 @@ pub fn avif_encoding_plan(
             0
         },
         alpha_quality_floor: if analysis.has_alpha { 90 } else { 1 },
-        min_ms_ssim: if ui_like { 0.994 } else { 0.993 },
-        max_blur_loss_percent: if ui_like { 2.8 } else { 4.5 },
-        max_perceptual_distance: if ui_like { 1.9 } else { 2.05 },
-        max_p99_delta_e: if ui_like { 3.5 } else { 3.4 },
-        max_p95_luminance_error: if ui_like { 0.75 } else { 0.8 },
-        max_p95_chroma_error: if ui_like { 3.0 } else { 2.9 },
+        // AVIF's transform and 4:2:0 chroma subsampling naturally score lower
+        // than PNG/JPEG on pixel-distance metrics even when the visual result is
+        // transparent to the eye. Keep UI assets conservative, but let photos
+        // use the same practical HVS envelope as the adaptive JPEG path.
+        min_ms_ssim: if ui_like { 0.985 } else { 0.980 },
+        max_blur_loss_percent: if ui_like { 4.0 } else { 7.5 },
+        max_perceptual_distance: if ui_like { 2.5 } else { 5.5 },
+        max_p99_delta_e: if ui_like { 4.5 } else { 8.5 },
+        max_p95_luminance_error: if ui_like { 1.0 } else { 3.1 },
+        max_p95_chroma_error: if ui_like { 4.0 } else { 10.0 },
         max_p95_alpha_error: 0.02,
         max_p99_alpha_error: 0.04,
-        butteraugli_target: if ui_like {
-            1.0
-        } else if photo_like {
-            2.0
-        } else {
-            1.5
-        },
-        butteraugli_pnorm_target: if ui_like {
-            0.45
-        } else if photo_like {
-            0.80
-        } else {
-            0.65
-        },
     }
 }

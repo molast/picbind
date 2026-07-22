@@ -38,6 +38,7 @@ import {
   consumeFilesForCompression,
   deleteQueuedImageFile,
   getQueuedImageFile,
+  stageQueuedImageFile,
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
 import { storeCompressedImage } from "@/utils/compressed-image-store";
@@ -54,6 +55,8 @@ import {
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
+const MAX_CONCURRENT_AVIF_COMPRESSIONS = 1;
+const MAX_CONCURRENT_WEBP_COMPRESSIONS = 2;
 const ALLOWED_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -63,7 +66,6 @@ const ALLOWED_TYPES = new Set([
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
 const COMPARE_IMAGE_SOURCE_NAME = "compare-original.png";
 const IS_DEV = process.env.NODE_ENV !== "production";
-const HEAVY_JPEG_RECOMPRESS_SIZE_BYTES = 1.5 * 1024 * 1024;
 
 function normalizeSourceFormat(file: File): OutputFormat {
   const extension = file.name.split(".").pop()?.toLowerCase();
@@ -172,15 +174,15 @@ async function createPreviewUrl(file: File) {
   }
 }
 
-async function createItem(
+function createItem(
   file: File,
   selectedFormats: OutputFormat[],
-): Promise<HomeItem> {
+): HomeItem {
   const now = Date.now();
   const fileId = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
   const sourceFormat = normalizeSourceFormat(file);
-  await storeQueuedImageFile(fileId, file);
-  const previewUrl = await createPreviewUrl(file);
+  stageQueuedImageFile(fileId, file);
+  const previewUrl = URL.createObjectURL(file);
   const variants = selectedFormats.length
     ? ensureVariants(
         {
@@ -211,14 +213,6 @@ async function createItem(
     updatedAt: now,
     variants,
   };
-}
-
-function isHeavyJpegRecompress(item: HomeItem, variant: OutputVariant) {
-  return (
-    item.sourceFormat === "jpeg" &&
-    variant.format === "jpeg" &&
-    item.fileSize >= HEAVY_JPEG_RECOMPRESS_SIZE_BYTES
-  );
 }
 
 function logCompressionFailure(
@@ -745,13 +739,46 @@ export function useHomeCompression({
       }
 
       try {
-        const nextItems = await Promise.all(
-          nextFiles
-            .slice(0, remain)
-            .map((file) => createItem(file, selectedFormats)),
+        const acceptedFiles = nextFiles.slice(0, remain);
+        const nextItems = acceptedFiles.map((file) =>
+          createItem(file, selectedFormats),
         );
         setUploadNotice(notices.length ? notices.join(" ") : null);
-        setItems((prev) => [...prev, ...nextItems].slice(0, MAX_FILES));
+        const optimisticItems = [...itemsRef.current, ...nextItems].slice(
+          0,
+          MAX_FILES,
+        );
+        itemsRef.current = optimisticItems;
+        setItems(optimisticItems);
+
+        nextItems.forEach((item, index) => {
+          const file = acceptedFiles[index];
+          void storeQueuedImageFile(item.fileId, file).catch((error) => {
+            if (IS_DEV) {
+              console.warn("Failed to persist queued image", error);
+            }
+          });
+
+          void createPreviewUrl(file).then((previewUrl) => {
+            if (
+              isUnmountedRef.current ||
+              !itemsRef.current.some((current) => current.id === item.id)
+            ) {
+              URL.revokeObjectURL(previewUrl);
+              return;
+            }
+            setItems((prev) =>
+              prev.map((current) =>
+                current.id === item.id
+                  ? { ...current, previewUrl }
+                  : current,
+              ),
+            );
+            window.requestAnimationFrame(() => {
+              URL.revokeObjectURL(item.previewUrl);
+            });
+          });
+        });
       } catch (error) {
         console.error("Failed to enqueue images:", error);
         setUploadNotice(copy.uploadNotice.unsupportedFiles);
@@ -847,7 +874,8 @@ export function useHomeCompression({
     const claimed = new Set<string>();
     const running = new Map<string, Promise<void>>();
     const runningFileIds = new Set<string>();
-    const heavyRunning = new Set<string>();
+    const runningAvif = new Set<string>();
+    const runningWebp = new Set<string>();
 
     const runOne = (currentItem: HomeItem, currentVariant: OutputVariant) =>
       (async () => {
@@ -1011,7 +1039,16 @@ export function useHomeCompression({
               if (runningFileIds.has(item.fileId)) {
                 return false;
               }
-              if (isHeavyJpegRecompress(item, variant) && heavyRunning.size > 0) {
+              if (
+                variant.format === "avif" &&
+                runningAvif.size >= MAX_CONCURRENT_AVIF_COMPRESSIONS
+              ) {
+                return false;
+              }
+              if (
+                variant.format === "webp" &&
+                runningWebp.size >= MAX_CONCURRENT_WEBP_COMPRESSIONS
+              ) {
                 return false;
               }
               return true;
@@ -1022,22 +1059,20 @@ export function useHomeCompression({
           }
 
           const key = `${nextTask.item.id}:${nextTask.variant.id}`;
-          const isHeavyTask = isHeavyJpegRecompress(
-            nextTask.item,
-            nextTask.variant,
-          );
           claimed.add(key);
           runningFileIds.add(nextTask.item.fileId);
-          if (isHeavyTask) {
-            heavyRunning.add(key);
+          if (nextTask.variant.format === "avif") {
+            runningAvif.add(key);
+          }
+          if (nextTask.variant.format === "webp") {
+            runningWebp.add(key);
           }
           const job = runOne(nextTask.item, nextTask.variant).finally(() => {
             running.delete(key);
             claimed.delete(key);
             runningFileIds.delete(nextTask.item.fileId);
-            if (isHeavyTask) {
-              heavyRunning.delete(key);
-            }
+            runningAvif.delete(key);
+            runningWebp.delete(key);
           });
           running.set(key, job);
         }

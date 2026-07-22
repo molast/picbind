@@ -9,16 +9,42 @@ import {
 const COMPRESSION_HANDOFF_KEY = "picbind:compression-handoff";
 export const COMPRESSION_HANDOFF_EVENT = "picbind:compression-handoff-ready";
 
-export const storeQueuedImageFile = storeQueuedFile;
-export const getQueuedImageFile = getQueuedFile;
-export const deleteQueuedImageFile = deleteQueuedFile;
+const stagedFiles = new Map<string, File>();
+const pendingStores = new Map<string, Promise<void>>();
+
+export function stageQueuedImageFile(id: string, file: File) {
+  stagedFiles.set(id, file);
+}
+
+export function storeQueuedImageFile(id: string, file: File) {
+  stageQueuedImageFile(id, file);
+  const pending = storeQueuedFile(id, file).finally(() => {
+    if (pendingStores.get(id) === pending) {
+      pendingStores.delete(id);
+    }
+  });
+  pendingStores.set(id, pending);
+  return pending;
+}
+
+export async function getQueuedImageFile(id: string) {
+  return stagedFiles.get(id) ?? getQueuedFile(id);
+}
+
+export async function deleteQueuedImageFile(id: string) {
+  stagedFiles.delete(id);
+  await pendingStores.get(id)?.catch(() => undefined);
+  await deleteQueuedFile(id);
+}
 
 export async function queueFilesForCompression(files: File[]) {
   const entries = files.map((file) => ({
     id: `handoff-${crypto.randomUUID()}`,
     file,
   }));
-  await Promise.all(entries.map(({ id, file }) => storeQueuedFile(id, file)));
+  await Promise.all(
+    entries.map(({ id, file }) => storeQueuedImageFile(id, file)),
+  );
   localStorage.setItem(
     COMPRESSION_HANDOFF_KEY,
     JSON.stringify(entries.map(({ id }) => id)),
@@ -39,7 +65,7 @@ export async function consumeFilesForCompression() {
   } catch {
     return [];
   }
-  const files = await Promise.all(ids.map((id) => getQueuedFile(id)));
-  await Promise.all(ids.map((id) => deleteQueuedFile(id)));
+  const files = await Promise.all(ids.map((id) => getQueuedImageFile(id)));
+  await Promise.all(ids.map((id) => deleteQueuedImageFile(id)));
   return files.filter((file): file is File => file instanceof File);
 }

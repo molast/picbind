@@ -47,9 +47,52 @@ export async function encodeWithLibavif(
     image.data.byteOffset,
     image.data.byteLength,
   );
-  const encoded = encoderModule.encode(data, image.width, image.height, options);
+  let encoded: Uint8Array | null = null;
+  let initialError: unknown;
+  try {
+    encoded = encoderModule.encode(data, image.width, image.height, options);
+  } catch (error) {
+    initialError = error;
+  }
   if (!encoded) {
-    throw new Error("libavif/libaom failed to encode the image");
+    const conservativeOptions: LibavifEncodeOptions = {
+      ...options,
+      qualityAlpha: options.lossless ? 100 : -1,
+      tileColsLog2: 0,
+      tileRowsLog2: 0,
+      speed: Math.max(6, options.speed),
+      subsample: options.lossless ? 3 : 1,
+      tune: 0,
+      chromaDeltaQ: false,
+      sharpness: 0,
+      enableSharpYUV: false,
+    };
+    try {
+      encoded = encoderModule.encode(
+        data,
+        image.width,
+        image.height,
+        conservativeOptions,
+      );
+    } catch (error) {
+      const initialMessage =
+        initialError instanceof Error
+          ? initialError.message
+          : String(initialError ?? "");
+      const fallbackMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `libavif/libaom failed to encode ${image.width}x${image.height} image` +
+          (initialMessage || fallbackMessage
+            ? ` (${[initialMessage, fallbackMessage].filter(Boolean).join("; ")})`
+            : ""),
+      );
+    }
+  }
+  if (!encoded) {
+    throw new Error(
+      `libavif/libaom failed to encode ${image.width}x${image.height} image`,
+    );
   }
   return encoded.slice();
 }

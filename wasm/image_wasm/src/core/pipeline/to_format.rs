@@ -10,11 +10,14 @@ use super::super::{
         encode_jpeg_from_rgb_image, is_opaque,
     },
     metrics::compare_dynamic_images_for_guardrails,
-    png::{encode_quantized_png_from_image, encode_quantized_png_with_options},
-    png_zopfli::recompress_png_idat,
+    png::{
+        encode_quantized_png_from_image, encode_quantized_png_with_options,
+        encode_sampled_quantized_png_from_image,
+    },
+    png_oxipng::optimize_quantized_png,
     quality::{
         jpeg_to_jpeg_quality_candidates, jpeg_to_jpeg_quality_thresholds, png_quantization_plan,
-        png_to_jpeg_quality_candidates, quality_candidates,
+        png_to_jpeg_quality_candidates,
     },
 };
 
@@ -43,10 +46,10 @@ fn encode_candidate_for_format(
             } else if is_jpeg_to_jpeg {
                 jpeg_to_jpeg_quality_candidates(img, quality, input_len)
             } else {
-                quality_candidates(quality)
-                    .into_iter()
-                    .filter(|q| *q >= 35)
-                    .collect()
+                // Cross-format Butteraugli retries are controlled by the caller.
+                // Encode the requested quality exactly so 80 -> 90 -> 100 is a
+                // real quality increase instead of selecting 50 -> 60 -> 70.
+                vec![quality.clamp(35, 100)]
             };
             if is_jpeg_to_jpeg {
                 let rgb = img.to_rgb8();
@@ -119,9 +122,21 @@ fn encode_candidate_for_format(
                 .ok_or_else(|| JsValue::from_str("JPEG encode failed"))
         }
         "png" => {
+            let pixel_count = u64::from(img.width()) * u64::from(img.height());
             if source_format == image::ImageFormat::Png {
                 let plan = png_quantization_plan(img, input.len());
-                for colors in plan.color_candidates {
+                let minimum_colors = if quality >= 100 {
+                    256
+                } else if quality >= 90 {
+                    128
+                } else {
+                    0
+                };
+                for colors in plan
+                    .color_candidates
+                    .into_iter()
+                    .filter(|colors| *colors >= minimum_colors)
+                {
                     let Ok(bytes) = encode_quantized_png_with_options(
                         img,
                         colors,
@@ -153,7 +168,7 @@ fn encode_candidate_for_format(
                         && comparison.p95_alpha_error <= plan.max_p95_alpha_error
                         && comparison.p99_alpha_error <= plan.max_p99_alpha_error
                     {
-                        let bytes = recompress_png_idat(&bytes).unwrap_or(bytes);
+                        let bytes = optimize_quantized_png(bytes, pixel_count);
                         return Ok(Candidate {
                             bytes,
                             mime: "image/png",
@@ -165,8 +180,13 @@ fn encode_candidate_for_format(
                     "PNG compression could not satisfy perceptual quality guardrails",
                 ))
             } else {
-                encode_quantized_png_from_image(img, quality).map(|bytes| {
-                    let bytes = recompress_png_idat(&bytes).unwrap_or(bytes);
+                let encoded = if pixel_count > 8_000_000 {
+                    encode_sampled_quantized_png_from_image(img, 256, quality)
+                } else {
+                    encode_quantized_png_from_image(img, quality)
+                };
+                encoded.map(|bytes| {
+                    let bytes = optimize_quantized_png(bytes, pixel_count);
                     Candidate {
                         bytes,
                         mime: "image/png",
