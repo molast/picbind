@@ -215,6 +215,26 @@ export function compress_image_to_format_with_options(input, quality, target_for
 
 /**
  * @param {Uint8Array} input
+ * @param {number} quality
+ * @param {string} target_format
+ * @param {boolean} allow_alpha_loss
+ * @param {number} compression_gain
+ * @returns {CompressionResult}
+ */
+export function compress_image_to_format_with_plan_options(input, quality, target_format, allow_alpha_loss, compression_gain) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(target_format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_image_to_format_with_plan_options(ptr0, len0, quality, ptr1, len1, allow_alpha_loss, compression_gain);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
  * @param {number} compression_level
  * @returns {CompressionResult}
  */
@@ -240,6 +260,25 @@ export function compress_rgba_to_png(rgba, width, height, quality, source_size_b
     const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.compress_rgba_to_png(ptr0, len0, width, height, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @param {number} compression_gain
+ * @returns {CompressionResult}
+ */
+export function compress_rgba_to_png_with_gain(rgba, width, height, quality, source_size_bytes, compression_gain) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_rgba_to_png_with_gain(ptr0, len0, width, height, quality, source_size_bytes, compression_gain);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -274,6 +313,25 @@ export function create_avif_encoding_plan_rgba(rgba, width, height, quality, sou
     const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.create_avif_encoding_plan_rgba(ptr0, len0, width, height, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @param {number} compression_gain
+ * @returns {any}
+ */
+export function create_avif_encoding_plan_rgba_with_gain(rgba, width, height, quality, source_size_bytes, compression_gain) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.create_avif_encoding_plan_rgba_with_gain(ptr0, len0, width, height, quality, source_size_bytes, compression_gain);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

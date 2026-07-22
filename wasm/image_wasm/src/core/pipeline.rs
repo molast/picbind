@@ -49,3 +49,33 @@ pub fn compress_dynamic_image_to_png(
 ) -> Result<CompressionResult, JsValue> {
     to_format::compress_dynamic_image_to_png(img, quality, source_size_bytes)
 }
+
+pub fn compress_dynamic_image_to_png_with_gain(
+    img: &image::DynamicImage,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    to_format::compress_dynamic_image_to_png_with_gain(
+        img,
+        quality,
+        source_size_bytes,
+        compression_gain,
+    )
+}
+
+pub fn compress_image_to_format_with_plan_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    to_format::compress_image_to_target_format_with_gain(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        compression_gain,
+    )
+}

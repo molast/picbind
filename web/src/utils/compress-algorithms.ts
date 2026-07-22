@@ -1,6 +1,12 @@
 "use client";
 
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import {
+  amplifyMaxError,
+  amplifyMinSimilarity,
+  amplifyQualityLoss,
+  compressionGainForFormat,
+} from "@/utils/compression-gain";
 import { createButteraugliEvaluator } from "@/utils/butteraugli";
 import {
   analyzeCompressionFeatures,
@@ -218,10 +224,11 @@ function hasNonOpaqueAlpha(rgba: Uint8Array) {
 async function compressPerceptualAvif(
   file: File,
   quality: number,
+  compressionGain: number,
 ): Promise<CompressResult> {
   const mod = await initWasm();
   if (
-    typeof mod?.create_avif_encoding_plan_rgba !== "function" ||
+    typeof mod?.create_avif_encoding_plan_rgba_with_gain !== "function" ||
     typeof mod?.compare_avif_candidate_rgba !== "function"
   ) {
     throw new Error("WASM module does not expose adaptive AVIF encoding");
@@ -229,12 +236,13 @@ async function compressPerceptualAvif(
 
   const sourceFormat = sourceFormatFromFile(file);
   const source = await decodeImageToRgba(file);
-  const plan = mod.create_avif_encoding_plan_rgba(
+  const plan = mod.create_avif_encoding_plan_rgba_with_gain(
     source.bytes,
     source.width,
     source.height,
     clampQuality(quality),
     file.size,
+    compressionGain,
   ) as AvifEncodingPlan;
   const pixelCount = source.width * source.height;
   const candidateQualities =
@@ -445,26 +453,41 @@ async function getWebpCodec() {
   return cachedWebpCodec;
 }
 
-function perceptualWebpQualities(quality: number, sameFormat: boolean) {
+function perceptualWebpQualities(
+  quality: number,
+  sameFormat: boolean,
+  compressionGain: number,
+) {
   const normalized = clampQuality(quality);
   const candidates = sameFormat
     ? [Math.max(68, normalized - 12), Math.max(75, normalized - 5)]
     : [Math.max(72, normalized - 8), Math.max(80, normalized)];
-  return Array.from(new Set(candidates.map(clampQuality))).sort((a, b) => a - b);
+  return Array.from(
+    new Set(
+      candidates.map((candidate) =>
+        amplifyQualityLoss(clampQuality(candidate), compressionGain, 20),
+      ),
+    ),
+  ).sort((a, b) => a - b);
 }
 
-function passesPerceptualWebpGuardrail(metrics: PerceptualMetrics) {
+function passesPerceptualWebpGuardrail(
+  metrics: PerceptualMetrics,
+  compressionGain: number,
+) {
   return (
-    metrics.ssim >= 0.95 &&
-    metrics.msSsim >= 0.974 &&
-    metrics.blurLossPercent <= 3.5 &&
-    metrics.overallQualityScore >= 96
+    metrics.ssim >= amplifyMinSimilarity(0.95, compressionGain) &&
+    metrics.msSsim >= amplifyMinSimilarity(0.974, compressionGain) &&
+    metrics.blurLossPercent <= amplifyMaxError(3.5, compressionGain) &&
+    metrics.overallQualityScore >=
+      amplifyMinSimilarity(0.96, compressionGain) * 100
   );
 }
 
 async function compressPerceptualWebp(
   file: File,
   quality: number,
+  compressionGain: number,
 ): Promise<CompressResult> {
   const [codec, imageData, mod, sourceBuffer] = await Promise.all([
     getWebpCodec(),
@@ -477,7 +500,11 @@ async function compressPerceptualWebp(
   const sameFormat = sourceFormat === "webp";
   const candidates: WebpCandidate[] = [];
 
-  for (const candidateQuality of perceptualWebpQualities(quality, sameFormat)) {
+  for (const candidateQuality of perceptualWebpQualities(
+    quality,
+    sameFormat,
+    compressionGain,
+  )) {
     try {
       const encoded = new Uint8Array(
         await codec.encode(imageData, {
@@ -505,7 +532,7 @@ async function compressPerceptualWebp(
             source,
             encoded,
           ) as PerceptualMetrics;
-          passes = passesPerceptualWebpGuardrail(metrics);
+          passes = passesPerceptualWebpGuardrail(metrics, compressionGain);
         } catch {
           // Some source decoders (notably AVIF) may be unavailable in the
           // metrics module. The successfully encoded WebP is still valid.
@@ -546,6 +573,7 @@ async function compressWithWasmCodec(
   quality = 80,
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
+  compressionGain = 1,
 ): Promise<CompressResult> {
   const mod = await initWasm();
   if (!mod || typeof mod.compress_image !== "function") {
@@ -559,16 +587,17 @@ async function compressWithWasmCodec(
   if (
     sourceFormat === "avif" &&
     requestedFormat === "png" &&
-    typeof mod.compress_rgba_to_png === "function"
+    typeof mod.compress_rgba_to_png_with_gain === "function"
   ) {
     try {
       const imageData = await decodeFileToImageData(file);
-      const output = mod.compress_rgba_to_png(
+      const output = mod.compress_rgba_to_png_with_gain(
         imageData.data,
         imageData.width,
         imageData.height,
         quality,
         file.size,
+        compressionGain,
       );
       const bytes = output.bytes as Uint8Array;
       const mime = output.mime as string;
@@ -595,12 +624,21 @@ async function compressWithWasmCodec(
   try {
     const output =
       targetFormat &&
-      allowAlphaLoss &&
-      typeof mod.compress_image_to_format_with_options === "function"
-        ? mod.compress_image_to_format_with_options(input, quality, targetFormat, true)
-        : targetFormat && typeof mod.compress_image_to_format === "function"
-          ? mod.compress_image_to_format(input, quality, targetFormat)
-          : mod.compress_image(input, quality);
+      typeof mod.compress_image_to_format_with_plan_options === "function"
+        ? mod.compress_image_to_format_with_plan_options(
+            input,
+            quality,
+            targetFormat,
+            allowAlphaLoss,
+            compressionGain,
+          )
+        : targetFormat &&
+            allowAlphaLoss &&
+            typeof mod.compress_image_to_format_with_options === "function"
+          ? mod.compress_image_to_format_with_options(input, quality, targetFormat, true)
+          : targetFormat && typeof mod.compress_image_to_format === "function"
+            ? mod.compress_image_to_format(input, quality, targetFormat)
+            : mod.compress_image(input, quality);
 
     const bytes = output.bytes as Uint8Array;
     const mime = output.mime as string;
@@ -617,7 +655,7 @@ async function compressWithWasmCodec(
       if (requestedFormat === "jpeg" && isJpegCompressionFailure(error)) {
         const result = await compressJpegWithCanvasFallback(
           file,
-          quality,
+          amplifyQualityLoss(quality, compressionGain, 20),
           requireSmaller,
         );
         return keepOriginalWhenNotSmaller(
@@ -669,7 +707,13 @@ export async function compressImageWithAlgorithms(
     allowAlphaLoss,
   );
   const analysis = analyzeCompressionFeatures(features);
-  const plan = createCompressionPlan(analysis, quality, BUTTERAUGLI_ENABLED);
+  const compressionGain = compressionGainForFormat(targetFormat);
+  const plan = createCompressionPlan(
+    analysis,
+    quality,
+    BUTTERAUGLI_ENABLED,
+    compressionGain,
+  );
   const encoder = selectCompressionEncoder(plan, {
     wasm: (candidateQuality) =>
       compressWithWasmCodec(
@@ -677,12 +721,17 @@ export async function compressImageWithAlgorithms(
         candidateQuality,
         targetFormat,
         allowAlphaLoss,
+        plan.compressionGain,
       ),
     libwebp: (candidateQuality) =>
-      compressPerceptualWebp(file, candidateQuality),
+      compressPerceptualWebp(file, candidateQuality, plan.compressionGain),
     libavif: async (candidateQuality) => {
       try {
-        return await compressPerceptualAvif(file, candidateQuality);
+        return await compressPerceptualAvif(
+          file,
+          candidateQuality,
+          plan.compressionGain,
+        );
       } catch (error) {
         if (plan.sameFormat) return originalFileResult(file, "avif");
         throw error;
@@ -710,6 +759,6 @@ export async function compressImageWithAlgorithms(
     plan,
     encoder,
     evaluator,
-    BUTTERAUGLI_TARGET_SCORE,
+    amplifyMaxError(BUTTERAUGLI_TARGET_SCORE, plan.compressionGain),
   );
 }
