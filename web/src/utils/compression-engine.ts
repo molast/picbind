@@ -26,6 +26,7 @@ export type CompressionAnalysis = CompressionFeatures & {
 };
 
 export type CompressionPlan = CompressionAnalysis & {
+  compressionGain: number;
   encoder: CompressionEncoderId;
   evaluator: PerceptualEvaluatorId;
   qualityCandidates: number[];
@@ -110,6 +111,7 @@ export function createCompressionPlan(
   analysis: CompressionAnalysis,
   quality: number,
   butteraugliEnabled: boolean,
+  compressionGain: number,
 ): CompressionPlan {
   const encoder: CompressionEncoderId =
     analysis.targetFormat === "avif"
@@ -123,6 +125,7 @@ export function createCompressionPlan(
   );
   return {
     ...analysis,
+    compressionGain,
     encoder,
     evaluator,
     qualityCandidates: qualityCandidates(quality, evaluator),

@@ -333,6 +333,69 @@ AVIF Encoder
 
 ---
 
+# Compression Gain（压缩增益层）
+
+Compression Gain 位于 Planner 与 Encoder Selector 之间：
+
+```text
+Compression Planner
+        ↓
+Standard CompressionPlan
+        ↓
+Compression Gain (K)
+        ↓
+Adjusted CompressionPlan
+        ↓
+Encoder Selector
+```
+
+`K` 只放大或缩小 Planner 已生成的压缩幅度，不参与图片分析、编码器选择或策略判断。
+
+```text
+K = 1.0  当前标准计划，输入与输出完全一致
+K > 1.0  放大压缩幅度
+K < 1.0  缩小压缩幅度
+```
+
+四种目标格式分别配置：
+
+```env
+NEXT_PUBLIC_PCE_JPEG_K=1.0
+NEXT_PUBLIC_PCE_PNG_K=1.0
+NEXT_PUBLIC_PCE_WEBP_K=1.0
+NEXT_PUBLIC_PCE_AVIF_K=1.0
+```
+
+允许范围为 `0.5..=2.0`，无效值回退到 `1.0`。
+
+有损质量采用损失幅度模型，而不是直接乘 Quality：
+
+```text
+qualityLoss = 100 - plannedQuality
+adjustedQuality = 100 - qualityLoss * K
+```
+
+感知阈值采用误差预算模型：
+
+```text
+adjustedMaxError = plannedMaxError * K
+adjustedMinSimilarity = 1 - (1 - plannedMinSimilarity) * K
+```
+
+PNG 同时缩放 Planner 给出的调色板预算。Gain 不修改抖动算法、量化器或 Oxipng 实现。
+
+以下参数不受 Gain 影响：
+
+- Feature Extractor 权重
+- 图片内容判断规则
+- Encoder 类型
+- AVIF speed、tune、tile 和色度策略
+- WebP method、pass 和 Sharp YUV 策略
+- Oxipng/Zopfli effort
+- Worker 并发数
+
+---
+
 # 五、Image Encoder（编码执行器）
 
 真正完成图片编码。

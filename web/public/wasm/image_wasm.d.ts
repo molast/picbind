@@ -28,13 +28,19 @@ export function compress_image_to_format(input: Uint8Array, quality: number, tar
 
 export function compress_image_to_format_with_options(input: Uint8Array, quality: number, target_format: string, allow_alpha_loss: boolean): CompressionResult;
 
+export function compress_image_to_format_with_plan_options(input: Uint8Array, quality: number, target_format: string, allow_alpha_loss: boolean, compression_gain: number): CompressionResult;
+
 export function compress_png_with_deflate(input: Uint8Array, compression_level: number): CompressionResult;
 
 export function compress_rgba_to_png(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number): CompressionResult;
 
+export function compress_rgba_to_png_with_gain(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number, compression_gain: number): CompressionResult;
+
 export function create_avif_encoding_plan(input: Uint8Array, quality: number, source_size_bytes: number): any;
 
 export function create_avif_encoding_plan_rgba(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number): any;
+
+export function create_avif_encoding_plan_rgba_with_gain(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number, compression_gain: number): any;
 
 export function create_zip_from_items(items: Array<any>): Uint8Array;
 
@@ -63,13 +69,16 @@ export interface InitOutput {
     readonly compress_image: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly compress_image_to_format_with_plan_options: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly compress_png_with_deflate: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_rgba_to_png: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly compress_rgba_to_png_with_gain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly compressionresult_bytes: (a: number) => [number, number];
     readonly compressionresult_ext: (a: number) => [number, number];
     readonly compressionresult_mime: (a: number) => [number, number];
     readonly create_avif_encoding_plan: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly create_avif_encoding_plan_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly create_avif_encoding_plan_rgba_with_gain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly create_zip_from_items: (a: any) => [number, number, number, number];
     readonly generate_favicon: (a: number, b: number) => [number, number, number];
     readonly generate_share_placeholder: (a: number, b: number) => [number, number, number];

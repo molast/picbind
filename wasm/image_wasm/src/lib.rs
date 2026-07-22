@@ -135,6 +135,42 @@ pub fn compress_rgba_to_png(
 }
 
 #[wasm_bindgen]
+pub fn compress_rgba_to_png_with_gain(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::pipeline::compress_dynamic_image_to_png_with_gain(
+        &img,
+        quality,
+        source_size_bytes,
+        compression_gain,
+    )
+}
+
+#[wasm_bindgen]
+pub fn compress_image_to_format_with_plan_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
+    core::pipeline::compress_image_to_format_with_plan_options(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        compression_gain,
+    )
+}
+
+#[wasm_bindgen]
 pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
     let mut entries = Vec::with_capacity(items.length() as usize);
 
@@ -224,6 +260,20 @@ pub fn create_avif_encoding_plan_rgba(
 ) -> Result<JsValue, JsValue> {
     let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
     core::quality::avif_encoding_plan(&img, quality, source_size_bytes).to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn create_avif_encoding_plan_rgba_with_gain(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<JsValue, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::quality::avif_encoding_plan_with_gain(&img, quality, source_size_bytes, compression_gain)
+        .to_js_value()
 }
 
 #[wasm_bindgen]

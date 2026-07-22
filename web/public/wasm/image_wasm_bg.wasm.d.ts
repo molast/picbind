@@ -10,13 +10,16 @@ export const compare_image_quality_for_guardrails: (a: number, b: number, c: num
 export const compress_image: (a: number, b: number, c: number) => [number, number, number];
 export const compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const compress_image_to_format_with_plan_options: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const compress_png_with_deflate: (a: number, b: number, c: number) => [number, number, number];
 export const compress_rgba_to_png: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const compress_rgba_to_png_with_gain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const compressionresult_bytes: (a: number) => [number, number];
 export const compressionresult_ext: (a: number) => [number, number];
 export const compressionresult_mime: (a: number) => [number, number];
 export const create_avif_encoding_plan: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const create_avif_encoding_plan_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const create_avif_encoding_plan_rgba_with_gain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const create_zip_from_items: (a: any) => [number, number, number, number];
 export const generate_favicon: (a: number, b: number) => [number, number, number];
 export const generate_share_placeholder: (a: number, b: number) => [number, number, number];

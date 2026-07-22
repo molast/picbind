@@ -3,6 +3,10 @@ use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::JsValue;
 
 use super::analysis::analyze_dynamic_image;
+use super::gain::{
+    amplify_max_error, amplify_min_similarity, amplify_palette_budget, amplify_quality_loss,
+    normalize_compression_gain,
+};
 
 const PNG_TO_JPEG_MIN_QUALITY_FLOOR: u8 = 80;
 
@@ -49,7 +53,58 @@ pub struct AvifEncodingPlan {
     pub max_p99_alpha_error: f64,
 }
 
+impl JpegPerceptualThresholds {
+    fn apply_gain(mut self, gain: f64) -> Self {
+        self.min_ms_ssim = amplify_min_similarity(self.min_ms_ssim, gain);
+        self.max_blur_loss_percent = amplify_max_error(self.max_blur_loss_percent, gain);
+        self.max_perceptual_distance = amplify_max_error(self.max_perceptual_distance, gain);
+        self.max_p99_delta_e = amplify_max_error(self.max_p99_delta_e, gain);
+        self.max_p95_luminance_error = amplify_max_error(self.max_p95_luminance_error, gain);
+        self.max_p95_chroma_error = amplify_max_error(self.max_p95_chroma_error, gain);
+        self
+    }
+}
+
+impl PngQuantizationPlan {
+    fn apply_gain(mut self, gain: f64) -> Self {
+        self.color_candidates = self
+            .color_candidates
+            .map(|colors| amplify_palette_budget(colors, gain));
+        self.min_ms_ssim = amplify_min_similarity(self.min_ms_ssim, gain);
+        self.max_perceptual_distance = amplify_max_error(self.max_perceptual_distance, gain);
+        self.max_p99_delta_e = amplify_max_error(self.max_p99_delta_e, gain);
+        self.max_p95_luminance_error = amplify_max_error(self.max_p95_luminance_error, gain);
+        self.max_p95_chroma_error = amplify_max_error(self.max_p95_chroma_error, gain);
+        self.max_p95_alpha_error = amplify_max_error(self.max_p95_alpha_error, gain);
+        self.max_p99_alpha_error = amplify_max_error(self.max_p99_alpha_error, gain);
+        self
+    }
+}
+
 impl AvifEncodingPlan {
+    fn apply_gain(mut self, gain: f64) -> Self {
+        let gain = normalize_compression_gain(gain);
+        self.quality_candidates = self
+            .quality_candidates
+            .into_iter()
+            .map(|quality| amplify_quality_loss(quality, gain, 24))
+            .collect();
+        self.quality_candidates.sort_unstable();
+        self.quality_candidates.dedup();
+        if self.alpha_quality_floor > 1 {
+            self.alpha_quality_floor = amplify_quality_loss(self.alpha_quality_floor, gain, 50);
+        }
+        self.min_ms_ssim = amplify_min_similarity(self.min_ms_ssim, gain);
+        self.max_blur_loss_percent = amplify_max_error(self.max_blur_loss_percent, gain);
+        self.max_perceptual_distance = amplify_max_error(self.max_perceptual_distance, gain);
+        self.max_p99_delta_e = amplify_max_error(self.max_p99_delta_e, gain);
+        self.max_p95_luminance_error = amplify_max_error(self.max_p95_luminance_error, gain);
+        self.max_p95_chroma_error = amplify_max_error(self.max_p95_chroma_error, gain);
+        self.max_p95_alpha_error = amplify_max_error(self.max_p95_alpha_error, gain);
+        self.max_p99_alpha_error = amplify_max_error(self.max_p99_alpha_error, gain);
+        self
+    }
+
     pub fn to_js_value(&self) -> Result<JsValue, JsValue> {
         let obj = Object::new();
         let candidates = Array::new();
@@ -147,6 +202,14 @@ pub fn png_quantization_plan(img: &DynamicImage, source_size_bytes: usize) -> Pn
             max_p99_alpha_error: 0.04,
         }
     }
+}
+
+pub fn png_quantization_plan_with_gain(
+    img: &DynamicImage,
+    source_size_bytes: usize,
+    gain: f64,
+) -> PngQuantizationPlan {
+    png_quantization_plan(img, source_size_bytes).apply_gain(gain)
 }
 
 pub fn png_to_jpeg_quality_candidates(
@@ -269,6 +332,18 @@ pub fn png_to_jpeg_quality_candidates(
     candidates
 }
 
+pub fn png_to_jpeg_quality_candidates_with_gain(
+    img: &DynamicImage,
+    requested_quality: u8,
+    source_size_bytes: usize,
+    gain: f64,
+) -> Vec<u8> {
+    png_to_jpeg_quality_candidates(img, requested_quality, source_size_bytes)
+        .into_iter()
+        .map(|quality| amplify_quality_loss(quality, gain, 35))
+        .collect()
+}
+
 pub fn jpeg_to_jpeg_quality_candidates(
     img: &DynamicImage,
     requested_quality: u8,
@@ -353,6 +428,18 @@ pub fn jpeg_to_jpeg_quality_candidates(
     candidates
 }
 
+pub fn jpeg_to_jpeg_quality_candidates_with_gain(
+    img: &DynamicImage,
+    requested_quality: u8,
+    source_size_bytes: usize,
+    gain: f64,
+) -> Vec<u8> {
+    jpeg_to_jpeg_quality_candidates(img, requested_quality, source_size_bytes)
+        .into_iter()
+        .map(|quality| amplify_quality_loss(quality, gain, 35))
+        .collect()
+}
+
 pub fn jpeg_to_jpeg_quality_thresholds(
     img: &DynamicImage,
     source_size_bytes: usize,
@@ -386,6 +473,14 @@ pub fn jpeg_to_jpeg_quality_thresholds(
             max_p95_chroma_error: 5.0,
         }
     }
+}
+
+pub fn jpeg_to_jpeg_quality_thresholds_with_gain(
+    img: &DynamicImage,
+    source_size_bytes: usize,
+    gain: f64,
+) -> JpegPerceptualThresholds {
+    jpeg_to_jpeg_quality_thresholds(img, source_size_bytes).apply_gain(gain)
 }
 
 pub fn avif_speed_for_pixels(pixel_count: usize) -> u8 {
@@ -517,11 +612,24 @@ pub fn avif_encoding_plan(
     }
 }
 
+pub fn avif_encoding_plan_with_gain(
+    img: &DynamicImage,
+    requested_quality: u8,
+    source_size_bytes: usize,
+    gain: f64,
+) -> AvifEncodingPlan {
+    avif_encoding_plan(img, requested_quality, source_size_bytes).apply_gain(gain)
+}
+
 #[cfg(test)]
 mod tests {
     use image::{DynamicImage, Rgb, RgbImage};
 
-    use super::{avif_encoding_plan, png_quantization_plan};
+    use super::{
+        avif_encoding_plan, avif_encoding_plan_with_gain, jpeg_to_jpeg_quality_candidates,
+        jpeg_to_jpeg_quality_candidates_with_gain, png_quantization_plan,
+        png_quantization_plan_with_gain,
+    };
 
     fn horizontal_gradient() -> DynamicImage {
         let mut image = RgbImage::new(64, 64);
@@ -559,5 +667,50 @@ mod tests {
     fn noise_is_not_planned_as_a_smooth_gradient() {
         let plan = png_quantization_plan(&checker_noise(), 4096);
         assert_eq!(plan.dithering_level, 0.0);
+    }
+
+    #[test]
+    fn unity_gain_preserves_planner_outputs() {
+        let image = horizontal_gradient();
+        let png = png_quantization_plan(&image, 4096);
+        let png_with_gain = png_quantization_plan_with_gain(&image, 4096, 1.0);
+        let avif = avif_encoding_plan(&image, 80, 4096);
+        let avif_with_gain = avif_encoding_plan_with_gain(&image, 80, 4096, 1.0);
+
+        assert_eq!(png.color_candidates, png_with_gain.color_candidates);
+        assert_eq!(png.min_ms_ssim, png_with_gain.min_ms_ssim);
+        assert_eq!(avif.quality_candidates, avif_with_gain.quality_candidates);
+        assert_eq!(avif.alpha_quality_floor, avif_with_gain.alpha_quality_floor);
+        assert_eq!(avif.speed, avif_with_gain.speed);
+        assert_eq!(avif.subsample, avif_with_gain.subsample);
+    }
+
+    #[test]
+    fn gain_changes_amplitude_without_changing_avif_strategy() {
+        let image = horizontal_gradient();
+        let standard = avif_encoding_plan(&image, 80, 4096);
+        let stronger = avif_encoding_plan_with_gain(&image, 80, 4096, 1.5);
+        let jpeg = jpeg_to_jpeg_quality_candidates(&image, 80, 4096);
+        let stronger_jpeg = jpeg_to_jpeg_quality_candidates_with_gain(&image, 80, 4096, 1.5);
+        let stronger_png = png_quantization_plan_with_gain(&image, 4096, 1.5);
+
+        assert!(
+            stronger
+                .quality_candidates
+                .iter()
+                .zip(standard.quality_candidates.iter())
+                .all(|(amplified, planned)| amplified <= planned)
+        );
+        assert!(
+            stronger_jpeg
+                .iter()
+                .zip(jpeg.iter())
+                .all(|(amplified, planned)| amplified <= planned)
+        );
+        assert!(stronger_png.color_candidates[3] < 256);
+        assert_eq!(stronger.speed, standard.speed);
+        assert_eq!(stronger.subsample, standard.subsample);
+        assert_eq!(stronger.tune, standard.tune);
+        assert_eq!(stronger.chroma_delta_q, standard.chroma_delta_q);
     }
 }

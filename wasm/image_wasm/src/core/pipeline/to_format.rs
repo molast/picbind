@@ -5,6 +5,7 @@ use crate::CompressionResult;
 
 use super::super::{
     candidate::Candidate,
+    gain::{DEFAULT_COMPRESSION_GAIN, amplify_quality_loss},
     jpeg::{
         encode_jpeg_from_image, encode_jpeg_from_image_with_white_background,
         encode_jpeg_from_rgb_image, is_opaque,
@@ -16,8 +17,8 @@ use super::super::{
     },
     png_oxipng::optimize_quantized_png,
     quality::{
-        jpeg_to_jpeg_quality_candidates, jpeg_to_jpeg_quality_thresholds, png_quantization_plan,
-        png_to_jpeg_quality_candidates,
+        jpeg_to_jpeg_quality_candidates_with_gain, jpeg_to_jpeg_quality_thresholds_with_gain,
+        png_quantization_plan_with_gain, png_to_jpeg_quality_candidates_with_gain,
     },
 };
 
@@ -28,6 +29,7 @@ fn encode_candidate_for_format(
     target_format: &str,
     quality: u8,
     allow_alpha_loss: bool,
+    compression_gain: f64,
 ) -> Result<Candidate, JsValue> {
     match target_format {
         "jpeg" | "jpg" => {
@@ -42,18 +44,23 @@ fn encode_candidate_for_format(
             let input_len = input.len();
             let mut best_bytes: Option<Vec<u8>> = None;
             let candidate_qualities: Vec<u8> = if is_png_to_jpeg {
-                png_to_jpeg_quality_candidates(img, quality, input_len)
+                png_to_jpeg_quality_candidates_with_gain(img, quality, input_len, compression_gain)
             } else if is_jpeg_to_jpeg {
-                jpeg_to_jpeg_quality_candidates(img, quality, input_len)
+                jpeg_to_jpeg_quality_candidates_with_gain(img, quality, input_len, compression_gain)
             } else {
                 // Cross-format Butteraugli retries are controlled by the caller.
                 // Encode the requested quality exactly so 80 -> 90 -> 100 is a
                 // real quality increase instead of selecting 50 -> 60 -> 70.
-                vec![quality.clamp(35, 100)]
+                vec![amplify_quality_loss(
+                    quality.clamp(35, 100),
+                    compression_gain,
+                    35,
+                )]
             };
             if is_jpeg_to_jpeg {
                 let rgb = img.to_rgb8();
-                let thresholds = jpeg_to_jpeg_quality_thresholds(img, input_len);
+                let thresholds =
+                    jpeg_to_jpeg_quality_thresholds_with_gain(img, input_len, compression_gain);
 
                 // Search from the smallest likely acceptable candidate upward. In the
                 // common case this performs one encode and one perceptual comparison.
@@ -124,10 +131,11 @@ fn encode_candidate_for_format(
         "png" => {
             let pixel_count = u64::from(img.width()) * u64::from(img.height());
             if source_format == image::ImageFormat::Png {
-                let plan = png_quantization_plan(img, input.len());
-                let minimum_colors = if quality >= 100 {
+                let plan = png_quantization_plan_with_gain(img, input.len(), compression_gain);
+                let effective_quality = amplify_quality_loss(quality, compression_gain, 1);
+                let minimum_colors = if effective_quality >= 100 {
                     256
-                } else if quality >= 90 {
+                } else if effective_quality >= 90 {
                     128
                 } else {
                     0
@@ -180,10 +188,11 @@ fn encode_candidate_for_format(
                     "PNG compression could not satisfy perceptual quality guardrails",
                 ))
             } else {
+                let effective_quality = amplify_quality_loss(quality, compression_gain, 1);
                 let encoded = if pixel_count > 8_000_000 {
-                    encode_sampled_quantized_png_from_image(img, 256, quality)
+                    encode_sampled_quantized_png_from_image(img, 256, effective_quality)
                 } else {
-                    encode_quantized_png_from_image(img, quality)
+                    encode_quantized_png_from_image(img, effective_quality)
                 };
                 encoded.map(|bytes| {
                     let bytes = optimize_quantized_png(bytes, pixel_count);
@@ -210,11 +219,27 @@ pub fn compress_dynamic_image_to_png(
     quality: u8,
     source_size_bytes: usize,
 ) -> Result<CompressionResult, JsValue> {
+    compress_dynamic_image_to_png_with_gain(
+        img,
+        quality,
+        source_size_bytes,
+        DEFAULT_COMPRESSION_GAIN,
+    )
+}
+
+pub fn compress_dynamic_image_to_png_with_gain(
+    img: &DynamicImage,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
     let pixel_count = u64::from(img.width()) * u64::from(img.height());
-    let plan = png_quantization_plan(img, source_size_bytes);
+    let plan = png_quantization_plan_with_gain(img, source_size_bytes, compression_gain);
+    let effective_quality = amplify_quality_loss(quality.max(85), compression_gain, 1);
 
     if pixel_count > 8_000_000 {
-        let bytes = encode_sampled_quantized_png_from_image(img, 256, quality.max(85))?;
+        let colors = *plan.color_candidates.last().unwrap_or(&256);
+        let bytes = encode_sampled_quantized_png_from_image(img, colors, effective_quality)?;
         return Ok(Candidate {
             bytes: optimize_quantized_png(bytes, pixel_count),
             mime: "image/png",
@@ -257,8 +282,9 @@ pub fn compress_dynamic_image_to_png(
     // Keep cross-format conversion available even when the conservative visual
     // guardrails reject every smaller palette. The 256-color candidate remains
     // perceptually bounded by imagequant's quality target.
+    let colors = *plan.color_candidates.last().unwrap_or(&256);
     let bytes =
-        encode_quantized_png_with_options(img, 256, quality.max(85), plan.dithering_level, 4)?;
+        encode_quantized_png_with_options(img, colors, effective_quality, plan.dithering_level, 4)?;
     Ok(Candidate {
         bytes: optimize_quantized_png(bytes, pixel_count),
         mime: "image/png",
@@ -273,6 +299,22 @@ pub fn compress_image_to_target_format(
     target_format: &str,
     allow_alpha_loss: bool,
 ) -> Result<CompressionResult, JsValue> {
+    compress_image_to_target_format_with_gain(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        DEFAULT_COMPRESSION_GAIN,
+    )
+}
+
+pub fn compress_image_to_target_format_with_gain(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
     let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let img = image::load_from_memory_with_format(input, format)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -284,6 +326,7 @@ pub fn compress_image_to_target_format(
         &target_format.to_ascii_lowercase(),
         quality,
         allow_alpha_loss,
+        compression_gain,
     )?;
     Ok(candidate.into_result())
 }
