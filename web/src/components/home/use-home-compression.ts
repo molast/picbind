@@ -38,6 +38,7 @@ import {
   consumeFilesForCompression,
   deleteQueuedImageFile,
   getQueuedImageFile,
+  releaseStagedQueuedImageFile,
   stageQueuedImageFile,
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
@@ -304,6 +305,7 @@ export function useHomeCompression({
   const metricsRequestsRef = React.useRef<Record<string, MetricsRequestState>>(
     {},
   );
+  const releasedSourceFilesRef = React.useRef(new Set<string>());
   const isUnmountedRef = React.useRef(false);
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -681,6 +683,29 @@ export function useHomeCompression({
   }, [items]);
 
   React.useEffect(() => {
+    items.forEach((item) => {
+      if (
+        item.rejection ||
+        !item.variants.length ||
+        item.variants.some(
+          (variant) =>
+            variant.status === "queued" || variant.status === "processing",
+        ) ||
+        releasedSourceFilesRef.current.has(item.fileId)
+      ) {
+        return;
+      }
+
+      releasedSourceFilesRef.current.add(item.fileId);
+      void releaseStagedQueuedImageFile(item.fileId).then((released) => {
+        if (!released) {
+          releasedSourceFilesRef.current.delete(item.fileId);
+        }
+      });
+    });
+  }, [items]);
+
+  React.useEffect(() => {
     setCompareLeftAssetId((current) =>
       current && compareAssets.some((asset) => asset.id === current)
         ? current
@@ -699,6 +724,7 @@ export function useHomeCompression({
     return () => {
       isUnmountedRef.current = true;
       metricsRequestsRef.current = {};
+      releasedSourceFilesRef.current.clear();
       void flushCompressedCountNow();
       Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
       terminateCompressionWorker();

@@ -11,6 +11,7 @@ export const COMPRESSION_HANDOFF_EVENT = "picbind:compression-handoff-ready";
 
 const stagedFiles = new Map<string, File>();
 const pendingStores = new Map<string, Promise<void>>();
+const persistedFiles = new Set<string>();
 
 export function stageQueuedImageFile(id: string, file: File) {
   stagedFiles.set(id, file);
@@ -18,11 +19,15 @@ export function stageQueuedImageFile(id: string, file: File) {
 
 export function storeQueuedImageFile(id: string, file: File) {
   stageQueuedImageFile(id, file);
-  const pending = storeQueuedFile(id, file).finally(() => {
-    if (pendingStores.get(id) === pending) {
-      pendingStores.delete(id);
-    }
-  });
+  const pending = storeQueuedFile(id, file)
+    .then(() => {
+      persistedFiles.add(id);
+    })
+    .finally(() => {
+      if (pendingStores.get(id) === pending) {
+        pendingStores.delete(id);
+      }
+    });
   pendingStores.set(id, pending);
   return pending;
 }
@@ -31,8 +36,24 @@ export async function getQueuedImageFile(id: string) {
   return stagedFiles.get(id) ?? getQueuedFile(id);
 }
 
+export async function releaseStagedQueuedImageFile(id: string) {
+  const pending = pendingStores.get(id);
+  if (pending) {
+    try {
+      await pending;
+    } catch {
+      return false;
+    }
+  }
+
+  if (!persistedFiles.has(id)) return false;
+  persistedFiles.delete(id);
+  return stagedFiles.delete(id);
+}
+
 export async function deleteQueuedImageFile(id: string) {
   stagedFiles.delete(id);
+  persistedFiles.delete(id);
   await pendingStores.get(id)?.catch(() => undefined);
   await deleteQueuedFile(id);
 }
