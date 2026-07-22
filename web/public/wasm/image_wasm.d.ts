@@ -30,6 +30,8 @@ export function compress_image_to_format_with_options(input: Uint8Array, quality
 
 export function compress_png_with_deflate(input: Uint8Array, compression_level: number): CompressionResult;
 
+export function compress_rgba_to_png(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number): CompressionResult;
+
 export function create_avif_encoding_plan(input: Uint8Array, quality: number, source_size_bytes: number): any;
 
 export function create_avif_encoding_plan_rgba(rgba: Uint8Array, width: number, height: number, quality: number, source_size_bytes: number): any;
@@ -62,6 +64,7 @@ export interface InitOutput {
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly compress_image_to_format_with_options: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly compress_png_with_deflate: (a: number, b: number, c: number) => [number, number, number];
+    readonly compress_rgba_to_png: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly compressionresult_bytes: (a: number) => [number, number];
     readonly compressionresult_ext: (a: number) => [number, number];
     readonly compressionresult_mime: (a: number) => [number, number];

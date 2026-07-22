@@ -93,11 +93,12 @@ impl AvifEncodingPlan {
 
 pub fn png_quantization_plan(img: &DynamicImage, source_size_bytes: usize) -> PngQuantizationPlan {
     let analysis = analyze_dynamic_image(img, source_size_bytes, "png");
-    let is_flat_gradient = analysis.flat_coverage >= 0.18;
-    let is_color_rich = analysis.color_complexity >= 0.95 && analysis.detail_coverage >= 0.40;
+    let is_smooth_gradient = analysis.gradient_coverage >= 0.18 && analysis.noise_level <= 0.12;
+    let is_color_rich = (analysis.color_entropy >= 0.72 || analysis.color_complexity >= 0.95)
+        && analysis.detail_coverage >= 0.32;
     let is_edge_heavy = analysis.edge_strength >= 0.38 && analysis.flat_coverage < 0.18;
 
-    if is_flat_gradient {
+    if is_smooth_gradient {
         PngQuantizationPlan {
             color_candidates: [64, 128, 192, 256],
             dithering_level: 0.75,
@@ -146,16 +147,6 @@ pub fn png_quantization_plan(img: &DynamicImage, source_size_bytes: usize) -> Pn
             max_p99_alpha_error: 0.04,
         }
     }
-}
-
-pub fn quality_candidates(quality: u8) -> [u8; 5] {
-    [
-        quality,
-        quality.saturating_sub(5),
-        quality.saturating_sub(10),
-        quality.saturating_sub(20),
-        quality.saturating_sub(30),
-    ]
 }
 
 pub fn png_to_jpeg_quality_candidates(
@@ -221,6 +212,11 @@ pub fn png_to_jpeg_quality_candidates(
         _ => 0,
     };
     adaptive += match () {
+        _ if analysis.gradient_coverage >= 0.35 => 2,
+        _ if analysis.gradient_coverage >= 0.18 => 1,
+        _ => 0,
+    };
+    adaptive += match () {
         _ if complexity >= 0.62 => 2,
         _ if complexity >= 0.48 => 1,
         _ => 0,
@@ -241,6 +237,11 @@ pub fn png_to_jpeg_quality_candidates(
         _ if analysis.compressibility_score >= 0.72 => 4,
         _ if analysis.compressibility_score >= 0.58 => 2,
         _ if analysis.compressibility_score >= 0.44 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.noise_level >= 0.45 => 2,
+        _ if analysis.noise_level >= 0.25 => 1,
         _ => 0,
     };
     adaptive -= large_image_bias as i32;
@@ -298,6 +299,11 @@ pub fn jpeg_to_jpeg_quality_candidates(
         _ if analysis.complexity_score >= 0.46 => 1,
         _ => 0,
     };
+    adaptive += match () {
+        _ if analysis.gradient_coverage >= 0.35 => 2,
+        _ if analysis.gradient_coverage >= 0.18 => 1,
+        _ => 0,
+    };
 
     adaptive -= match () {
         _ if analysis.flat_coverage >= 0.52 => 4,
@@ -319,6 +325,11 @@ pub fn jpeg_to_jpeg_quality_candidates(
         _ if analysis.compressibility_score >= 0.60 => 3,
         _ if analysis.compressibility_score >= 0.48 => 2,
         _ if analysis.compressibility_score >= 0.36 => 1,
+        _ => 0,
+    };
+    adaptive -= match () {
+        _ if analysis.noise_level >= 0.45 => 2,
+        _ if analysis.noise_level >= 0.25 => 1,
         _ => 0,
     };
     adaptive -= match () {
@@ -395,13 +406,17 @@ pub fn avif_encoding_plan(
     let analysis = analyze_dynamic_image(img, source_size_bytes, "avif");
     let photo_like = analysis.detail_coverage >= 0.24
         || analysis.brightness_variance >= 0.30
+        || analysis.color_entropy >= 0.58
+        || analysis.noise_level >= 0.18
         || (analysis.color_complexity >= 0.34 && analysis.flat_coverage < 0.28);
     let ui_like = analysis.edge_strength >= 0.30
         && analysis.flat_coverage >= 0.18
-        && analysis.detail_coverage < 0.34;
+        && analysis.detail_coverage < 0.34
+        && analysis.noise_level < 0.18;
     let near_lossless_candidate = analysis.pixel_count <= 1_500_000
         && analysis.flat_coverage >= 0.52
-        && analysis.color_complexity <= 0.24;
+        && analysis.color_complexity <= 0.24
+        && analysis.color_entropy <= 0.40;
 
     let mut predicted = requested_quality.clamp(55, 96) as i32 - if photo_like { 35 } else { 22 };
     predicted += if analysis.detail_coverage >= 0.36 {
@@ -418,6 +433,20 @@ pub fn avif_encoding_plan(
     } else {
         0
     };
+    predicted += if analysis.gradient_coverage >= 0.35 {
+        3
+    } else if analysis.gradient_coverage >= 0.18 {
+        1
+    } else {
+        0
+    };
+    predicted -= if analysis.noise_level >= 0.45 {
+        3
+    } else if analysis.noise_level >= 0.25 {
+        1
+    } else {
+        0
+    };
     predicted += if ui_like { 5 } else { 0 };
     let predicted = predicted.clamp(if photo_like { 36 } else { 48 }, 94) as u8;
 
@@ -427,6 +456,7 @@ pub fn avif_encoding_plan(
         vec![predicted.max(76), predicted.saturating_add(8).min(96)]
     } else if photo_like {
         vec![
+            predicted.saturating_sub(6).max(32),
             predicted,
             predicted.saturating_add(3).min(96),
             predicted.saturating_add(6).min(98),
@@ -448,7 +478,9 @@ pub fn avif_encoding_plan(
         quality_candidates,
         speed: avif_speed_for_pixels(analysis.pixel_count),
         bit_depth: 8,
-        subsample: if ui_like && !photo_like {
+        subsample: if analysis.gradient_coverage >= 0.25 && analysis.noise_level < 0.18 {
+            3
+        } else if ui_like && !photo_like {
             3
         } else if !photo_like && analysis.color_complexity >= 0.42 {
             2
@@ -470,13 +502,62 @@ pub fn avif_encoding_plan(
             0
         },
         alpha_quality_floor: if analysis.has_alpha { 90 } else { 1 },
-        min_ms_ssim: if ui_like { 0.994 } else { 0.993 },
-        max_blur_loss_percent: if ui_like { 2.8 } else { 4.5 },
-        max_perceptual_distance: if ui_like { 1.9 } else { 2.05 },
-        max_p99_delta_e: if ui_like { 3.5 } else { 3.4 },
-        max_p95_luminance_error: if ui_like { 0.75 } else { 0.8 },
-        max_p95_chroma_error: if ui_like { 3.0 } else { 2.9 },
+        // AVIF's transform and 4:2:0 chroma subsampling naturally score lower
+        // than PNG/JPEG on pixel-distance metrics even when the visual result is
+        // transparent to the eye. Keep UI assets conservative, but let photos
+        // use the same practical HVS envelope as the adaptive JPEG path.
+        min_ms_ssim: if ui_like { 0.985 } else { 0.980 },
+        max_blur_loss_percent: if ui_like { 4.0 } else { 7.5 },
+        max_perceptual_distance: if ui_like { 2.5 } else { 5.5 },
+        max_p99_delta_e: if ui_like { 4.5 } else { 8.5 },
+        max_p95_luminance_error: if ui_like { 1.0 } else { 3.1 },
+        max_p95_chroma_error: if ui_like { 4.0 } else { 10.0 },
         max_p95_alpha_error: 0.02,
         max_p99_alpha_error: 0.04,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{DynamicImage, Rgb, RgbImage};
+
+    use super::{avif_encoding_plan, png_quantization_plan};
+
+    fn horizontal_gradient() -> DynamicImage {
+        let mut image = RgbImage::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                let value = (x * 4) as u8;
+                image.put_pixel(x, y, Rgb([value, value, value]));
+            }
+        }
+        DynamicImage::ImageRgb8(image)
+    }
+
+    fn checker_noise() -> DynamicImage {
+        let mut image = RgbImage::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                let value = if (x + y) % 2 == 0 { 0 } else { 255 };
+                image.put_pixel(x, y, Rgb([value, value, value]));
+            }
+        }
+        DynamicImage::ImageRgb8(image)
+    }
+
+    #[test]
+    fn smooth_gradient_uses_gradient_safe_plans() {
+        let image = horizontal_gradient();
+        let png = png_quantization_plan(&image, 4096);
+        let avif = avif_encoding_plan(&image, 80, 4096);
+
+        assert_eq!(png.dithering_level, 0.75);
+        assert_eq!(avif.subsample, 3);
+    }
+
+    #[test]
+    fn noise_is_not_planned_as_a_smooth_gradient() {
+        let plan = png_quantization_plan(&checker_noise(), 4096);
+        assert_eq!(plan.dithering_level, 0.0);
     }
 }

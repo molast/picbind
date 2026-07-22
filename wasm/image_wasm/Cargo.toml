@@ -15,9 +15,7 @@ mozjpeg-rs = "0.8.0"
 lodepng = { version = "3.12.2", default-features = false, features = ["rust_backend"] }
 imagequant = { version = "4.4.1", default-features = false }
 imgico = "0.1.3"
-crc32fast = "1.5"
-miniz_oxide = "0.8"
-zopfli = { version = "0.8", default-features = false, features = ["std", "zlib"] }
+oxipng = { version = "=2.3.0", default-features = false }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

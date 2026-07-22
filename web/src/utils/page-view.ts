@@ -2,7 +2,13 @@
 
 import { getPageViewApiPath } from "@/utils/api-endpoints";
 
-const PAGE_VIEW_ENABLED = process.env.NEXT_PUBLIC_PAGE_VIEW_ENABLED === "true";
+const HAS_EXPLICIT_PAGE_VIEW_API = Boolean(
+  process.env.NEXT_PUBLIC_PAGE_VIEW_API_PATH ||
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+);
+const PAGE_VIEW_ENABLED =
+  process.env.NEXT_PUBLIC_PAGE_VIEW_ENABLED === "true" &&
+  (process.env.NODE_ENV !== "development" || HAS_EXPLICIT_PAGE_VIEW_API);
 const PAGE_VIEW_API_PATH = getPageViewApiPath();
 const PAGE_VIEW_SESSION_KEY = "picbind-page-view-reported";
 

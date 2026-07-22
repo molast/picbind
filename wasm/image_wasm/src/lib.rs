@@ -123,6 +123,18 @@ pub fn compress_image_to_format_with_options(
 }
 
 #[wasm_bindgen]
+pub fn compress_rgba_to_png(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<CompressionResult, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::pipeline::compress_dynamic_image_to_png(&img, quality, source_size_bytes)
+}
+
+#[wasm_bindgen]
 pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
     let mut entries = Vec::with_capacity(items.length() as usize);
 

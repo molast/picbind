@@ -17,7 +17,8 @@ export type HomeCompressLandingCopy = {
   uploadNotice: {
     tooManyFiles: string;
     unsupportedFiles: string;
-    fileTooLarge: string;
+    fileTooLargeTitle: string;
+    fileTooLargeDescription: string;
   };
   downloadZip: string;
   cards: Array<{ title: string; desc: string }>;
@@ -143,7 +144,8 @@ const zh = {
     uploadNotice: {
       tooManyFiles: "最多只能同时处理 20 张图片。",
       unsupportedFiles: "部分文件已跳过，目前仅支持 PNG、JPEG 和 WebP。",
-      fileTooLarge: "部分文件已跳过，单张图片不能超过 5 MB。",
+      fileTooLargeTitle: "文件过大（最大 5 MB）",
+      fileTooLargeDescription: "该图片超过当前压缩大小限制",
     },
     downloadZip: "打包下载 ZIP",
     cards: [

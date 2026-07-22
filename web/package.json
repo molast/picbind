@@ -9,7 +9,7 @@
     "clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\"",
     "dev:fresh": "npm run clean && npm run dev",
     "build:fresh": "npm run clean && npm run build",
-    "wasm:build": "cd ../wasm/image_wasm && wasm-pack build --target web --out-dir ../../web/public/wasm",
+    "wasm:build": "cd ../wasm/image_wasm && wasm-pack build --target web --out-dir ../../web/public/wasm && cd ../perceptual_wasm && RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --target web --out-dir ../../web/public/perceptual-wasm",
     "lint": "next lint"
   },
   "dependencies": {

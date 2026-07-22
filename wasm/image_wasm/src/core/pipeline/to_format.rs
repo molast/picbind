@@ -10,11 +10,14 @@ use super::super::{
         encode_jpeg_from_rgb_image, is_opaque,
     },
     metrics::compare_dynamic_images_for_guardrails,
-    png::{encode_quantized_png_from_image, encode_quantized_png_with_options},
-    png_zopfli::recompress_png_idat,
+    png::{
+        encode_quantized_png_from_image, encode_quantized_png_with_options,
+        encode_sampled_quantized_png_from_image,
+    },
+    png_oxipng::optimize_quantized_png,
     quality::{
         jpeg_to_jpeg_quality_candidates, jpeg_to_jpeg_quality_thresholds, png_quantization_plan,
-        png_to_jpeg_quality_candidates, quality_candidates,
+        png_to_jpeg_quality_candidates,
     },
 };
 
@@ -43,10 +46,10 @@ fn encode_candidate_for_format(
             } else if is_jpeg_to_jpeg {
                 jpeg_to_jpeg_quality_candidates(img, quality, input_len)
             } else {
-                quality_candidates(quality)
-                    .into_iter()
-                    .filter(|q| *q >= 35)
-                    .collect()
+                // Cross-format Butteraugli retries are controlled by the caller.
+                // Encode the requested quality exactly so 80 -> 90 -> 100 is a
+                // real quality increase instead of selecting 50 -> 60 -> 70.
+                vec![quality.clamp(35, 100)]
             };
             if is_jpeg_to_jpeg {
                 let rgb = img.to_rgb8();
@@ -119,9 +122,21 @@ fn encode_candidate_for_format(
                 .ok_or_else(|| JsValue::from_str("JPEG encode failed"))
         }
         "png" => {
+            let pixel_count = u64::from(img.width()) * u64::from(img.height());
             if source_format == image::ImageFormat::Png {
                 let plan = png_quantization_plan(img, input.len());
-                for colors in plan.color_candidates {
+                let minimum_colors = if quality >= 100 {
+                    256
+                } else if quality >= 90 {
+                    128
+                } else {
+                    0
+                };
+                for colors in plan
+                    .color_candidates
+                    .into_iter()
+                    .filter(|colors| *colors >= minimum_colors)
+                {
                     let Ok(bytes) = encode_quantized_png_with_options(
                         img,
                         colors,
@@ -153,7 +168,7 @@ fn encode_candidate_for_format(
                         && comparison.p95_alpha_error <= plan.max_p95_alpha_error
                         && comparison.p99_alpha_error <= plan.max_p99_alpha_error
                     {
-                        let bytes = recompress_png_idat(&bytes).unwrap_or(bytes);
+                        let bytes = optimize_quantized_png(bytes, pixel_count);
                         return Ok(Candidate {
                             bytes,
                             mime: "image/png",
@@ -165,8 +180,13 @@ fn encode_candidate_for_format(
                     "PNG compression could not satisfy perceptual quality guardrails",
                 ))
             } else {
-                encode_quantized_png_from_image(img, quality).map(|bytes| {
-                    let bytes = recompress_png_idat(&bytes).unwrap_or(bytes);
+                let encoded = if pixel_count > 8_000_000 {
+                    encode_sampled_quantized_png_from_image(img, 256, quality)
+                } else {
+                    encode_quantized_png_from_image(img, quality)
+                };
+                encoded.map(|bytes| {
+                    let bytes = optimize_quantized_png(bytes, pixel_count);
                     Candidate {
                         bytes,
                         mime: "image/png",
@@ -183,6 +203,68 @@ fn encode_candidate_for_format(
         )),
         _ => Err(JsValue::from_str("Unsupported target format")),
     }
+}
+
+pub fn compress_dynamic_image_to_png(
+    img: &DynamicImage,
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<CompressionResult, JsValue> {
+    let pixel_count = u64::from(img.width()) * u64::from(img.height());
+    let plan = png_quantization_plan(img, source_size_bytes);
+
+    if pixel_count > 8_000_000 {
+        let bytes = encode_sampled_quantized_png_from_image(img, 256, quality.max(85))?;
+        return Ok(Candidate {
+            bytes: optimize_quantized_png(bytes, pixel_count),
+            mime: "image/png",
+            ext: "png",
+        }
+        .into_result());
+    }
+
+    for colors in plan.color_candidates {
+        let Ok(bytes) =
+            encode_quantized_png_with_options(img, colors, 100, plan.dithering_level, 4)
+        else {
+            continue;
+        };
+        let Ok(decoded_candidate) =
+            image::load_from_memory_with_format(bytes.as_slice(), image::ImageFormat::Png)
+        else {
+            continue;
+        };
+        let Ok(comparison) = compare_dynamic_images_for_guardrails(img, &decoded_candidate) else {
+            continue;
+        };
+        if comparison.ms_ssim >= plan.min_ms_ssim
+            && comparison.perceptual_distance <= plan.max_perceptual_distance
+            && comparison.p99_delta_e <= plan.max_p99_delta_e
+            && comparison.p95_luminance_error <= plan.max_p95_luminance_error
+            && comparison.p95_chroma_error <= plan.max_p95_chroma_error
+            && comparison.p95_alpha_error <= plan.max_p95_alpha_error
+            && comparison.p99_alpha_error <= plan.max_p99_alpha_error
+        {
+            return Ok(Candidate {
+                bytes: optimize_quantized_png(bytes, pixel_count),
+                mime: "image/png",
+                ext: "png",
+            }
+            .into_result());
+        }
+    }
+
+    // Keep cross-format conversion available even when the conservative visual
+    // guardrails reject every smaller palette. The 256-color candidate remains
+    // perceptually bounded by imagequant's quality target.
+    let bytes =
+        encode_quantized_png_with_options(img, 256, quality.max(85), plan.dithering_level, 4)?;
+    Ok(Candidate {
+        bytes: optimize_quantized_png(bytes, pixel_count),
+        mime: "image/png",
+        ext: "png",
+    }
+    .into_result())
 }
 
 pub fn compress_image_to_target_format(
@@ -204,4 +286,27 @@ pub fn compress_image_to_target_format(
         allow_alpha_loss,
     )?;
     Ok(candidate.into_result())
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{DynamicImage, Rgba, RgbaImage};
+
+    use super::compress_dynamic_image_to_png;
+
+    #[test]
+    fn rgba_cross_format_png_uses_an_indexed_palette() {
+        let mut pixels = RgbaImage::new(128, 64);
+        for (x, y, pixel) in pixels.enumerate_pixels_mut() {
+            *pixel = Rgba([(x * 2) as u8, (y * 4) as u8, ((x + y) % 256) as u8, 255]);
+        }
+
+        let result =
+            compress_dynamic_image_to_png(&DynamicImage::ImageRgba8(pixels), 80, 32 * 1024)
+                .unwrap();
+
+        assert_eq!(&result.bytes[1..4], b"PNG");
+        assert_eq!(result.bytes[24], 8);
+        assert_eq!(result.bytes[25], 3);
+    }
 }
