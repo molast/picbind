@@ -55,6 +55,9 @@ export type ImageAnalysisMetrics = {
   edgeStrength: number;
   brightnessVariance: number;
   colorComplexity: number;
+  colorEntropy: number;
+  noiseLevel: number;
+  gradientCoverage: number;
   detailCoverage: number;
   flatCoverage: number;
   complexityScore: number;

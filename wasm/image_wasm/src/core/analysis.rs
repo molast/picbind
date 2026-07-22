@@ -24,6 +24,9 @@ pub struct ImageAnalysis {
     pub edge_strength: f64,
     pub brightness_variance: f64,
     pub color_complexity: f64,
+    pub color_entropy: f64,
+    pub noise_level: f64,
+    pub gradient_coverage: f64,
     pub detail_coverage: f64,
     pub flat_coverage: f64,
     pub complexity_score: f64,
@@ -52,6 +55,9 @@ impl ImageAnalysis {
         set_number(&obj, "edgeStrength", self.edge_strength)?;
         set_number(&obj, "brightnessVariance", self.brightness_variance)?;
         set_number(&obj, "colorComplexity", self.color_complexity)?;
+        set_number(&obj, "colorEntropy", self.color_entropy)?;
+        set_number(&obj, "noiseLevel", self.noise_level)?;
+        set_number(&obj, "gradientCoverage", self.gradient_coverage)?;
         set_number(&obj, "detailCoverage", self.detail_coverage)?;
         set_number(&obj, "flatCoverage", self.flat_coverage)?;
         set_number(&obj, "complexityScore", self.complexity_score)?;
@@ -85,18 +91,23 @@ pub fn analyze_dynamic_image(
 
 pub fn analyze_image_features(feature: ImageFeature) -> ImageAnalysis {
     let alpha_ratio = feature.alpha.non_opaque_pixel_ratio;
-    let complexity_score = (0.32 * feature.edge_strength
-        + 0.22 * feature.brightness_variance
-        + 0.16 * feature.color_complexity
-        + 0.22 * feature.detail_coverage
-        - 0.14 * feature.flat_coverage)
+    let complexity_score = (0.24 * feature.edge_strength
+        + 0.14 * feature.brightness_variance
+        + 0.12 * feature.color_complexity
+        + 0.16 * feature.color_entropy
+        + 0.15 * feature.detail_coverage
+        + 0.13 * feature.noise_level
+        + 0.06 * feature.gradient_coverage
+        - 0.12 * feature.flat_coverage)
         .clamp(0.0, 1.0);
     let size_pressure = (feature.source_size_mb / 4.0).clamp(0.0, 1.0);
-    let compressibility_score = (0.38 * feature.flat_coverage
-        + 0.22 * (1.0 - complexity_score)
-        + 0.18 * (1.0 - feature.detail_coverage)
-        + 0.12 * (1.0 - alpha_ratio)
-        + 0.10 * size_pressure)
+    let compressibility_score = (0.30 * feature.flat_coverage
+        + 0.10 * feature.gradient_coverage
+        + 0.20 * (1.0 - complexity_score)
+        + 0.14 * (1.0 - feature.detail_coverage)
+        + 0.08 * (1.0 - feature.color_entropy)
+        + 0.10 * (1.0 - alpha_ratio)
+        + 0.08 * size_pressure)
         .clamp(0.0, 1.0);
 
     ImageAnalysis {
@@ -119,6 +130,9 @@ pub fn analyze_image_features(feature: ImageFeature) -> ImageAnalysis {
         edge_strength: feature.edge_strength,
         brightness_variance: feature.brightness_variance,
         color_complexity: feature.color_complexity,
+        color_entropy: feature.color_entropy,
+        noise_level: feature.noise_level,
+        gradient_coverage: feature.gradient_coverage,
         detail_coverage: feature.detail_coverage,
         flat_coverage: feature.flat_coverage,
         complexity_score,
