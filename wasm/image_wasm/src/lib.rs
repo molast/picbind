@@ -227,6 +227,24 @@ pub fn analyze_image_metrics(input: &[u8]) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn predict_compression(input: &[u8]) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(input)?;
+    core::predictor::predict_image(input)?.to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn predict_compression_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source_size_bytes: usize,
+    source_format: &str,
+) -> Result<JsValue, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::predictor::predict_dynamic_image(&img, source_size_bytes, source_format).to_js_value()
+}
+
+#[wasm_bindgen]
 pub fn create_avif_encoding_plan(
     input: &[u8],
     quality: u8,

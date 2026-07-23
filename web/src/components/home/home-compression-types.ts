@@ -6,6 +6,7 @@ export type OutputVariant = {
   id: string;
   format: OutputFormat;
   allowAlphaLoss?: boolean;
+  automatic?: boolean;
   outputUrl?: string;
   outputName?: string;
   outputExt?: string;

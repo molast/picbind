@@ -8,6 +8,7 @@ import {
   compressionGainForFormat,
 } from "@/utils/compression-gain";
 import { createButteraugliEvaluator } from "@/utils/butteraugli";
+import { predictRecommendedFormat } from "@/utils/compression-predictor";
 import {
   analyzeCompressionFeatures,
   createCompressionPlan,
@@ -761,4 +762,12 @@ export async function compressImageWithAlgorithms(
     evaluator,
     amplifyMaxError(BUTTERAUGLI_TARGET_SCORE, plan.compressionGain),
   );
+}
+
+export async function compressImageAutomatically(
+  file: File,
+  quality = 80,
+): Promise<CompressResult> {
+  const recommendedFormat = await predictRecommendedFormat(file);
+  return compressImageWithAlgorithms(file, quality, recommendedFormat, false);
 }

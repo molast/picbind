@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
-import { compressImageWithAlgorithms } from "@/utils/compress-algorithms";
+import {
+  compressImageAutomatically,
+  compressImageWithAlgorithms,
+} from "@/utils/compress-algorithms";
 import type { OutputFormat } from "@/utils/compress-shared";
 
 type WorkerRequest = {
@@ -9,15 +12,23 @@ type WorkerRequest = {
   quality: number;
   targetFormat: OutputFormat;
   allowAlphaLoss?: boolean;
+  automatic?: boolean;
 };
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 
 workerScope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  const { id, file, quality, targetFormat, allowAlphaLoss } = event.data;
+  const { id, file, quality, targetFormat, allowAlphaLoss, automatic } = event.data;
 
   try {
-    const output = await compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
+    const output = automatic
+      ? await compressImageAutomatically(file, quality)
+      : await compressImageWithAlgorithms(
+          file,
+          quality,
+          targetFormat,
+          allowAlphaLoss,
+        );
     const bytes = new Uint8Array(await output.blob.arrayBuffer());
     const mime = output.mime;
     const ext = output.ext;

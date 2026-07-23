@@ -56,6 +56,10 @@ export function generate_share_preview_thumbnail_from_rgba(width: number, height
 
 export function generate_share_thumbnail(input: Uint8Array): Uint8Array;
 
+export function predict_compression(input: Uint8Array): any;
+
+export function predict_compression_rgba(rgba: Uint8Array, width: number, height: number, source_size_bytes: number, source_format: string): any;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -86,6 +90,8 @@ export interface InitOutput {
     readonly generate_share_preview_thumbnail: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_share_preview_thumbnail_from_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
+    readonly predict_compression: (a: number, b: number) => [number, number, number];
+    readonly predict_compression_rgba: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

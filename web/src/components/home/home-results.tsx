@@ -456,7 +456,9 @@ export default function HomeResults({
                                     <div
                                       className={`rounded-[14px] px-2.5 py-1 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}
                                     >
-                                      {variant.format}
+                                      {variant.automatic
+                                        ? "auto"
+                                        : variant.format}
                                     </div>
                                     <div className="max-w-[96px] text-[10px] leading-3.5">
                                       {detail}
@@ -471,7 +473,7 @@ export default function HomeResults({
                       <div
                         className={`mt-1.5 overflow-hidden rounded-full ${
                           hasInFlightVariant
-                            ? "h-[4px] bg-[#dce8fb]"
+                            ? "h-[2px] bg-[#dce8fb]"
                             : "h-px bg-[#d6e3f9]"
                         }`}
                       >
@@ -479,8 +481,8 @@ export default function HomeResults({
                           className={`transition-all duration-300 ${
                             hasInFlightVariant
                               ? activeProgress <= 0
-                                ? "h-[4px] bg-[#4b86e8] transition-none"
-                                : "h-[4px] bg-[#4b86e8]"
+                                ? "h-[2px] bg-[#4b86e8] transition-none"
+                                : "h-[2px] bg-[#4b86e8]"
                               : "h-px bg-[#8aa4cf]"
                           }`}
                           style={{

@@ -21,6 +21,12 @@
                     │
                     ▼
           ┌───────────────────────────┐
+          │ Compression Predictor      │
+          │（压缩预测器）               │
+          └─────────┬─────────────────┘
+                    │
+                    ▼
+          ┌───────────────────────────┐
           │ Compression Planner        │
           │（压缩策略生成器）           │
           └─────────┬─────────────────┘
@@ -195,7 +201,17 @@ ImageAnalysis {
 
 ---
 
-# 三、Compression Planner（压缩策略生成器）
+# 三、Compression Predictor（压缩预测器）
+
+Predictor 位于 Analyzer 与 Planner 之间，负责预测 JPEG、WebP、AVIF、PNG 的预计大小、预计视觉质量和可用性，并判断是否值得切换编码器。
+
+当用户没有主动选择输出格式时，Predictor 的推荐格式会成为 Planner 的目标格式；用户主动选择格式时跳过 Predictor，直接按选中格式生成 Plan。
+
+当前实现是基于连续图片特征的可解释启发式模型。存在真实 Alpha 时排除 JPEG；只有预计至少节省约 10% 且预计质量下降不超过 2.5 分时才切换编码器。Predictor 失败时回退源格式。
+
+---
+
+# 四、Compression Planner（压缩策略生成器）
 
 这是整个压缩引擎的大脑。
 
@@ -277,7 +293,7 @@ Planner 不关心编码细节。
 
 ---
 
-# 四、Encoder Selector（编码器选择器）
+# 五、Encoder Selector（编码器选择器）
 
 根据 Compression Plan 自动选择编码器。
 
@@ -396,7 +412,7 @@ PNG 同时缩放 Planner 给出的调色板预算。Gain 不修改抖动算法�
 
 ---
 
-# 五、Image Encoder（编码执行器）
+# 六、Image Encoder（编码执行器）
 
 真正完成图片编码。
 
@@ -431,7 +447,7 @@ Encoder 只负责：
 
 ---
 
-# 六、Perceptual Evaluator（可选）
+# 七、Perceptual Evaluator（可选）
 
 用于高质量压缩模式。
 
@@ -472,6 +488,8 @@ Feature
       ↓
 Analyzer
       ↓
+Predictor
+      ↓
 Planner
       ↓
 Encoder
@@ -491,6 +509,7 @@ Evaluator
 |------|------|
 | Feature Extractor | 提取图片原始特征数据 |
 | Image Feature Analyzer | 分析图片内容，生成特征评分 |
+| Compression Predictor | 预测各格式大小和质量，决定推荐格式及是否切换编码器 |
 | Compression Planner | 根据分析结果生成压缩方案 |
 | Encoder Selector | 选择并配置编码器 |
 | Image Encoder | 执行图片压缩 |
@@ -502,7 +521,7 @@ Evaluator
 
 PicBind 不采用固定压缩参数，而是遵循：
 
-> **Analyze → Plan → Encode → Evaluate**
+> **Analyze → Predict → Plan → Encode → Evaluate**
 
 每张图片都会先经过特征分析，再生成最适合当前图片的压缩策略，最后由对应编码器执行压缩。
 

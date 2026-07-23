@@ -8,5 +8,6 @@ pub mod metrics;
 pub mod pipeline;
 pub mod png;
 pub mod png_oxipng;
+pub mod predictor;
 pub mod quality;
 pub mod zip;

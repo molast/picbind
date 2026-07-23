@@ -51,11 +51,18 @@ npm run build
 本地开发不会请求已部署的 `api.picbind.com`，房间 API、Durable Object、
 KV 和 WebSocket 信令都由本机运行时模拟，房间文件默认通过 P2P 传输。
 
-首次使用先安装本地 API 依赖，之后从仓库根目录一键启动：
+启动脚本会检查本地 API 依赖，缺少依赖命令时会自动执行
+`pnpm install --frozen-lockfile`。从仓库根目录运行：
 
 ```bash
-cd cloudflare-worker && pnpm install
-cd .. && ./dev-local.sh
+# macOS / Linux / Git Bash / WSL
+./dev-local.sh
+
+# Windows CMD
+dev-local.cmd
+
+# Windows PowerShell
+.\dev-local.cmd
 ```
 
 前端地址为 `http://localhost:3000`，本地 API 地址为

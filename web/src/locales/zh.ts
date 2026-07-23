@@ -15,8 +15,6 @@ export type HomeCompressLandingCopy = {
   transparencyBlocked: string;
   unsupportedFormat: string;
   uploadNotice: {
-    tooManyFiles: string;
-    unsupportedFiles: string;
     fileTooLargeTitle: string;
     fileTooLargeDescription: string;
   };
@@ -142,8 +140,6 @@ const zh = {
     transparencyBlocked: "原图包含透明图层，不能直接转换为 JPEG",
     unsupportedFormat: "当前格式暂不支持",
     uploadNotice: {
-      tooManyFiles: "最多只能同时处理 20 张图片。",
-      unsupportedFiles: "部分文件已跳过，目前仅支持 PNG、JPEG 和 WebP。",
       fileTooLargeTitle: "文件过大（最大 5 MB）",
       fileTooLargeDescription: "该图片超过当前压缩大小限制",
     },
