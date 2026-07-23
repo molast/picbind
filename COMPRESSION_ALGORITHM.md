@@ -7,7 +7,7 @@
 当前压缩链路遵循以下原则：
 
 1. 压缩在浏览器本地执行，原图不会因为压缩而上传到服务端。
-2. PCE 先分析图像内容，再生成格式相关的压缩计划，而不是对所有图片使用同一组质量参数。
+2. PCE 先分析图像内容并预测各格式结果，再生成格式相关的压缩计划，而不是对所有图片使用同一组质量参数。
 3. 同格式压缩必须满足“结果更小”；否则返回原图，避免出现压缩后体积反而增大。
 4. 通过感知指标保护结构、边缘、颜色、亮度和 Alpha，不只比较文件大小。
 5. `K` 只调整压缩幅度，不改变特征权重、图片分类、编码器和性能参数。
@@ -31,6 +31,8 @@
 独立 Web Worker
   v
 PCE 前端入口
+  |-- 用户指定格式 -> 直接使用指定目标格式
+  |-- 用户未指定格式 -> Compression Predictor 自动推荐目标格式
   |-- 提取源格式、目标格式、源文件大小和 Alpha 策略
   |-- 判断同格式/跨格式
   |-- 读取目标格式对应的 Compression Gain（K）
@@ -85,7 +87,7 @@ pixels.iter().skip(3).step_by(4).any(|alpha| *alpha < 255)
 
 找到第一个小于 `255` 的 Alpha 值就立即结束，不会为了判断透明性继续扫描全部像素。只有确实存在透明像素时，才继续统计完整的 Alpha 分布。
 
-当前 Feature Extractor 尚未解析 ICC、EXIF 或原始 JPEG 量化表，这些属于后续扩展能力，不参与当前压缩计划。
+当前 Feature Extractor 尚未解析 ICC、EXIF 或原始 JPEG 量化表，这些属于后续扩展能力，不参与当前压缩计划。JPEG 同格式编码路径会单独读取 SOF 标记中的色度采样信息，但不会将其作为通用图片特征。
 
 ### 3.2 Image Analyzer
 
@@ -112,9 +114,53 @@ compressibility_score =
   + 0.08 * size_pressure
 ```
 
-两项结果都限制在 `0..1`。Analyzer 不使用“照片、UI、漫画”等主观类型标签，而是让 Planner 直接基于连续特征决策。
+两项结果都限制在 `0..1`。Analyzer 不输出“照片、UI、漫画”等固定类型，而是让 Predictor 和 Planner 直接基于连续特征决策。
 
-### 3.3 Compression Planner
+### 3.3 Compression Predictor
+
+Predictor 位于 Analyzer 与 Planner 之间：
+
+```text
+Image Feature Analyzer
+          |
+          v
+Compression Predictor
+          |
+          v
+Compression Planner
+```
+
+它使用图片像素量、源文件大小、复杂度、细节、噪声、颜色熵、渐变、平坦区域和真实 Alpha，分别预测 JPEG、WebP、AVIF、PNG 的：
+
+- 预计压缩后字节数。
+- 预计视觉质量（`0..100`）。
+- 当前格式是否可用。
+- 综合大小和质量后的推荐格式。
+- 是否值得从源编码器切换到推荐编码器。
+
+当前 Predictor 是可解释的确定性启发式模型，不是经过训练的机器学习模型。预计大小以按格式建立的 bytes-per-pixel 模型计算；预计质量按格式对边缘、渐变、细节、平坦区域和颜色熵的敏感程度计算。
+
+格式决策还包含以下规则：
+
+- 存在真实 Alpha 时，自动决策中的 JPEG 标记为不可用，不会静默压平透明区域。
+- 照片型连续特征会给 AVIF 更高的编码效率权重。
+- 平坦、低熵、低噪声图片会提高 PNG 的权重。
+- 含 Alpha 的图片会提高 WebP 的权重；边缘密集的透明图片会对 AVIF 更保守。
+- 只有推荐格式相对源格式的预计结果至少节省约 `10%`，并且预计视觉质量下降不超过 `2.5` 分时，才判定“值得切换编码器”。否则继续使用源格式。
+
+首页格式语义：
+
+- 用户没有主动选择任何格式：创建一个 `AUTO` 任务，Worker 先运行 Predictor，再把推荐格式交给 Planner。
+- 用户主动选择一个格式：跳过 Predictor，强制使用该格式。
+- 用户主动选择多个格式：为每个选中格式分别创建任务，每个任务都跳过 Predictor。
+- Predictor 解码或调用失败：回退到源格式，不能阻断压缩。
+- 自动任务在调度器中保守占用 AVIF 单并发槽位，避免多个任务同时被推荐为 AVIF 后造成内存峰值。
+
+普通 JPEG/PNG/WebP 直接通过 WASM 解码和预测。由于 Rust `image` 解码路径不负责 AVIF，AVIF 会先由浏览器解码成 RGBA，再调用 `predict_compression_rgba`，两条路径最后使用同一个 Predictor。
+
+预测值只用于编码决策，不会作为最终压缩结果展示或替代实际文件大小；最终结果仍由编码器和质量护栏决定。
+
+### 3.4 Compression Planner
 
 Planner 根据目标格式和分析结果生成：
 
@@ -125,7 +171,7 @@ Planner 根据目标格式和分析结果生成：
 
 同一张图片转成不同格式会获得不同计划；同一格式的不同图片也可能获得不同候选参数。
 
-### 3.4 Compression Gain
+### 3.5 Compression Gain
 
 Gain 位于 Planner 和 Encoder 之间。四个目标格式分别读取：
 
@@ -178,19 +224,21 @@ JPEG 不支持 Alpha：
 ### 5.2 JPEG 转 JPEG
 
 1. 提取细节、边缘、渐变、平坦区域、噪声、文件大小和像素量。
-2. 以请求质量为基线，生成一组自适应质量候选。
+2. 以请求质量为基线，生成一组自适应质量候选。除常规候选外，还包含最低不低于 `45` 的深度压缩候选，用于已经压缩过、体积很小但仍存在安全压缩空间的 JPEG；该候选仍必须通过同一套感知护栏。
 3. 高细节、高边缘、高渐变图片提高质量；平坦、易压缩、大文件或高噪声图片允许降低质量。
 4. 候选按“更可能得到小文件”的方向开始尝试。
-5. MozJPEG 编码后，候选必须小于原文件。
-6. 解码候选，并执行 PCE 感知质量护栏。
-7. 返回第一个满足护栏的较小候选；没有候选满足时进入外层回退/原图策略。
+5. 从原 JPEG 的 SOF 标记读取色度采样，并在重新编码时保留 4:4:4、4:2:2、4:2:0 或 4:4:0，避免 UI、动漫和高色彩边缘图片被无条件降为 4:2:0。
+6. MozJPEG 编码后，候选必须小于原文件。
+7. 解码候选，并执行 PCE 感知质量护栏。默认 JPEG 同格式护栏以 `MS-SSIM >= 0.990` 为结构质量底线，并按内容类型限制模糊、综合色差、亮度和色度误差。
+8. 返回第一个满足护栏的较小候选；没有候选满足时进入外层回退/原图策略。
 
 MozJPEG 固定启用：
 
 - `ProgressiveBalanced` 渐进式预设。
 - Progressive JPEG。
 - Huffman 表优化。
-- 质量 `>= 96` 使用 4:4:4，`90..95` 使用 4:2:2，更低质量使用 4:2:0。
+- JPEG 同格式压缩保留源文件色度采样。
+- 其他格式转 JPEG 时，质量 `>= 96` 使用 4:4:4，`90..95` 使用 4:2:2，更低质量使用 4:2:0。
 
 ### 5.3 其他格式转 JPEG
 
@@ -287,7 +335,7 @@ PCE 会把候选图解码后与原图对比。为控制大图成本，护栏比�
 
 不同格式不会使用完全相同的阈值：
 
-- JPEG 重点保护 MS-SSIM、模糊、颜色、亮度和色度。
+- JPEG 重点保护 MS-SSIM、模糊、颜色、亮度和色度；同格式默认以 `0.990` 作为 MS-SSIM 最低线，其他误差阈值按内容类型变化。
 - PNG 额外严格保护 Alpha，并按图片内容切换阈值和抖动。
 - WebP 使用 SSIM、MS-SSIM、模糊损失和综合质量分。
 - AVIF 同时校验结构、模糊、颜色、亮度、色度和 Alpha。
@@ -377,7 +425,7 @@ AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回
 后续增加这些能力时，应继续沿用：
 
 ```text
-Feature Extractor -> Analyzer -> Planner -> Gain -> Encoder -> Guardrail
+Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guardrail
 ```
 
 编码器只执行 Plan，不应在编码器内部重新发明图片分类规则；Gain 只调整幅度，不应改变编码器 effort、并发或策略分支。
@@ -393,6 +441,8 @@ Feature Extractor -> Analyzer -> Planner -> Gain -> Encoder -> Guardrail
 | 页面队列、并发和 5 MiB 限制 | `web/src/components/home/use-home-compression.ts` |
 | WASM Feature Extractor | `wasm/image_wasm/src/core/feature.rs` |
 | WASM Analyzer | `wasm/image_wasm/src/core/analysis.rs` |
+| WASM Predictor | `wasm/image_wasm/src/core/predictor.rs` |
+| Predictor 浏览器适配和 AVIF/RGBA 路径 | `web/src/utils/compression-predictor.ts` |
 | 格式 Planner 和阈值 | `wasm/image_wasm/src/core/quality.rs` |
 | Gain 公式 | `wasm/image_wasm/src/core/gain.rs` |
 | JPEG / MozJPEG | `wasm/image_wasm/src/core/jpeg.rs` |
@@ -400,4 +450,3 @@ Feature Extractor -> Analyzer -> Planner -> Gain -> Encoder -> Guardrail
 | PNG / Oxipng | `wasm/image_wasm/src/core/png_oxipng.rs` |
 | 感知指标 | `wasm/image_wasm/src/core/metrics.rs`、`wasm/image_wasm/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `wasm/image_wasm/src/core/pipeline/to_format.rs` |
-

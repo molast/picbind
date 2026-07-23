@@ -1,6 +1,9 @@
 "use client";
 
-import { compressImageWithAlgorithms } from "@/utils/compress-algorithms";
+import {
+  compressImageAutomatically,
+  compressImageWithAlgorithms,
+} from "@/utils/compress-algorithms";
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
 import { initWasm } from "@/utils/wasm-runtime";
 
@@ -69,8 +72,11 @@ export async function compressWithWasm(
   quality = 80,
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
+  automatic = false,
 ) {
-  return compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
+  return automatic
+    ? compressImageAutomatically(file, quality)
+    : compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
 }
 
 export async function compareImageQuality(

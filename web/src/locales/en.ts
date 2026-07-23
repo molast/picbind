@@ -26,8 +26,6 @@ const en: LocaleType = {
     transparencyBlocked: "The source image contains transparency, so JPEG output is blocked.",
     unsupportedFormat: "This format is not supported yet",
     uploadNotice: {
-      tooManyFiles: "You can process up to 20 images at a time.",
-      unsupportedFiles: "Some files were skipped. Only PNG, JPEG, and WebP are supported right now.",
       fileTooLargeTitle: "File is too large (max 5 MB)",
       fileTooLargeDescription: "This image exceeds the current compression limit.",
     },

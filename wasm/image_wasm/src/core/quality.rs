@@ -420,8 +420,9 @@ pub fn jpeg_to_jpeg_quality_candidates(
         adaptive.saturating_sub(13),
         adaptive.saturating_sub(19),
         adaptive.saturating_sub(25),
+        adaptive.saturating_sub(35),
     ];
-    candidates.retain(|quality| *quality >= 52);
+    candidates.retain(|quality| *quality >= 45);
     candidates.sort_unstable();
     candidates.dedup();
     candidates.reverse();
@@ -447,30 +448,30 @@ pub fn jpeg_to_jpeg_quality_thresholds(
     let analysis = analyze_dynamic_image(img, source_size_bytes, "jpeg");
     if analysis.flat_coverage >= 0.44 || analysis.compressibility_score >= 0.62 {
         JpegPerceptualThresholds {
-            min_ms_ssim: 0.975,
-            max_blur_loss_percent: 5.0,
-            max_perceptual_distance: 2.40,
-            max_p99_delta_e: 4.80,
-            max_p95_luminance_error: 1.0,
-            max_p95_chroma_error: 4.30,
+            min_ms_ssim: 0.990,
+            max_blur_loss_percent: 6.5,
+            max_perceptual_distance: 3.20,
+            max_p99_delta_e: 6.50,
+            max_p95_luminance_error: 3.50,
+            max_p95_chroma_error: 5.0,
         }
     } else if analysis.detail_coverage >= 0.30 || analysis.edge_strength >= 0.38 {
         JpegPerceptualThresholds {
-            min_ms_ssim: 0.982,
-            max_blur_loss_percent: 6.0,
-            max_perceptual_distance: 3.20,
-            max_p99_delta_e: 6.0,
-            max_p95_luminance_error: 1.25,
-            max_p95_chroma_error: 5.50,
+            min_ms_ssim: 0.990,
+            max_blur_loss_percent: 7.0,
+            max_perceptual_distance: 3.50,
+            max_p99_delta_e: 7.50,
+            max_p95_luminance_error: 4.20,
+            max_p95_chroma_error: 6.0,
         }
     } else {
         JpegPerceptualThresholds {
-            min_ms_ssim: 0.978,
-            max_blur_loss_percent: 5.5,
-            max_perceptual_distance: 2.80,
-            max_p99_delta_e: 5.50,
-            max_p95_luminance_error: 1.10,
-            max_p95_chroma_error: 5.0,
+            min_ms_ssim: 0.990,
+            max_blur_loss_percent: 6.5,
+            max_perceptual_distance: 3.30,
+            max_p99_delta_e: 7.0,
+            max_p95_luminance_error: 3.60,
+            max_p95_chroma_error: 5.50,
         }
     }
 }

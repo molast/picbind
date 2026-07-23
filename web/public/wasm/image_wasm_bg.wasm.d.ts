@@ -27,6 +27,8 @@ export const generate_share_placeholder_from_rgba: (a: number, b: number, c: num
 export const generate_share_preview_thumbnail: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const generate_share_preview_thumbnail_from_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
+export const predict_compression: (a: number, b: number) => [number, number, number];
+export const predict_compression_rgba: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

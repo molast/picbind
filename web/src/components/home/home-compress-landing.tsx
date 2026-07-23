@@ -61,7 +61,6 @@ export default function HomeCompressLanding({
         inputRef={home.inputRef}
         isLangMenuOpen={home.isLangMenuOpen}
         isDragging={home.isDragging}
-        uploadNotice={home.uploadNotice}
         showFormatOptions={home.showFormatOptions}
         selectedFormats={home.selectedFormats}
         formatOptions={home.formatOptions}
@@ -81,7 +80,7 @@ export default function HomeCompressLanding({
         ref={home.inputRef}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/webp,image/avif,.avif"
+        accept=".png,.jpg,.jpeg,.webp,.avif,image/png,image/jpeg,image/webp,image/avif"
         className="hidden"
         onChange={(event) => {
           home.enqueueFiles(event.target.files ?? []);

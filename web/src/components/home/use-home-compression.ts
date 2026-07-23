@@ -64,6 +64,7 @@ const ALLOWED_TYPES = new Set([
   "image/webp",
   "image/avif",
 ]);
+const ALLOWED_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "avif"]);
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
 const COMPARE_IMAGE_SOURCE_NAME = "compare-original.png";
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -95,12 +96,16 @@ function normalizeOutputFormat(ext?: string): OutputFormat {
   return "jpeg";
 }
 
-function createVariant(format: OutputFormat): OutputVariant {
+function createVariant(
+  format: OutputFormat,
+  automatic = false,
+): OutputVariant {
   return {
     id: `${format}-${createUuid()}`,
     format,
     progress: 0,
     status: "queued",
+    automatic,
   };
 }
 
@@ -115,20 +120,28 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   const wantedFormats = selectedFormats.length
     ? Array.from(new Set(selectedFormats))
     : [item.sourceFormat];
+  const retainedVariants = item.variants.filter(
+    (variant) => !variant.automatic || variant.status !== "queued",
+  );
   const existingFormats = new Set(
-    item.variants.map((variant) => variant.format),
+    retainedVariants
+      .filter((variant) => !variant.automatic)
+      .map((variant) => variant.format),
   );
   const missingVariants = wantedFormats
     .filter((format) => !existingFormats.has(format))
     .map((format) => createVariant(format));
 
-  if (!missingVariants.length) {
+  if (
+    !missingVariants.length &&
+    retainedVariants.length === item.variants.length
+  ) {
     return item;
   }
 
   return {
     ...item,
-    variants: [...item.variants, ...missingVariants],
+    variants: [...retainedVariants, ...missingVariants],
   };
 }
 
@@ -221,7 +234,7 @@ function createItem(
         },
         selectedFormats,
       ).variants
-    : [createVariant(normalizeSourceFormat(file))];
+    : [createVariant(normalizeSourceFormat(file), true)];
 
   return {
     id: fileId,
@@ -335,7 +348,6 @@ export function useHomeCompression({
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
     [],
   );
-  const [uploadNotice, setUploadNotice] = React.useState<string | null>(null);
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
   const [metricsVariantId, setMetricsVariantId] = React.useState<string | null>(
     null,
@@ -747,13 +759,14 @@ export function useHomeCompression({
   const enqueueFiles = React.useCallback(
     async (fileList: FileList | File[]) => {
       const inputFiles = Array.from(fileList);
-      let hasUnsupported = false;
       const tooLargeFiles: File[] = [];
 
       const nextFiles = inputFiles.filter((file) => {
         const extension = file.name.split(".").pop()?.toLowerCase();
-        if (!ALLOWED_TYPES.has(file.type) && extension !== "avif") {
-          hasUnsupported = true;
+        if (
+          !ALLOWED_TYPES.has(file.type) &&
+          (!extension || !ALLOWED_EXTENSIONS.has(extension))
+        ) {
           return false;
         }
         if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -763,12 +776,7 @@ export function useHomeCompression({
         return true;
       });
 
-      const notices: string[] = [];
-      if (hasUnsupported) {
-        notices.push(copy.uploadNotice.unsupportedFiles);
-      }
       if (!nextFiles.length && !tooLargeFiles.length) {
-        setUploadNotice(notices[0] ?? null);
         return;
       }
 
@@ -776,12 +784,6 @@ export function useHomeCompression({
         (item) => !item.rejection,
       ).length;
       const remain = MAX_FILES - processableItemCount;
-      if (remain <= 0 && nextFiles.length) {
-        notices.push(copy.uploadNotice.tooManyFiles);
-      }
-      if (remain > 0 && nextFiles.length > remain) {
-        notices.push(copy.uploadNotice.tooManyFiles);
-      }
 
       try {
         const acceptedFiles = nextFiles.slice(0, Math.max(0, remain));
@@ -789,7 +791,6 @@ export function useHomeCompression({
           createItem(file, selectedFormats),
         );
         const rejectedItems = tooLargeFiles.map(createRejectedItem);
-        setUploadNotice(notices.length ? notices.join(" ") : null);
         const optimisticItems = [
           ...itemsRef.current,
           ...nextItems,
@@ -827,11 +828,10 @@ export function useHomeCompression({
           });
         });
       } catch (error) {
-        console.error("Failed to enqueue images:", error);
-        setUploadNotice(copy.uploadNotice.unsupportedFiles);
+        if (IS_DEV) console.error("Failed to enqueue images:", error);
       }
     },
-    [copy.uploadNotice, selectedFormats],
+    [selectedFormats],
   );
 
   const loadCompressionHandoff = React.useCallback(() => {
@@ -961,6 +961,7 @@ export function useHomeCompression({
             80,
             currentVariant.format,
             Boolean(currentVariant.allowAlphaLoss),
+            Boolean(currentVariant.automatic),
           );
           if (isUnmountedRef.current) {
             return;
@@ -1087,7 +1088,7 @@ export function useHomeCompression({
                 return false;
               }
               if (
-                variant.format === "avif" &&
+                (variant.format === "avif" || variant.automatic) &&
                 runningAvif.size >= MAX_CONCURRENT_AVIF_COMPRESSIONS
               ) {
                 return false;
@@ -1108,7 +1109,10 @@ export function useHomeCompression({
           const key = `${nextTask.item.id}:${nextTask.variant.id}`;
           claimed.add(key);
           runningFileIds.add(nextTask.item.fileId);
-          if (nextTask.variant.format === "avif") {
+          if (
+            nextTask.variant.format === "avif" ||
+            nextTask.variant.automatic
+          ) {
             runningAvif.add(key);
           }
           if (nextTask.variant.format === "webp") {
@@ -1331,7 +1335,6 @@ export function useHomeCompression({
     setIsLangMenuOpen,
     isDragging,
     setIsDragging,
-    uploadNotice,
     showFormatOptions,
     setShowFormatOptions,
     selectedFormats,

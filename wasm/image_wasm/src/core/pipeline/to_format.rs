@@ -8,7 +8,7 @@ use super::super::{
     gain::{DEFAULT_COMPRESSION_GAIN, amplify_quality_loss},
     jpeg::{
         encode_jpeg_from_image, encode_jpeg_from_image_with_white_background,
-        encode_jpeg_from_rgb_image, is_opaque,
+        encode_jpeg_from_rgb_image_with_subsampling, is_opaque, jpeg_subsampling,
     },
     metrics::compare_dynamic_images_for_guardrails,
     png::{
@@ -59,13 +59,18 @@ fn encode_candidate_for_format(
             };
             if is_jpeg_to_jpeg {
                 let rgb = img.to_rgb8();
+                let source_subsampling = jpeg_subsampling(input);
                 let thresholds =
                     jpeg_to_jpeg_quality_thresholds_with_gain(img, input_len, compression_gain);
 
                 // Search from the smallest likely acceptable candidate upward. In the
                 // common case this performs one encode and one perceptual comparison.
                 for candidate_quality in candidate_qualities.iter().rev().copied() {
-                    let Ok(bytes) = encode_jpeg_from_rgb_image(&rgb, candidate_quality) else {
+                    let Ok(bytes) = encode_jpeg_from_rgb_image_with_subsampling(
+                        &rgb,
+                        candidate_quality,
+                        source_subsampling,
+                    ) else {
                         continue;
                     };
                     if bytes.len() >= input_len {
