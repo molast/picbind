@@ -295,7 +295,7 @@ const zh = {
         },
         {
           title: "支持",
-          links: [{ label: "联系支持", href: "mailto:loomchen@gmail.com" }],
+          links: [{ label: "联系支持", href: "mailto:picbind@proton.me" }],
         },
       ],
       contactSupport: "联系支持",

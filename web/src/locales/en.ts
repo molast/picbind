@@ -179,7 +179,7 @@ const en: LocaleType = {
         },
         {
           title: "Support",
-          links: [{ label: "Contact support", href: "mailto:loomchen@gmail.com" }],
+          links: [{ label: "Contact support", href: "mailto:picbind@proton.me" }],
         },
       ],
       contactSupport: "Contact support",
