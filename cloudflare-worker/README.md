@@ -53,11 +53,19 @@ Local development does not call the deployed Worker, Cloudflare TURN, or R2.
 Wrangler runs the Worker code, Durable Objects, KV, and WebSocket signaling on
 the local machine. Local state is persisted in `.wrangler/state`.
 
-Install dependencies once and start both the local API and Next.js app:
+The launcher checks the local API dependencies and automatically runs
+`pnpm install --frozen-lockfile` when required commands are missing. Start both the
+local API and Next.js app from the repository root:
 
 ```bash
-cd cloudflare-worker && pnpm install
-cd .. && ./dev-local.sh
+# macOS / Linux / Git Bash / WSL
+./dev-local.sh
+
+# Windows CMD
+dev-local.cmd
+
+# Windows PowerShell
+.\dev-local.cmd
 ```
 
 Open `http://localhost:3000`. The frontend development default is

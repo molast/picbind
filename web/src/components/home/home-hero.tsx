@@ -15,7 +15,6 @@ type HomeHeroProps = {
   inputRef: React.RefObject<HTMLInputElement>;
   isLangMenuOpen: boolean;
   isDragging: boolean;
-  uploadNotice: string | null;
   showFormatOptions: boolean;
   selectedFormats: OutputFormat[];
   formatOptions: Array<{ key: OutputFormat; label: string }>;
@@ -38,7 +37,6 @@ export default function HomeHero({
   inputRef,
   isLangMenuOpen,
   isDragging,
-  uploadNotice,
   showFormatOptions,
   selectedFormats,
   formatOptions,
@@ -199,11 +197,6 @@ export default function HomeHero({
                 <p className="mt-2 text-[11px] font-medium text-[#5d6d95] sm:mt-3 sm:text-[13px] md:text-[14px]">
                   {copy.dropDesc}
                 </p>
-                {uploadNotice ? (
-                  <p className="mt-3 max-w-[460px] text-[11px] font-semibold leading-5 text-[#d14332] sm:text-[12px] md:text-[13px]">
-                    {uploadNotice}
-                  </p>
-                ) : null}
               </button>
               <div className="mt-3 overflow-hidden rounded-[18px] bg-[rgba(251,253,255,0.98)] sm:rounded-[20px]">
                 <div className="flex items-center gap-3 px-4 py-3 text-[11px] text-[#5f6e90] sm:px-5 sm:text-[13px] md:text-[14px]">

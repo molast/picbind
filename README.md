@@ -51,11 +51,18 @@ npm run build
 本地开发不会请求已部署的 `api.picbind.com`，房间 API、Durable Object、
 KV 和 WebSocket 信令都由本机运行时模拟，房间文件默认通过 P2P 传输。
 
-首次使用先安装本地 API 依赖，之后从仓库根目录一键启动：
+启动脚本会检查本地 API 依赖，缺少依赖命令时会自动执行
+`pnpm install --frozen-lockfile`。从仓库根目录运行：
 
 ```bash
-cd cloudflare-worker && pnpm install
-cd .. && ./dev-local.sh
+# macOS / Linux / Git Bash / WSL
+./dev-local.sh
+
+# Windows CMD
+dev-local.cmd
+
+# Windows PowerShell
+.\dev-local.cmd
 ```
 
 前端地址为 `http://localhost:3000`，本地 API 地址为
@@ -185,3 +192,7 @@ site.webmanifest
 - 前端页面保持可静态导出，减少部署复杂度。
 - 动态统计和管理能力迁移到 Cloudflare Worker。
 - 不再使用 Docker 部署。
+
+## 高清图片下载
+https://www.pexels.com/
+选好图图片以后，在图片上右键 Copy Image link，拿到连接以后再地址栏中拷贝链接，然后在末尾加上?auto=compress&fm=webp&w=1920

@@ -2,6 +2,8 @@ use image::DynamicImage;
 use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 
+use super::feature::{ImageFeature, extract_dynamic_image_features};
+
 pub struct ImageAnalysis {
     pub width: u32,
     pub height: u32,
@@ -10,12 +12,21 @@ pub struct ImageAnalysis {
     pub source_size_mb: f64,
     pub source_format: String,
     pub has_alpha: bool,
+    pub has_alpha_channel: bool,
+    pub has_real_alpha: bool,
+    pub alpha_min: u8,
+    pub alpha_max: u8,
     pub alpha_ratio: f64,
+    pub transparent_pixel_ratio: f64,
+    pub semi_transparent_ratio: f64,
     pub sample_stride: usize,
     pub sample_count: usize,
     pub edge_strength: f64,
     pub brightness_variance: f64,
     pub color_complexity: f64,
+    pub color_entropy: f64,
+    pub noise_level: f64,
+    pub gradient_coverage: f64,
     pub detail_coverage: f64,
     pub flat_coverage: f64,
     pub complexity_score: f64,
@@ -32,12 +43,21 @@ impl ImageAnalysis {
         set_number(&obj, "sourceSizeMb", self.source_size_mb)?;
         set_string(&obj, "sourceFormat", &self.source_format)?;
         set_bool(&obj, "hasAlpha", self.has_alpha)?;
+        set_bool(&obj, "hasAlphaChannel", self.has_alpha_channel)?;
+        set_bool(&obj, "hasRealAlpha", self.has_real_alpha)?;
+        set_number(&obj, "alphaMin", self.alpha_min as f64)?;
+        set_number(&obj, "alphaMax", self.alpha_max as f64)?;
         set_number(&obj, "alphaRatio", self.alpha_ratio)?;
+        set_number(&obj, "transparentPixelRatio", self.transparent_pixel_ratio)?;
+        set_number(&obj, "semiTransparentRatio", self.semi_transparent_ratio)?;
         set_number(&obj, "sampleStride", self.sample_stride as f64)?;
         set_number(&obj, "sampleCount", self.sample_count as f64)?;
         set_number(&obj, "edgeStrength", self.edge_strength)?;
         set_number(&obj, "brightnessVariance", self.brightness_variance)?;
         set_number(&obj, "colorComplexity", self.color_complexity)?;
+        set_number(&obj, "colorEntropy", self.color_entropy)?;
+        set_number(&obj, "noiseLevel", self.noise_level)?;
+        set_number(&obj, "gradientCoverage", self.gradient_coverage)?;
         set_number(&obj, "detailCoverage", self.detail_coverage)?;
         set_number(&obj, "flatCoverage", self.flat_coverage)?;
         set_number(&obj, "complexityScore", self.complexity_score)?;
@@ -62,158 +82,59 @@ pub fn analyze_dynamic_image(
     source_size_bytes: usize,
     source_format: &str,
 ) -> ImageAnalysis {
-    let rgba = img.to_rgba8();
-    let rgb = img.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    let pixel_count = (width as usize) * (height as usize);
-    let source_size_mb = source_size_bytes as f64 / (1024.0 * 1024.0);
+    analyze_image_features(extract_dynamic_image_features(
+        img,
+        source_size_bytes,
+        source_format,
+    ))
+}
 
-    let alpha_ratio = if pixel_count == 0 {
-        0.0
-    } else {
-        rgba.pixels().filter(|pixel| pixel[3] < 255).count() as f64 / pixel_count as f64
-    };
-
-    if width < 2 || height < 2 {
-        return ImageAnalysis {
-            width,
-            height,
-            pixel_count,
-            source_size_bytes,
-            source_size_mb,
-            source_format: source_format.to_string(),
-            has_alpha: alpha_ratio > 0.0,
-            alpha_ratio,
-            sample_stride: 1,
-            sample_count: pixel_count,
-            edge_strength: 0.0,
-            brightness_variance: 0.0,
-            color_complexity: 0.0,
-            detail_coverage: 0.0,
-            flat_coverage: 1.0,
-            complexity_score: 0.0,
-            compressibility_score: 1.0,
-        };
-    }
-
-    let stride = ((width.max(height) / 320).max(1)) as usize;
-    let mut sample_count = 0usize;
-    let mut luminance_sum = 0.0f64;
-    let mut luminance_sq_sum = 0.0f64;
-    let mut edge_sum = 0.0f64;
-    let mut color_sum = 0.0f64;
-    let mut detail_samples = 0usize;
-    let mut flat_samples = 0usize;
-
-    let to_luma = |r: u8, g: u8, b: u8| -> f64 {
-        0.2126 * (r as f64) + 0.7152 * (g as f64) + 0.0722 * (b as f64)
-    };
-
-    for y in (0..height as usize).step_by(stride) {
-        for x in (0..width as usize).step_by(stride) {
-            let current = rgb.get_pixel(x as u32, y as u32).0;
-            let luma = to_luma(current[0], current[1], current[2]);
-            luminance_sum += luma;
-            luminance_sq_sum += luma * luma;
-            color_sum += ((current[0] as f64 - current[1] as f64).abs()
-                + (current[1] as f64 - current[2] as f64).abs()
-                + (current[0] as f64 - current[2] as f64).abs())
-                / 3.0;
-
-            let mut local_edge = 0.0f64;
-            if x + stride < width as usize {
-                let right = rgb.get_pixel((x + stride) as u32, y as u32).0;
-                let right_luma = to_luma(right[0], right[1], right[2]);
-                let delta = (luma - right_luma).abs();
-                edge_sum += delta;
-                local_edge += delta;
-            }
-            if y + stride < height as usize {
-                let bottom = rgb.get_pixel(x as u32, (y + stride) as u32).0;
-                let bottom_luma = to_luma(bottom[0], bottom[1], bottom[2]);
-                let delta = (luma - bottom_luma).abs();
-                edge_sum += delta;
-                local_edge += delta;
-            }
-
-            let local_color = ((current[0] as f64 - current[1] as f64).abs()
-                + (current[1] as f64 - current[2] as f64).abs()
-                + (current[0] as f64 - current[2] as f64).abs())
-                / 3.0;
-
-            if local_edge >= 22.0 || (local_edge >= 14.0 && local_color >= 18.0) {
-                detail_samples += 1;
-            } else if local_edge <= 6.0 && local_color <= 10.0 {
-                flat_samples += 1;
-            }
-
-            sample_count += 1;
-        }
-    }
-
-    let mean_luma = if sample_count == 0 {
-        0.0
-    } else {
-        luminance_sum / sample_count as f64
-    };
-    let variance = if sample_count == 0 {
-        0.0
-    } else {
-        (luminance_sq_sum / sample_count as f64) - mean_luma * mean_luma
-    };
-    let brightness_variance = (variance.sqrt() / 64.0).clamp(0.0, 1.0);
-    let edge_strength = if sample_count == 0 {
-        0.0
-    } else {
-        (edge_sum / sample_count as f64 / 48.0).clamp(0.0, 1.0)
-    };
-    let color_complexity = if sample_count == 0 {
-        0.0
-    } else {
-        (color_sum / sample_count as f64 / 48.0).clamp(0.0, 1.0)
-    };
-    let detail_coverage = if sample_count == 0 {
-        0.0
-    } else {
-        (detail_samples as f64 / sample_count as f64).clamp(0.0, 1.0)
-    };
-    let flat_coverage = if sample_count == 0 {
-        0.0
-    } else {
-        (flat_samples as f64 / sample_count as f64).clamp(0.0, 1.0)
-    };
-
-    let complexity_score = (0.32 * edge_strength
-        + 0.22 * brightness_variance
-        + 0.16 * color_complexity
-        + 0.22 * detail_coverage
-        - 0.14 * flat_coverage)
+pub fn analyze_image_features(feature: ImageFeature) -> ImageAnalysis {
+    let alpha_ratio = feature.alpha.non_opaque_pixel_ratio;
+    let complexity_score = (0.24 * feature.edge_strength
+        + 0.14 * feature.brightness_variance
+        + 0.12 * feature.color_complexity
+        + 0.16 * feature.color_entropy
+        + 0.15 * feature.detail_coverage
+        + 0.13 * feature.noise_level
+        + 0.06 * feature.gradient_coverage
+        - 0.12 * feature.flat_coverage)
         .clamp(0.0, 1.0);
-
-    let size_pressure = (source_size_mb / 4.0).clamp(0.0, 1.0);
-    let compressibility_score = (0.38 * flat_coverage
-        + 0.22 * (1.0 - complexity_score)
-        + 0.18 * (1.0 - detail_coverage)
-        + 0.12 * (1.0 - alpha_ratio)
-        + 0.10 * size_pressure)
+    let size_pressure = (feature.source_size_mb / 4.0).clamp(0.0, 1.0);
+    let compressibility_score = (0.30 * feature.flat_coverage
+        + 0.10 * feature.gradient_coverage
+        + 0.20 * (1.0 - complexity_score)
+        + 0.14 * (1.0 - feature.detail_coverage)
+        + 0.08 * (1.0 - feature.color_entropy)
+        + 0.10 * (1.0 - alpha_ratio)
+        + 0.08 * size_pressure)
         .clamp(0.0, 1.0);
 
     ImageAnalysis {
-        width,
-        height,
-        pixel_count,
-        source_size_bytes,
-        source_size_mb,
-        source_format: source_format.to_string(),
-        has_alpha: alpha_ratio > 0.0,
+        width: feature.width,
+        height: feature.height,
+        pixel_count: feature.pixel_count,
+        source_size_bytes: feature.source_size_bytes,
+        source_size_mb: feature.source_size_mb,
+        source_format: feature.source_format,
+        has_alpha: feature.alpha.has_real_alpha,
+        has_alpha_channel: feature.alpha.has_alpha_channel,
+        has_real_alpha: feature.alpha.has_real_alpha,
+        alpha_min: feature.alpha.alpha_min,
+        alpha_max: feature.alpha.alpha_max,
         alpha_ratio,
-        sample_stride: stride,
-        sample_count,
-        edge_strength,
-        brightness_variance,
-        color_complexity,
-        detail_coverage,
-        flat_coverage,
+        transparent_pixel_ratio: feature.alpha.transparent_pixel_ratio,
+        semi_transparent_ratio: feature.alpha.semi_transparent_ratio,
+        sample_stride: feature.sample_stride,
+        sample_count: feature.sample_count,
+        edge_strength: feature.edge_strength,
+        brightness_variance: feature.brightness_variance,
+        color_complexity: feature.color_complexity,
+        color_entropy: feature.color_entropy,
+        noise_level: feature.noise_level,
+        gradient_coverage: feature.gradient_coverage,
+        detail_coverage: feature.detail_coverage,
+        flat_coverage: feature.flat_coverage,
         complexity_score,
         compressibility_score,
     }

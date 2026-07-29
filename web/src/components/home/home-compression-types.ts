@@ -6,6 +6,7 @@ export type OutputVariant = {
   id: string;
   format: OutputFormat;
   allowAlphaLoss?: boolean;
+  automatic?: boolean;
   outputUrl?: string;
   outputName?: string;
   outputExt?: string;
@@ -33,6 +34,28 @@ export type HomeItem = {
   previewUrl: string;
   variants: OutputVariant[];
   updatedAt: number;
+  rejection?: "file-too-large";
+};
+
+export type CompareAsset = {
+  id: string;
+  itemId: string;
+  variantId?: string;
+  label: string;
+  src: string;
+  size: number;
+  format: string;
+  kind: "original" | "output";
+};
+
+export type HomeCompareCopy = {
+  kicker: string;
+  title: string;
+  desc: string;
+  original: string;
+  compressed: string;
+  hintLeft: string;
+  hintRight: string;
 };
 
 export function formatSize(size: number) {

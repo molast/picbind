@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   formatSize,
   getBestDoneVariant,
+  type CompareAsset,
+  type HomeCompareCopy,
   type HomeItem,
   type MetricsRequestState,
   type OutputVariant,
@@ -25,12 +27,19 @@ import {
 import { reportPageViewOnce } from "@/utils/page-view";
 import { buildZipEntryFileName } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
+import {
+  COMPRESSION_QUALITY_METRICS_ENABLED,
+  IMAGE_COMPARE_ENABLED,
+  IMAGE_COMPARE_SELECTION_ENABLED,
+} from "@/utils/feature-flags";
 import { createUuid } from "@/utils/uuid";
 import {
   COMPRESSION_HANDOFF_EVENT,
   consumeFilesForCompression,
   deleteQueuedImageFile,
   getQueuedImageFile,
+  releaseStagedQueuedImageFile,
+  stageQueuedImageFile,
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
 import { storeCompressedImage } from "@/utils/compressed-image-store";
@@ -45,20 +54,31 @@ import {
 } from "@/utils/wasm";
 
 const MAX_FILES = 20;
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_CONCURRENT_COMPRESSIONS = 2;
-const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_CONCURRENT_AVIF_COMPRESSIONS = 1;
+const MAX_CONCURRENT_WEBP_COMPRESSIONS = 2;
+const ALLOWED_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/avif",
+]);
+const ALLOWED_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "avif"]);
 const COMPARE_IMAGE_SOURCE_PATH = "/images/compare-original.png";
 const COMPARE_IMAGE_SOURCE_NAME = "compare-original.png";
 const IS_DEV = process.env.NODE_ENV !== "production";
-const HEAVY_JPEG_RECOMPRESS_SIZE_BYTES = 1.5 * 1024 * 1024;
 
 function normalizeSourceFormat(file: File): OutputFormat {
+  const extension = file.name.split(".").pop()?.toLowerCase();
   if (file.type === "image/png") {
     return "png";
   }
   if (file.type === "image/webp") {
     return "webp";
+  }
+  if (file.type === "image/avif" || extension === "avif") {
+    return "avif";
   }
   return "jpeg";
 }
@@ -76,16 +96,23 @@ function normalizeOutputFormat(ext?: string): OutputFormat {
   return "jpeg";
 }
 
-function createVariant(format: OutputFormat): OutputVariant {
+function createVariant(
+  format: OutputFormat,
+  automatic = false,
+): OutputVariant {
   return {
     id: `${format}-${createUuid()}`,
     format,
     progress: 0,
     status: "queued",
+    automatic,
   };
 }
 
 function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
+  if (item.rejection) {
+    return item;
+  }
   if (!selectedFormats.length) {
     return item;
   }
@@ -93,20 +120,46 @@ function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
   const wantedFormats = selectedFormats.length
     ? Array.from(new Set(selectedFormats))
     : [item.sourceFormat];
+  const retainedVariants = item.variants.filter(
+    (variant) => !variant.automatic || variant.status !== "queued",
+  );
   const existingFormats = new Set(
-    item.variants.map((variant) => variant.format),
+    retainedVariants
+      .filter((variant) => !variant.automatic)
+      .map((variant) => variant.format),
   );
   const missingVariants = wantedFormats
     .filter((format) => !existingFormats.has(format))
     .map((format) => createVariant(format));
 
-  if (!missingVariants.length) {
+  if (
+    !missingVariants.length &&
+    retainedVariants.length === item.variants.length
+  ) {
     return item;
   }
 
   return {
     ...item,
-    variants: [...item.variants, ...missingVariants],
+    variants: [...retainedVariants, ...missingVariants],
+  };
+}
+
+function createRejectedItem(file: File): HomeItem {
+  const now = Date.now();
+  const id = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
+  return {
+    id,
+    fileId: id,
+    fileName: file.name,
+    fileSize: file.size,
+    fileType: file.type,
+    fileLastModified: file.lastModified,
+    sourceFormat: normalizeSourceFormat(file),
+    previewUrl: "",
+    updatedAt: now,
+    variants: [],
+    rejection: "file-too-large",
   };
 }
 
@@ -156,15 +209,15 @@ async function createPreviewUrl(file: File) {
   }
 }
 
-async function createItem(
+function createItem(
   file: File,
   selectedFormats: OutputFormat[],
-): Promise<HomeItem> {
+): HomeItem {
   const now = Date.now();
   const fileId = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
   const sourceFormat = normalizeSourceFormat(file);
-  await storeQueuedImageFile(fileId, file);
-  const previewUrl = await createPreviewUrl(file);
+  stageQueuedImageFile(fileId, file);
+  const previewUrl = URL.createObjectURL(file);
   const variants = selectedFormats.length
     ? ensureVariants(
         {
@@ -181,7 +234,7 @@ async function createItem(
         },
         selectedFormats,
       ).variants
-    : [createVariant(normalizeSourceFormat(file))];
+    : [createVariant(normalizeSourceFormat(file), true)];
 
   return {
     id: fileId,
@@ -195,14 +248,6 @@ async function createItem(
     updatedAt: now,
     variants,
   };
-}
-
-function isHeavyJpegRecompress(item: HomeItem, variant: OutputVariant) {
-  return (
-    item.sourceFormat === "jpeg" &&
-    variant.format === "jpeg" &&
-    item.fileSize >= HEAVY_JPEG_RECOMPRESS_SIZE_BYTES
-  );
 }
 
 function logCompressionFailure(
@@ -256,13 +301,11 @@ async function logCompressionAnalysis(
 export type UseHomeCompressionOptions = {
   initialLang?: Lang;
   showCompressedCount?: boolean;
-  showCompareSection?: boolean;
 };
 
 export function useHomeCompression({
   initialLang = "en",
   showCompressedCount = false,
-  showCompareSection = false,
 }: UseHomeCompressionOptions) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -271,9 +314,11 @@ export function useHomeCompression({
   const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
   const compareCompressedUrlRef = React.useRef<string | null>(null);
+  const compareSourceUrlsRef = React.useRef<Record<string, string>>({});
   const metricsRequestsRef = React.useRef<Record<string, MetricsRequestState>>(
     {},
   );
+  const releasedSourceFilesRef = React.useRef(new Set<string>());
   const isUnmountedRef = React.useRef(false);
   const [items, setItems] = React.useState<HomeItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -281,10 +326,17 @@ export function useHomeCompression({
   const [homeShowCompressedCount, setHomeShowCompressedCount] = React.useState(
     showCompressedCount,
   );
-  const [homeShowCompareSection, setHomeShowCompareSection] = React.useState(
-    showCompareSection,
-  );
+  const homeShowCompareSection = IMAGE_COMPARE_ENABLED;
+  const homeAllowCompareSelection = IMAGE_COMPARE_SELECTION_ENABLED;
+  const homeShowQualityMetrics = COMPRESSION_QUALITY_METRICS_ENABLED;
   const [compareSectionReady, setCompareSectionReady] = React.useState(false);
+  const [compareAssets, setCompareAssets] = React.useState<CompareAsset[]>([]);
+  const [compareLeftAssetId, setCompareLeftAssetId] = React.useState<
+    string | null
+  >(null);
+  const [compareRightAssetId, setCompareRightAssetId] = React.useState<
+    string | null
+  >(null);
   const [totalCompressedCount, setTotalCompressedCount] = React.useState(0);
   const [displayedCompressedCount, setDisplayedCompressedCount] =
     React.useState(0);
@@ -296,7 +348,6 @@ export function useHomeCompression({
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
     [],
   );
-  const [uploadNotice, setUploadNotice] = React.useState<string | null>(null);
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
   const [metricsVariantId, setMetricsVariantId] = React.useState<string | null>(
     null,
@@ -314,7 +365,7 @@ export function useHomeCompression({
   const copy = React.useMemo(() => getHomeCompressLandingCopy(lang), [lang]);
   const blockedCopy = copy.errorOverlay;
   const metricsCopy = copy.metricsOverlay;
-  const compareCopy = React.useMemo(
+  const compareCopy = React.useMemo<HomeCompareCopy>(
     () =>
       lang === "zh"
         ? {
@@ -339,7 +390,7 @@ export function useHomeCompression({
   );
   const loadVariantMetrics = React.useCallback(
     async (item: HomeItem, variant: OutputVariant) => {
-      if (!IS_DEV || variant.status !== "done" || !variant.outputUrl) {
+      if (!homeShowQualityMetrics || variant.status !== "done" || !variant.outputUrl) {
         return;
       }
 
@@ -409,7 +460,7 @@ export function useHomeCompression({
         }
       }
     },
-    [],
+    [homeShowQualityMetrics],
   );
 
   React.useEffect(() => {
@@ -473,21 +524,17 @@ export function useHomeCompression({
   React.useEffect(() => {
     let cancelled = false;
 
-    void loadHomeDisplayConfig({
-      showCompressedCount,
-      showCompareSection,
-    }).then((config) => {
+    void loadHomeDisplayConfig({ showCompressedCount }).then((config) => {
       if (cancelled) {
         return;
       }
       setHomeShowCompressedCount(config.showCompressedCount);
-      setHomeShowCompareSection(config.showCompareSection);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [showCompareSection, showCompressedCount]);
+  }, [showCompressedCount]);
 
   React.useEffect(() => {
     if (!homeShowCompressedCount) {
@@ -648,14 +695,55 @@ export function useHomeCompression({
   }, [items]);
 
   React.useEffect(() => {
+    items.forEach((item) => {
+      if (
+        item.rejection ||
+        !item.variants.length ||
+        item.variants.some(
+          (variant) =>
+            variant.status === "queued" || variant.status === "processing",
+        ) ||
+        releasedSourceFilesRef.current.has(item.fileId)
+      ) {
+        return;
+      }
+
+      releasedSourceFilesRef.current.add(item.fileId);
+      void releaseStagedQueuedImageFile(item.fileId).then((released) => {
+        if (!released) {
+          releasedSourceFilesRef.current.delete(item.fileId);
+        }
+      });
+    });
+  }, [items]);
+
+  React.useEffect(() => {
+    setCompareLeftAssetId((current) =>
+      current && compareAssets.some((asset) => asset.id === current)
+        ? current
+        : compareAssets[0]?.id || null,
+    );
+    setCompareRightAssetId((current) =>
+      current && compareAssets.some((asset) => asset.id === current)
+        ? current
+        : compareAssets[1]?.id || compareAssets[0]?.id || null,
+    );
+  }, [compareAssets]);
+
+  React.useEffect(() => {
     isUnmountedRef.current = false;
     const timerMap = timersRef.current;
     return () => {
       isUnmountedRef.current = true;
       metricsRequestsRef.current = {};
+      releasedSourceFilesRef.current.clear();
       void flushCompressedCountNow();
       Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
       terminateCompressionWorker();
+      Object.values(compareSourceUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+      compareSourceUrlsRef.current = {};
       itemsRef.current.forEach((item) => {
         URL.revokeObjectURL(item.previewUrl);
         void deleteQueuedImageFile(item.fileId);
@@ -671,57 +759,79 @@ export function useHomeCompression({
   const enqueueFiles = React.useCallback(
     async (fileList: FileList | File[]) => {
       const inputFiles = Array.from(fileList);
-      let hasUnsupported = false;
-      let hasTooLarge = false;
+      const tooLargeFiles: File[] = [];
 
       const nextFiles = inputFiles.filter((file) => {
-        if (!ALLOWED_TYPES.has(file.type)) {
-          hasUnsupported = true;
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        if (
+          !ALLOWED_TYPES.has(file.type) &&
+          (!extension || !ALLOWED_EXTENSIONS.has(extension))
+        ) {
           return false;
         }
         if (file.size > MAX_FILE_SIZE_BYTES) {
-          hasTooLarge = true;
+          tooLargeFiles.push(file);
           return false;
         }
         return true;
       });
 
-      const notices: string[] = [];
-      if (hasUnsupported) {
-        notices.push(copy.uploadNotice.unsupportedFiles);
-      }
-      if (hasTooLarge) {
-        notices.push(copy.uploadNotice.fileTooLarge);
-      }
-
-      if (!nextFiles.length) {
-        setUploadNotice(notices[0] ?? null);
+      if (!nextFiles.length && !tooLargeFiles.length) {
         return;
       }
 
-      const remain = MAX_FILES - itemsRef.current.length;
-      if (remain <= 0) {
-        setUploadNotice(copy.uploadNotice.tooManyFiles);
-        return;
-      }
-      if (nextFiles.length > remain) {
-        notices.push(copy.uploadNotice.tooManyFiles);
-      }
+      const processableItemCount = itemsRef.current.filter(
+        (item) => !item.rejection,
+      ).length;
+      const remain = MAX_FILES - processableItemCount;
 
       try {
-        const nextItems = await Promise.all(
-          nextFiles
-            .slice(0, remain)
-            .map((file) => createItem(file, selectedFormats)),
+        const acceptedFiles = nextFiles.slice(0, Math.max(0, remain));
+        const nextItems = acceptedFiles.map((file) =>
+          createItem(file, selectedFormats),
         );
-        setUploadNotice(notices.length ? notices.join(" ") : null);
-        setItems((prev) => [...prev, ...nextItems].slice(0, MAX_FILES));
+        const rejectedItems = tooLargeFiles.map(createRejectedItem);
+        const optimisticItems = [
+          ...itemsRef.current,
+          ...nextItems,
+          ...rejectedItems,
+        ];
+        itemsRef.current = optimisticItems;
+        setItems(optimisticItems);
+
+        nextItems.forEach((item, index) => {
+          const file = acceptedFiles[index];
+          void storeQueuedImageFile(item.fileId, file).catch((error) => {
+            if (IS_DEV) {
+              console.warn("Failed to persist queued image", error);
+            }
+          });
+
+          void createPreviewUrl(file).then((previewUrl) => {
+            if (
+              isUnmountedRef.current ||
+              !itemsRef.current.some((current) => current.id === item.id)
+            ) {
+              URL.revokeObjectURL(previewUrl);
+              return;
+            }
+            setItems((prev) =>
+              prev.map((current) =>
+                current.id === item.id
+                  ? { ...current, previewUrl }
+                  : current,
+              ),
+            );
+            window.requestAnimationFrame(() => {
+              URL.revokeObjectURL(item.previewUrl);
+            });
+          });
+        });
       } catch (error) {
-        console.error("Failed to enqueue images:", error);
-        setUploadNotice(copy.uploadNotice.unsupportedFiles);
+        if (IS_DEV) console.error("Failed to enqueue images:", error);
       }
     },
-    [copy.uploadNotice, selectedFormats],
+    [selectedFormats],
   );
 
   const loadCompressionHandoff = React.useCallback(() => {
@@ -811,7 +921,8 @@ export function useHomeCompression({
     const claimed = new Set<string>();
     const running = new Map<string, Promise<void>>();
     const runningFileIds = new Set<string>();
-    const heavyRunning = new Set<string>();
+    const runningAvif = new Set<string>();
+    const runningWebp = new Set<string>();
 
     const runOne = (currentItem: HomeItem, currentVariant: OutputVariant) =>
       (async () => {
@@ -850,6 +961,7 @@ export function useHomeCompression({
             80,
             currentVariant.format,
             Boolean(currentVariant.allowAlphaLoss),
+            Boolean(currentVariant.automatic),
           );
           if (isUnmountedRef.current) {
             return;
@@ -975,7 +1087,16 @@ export function useHomeCompression({
               if (runningFileIds.has(item.fileId)) {
                 return false;
               }
-              if (isHeavyJpegRecompress(item, variant) && heavyRunning.size > 0) {
+              if (
+                (variant.format === "avif" || variant.automatic) &&
+                runningAvif.size >= MAX_CONCURRENT_AVIF_COMPRESSIONS
+              ) {
+                return false;
+              }
+              if (
+                variant.format === "webp" &&
+                runningWebp.size >= MAX_CONCURRENT_WEBP_COMPRESSIONS
+              ) {
                 return false;
               }
               return true;
@@ -986,22 +1107,23 @@ export function useHomeCompression({
           }
 
           const key = `${nextTask.item.id}:${nextTask.variant.id}`;
-          const isHeavyTask = isHeavyJpegRecompress(
-            nextTask.item,
-            nextTask.variant,
-          );
           claimed.add(key);
           runningFileIds.add(nextTask.item.fileId);
-          if (isHeavyTask) {
-            heavyRunning.add(key);
+          if (
+            nextTask.variant.format === "avif" ||
+            nextTask.variant.automatic
+          ) {
+            runningAvif.add(key);
+          }
+          if (nextTask.variant.format === "webp") {
+            runningWebp.add(key);
           }
           const job = runOne(nextTask.item, nextTask.variant).finally(() => {
             running.delete(key);
             claimed.delete(key);
             runningFileIds.delete(nextTask.item.fileId);
-            if (isHeavyTask) {
-              heavyRunning.delete(key);
-            }
+            runningAvif.delete(key);
+            runningWebp.delete(key);
           });
           running.set(key, job);
         }
@@ -1037,7 +1159,13 @@ export function useHomeCompression({
     item.variants.some((variant) => variant.status === "done"),
   );
   const sortedItems = React.useMemo(
-    () => [...items].sort((a, b) => b.updatedAt - a.updatedAt),
+    () =>
+      [...items].sort((a, b) => {
+        if (Boolean(a.rejection) !== Boolean(b.rejection)) {
+          return a.rejection ? 1 : -1;
+        }
+        return b.updatedAt - a.updatedAt;
+      }),
     [items],
   );
   const completedCount = completedItems.length;
@@ -1149,6 +1277,54 @@ export function useHomeCompression({
     );
   };
 
+  const addVariantToCompare = React.useCallback(
+    async (item: HomeItem, variant: OutputVariant) => {
+      if (
+        !homeAllowCompareSelection ||
+        variant.status !== "done" ||
+        !variant.outputUrl
+      ) {
+        return;
+      }
+
+      const sourceAssetId = `${item.id}:original`;
+      let sourceUrl = compareSourceUrlsRef.current[item.id];
+      if (!sourceUrl) {
+        const sourceFile = await getQueuedImageFile(item.fileId);
+        if (!sourceFile || isUnmountedRef.current) {
+          return;
+        }
+        sourceUrl = URL.createObjectURL(sourceFile);
+        compareSourceUrlsRef.current[item.id] = sourceUrl;
+      }
+
+      const originalAsset: CompareAsset = {
+        id: sourceAssetId,
+        itemId: item.id,
+        label: `${item.fileName} · ORIGINAL`,
+        src: sourceUrl,
+        size: item.fileSize,
+        format: item.sourceFormat,
+        kind: "original",
+      };
+      const outputAsset: CompareAsset = {
+        id: `${item.id}:${variant.id}`,
+        itemId: item.id,
+        variantId: variant.id,
+        label: `${item.fileName} · ${variant.format.toUpperCase()}`,
+        src: variant.outputUrl,
+        size: variant.outputSize || 0,
+        format: variant.format,
+        kind: "output",
+      };
+
+      setCompareAssets([originalAsset, outputAsset]);
+      setCompareLeftAssetId(originalAsset.id);
+      setCompareRightAssetId(outputAsset.id);
+    },
+    [homeAllowCompareSelection],
+  );
+
   return {
     langReady,
     copy,
@@ -1159,7 +1335,6 @@ export function useHomeCompression({
     setIsLangMenuOpen,
     isDragging,
     setIsDragging,
-    uploadNotice,
     showFormatOptions,
     setShowFormatOptions,
     selectedFormats,
@@ -1184,9 +1359,15 @@ export function useHomeCompression({
     handleDownloadZip,
     compareCopy,
     homeShowCompareSection,
+    homeAllowCompareSelection,
+    homeShowQualityMetrics,
     compareSectionReady,
     compareCompressedSrc,
     compareSizes,
+    compareAssets,
+    compareLeftAssetId,
+    compareRightAssetId,
+    addVariantToCompare,
     homeShowCompressedCount,
     displayedCompressedCount,
     isCountBouncing,

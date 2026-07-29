@@ -1,9 +1,13 @@
 pub mod analysis;
-pub mod avif;
 pub mod candidate;
+pub mod feature;
+pub mod gain;
+pub mod hvs;
 pub mod jpeg;
 pub mod metrics;
 pub mod pipeline;
 pub mod png;
+pub mod png_oxipng;
+pub mod predictor;
 pub mod quality;
 pub mod zip;

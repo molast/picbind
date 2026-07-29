@@ -13,7 +13,7 @@ const en: LocaleType = {
     heroDesc:
       "Upload, optimize, and download in one focused homepage flow with fewer steps and faster delivery.",
     dropTitle: "Drop your images here!",
-    dropDesc: "Up to 20 images, max 10 MB each.",
+    dropDesc: "Up to 20 images, max 5 MB each.",
     faviconEntry: "Favicon",
     autoLabel: "Convert my images automatically",
     selectAll: "SELECT ALL",
@@ -26,9 +26,8 @@ const en: LocaleType = {
     transparencyBlocked: "The source image contains transparency, so JPEG output is blocked.",
     unsupportedFormat: "This format is not supported yet",
     uploadNotice: {
-      tooManyFiles: "You can process up to 20 images at a time.",
-      unsupportedFiles: "Some files were skipped. Only PNG, JPEG, and WebP are supported right now.",
-      fileTooLarge: "Some files were skipped. Each image must be 10 MB or smaller.",
+      fileTooLargeTitle: "File is too large (max 5 MB)",
+      fileTooLargeDescription: "This image exceeds the current compression limit.",
     },
     downloadZip: "Download ZIP",
     cards: [
@@ -178,7 +177,7 @@ const en: LocaleType = {
         },
         {
           title: "Support",
-          links: [{ label: "Contact support", href: "mailto:loomchen@gmail.com" }],
+          links: [{ label: "Contact support", href: "mailto:picbind@proton.me" }],
         },
       ],
       contactSupport: "Contact support",

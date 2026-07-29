@@ -27,6 +27,9 @@
       ],
       "@wasm/*": [
         "./public/wasm/*"
+      ],
+      "@perceptual-wasm/*": [
+        "./public/perceptual-wasm/*"
       ]
     },
     "target": "ES2017"

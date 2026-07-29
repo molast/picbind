@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React from "react";
+import { FiColumns, FiLock } from "react-icons/fi";
 import {
   extToBadge,
   formatDeltaPercent,
@@ -12,11 +13,10 @@ import {
   getDoneVariants,
   isTransparencyBlocked,
   type HomeItem,
+  type CompareAsset,
   type OutputVariant,
 } from "./home-compression-types";
-import type { HomeCompressLandingCopy } from "@/locales";
-
-const IS_DEV = process.env.NODE_ENV !== "production";
+import type { HomeCompressLandingCopy, Lang } from "@/locales";
 
 type HomeResultsProps = {
   copy: HomeCompressLandingCopy;
@@ -28,11 +28,16 @@ type HomeResultsProps = {
   canDownloadZip: boolean;
   whyVariantId: string | null;
   metricsVariantId: string | null;
+  lang: Lang;
+  allowCompareSelection: boolean;
+  showQualityMetrics: boolean;
+  compareAssets: CompareAsset[];
   onDownloadZip(): void;
   onWhyVariantChange: React.Dispatch<React.SetStateAction<string | null>>;
   onMetricsVariantChange: React.Dispatch<React.SetStateAction<string | null>>;
   onLoadVariantMetrics(item: HomeItem, variant: OutputVariant): void | Promise<void>;
   onConvertAnyway(itemId: string, variantId: string): void;
+  onAddVariantToCompare(item: HomeItem, variant: OutputVariant): void | Promise<void>;
 };
 
 export default function HomeResults({
@@ -45,11 +50,16 @@ export default function HomeResults({
   canDownloadZip,
   whyVariantId,
   metricsVariantId,
+  lang,
+  allowCompareSelection,
+  showQualityMetrics,
+  compareAssets,
   onDownloadZip,
   onWhyVariantChange,
   onMetricsVariantChange,
   onLoadVariantMetrics,
   onConvertAnyway,
+  onAddVariantToCompare,
 }: HomeResultsProps) {
   const blockedCopy = copy.errorOverlay;
   const metricsCopy = copy.metricsOverlay;
@@ -58,32 +68,67 @@ export default function HomeResults({
       {items.length > 0 && (
         <section className="relative z-10 mx-auto -mt-8 w-full max-w-[1100px] px-4 pb-20 md:-mt-12">
           <div className="overflow-visible rounded-[18px] border border-[#c4d8fb] bg-[rgba(237,244,255,0.88)] text-[#334a72] shadow-[0_18px_48px_rgba(78,120,193,0.2)] backdrop-blur">
-            <div className="flex flex-col gap-5 border-b border-[#c9dbfb] px-6 py-5 md:flex-row md:items-start md:justify-between">
-              <div className="max-w-3xl">
-                <h3 className="text-[30px] font-semibold leading-tight text-[#2f4b7d]">
-                  {hasPendingItems
-                    ? copy.processingTitle
-                    : copy.completedTitle(
-                        totalSavedPercent,
-                        completedCount,
-                        formatSize(totalSavedBytes),
-                      )}
-                </h3>
+            {(hasPendingItems || completedCount > 0) && (
+              <div className="flex flex-col gap-5 border-b border-[#c9dbfb] px-6 py-5 md:flex-row md:items-start md:justify-between">
+                <div className="max-w-3xl">
+                  <h3 className="text-[30px] font-semibold leading-tight text-[#2f4b7d]">
+                    {hasPendingItems
+                      ? copy.processingTitle
+                      : copy.completedTitle(
+                          totalSavedPercent,
+                          completedCount,
+                          formatSize(totalSavedBytes),
+                        )}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={!canDownloadZip}
+                    onClick={onDownloadZip}
+                    className="rounded-xl bg-[#3f80ea] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#356fd0] disabled:cursor-not-allowed disabled:bg-[#9ab3d8] disabled:text-[#eef4ff]"
+                  >
+                    {copy.downloadZip}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!canDownloadZip}
-                  onClick={onDownloadZip}
-                  className="rounded-xl bg-[#3f80ea] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#356fd0] disabled:cursor-not-allowed disabled:bg-[#9ab3d8] disabled:text-[#eef4ff]"
-                >
-                  {copy.downloadZip}
-                </button>
-              </div>
-            </div>
+            )}
 
             <div className="bg-[rgba(248,251,255,0.9)] text-[#3b4a62]">
               {items.map((item) => {
+                if (item.rejection === "file-too-large") {
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex min-h-[84px] flex-col gap-3 border-t border-[#d6e3f9] bg-white px-5 py-3 first:border-t-0 sm:flex-row sm:items-center"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#f3f4f6] text-[#4a4f59] ring-1 ring-[#eceef1]">
+                          <FiLock aria-hidden="true" className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-[15px] font-semibold text-[#a0a3aa]">
+                            {item.fileName}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-[12px] text-[#9b9ea5]">
+                            <span className="rounded-md bg-[#f7f5ff] px-2 py-0.5 font-semibold uppercase text-[#a691e8]">
+                              {item.sourceFormat}
+                            </span>
+                            <span>{formatSize(item.fileSize)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="sm:w-[48%] sm:text-center">
+                        <div className="text-[15px] font-semibold text-[#3f434c]">
+                          {copy.uploadNotice.fileTooLargeTitle}
+                        </div>
+                        <div className="mt-0.5 text-[13px] text-[#5f626b]">
+                          {copy.uploadNotice.fileTooLargeDescription}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
                 const bestVariant = getBestDoneVariant(item);
                 const doneVariants = getDoneVariants(item);
                 const activeVariant = getActiveVariant(item);
@@ -167,7 +212,7 @@ export default function HomeResults({
                               variant.status === "done"
                                 ? `${formatSize(variant.outputSize || 0)}`
                                 : variant.status === "processing"
-                                  ? `${copy.optimizing} ${Math.round(variant.progress)}%`
+                                  ? copy.optimizing
                                   : variant.status === "queued"
                                     ? copy.queued
                                     : isTransparencyBlocked(
@@ -203,7 +248,7 @@ export default function HomeResults({
                                       <div
                                         className="relative"
                                         onMouseEnter={
-                                          IS_DEV
+                                          showQualityMetrics
                                             ? () => {
                                                 onMetricsVariantChange(variant.id);
                                                 void onLoadVariantMetrics(
@@ -214,7 +259,7 @@ export default function HomeResults({
                                             : undefined
                                         }
                                         onMouseLeave={
-                                          IS_DEV
+                                          showQualityMetrics
                                             ? () =>
                                                 onMetricsVariantChange((prev) =>
                                                   prev === variant.id ? null : prev,
@@ -222,19 +267,57 @@ export default function HomeResults({
                                             : undefined
                                         }
                                       >
-                                        <a
-                                          href={variant.outputUrl}
-                                          download={
-                                            variant.outputName || item.fileName
-                                          }
-                                          className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
-                                        >
-                                          <span className="text-[11px]">⬇</span>
-                                          <span>
-                                            {extToBadge(variant.outputExt)}
-                                          </span>
-                                        </a>
-                                        {IS_DEV &&
+                                        <div className="flex items-center gap-1">
+                                          <a
+                                            href={variant.outputUrl}
+                                            download={
+                                              variant.outputName || item.fileName
+                                            }
+                                            className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
+                                          >
+                                            <span className="text-[11px]">⬇</span>
+                                            <span>
+                                              {extToBadge(variant.outputExt)}
+                                            </span>
+                                          </a>
+                                          {allowCompareSelection && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                void onAddVariantToCompare(
+                                                  item,
+                                                  variant,
+                                                )
+                                              }
+                                              className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition ${
+                                                compareAssets.some(
+                                                  (asset) =>
+                                                    asset.variantId ===
+                                                      variant.id &&
+                                                    asset.itemId === item.id,
+                                                )
+                                                  ? "bg-[#3f80ea] text-white"
+                                                  : "bg-[#dde9ff] text-[#5374a8] hover:bg-[#cbdfff]"
+                                              }`}
+                                              title={
+                                                lang === "zh"
+                                                  ? "加入图片对比"
+                                                  : "Add to image comparison"
+                                              }
+                                              aria-label={
+                                                lang === "zh"
+                                                  ? "加入图片对比"
+                                                  : "Add to image comparison"
+                                              }
+                                            >
+                                              <FiColumns
+                                                aria-hidden="true"
+                                                className="h-3.5 w-3.5"
+                                              />
+                                            </button>
+                                          )}
+                                        </div>
+                                        {showQualityMetrics &&
                                           metricsVariantId === variant.id && (
                                           <div className="absolute right-0 top-[calc(100%+10px)] z-20 w-[220px] rounded-xl bg-white p-4 text-left shadow-[0_12px_32px_rgba(0,0,0,0.18)] ring-1 ring-black/5">
                                             <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -373,7 +456,9 @@ export default function HomeResults({
                                     <div
                                       className={`rounded-[14px] px-2.5 py-1 text-[11px] font-semibold uppercase ${toneClass} ${accentClass}`}
                                     >
-                                      {variant.format}
+                                      {variant.automatic
+                                        ? "auto"
+                                        : variant.format}
                                     </div>
                                     <div className="max-w-[96px] text-[10px] leading-3.5">
                                       {detail}
@@ -388,7 +473,7 @@ export default function HomeResults({
                       <div
                         className={`mt-1.5 overflow-hidden rounded-full ${
                           hasInFlightVariant
-                            ? "h-[4px] bg-[#dce8fb]"
+                            ? "h-[2px] bg-[#dce8fb]"
                             : "h-px bg-[#d6e3f9]"
                         }`}
                       >
@@ -396,8 +481,8 @@ export default function HomeResults({
                           className={`transition-all duration-300 ${
                             hasInFlightVariant
                               ? activeProgress <= 0
-                                ? "h-[4px] bg-[#4b86e8] transition-none"
-                                : "h-[4px] bg-[#4b86e8]"
+                                ? "h-[2px] bg-[#4b86e8] transition-none"
+                                : "h-[2px] bg-[#4b86e8]"
                               : "h-px bg-[#8aa4cf]"
                           }`}
                           style={{

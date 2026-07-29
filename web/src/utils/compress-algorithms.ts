@@ -1,39 +1,90 @@
 "use client";
 
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import {
+  amplifyMaxError,
+  amplifyMinSimilarity,
+  amplifyQualityLoss,
+  compressionGainForFormat,
+} from "@/utils/compression-gain";
+import { createButteraugliEvaluator } from "@/utils/butteraugli";
+import { predictRecommendedFormat } from "@/utils/compression-predictor";
+import {
+  analyzeCompressionFeatures,
+  createCompressionPlan,
+  executeCompressionPlan,
+  extractCompressionFeatures,
+  selectCompressionEncoder,
+  sourceFormatFromFile,
+  type CompressResult,
+  type PerceptualEvaluator,
+} from "@/utils/compression-engine";
+import {
+  BUTTERAUGLI_ENABLED,
+  BUTTERAUGLI_TARGET_SCORE,
+} from "@/utils/feature-flags";
+import { encodeWithLibavif } from "@/utils/libavif-codec";
 import { initWasm } from "@/utils/wasm-runtime";
 
-export type CompressResult = {
-  blob: Blob;
-  mime: string;
-  ext: string;
-  fileName: string;
+export type { CompressResult } from "@/utils/compression-engine";
+
+type WebpEncodeOptions = {
+  quality?: number;
+  alpha_quality?: number;
+  lossless?: 0 | 1;
+  method?: number;
+  pass?: number;
+  exact?: number;
+  alpha_compression?: number;
+  alpha_filtering?: number;
+  autofilter?: number;
+  use_sharp_yuv?: number;
 };
 
 type JsQuashWebpModule = {
-  encode: (
-    data: ImageData,
-    options?: {
-      quality?: number;
-      alpha_quality?: number;
-      lossless?: 0 | 1 | boolean;
-      method?: number;
-      sns_strength?: number;
-      filter_strength?: number;
-      filter_sharpness?: number;
-      filter_type?: number;
-      segments?: number;
-      pass?: number;
-      autofilter?: number;
-      alpha_compression?: number;
-      alpha_filtering?: number;
-      exact?: number;
-      preprocessing?: number;
-      use_sharp_yuv?: number;
-      near_lossless?: number;
-      image_hint?: number;
-    },
-  ) => Promise<ArrayBuffer>;
+  encode(data: ImageData, options?: WebpEncodeOptions): Promise<ArrayBuffer>;
+};
+
+type PerceptualMetrics = {
+  ssim: number;
+  msSsim: number;
+  blurLossPercent: number;
+  overallQualityScore: number;
+  p99DeltaE: number;
+  p99MaskedDeltaE: number;
+  p95LuminanceError: number;
+  p95ChromaError: number;
+  perceptualDistance: number;
+  p95AlphaError: number;
+  p99AlphaError: number;
+};
+
+type WebpCandidate = {
+  bytes: Uint8Array;
+  metrics: PerceptualMetrics | null;
+  passesGuardrail: boolean;
+};
+
+type AvifEncodingPlan = {
+  qualityCandidates: number[];
+  speed: number;
+  bitDepth: 8;
+  subsample: number;
+  tune: number;
+  chromaDeltaQ: boolean;
+  sharpness: number;
+  enableSharpYuv: boolean;
+  tileColsLog2: number;
+  tileRowsLog2: number;
+  alphaQualityFloor: number;
+  minMsSsim: number;
+  maxBlurLossPercent: number;
+  maxPerceptualDistance: number;
+  maxP99DeltaE: number;
+  maxP95LuminanceError: number;
+  maxP95ChromaError: number;
+  maxP95AlphaError: number;
+  maxP99AlphaError: number;
 };
 
 let cachedWebpCodec: Promise<JsQuashWebpModule> | null = null;
@@ -46,16 +97,6 @@ function clampQuality(quality: number) {
   return Math.max(0, Math.min(quality, 100));
 }
 
-function sourceFormatFromFile(file: File): OutputFormat {
-  if (file.type === "image/png") {
-    return "png";
-  }
-  if (file.type === "image/webp") {
-    return "webp";
-  }
-  return "jpeg";
-}
-
 function extForFormat(format: OutputFormat) {
   if (format === "jpeg") {
     return "jpg";
@@ -63,18 +104,34 @@ function extForFormat(format: OutputFormat) {
   return format;
 }
 
+function mimeForFormat(format: OutputFormat) {
+  return format === "jpeg" ? "image/jpeg" : `image/${format}`;
+}
+
+function originalFileResult(file: File, format: OutputFormat): CompressResult {
+  return {
+    blob: file,
+    mime: file.type || mimeForFormat(format),
+    ext: extForFormat(format),
+    fileName: file.name,
+  };
+}
+
+function keepOriginalWhenNotSmaller(
+  file: File,
+  result: CompressResult,
+  requestedFormat: OutputFormat,
+  sourceFormat: OutputFormat,
+) {
+  return requestedFormat === sourceFormat && result.blob.size >= file.size
+    ? originalFileResult(file, sourceFormat)
+    : result;
+}
+
 function requiresSmallerResult(
   requestedFormat: OutputFormat,
   sourceFormat: OutputFormat,
 ) {
-  if (requestedFormat === "jpeg") {
-    return true;
-  }
-
-  if (requestedFormat === "png" || requestedFormat === "webp") {
-    return false;
-  }
-
   return requestedFormat === sourceFormat;
 }
 
@@ -105,90 +162,163 @@ function buildJpegFallbackQualities(quality: number) {
   return Array.from(new Set(candidates)).sort((a, b) => b - a);
 }
 
-function hasTransparency(imageData: ImageData) {
-  const { data } = imageData;
-  for (let index = 3; index < data.length; index += 4) {
-    if (data[index] !== 255) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function analyzeImageData(imageData: ImageData) {
-  const { data, width, height } = imageData;
-  const pixelCount = width * height;
-  const sampleStride = Math.max(1, Math.floor(Math.sqrt(pixelCount / 12000)));
-
-  let sampledPixels = 0;
-  let alphaPixels = 0;
-  let edgePixels = 0;
-  let flatPixels = 0;
-  let lumaSum = 0;
-  let lumaSqSum = 0;
-
-  const getIndex = (x: number, y: number) => (y * width + x) * 4;
-  const lumaAt = (index: number) =>
-    data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-
-  for (let y = sampleStride; y < height - sampleStride; y += sampleStride) {
-    for (let x = sampleStride; x < width - sampleStride; x += sampleStride) {
-      const index = getIndex(x, y);
-      const luma = lumaAt(index);
-      const left = lumaAt(getIndex(x - sampleStride, y));
-      const right = lumaAt(getIndex(x + sampleStride, y));
-      const up = lumaAt(getIndex(x, y - sampleStride));
-      const down = lumaAt(getIndex(x, y + sampleStride));
-
-      const gradient = Math.abs(left - right) + Math.abs(up - down);
-
-      sampledPixels += 1;
-      lumaSum += luma;
-      lumaSqSum += luma * luma;
-
-      if (data[index + 3] < 255) {
-        alphaPixels += 1;
-      }
-
-      if (gradient >= 24) {
-        edgePixels += 1;
-      } else if (gradient <= 8) {
-        flatPixels += 1;
-      }
-    }
-  }
-
-  const meanLuma = sampledPixels ? lumaSum / sampledPixels : 0;
-  const variance = sampledPixels
-    ? Math.max(0, lumaSqSum / sampledPixels - meanLuma * meanLuma)
-    : 0;
-
-  return {
-    pixelCount,
-    sampledPixels,
-    alphaRatio: sampledPixels ? alphaPixels / sampledPixels : 0,
-    edgeCoverage: sampledPixels ? edgePixels / sampledPixels : 0,
-    flatCoverage: sampledPixels ? flatPixels / sampledPixels : 0,
-    lumaVariance: variance / (255 * 255),
-  };
-}
-
 async function decodeFileToImageData(file: File): Promise<ImageData> {
   const bitmap = await createImageBitmap(file);
-
   try {
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) {
-      throw new Error("Canvas 2D context is unavailable");
-    }
-
+    if (!context) throw new Error("Canvas 2D context is unavailable");
     context.drawImage(bitmap, 0, 0);
     return context.getImageData(0, 0, bitmap.width, bitmap.height);
   } finally {
     bitmap.close();
   }
+}
+
+async function decodeImageToRgba(image: Blob) {
+  const bitmap = await createImageBitmap(image);
+  try {
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas 2D context is unavailable");
+    context.drawImage(bitmap, 0, 0);
+    const imageData = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    return {
+      bytes: new Uint8Array(
+        imageData.data.buffer,
+        imageData.data.byteOffset,
+        imageData.data.byteLength,
+      ),
+      width: bitmap.width,
+      height: bitmap.height,
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
+function passesPerceptualAvifGuardrail(
+  metrics: PerceptualMetrics,
+  plan: AvifEncodingPlan,
+) {
+  return (
+    metrics.msSsim >= plan.minMsSsim &&
+    metrics.blurLossPercent <= plan.maxBlurLossPercent &&
+    metrics.perceptualDistance <= plan.maxPerceptualDistance &&
+    metrics.p99MaskedDeltaE <= plan.maxP99DeltaE &&
+    metrics.p95LuminanceError <= plan.maxP95LuminanceError &&
+    metrics.p95ChromaError <= plan.maxP95ChromaError &&
+    metrics.p95AlphaError <= plan.maxP95AlphaError &&
+    metrics.p99AlphaError <= plan.maxP99AlphaError
+  );
+}
+
+function hasNonOpaqueAlpha(rgba: Uint8Array) {
+  for (let index = 3; index < rgba.length; index += 4) {
+    if (rgba[index] !== 255) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function compressPerceptualAvif(
+  file: File,
+  quality: number,
+  compressionGain: number,
+): Promise<CompressResult> {
+  const mod = await initWasm();
+  if (
+    typeof mod?.create_avif_encoding_plan_rgba_with_gain !== "function" ||
+    typeof mod?.compare_avif_candidate_rgba !== "function"
+  ) {
+    throw new Error("WASM module does not expose adaptive AVIF encoding");
+  }
+
+  const sourceFormat = sourceFormatFromFile(file);
+  const source = await decodeImageToRgba(file);
+  const plan = mod.create_avif_encoding_plan_rgba_with_gain(
+    source.bytes,
+    source.width,
+    source.height,
+    clampQuality(quality),
+    file.size,
+    compressionGain,
+  ) as AvifEncodingPlan;
+  const pixelCount = source.width * source.height;
+  const candidateQualities =
+    pixelCount >= 12_000_000
+      ? plan.qualityCandidates.filter((candidate) => candidate < 100).slice(0, 2)
+      : plan.qualityCandidates;
+  const sourceHasAlpha =
+    sourceFormat !== "jpeg" &&
+    hasNonOpaqueAlpha(source.bytes);
+  let fallbackResult: CompressResult | null = null;
+
+  for (const candidateQuality of candidateQualities) {
+    const alphaQuality = sourceHasAlpha
+      ? Math.max(candidateQuality, plan.alphaQualityFloor)
+      : -1;
+    const imageData = {
+      data: new Uint8ClampedArray(
+        source.bytes.buffer,
+        source.bytes.byteOffset,
+        source.bytes.byteLength,
+      ),
+      width: source.width,
+      height: source.height,
+    } as ImageData;
+    const encoded = await encodeWithLibavif(imageData, {
+      quality: candidateQuality,
+      qualityAlpha: alphaQuality,
+      denoiseLevel: 0,
+      tileColsLog2: plan.tileColsLog2,
+      tileRowsLog2: plan.tileRowsLog2,
+      speed: plan.speed,
+      subsample: plan.subsample,
+      chromaDeltaQ: plan.chromaDeltaQ,
+      sharpness: plan.sharpness,
+      tune: plan.tune,
+      enableSharpYUV: plan.enableSharpYuv,
+      bitDepth: plan.bitDepth,
+      lossless: candidateQuality === 100,
+    });
+
+    if (sourceFormat === "avif" && encoded.byteLength >= file.size) {
+      continue;
+    }
+
+    const candidateBlob = new Blob([toBlobPart(encoded)], { type: "image/avif" });
+    const candidate = await decodeImageToRgba(candidateBlob);
+    if (candidate.width !== source.width || candidate.height !== source.height) {
+      continue;
+    }
+    const metrics = mod.compare_avif_candidate_rgba(
+      source.bytes,
+      candidate.bytes,
+      source.width,
+      source.height,
+    ) as PerceptualMetrics;
+
+    fallbackResult = {
+      blob: candidateBlob,
+      mime: "image/avif",
+      ext: "avif",
+      fileName: buildCompressedFileName(file.name, "avif"),
+    };
+
+    if (passesPerceptualAvifGuardrail(metrics, plan)) {
+      return fallbackResult;
+    }
+  }
+
+  if (sourceFormat === "avif") {
+    return originalFileResult(file, sourceFormat);
+  }
+  if (fallbackResult) {
+    return fallbackResult;
+  }
+  throw new Error("AVIF compression could not satisfy perceptual quality guardrails");
 }
 
 async function encodeCanvasJpeg(
@@ -292,15 +422,16 @@ function isJpegCompressionFailure(error?: unknown) {
         ? error
         : String(error ?? "");
 
-  return /unreachable|memory|allocation|JPEG encode failed/i.test(message);
+  return /unreachable|memory|allocation|JPEG encode failed|not supported|avif/i.test(
+    message,
+  );
 }
 
 function shouldUsePngCanvasFallback(
-  file: File,
-  targetFormat?: Exclude<OutputFormat, "webp">,
+  targetFormat?: OutputFormat,
   error?: unknown,
 ) {
-  if (file.type !== "image/png" || (targetFormat && targetFormat !== "png")) {
+  if (targetFormat !== "png") {
     return false;
   }
 
@@ -311,526 +442,175 @@ function shouldUsePngCanvasFallback(
         ? error
         : String(error ?? "");
 
-  return /unreachable|memory|allocation|PNG|quantiz/i.test(message);
-}
-
-async function encodeCanvasWebp(file: File, quality: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
-
-  try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("Canvas 2D context is unavailable");
-    }
-
-    context.drawImage(bitmap, 0, 0);
-    return await canvas.convertToBlob({
-      type: "image/webp",
-      quality: clampQuality(quality) / 100,
-    });
-  } finally {
-    bitmap.close();
-  }
-}
-
-async function compressWebpWithCanvasFallback(
-  file: File,
-  quality = 80,
-  requireSmaller = true,
-): Promise<CompressResult> {
-  let bestBlob: Blob | null = null;
-  let bestAnyBlob: Blob | null = null;
-
-  for (const candidateQuality of buildJpegFallbackQualities(quality)) {
-    const blob = await encodeCanvasWebp(file, candidateQuality);
-
-    if (!bestAnyBlob || blob.size < bestAnyBlob.size) {
-      bestAnyBlob = blob;
-    }
-
-    if (blob.size >= file.size) {
-      continue;
-    }
-
-    if (!bestBlob || blob.size < bestBlob.size) {
-      bestBlob = blob;
-    }
-  }
-
-  const resultBlob = requireSmaller ? bestBlob : bestBlob || bestAnyBlob;
-  if (!resultBlob) {
-    throw new Error("WebP fallback could not produce a usable file");
-  }
-
-  return {
-    blob: resultBlob,
-    mime: "image/webp",
-    ext: "webp",
-    fileName: buildCompressedFileName(file.name, "webp"),
-  };
-}
-
-async function encodeCanvasAvif(file: File, quality: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
-
-  try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("Canvas 2D context is unavailable");
-    }
-
-    context.drawImage(bitmap, 0, 0);
-    return await canvas.convertToBlob({
-      type: "image/avif",
-      quality: clampQuality(quality) / 100,
-    });
-  } finally {
-    bitmap.close();
-  }
-}
-
-async function compressAvifWithCanvasFallback(
-  file: File,
-  quality = 80,
-  requireSmaller = true,
-): Promise<CompressResult> {
-  let bestBlob: Blob | null = null;
-  let bestAnyBlob: Blob | null = null;
-
-  for (const candidateQuality of buildJpegFallbackQualities(quality)) {
-    const blob = await encodeCanvasAvif(file, candidateQuality);
-
-    if (!bestAnyBlob || blob.size < bestAnyBlob.size) {
-      bestAnyBlob = blob;
-    }
-
-    if (blob.size >= file.size) {
-      continue;
-    }
-
-    if (!bestBlob || blob.size < bestBlob.size) {
-      bestBlob = blob;
-    }
-  }
-
-  const resultBlob = requireSmaller ? bestBlob : bestBlob || bestAnyBlob;
-  if (!resultBlob) {
-    throw new Error("AVIF fallback could not produce a usable file");
-  }
-
-  return {
-    blob: resultBlob,
-    mime: "image/avif",
-    ext: "avif",
-    fileName: buildCompressedFileName(file.name, "avif"),
-  };
+  return /unreachable|memory|allocation|PNG|quantiz|not supported|avif/i.test(
+    message,
+  );
 }
 
 async function getWebpCodec() {
   if (!cachedWebpCodec) {
     cachedWebpCodec = import("@jsquash/webp") as unknown as Promise<JsQuashWebpModule>;
   }
-
   return cachedWebpCodec;
 }
 
-type WebpEncodeOptions = NonNullable<Parameters<JsQuashWebpModule["encode"]>[1]>;
-
-function dedupeWebpCandidates(optionsList: WebpEncodeOptions[]) {
-  const seen = new Set<string>();
-  return optionsList.filter((options) => {
-    const key = JSON.stringify(options);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function buildWebpCandidates(
-  file: File,
-  imageData: ImageData,
+function perceptualWebpQualities(
   quality: number,
-): WebpEncodeOptions[] {
-  const normalizedQuality = clampQuality(quality);
-  const transparent = hasTransparency(imageData);
-  const isPngInput = file.type === "image/png";
-  const isWebpInput = file.type === "image/webp";
-  const sourceSizeMb = file.size / (1024 * 1024);
-  const analysis = analyzeImageData(imageData);
-
-  const sizeBias =
-    sourceSizeMb >= 3
-      ? 14
-      : sourceSizeMb >= 2
-        ? 10
-        : sourceSizeMb >= 1
-          ? 6
-          : 2;
-
-  const detailBias =
-    analysis.edgeCoverage >= 0.28
-      ? 0
-      : analysis.edgeCoverage >= 0.18
-        ? 3
-        : 7;
-
-  const flatBias =
-    analysis.flatCoverage >= 0.45
-      ? 8
-      : analysis.flatCoverage >= 0.3
-        ? 4
-        : 0;
-
-  const varianceBias =
-    analysis.lumaVariance <= 0.018
-      ? 6
-      : analysis.lumaVariance <= 0.04
-        ? 3
-        : 0;
-
-  const pixelBias =
-    analysis.pixelCount >= 8_000_000
-      ? 6
-      : analysis.pixelCount >= 4_000_000
-        ? 3
-        : 0;
-
-  const smallPngBias =
-    isPngInput && file.size <= 220 * 1024
-      ? 8
-      : isPngInput && file.size <= 512 * 1024
-        ? 4
-        : 0;
-
-  const webpRecompressBias =
-    isWebpInput
-      ? sourceSizeMb >= 2
-        ? 14
-        : sourceSizeMb >= 1
-          ? 10
-          : sourceSizeMb >= 0.5
-            ? 7
-            : 4
-      : 0;
-
-  const flatWebpBonus =
-    isWebpInput && analysis.flatCoverage >= 0.4
-      ? 6
-      : isWebpInput && analysis.flatCoverage >= 0.28
-        ? 3
-        : 0;
-
-  const aggressiveDrop =
-    sizeBias +
-    detailBias +
-    flatBias +
-    varianceBias +
-    pixelBias +
-    smallPngBias +
-    webpRecompressBias +
-    flatWebpBonus;
-  const qualityBase = Math.max(18, normalizedQuality - aggressiveDrop);
-  const qualityMid = Math.max(14, qualityBase - 8);
-  const qualityLow = Math.max(10, qualityBase - 16);
-
-  if (transparent) {
-    const mostlyFlatTransparent =
-      isPngInput &&
-      analysis.alphaRatio > 0 &&
-      analysis.flatCoverage >= 0.34 &&
-      analysis.edgeCoverage <= 0.22;
-
-    const candidates: WebpEncodeOptions[] = [
-      {
-        quality: Math.max(28, qualityBase),
-        alpha_quality: Math.max(84, normalizedQuality),
-        lossless: 0,
-        method: 6,
-        pass: 4,
-        sns_strength: 24,
-        filter_strength: 12,
-        filter_sharpness: 5,
-        filter_type: 1,
-        autofilter: 1,
-        alpha_compression: 1,
-        alpha_filtering: 2,
-        exact: 0,
-        preprocessing: 0,
-        use_sharp_yuv: 1,
-      },
-      {
-        quality: Math.max(22, qualityMid),
-        alpha_quality: Math.max(78, normalizedQuality - 4),
-        lossless: 0,
-        method: 6,
-        pass: 5,
-        sns_strength: 16,
-        filter_strength: 8,
-        filter_sharpness: 6,
-        filter_type: 1,
-        autofilter: 1,
-        alpha_compression: 1,
-        alpha_filtering: 2,
-        exact: 0,
-        preprocessing: 0,
-        use_sharp_yuv: 1,
-      },
-    ];
-
-    if (mostlyFlatTransparent) {
-      candidates.push(
-        {
-          lossless: 1,
-          method: 6,
-          exact: 0,
-          image_hint: 2,
-        },
-        {
-          lossless: 1,
-          method: 6,
-          exact: 0,
-          near_lossless: 72,
-          image_hint: 2,
-        },
-        {
-          lossless: 1,
-          method: 6,
-          exact: 0,
-          near_lossless: 54,
-          image_hint: 2,
-        },
-      );
-    }
-
-    return dedupeWebpCandidates(candidates);
-  }
-
-  const mostlyFlatOpaquePng =
-    isPngInput &&
-    analysis.flatCoverage >= 0.34 &&
-    analysis.edgeCoverage <= 0.22 &&
-    analysis.lumaVariance <= 0.05;
-
-  const candidates: WebpEncodeOptions[] = [
-    {
-      quality: Math.max(isPngInput ? 24 : isWebpInput ? 26 : 34, qualityBase),
-      lossless: 0,
-      method: 6,
-      pass: 4,
-      sns_strength: isPngInput ? 14 : isWebpInput ? 42 : 68,
-      filter_strength: isPngInput ? 12 : isWebpInput ? 18 : 28,
-      filter_sharpness: isPngInput ? 6 : isWebpInput ? 5 : 4,
-      filter_type: 1,
-      autofilter: 1,
-      preprocessing: 0,
-      segments: 4,
-      use_sharp_yuv: 1,
-    },
-    {
-      quality: Math.max(isPngInput ? 18 : isWebpInput ? 20 : 28, qualityMid),
-      lossless: 0,
-      method: 6,
-      pass: 5,
-      sns_strength: isPngInput ? 6 : isWebpInput ? 24 : 48,
-      filter_strength: isPngInput ? 6 : isWebpInput ? 10 : 20,
-      filter_sharpness: isPngInput ? 7 : isWebpInput ? 6 : 5,
-      filter_type: 1,
-      autofilter: 1,
-      preprocessing: 0,
-      segments: 4,
-      use_sharp_yuv: 1,
-    },
-    {
-      quality: Math.max(isPngInput ? 12 : isWebpInput ? 14 : 22, qualityLow),
-      lossless: 0,
-      method: 6,
-      pass: 6,
-      sns_strength: isPngInput ? 0 : isWebpInput ? 8 : 28,
-      filter_strength: isPngInput ? 4 : isWebpInput ? 6 : 14,
-      filter_sharpness: 7,
-      filter_type: 1,
-      autofilter: 1,
-      preprocessing: 0,
-      segments: 4,
-      use_sharp_yuv: 1,
-    },
-  ];
-
-  if (isPngInput) {
-    candidates.push({
-      quality: Math.max(8, qualityLow - 10),
-      lossless: 0,
-      method: 6,
-      pass: 6,
-      sns_strength: 0,
-      filter_strength: 2,
-      filter_sharpness: 7,
-      filter_type: 1,
-      autofilter: 1,
-      preprocessing: 0,
-      segments: 4,
-      use_sharp_yuv: 1,
-    });
-  }
-
-  if (isWebpInput) {
-    candidates.push(
-      {
-        quality: Math.max(12, qualityLow - 8),
-        lossless: 0,
-        method: 6,
-        pass: 6,
-        sns_strength: 4,
-        filter_strength: 4,
-        filter_sharpness: 7,
-        filter_type: 1,
-        autofilter: 1,
-        preprocessing: 0,
-        segments: 4,
-        use_sharp_yuv: 1,
-      },
-      {
-        quality: Math.max(8, qualityLow - 14),
-        lossless: 0,
-        method: 6,
-        pass: 6,
-        sns_strength: 0,
-        filter_strength: 2,
-        filter_sharpness: 7,
-        filter_type: 1,
-        autofilter: 1,
-        preprocessing: 0,
-        segments: 4,
-        use_sharp_yuv: 1,
-      },
-    );
-  }
-
-  if (mostlyFlatOpaquePng) {
-    candidates.push(
-      {
-        lossless: 1,
-        method: 6,
-        exact: 0,
-        near_lossless: 72,
-        image_hint: 2,
-      },
-      {
-        lossless: 1,
-        method: 6,
-        exact: 0,
-        near_lossless: 54,
-        image_hint: 2,
-      },
-      {
-        lossless: 1,
-        method: 6,
-        exact: 0,
-        near_lossless: 36,
-        image_hint: 2,
-      },
-    );
-  }
-
-  return dedupeWebpCandidates(candidates);
-}
-
-async function encodeSmallestWebp(
-  codec: JsQuashWebpModule,
-  imageData: ImageData,
-  optionsList: WebpEncodeOptions[],
+  sameFormat: boolean,
+  compressionGain: number,
 ) {
-  let smallest: Uint8Array | null = null;
+  const normalized = clampQuality(quality);
+  const candidates = sameFormat
+    ? [Math.max(68, normalized - 12), Math.max(75, normalized - 5)]
+    : [Math.max(72, normalized - 8), Math.max(80, normalized)];
+  return Array.from(
+    new Set(
+      candidates.map((candidate) =>
+        amplifyQualityLoss(clampQuality(candidate), compressionGain, 20),
+      ),
+    ),
+  ).sort((a, b) => a - b);
+}
 
-  for (const options of optionsList) {
-    const encoded = new Uint8Array(await codec.encode(imageData, options));
-    if (!smallest || encoded.byteLength < smallest.byteLength) {
-      smallest = encoded;
+function passesPerceptualWebpGuardrail(
+  metrics: PerceptualMetrics,
+  compressionGain: number,
+) {
+  return (
+    metrics.ssim >= amplifyMinSimilarity(0.95, compressionGain) &&
+    metrics.msSsim >= amplifyMinSimilarity(0.974, compressionGain) &&
+    metrics.blurLossPercent <= amplifyMaxError(3.5, compressionGain) &&
+    metrics.overallQualityScore >=
+      amplifyMinSimilarity(0.96, compressionGain) * 100
+  );
+}
+
+async function compressPerceptualWebp(
+  file: File,
+  quality: number,
+  compressionGain: number,
+): Promise<CompressResult> {
+  const [codec, imageData, mod, sourceBuffer] = await Promise.all([
+    getWebpCodec(),
+    decodeFileToImageData(file),
+    initWasm(),
+    file.arrayBuffer(),
+  ]);
+  const source = new Uint8Array(sourceBuffer);
+  const sourceFormat = sourceFormatFromFile(file);
+  const sameFormat = sourceFormat === "webp";
+  const candidates: WebpCandidate[] = [];
+
+  for (const candidateQuality of perceptualWebpQualities(
+    quality,
+    sameFormat,
+    compressionGain,
+  )) {
+    try {
+      const encoded = new Uint8Array(
+        await codec.encode(imageData, {
+          quality: candidateQuality,
+          alpha_quality: 100,
+          lossless: 0,
+          method: 4,
+          pass: 1,
+          exact: 1,
+          alpha_compression: 1,
+          alpha_filtering: 2,
+          autofilter: 1,
+          use_sharp_yuv: 1,
+        }),
+      );
+
+      let passes = imageData.width < 3 || imageData.height < 3;
+      let metrics: PerceptualMetrics | null = null;
+      if (
+        !passes &&
+        typeof mod?.compare_image_quality_for_guardrails === "function"
+      ) {
+        try {
+          metrics = mod.compare_image_quality_for_guardrails(
+            source,
+            encoded,
+          ) as PerceptualMetrics;
+          passes = passesPerceptualWebpGuardrail(metrics, compressionGain);
+        } catch {
+          // Some source decoders (notably AVIF) may be unavailable in the
+          // metrics module. The successfully encoded WebP is still valid.
+        }
+      }
+      candidates.push({ bytes: encoded, metrics, passesGuardrail: passes });
+    } catch {
+      // A failed candidate must not discard other successful lossy encodes.
     }
   }
 
-  if (!smallest) {
-    throw new Error("Failed to encode WebP image");
+  const passingCandidates = candidates.filter(
+    (candidate) => candidate.passesGuardrail,
+  );
+  const selected =
+    passingCandidates.sort((left, right) =>
+      left.bytes.byteLength - right.bytes.byteLength,
+    )[0] ??
+    candidates.sort(
+      (left, right) => left.bytes.byteLength - right.bytes.byteLength,
+    )[0];
+
+  if (!selected) {
+    if (sameFormat) return originalFileResult(file, sourceFormat);
+    throw new Error("WebP compression produced no lossy candidate");
   }
 
-  return smallest;
-}
-
-async function compressWithWebpCodec(
-  file: File,
-  quality = 80,
-  requireSmaller = false,
-): Promise<CompressResult> {
-  const codec = await getWebpCodec();
-  const imageData = await decodeFileToImageData(file);
-  const webpCandidates = buildWebpCandidates(file, imageData, quality);
-
-  const bytes = await encodeSmallestWebp(codec, imageData, webpCandidates);
-  if (requireSmaller && bytes.byteLength >= file.size) {
-    throw new Error("WebP output is not smaller than the source image");
-  }
-
-  const blob = new Blob([toBlobPart(bytes)], { type: "image/webp" });
-  return {
-    blob,
+  return keepOriginalWhenNotSmaller(file, {
+    blob: new Blob([toBlobPart(selected.bytes)], { type: "image/webp" }),
     mime: "image/webp",
     ext: "webp",
     fileName: buildCompressedFileName(file.name, "webp"),
-  };
+  }, "webp", sourceFormat);
 }
 
 async function compressWithWasmCodec(
   file: File,
   quality = 80,
-  targetFormat: Exclude<OutputFormat, "webp">,
+  targetFormat: OutputFormat,
   allowAlphaLoss = false,
+  compressionGain = 1,
 ): Promise<CompressResult> {
   const mod = await initWasm();
   if (!mod || typeof mod.compress_image !== "function") {
     throw new Error("WASM module failed to load correctly");
   }
 
-  const buffer = await file.arrayBuffer();
-  const input = new Uint8Array(buffer);
   const sourceFormat = sourceFormatFromFile(file);
   const requestedFormat = targetFormat ?? sourceFormat;
   const requireSmaller = requiresSmallerResult(requestedFormat, sourceFormat);
-  try {
-    const output =
-      targetFormat &&
-      allowAlphaLoss &&
-      typeof mod.compress_image_to_format_with_options === "function"
-        ? mod.compress_image_to_format_with_options(input, quality, targetFormat, true)
-        : targetFormat && typeof mod.compress_image_to_format === "function"
-          ? mod.compress_image_to_format(input, quality, targetFormat)
-          : mod.compress_image(input, quality);
 
-    const bytes = output.bytes as Uint8Array;
-    const mime = output.mime as string;
-    const ext = output.ext as string;
-
-    if (requestedFormat === "jpeg" && bytes.byteLength >= file.size) {
-      throw new Error("JPEG output is not smaller than the source image");
-    }
-
-    return {
-      blob: new Blob([toBlobPart(bytes)], { type: mime }),
-      mime,
-      ext,
-      fileName: buildCompressedFileName(file.name, ext),
-    };
-  } catch (error) {
-    if (requestedFormat === "jpeg" && isJpegCompressionFailure(error)) {
-      return compressJpegWithCanvasFallback(file, quality, requireSmaller);
-    }
-    if (shouldUsePngCanvasFallback(file, targetFormat, error)) {
-      if (requireSmaller) {
-        return compressPngWithCanvasFallback(file);
-      }
+  if (
+    sourceFormat === "avif" &&
+    requestedFormat === "png" &&
+    typeof mod.compress_rgba_to_png_with_gain === "function"
+  ) {
+    try {
+      const imageData = await decodeFileToImageData(file);
+      const output = mod.compress_rgba_to_png_with_gain(
+        imageData.data,
+        imageData.width,
+        imageData.height,
+        quality,
+        file.size,
+        compressionGain,
+      );
+      const bytes = output.bytes as Uint8Array;
+      const mime = output.mime as string;
+      const ext = output.ext as string;
+      return {
+        blob: new Blob([toBlobPart(bytes)], { type: mime }),
+        mime,
+        ext,
+        fileName: buildCompressedFileName(file.name, ext),
+      };
+    } catch (error) {
+      if (!shouldUsePngCanvasFallback(requestedFormat, error)) throw error;
       return {
         blob: await encodeCanvasPng(file),
         mime: "image/png",
@@ -838,10 +618,80 @@ async function compressWithWasmCodec(
         fileName: buildCompressedFileName(file.name, "png"),
       };
     }
-    if (requestedFormat === "avif") {
-      return compressAvifWithCanvasFallback(file, quality, requireSmaller);
+  }
+
+  const buffer = await file.arrayBuffer();
+  const input = new Uint8Array(buffer);
+  try {
+    const output =
+      targetFormat &&
+      typeof mod.compress_image_to_format_with_plan_options === "function"
+        ? mod.compress_image_to_format_with_plan_options(
+            input,
+            quality,
+            targetFormat,
+            allowAlphaLoss,
+            compressionGain,
+          )
+        : targetFormat &&
+            allowAlphaLoss &&
+            typeof mod.compress_image_to_format_with_options === "function"
+          ? mod.compress_image_to_format_with_options(input, quality, targetFormat, true)
+          : targetFormat && typeof mod.compress_image_to_format === "function"
+            ? mod.compress_image_to_format(input, quality, targetFormat)
+            : mod.compress_image(input, quality);
+
+    const bytes = output.bytes as Uint8Array;
+    const mime = output.mime as string;
+    const ext = output.ext as string;
+
+    return keepOriginalWhenNotSmaller(file, {
+      blob: new Blob([toBlobPart(bytes)], { type: mime }),
+      mime,
+      ext,
+      fileName: buildCompressedFileName(file.name, ext),
+    }, requestedFormat, sourceFormat);
+  } catch (error) {
+    try {
+      if (requestedFormat === "jpeg" && isJpegCompressionFailure(error)) {
+        const result = await compressJpegWithCanvasFallback(
+          file,
+          amplifyQualityLoss(quality, compressionGain, 20),
+          requireSmaller,
+        );
+        return keepOriginalWhenNotSmaller(
+          file,
+          result,
+          requestedFormat,
+          sourceFormat,
+        );
+      }
+      if (shouldUsePngCanvasFallback(targetFormat, error)) {
+        const result = requireSmaller
+          ? await compressPngWithCanvasFallback(file)
+          : {
+              blob: await encodeCanvasPng(file),
+              mime: "image/png",
+              ext: "png",
+              fileName: buildCompressedFileName(file.name, "png"),
+            };
+        return keepOriginalWhenNotSmaller(
+          file,
+          result,
+          requestedFormat,
+          sourceFormat,
+        );
+      }
+    } catch (fallbackError) {
+      if (requestedFormat === sourceFormat) {
+        return originalFileResult(file, sourceFormat);
+      }
+      throw fallbackError;
     }
 
+    if (requestedFormat === sourceFormat) {
+      return originalFileResult(file, sourceFormat);
+    }
     throw error;
   }
 }
@@ -852,16 +702,72 @@ export async function compressImageWithAlgorithms(
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
 ): Promise<CompressResult> {
-  const sourceFormat = sourceFormatFromFile(file);
+  const features = extractCompressionFeatures(
+    file,
+    targetFormat,
+    allowAlphaLoss,
+  );
+  const analysis = analyzeCompressionFeatures(features);
+  const compressionGain = compressionGainForFormat(targetFormat);
+  const plan = createCompressionPlan(
+    analysis,
+    quality,
+    BUTTERAUGLI_ENABLED,
+    compressionGain,
+  );
+  const encoder = selectCompressionEncoder(plan, {
+    wasm: (candidateQuality) =>
+      compressWithWasmCodec(
+        file,
+        candidateQuality,
+        targetFormat,
+        allowAlphaLoss,
+        plan.compressionGain,
+      ),
+    libwebp: (candidateQuality) =>
+      compressPerceptualWebp(file, candidateQuality, plan.compressionGain),
+    libavif: async (candidateQuality) => {
+      try {
+        return await compressPerceptualAvif(
+          file,
+          candidateQuality,
+          plan.compressionGain,
+        );
+      } catch (error) {
+        if (plan.sameFormat) return originalFileResult(file, "avif");
+        throw error;
+      }
+    },
+  });
 
-  if (targetFormat === "webp") {
-    const requireSmaller = requiresSmallerResult(targetFormat, sourceFormat);
-    try {
-      return await compressWithWebpCodec(file, quality, requireSmaller);
-    } catch {
-      return compressWebpWithCanvasFallback(file, quality, requireSmaller);
-    }
+  let evaluator: PerceptualEvaluator | null = null;
+  if (plan.evaluator === "butteraugli") {
+    const source = await decodeImageToRgba(file);
+    const butteraugli = await createButteraugliEvaluator(source);
+    evaluator = {
+      async score(candidateBlob) {
+        const candidate = await decodeImageToRgba(candidateBlob);
+        return (await butteraugli.compare(candidate)).score;
+      },
+      dispose() {
+        butteraugli.free();
+      },
+    };
   }
 
-  return compressWithWasmCodec(file, quality, targetFormat, allowAlphaLoss);
+  return executeCompressionPlan(
+    file,
+    plan,
+    encoder,
+    evaluator,
+    amplifyMaxError(BUTTERAUGLI_TARGET_SCORE, plan.compressionGain),
+  );
+}
+
+export async function compressImageAutomatically(
+  file: File,
+  quality = 80,
+): Promise<CompressResult> {
+  const recommendedFormat = await predictRecommendedFormat(file);
+  return compressImageWithAlgorithms(file, quality, recommendedFormat, false);
 }

@@ -3,8 +3,13 @@
 import { getMetricsApiPath } from "@/utils/api-endpoints";
 
 const METRICS_API_PATH = getMetricsApiPath();
+const HAS_EXPLICIT_METRICS_API = Boolean(
+  process.env.NEXT_PUBLIC_METRICS_API_PATH ||
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+);
 const METRICS_ENABLED =
   Boolean(METRICS_API_PATH) &&
+  (process.env.NODE_ENV !== "development" || HAS_EXPLICIT_METRICS_API) &&
   process.env.NEXT_PUBLIC_METRICS_ENABLED !== "false";
 const MAX_DELTA_PER_REQUEST = 20;
 const MAX_EVENTS_PER_REQUEST = 20;
@@ -33,7 +38,6 @@ let retryDelayMs = FLUSH_DELAY_MS;
 type MetricsReadResponse = {
   totalCompressed?: number;
   showCompressedCount?: boolean;
-  showCompareSection?: boolean;
 };
 
 function makeSessionId() {
@@ -197,7 +201,6 @@ async function readTotalCount() {
     return {
       totalCompressed: 0,
       showCompressedCount: false,
-      showCompareSection: false,
     };
   }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
@@ -346,7 +349,6 @@ export async function loadTotalCompressedCount() {
 
 export async function loadHomeDisplayConfig(defaults: {
   showCompressedCount: boolean;
-  showCompareSection: boolean;
 }) {
   if (!METRICS_ENABLED || !METRICS_API_PATH) {
     return defaults;
@@ -359,10 +361,6 @@ export async function loadHomeDisplayConfig(defaults: {
         typeof data.showCompressedCount === "boolean"
           ? data.showCompressedCount
           : defaults.showCompressedCount,
-      showCompareSection:
-        typeof data.showCompareSection === "boolean"
-          ? data.showCompareSection
-          : defaults.showCompareSection,
     };
   } catch (error) {
     console.error("Home display config read failed:", error);

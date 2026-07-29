@@ -1,28 +1,5 @@
 /* @ts-self-types="./image_wasm.d.ts" */
 
-/**
- * Chroma subsampling format
- * @enum {0 | 1 | 2 | 3}
- */
-export const ChromaSampling = Object.freeze({
-    /**
-     * Both vertically and horizontally subsampled.
-     */
-    Cs420: 0, "0": "Cs420",
-    /**
-     * Horizontally subsampled.
-     */
-    Cs422: 1, "1": "Cs422",
-    /**
-     * Not subsampled.
-     */
-    Cs444: 2, "2": "Cs444",
-    /**
-     * Monochrome.
-     */
-    Cs400: 3, "3": "Cs400",
-});
-
 export class CompressionResult {
     static __wrap(ptr) {
         ptr = ptr >>> 0;
@@ -116,6 +93,42 @@ export function calculate_image_quality_score(original_input, assessed_input) {
 
 /**
  * @param {Uint8Array} original_input
+ * @param {Uint8Array} candidate_input
+ * @returns {any}
+ */
+export function compare_avif_candidate_quality(original_input, candidate_input) {
+    const ptr0 = passArray8ToWasm0(original_input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(candidate_input, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compare_avif_candidate_quality(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} original_rgba
+ * @param {Uint8Array} candidate_rgba
+ * @param {number} width
+ * @param {number} height
+ * @returns {any}
+ */
+export function compare_avif_candidate_rgba(original_rgba, candidate_rgba, width, height) {
+    const ptr0 = passArray8ToWasm0(original_rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(candidate_rgba, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compare_avif_candidate_rgba(ptr0, len0, ptr1, len1, width, height);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} original_input
  * @param {Uint8Array} compressed_input
  * @returns {any}
  */
@@ -125,6 +138,23 @@ export function compare_image_quality(original_input, compressed_input) {
     const ptr1 = passArray8ToWasm0(compressed_input, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.compare_image_quality(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} original_input
+ * @param {Uint8Array} compressed_input
+ * @returns {any}
+ */
+export function compare_image_quality_for_guardrails(original_input, compressed_input) {
+    const ptr0 = passArray8ToWasm0(original_input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(compressed_input, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compare_image_quality_for_guardrails(ptr0, len0, ptr1, len1);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -185,6 +215,26 @@ export function compress_image_to_format_with_options(input, quality, target_for
 
 /**
  * @param {Uint8Array} input
+ * @param {number} quality
+ * @param {string} target_format
+ * @param {boolean} allow_alpha_loss
+ * @param {number} compression_gain
+ * @returns {CompressionResult}
+ */
+export function compress_image_to_format_with_plan_options(input, quality, target_format, allow_alpha_loss, compression_gain) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(target_format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_image_to_format_with_plan_options(ptr0, len0, quality, ptr1, len1, allow_alpha_loss, compression_gain);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
  * @param {number} compression_level
  * @returns {CompressionResult}
  */
@@ -196,6 +246,96 @@ export function compress_png_with_deflate(input, compression_level) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @returns {CompressionResult}
+ */
+export function compress_rgba_to_png(rgba, width, height, quality, source_size_bytes) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_rgba_to_png(ptr0, len0, width, height, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @param {number} compression_gain
+ * @returns {CompressionResult}
+ */
+export function compress_rgba_to_png_with_gain(rgba, width, height, quality, source_size_bytes, compression_gain) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compress_rgba_to_png_with_gain(ptr0, len0, width, height, quality, source_size_bytes, compression_gain);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompressionResult.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @returns {any}
+ */
+export function create_avif_encoding_plan(input, quality, source_size_bytes) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.create_avif_encoding_plan(ptr0, len0, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @returns {any}
+ */
+export function create_avif_encoding_plan_rgba(rgba, width, height, quality, source_size_bytes) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.create_avif_encoding_plan_rgba(ptr0, len0, width, height, quality, source_size_bytes);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} source_size_bytes
+ * @param {number} compression_gain
+ * @returns {any}
+ */
+export function create_avif_encoding_plan_rgba_with_gain(rgba, width, height, quality, source_size_bytes, compression_gain) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.create_avif_encoding_plan_rgba_with_gain(ptr0, len0, width, height, quality, source_size_bytes, compression_gain);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -310,6 +450,40 @@ export function generate_share_thumbnail(input) {
     return v2;
 }
 
+/**
+ * @param {Uint8Array} input
+ * @returns {any}
+ */
+export function predict_compression(input) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.predict_compression(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} source_size_bytes
+ * @param {string} source_format
+ * @returns {any}
+ */
+export function predict_compression_rgba(rgba, width, height, source_size_bytes, source_format) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(source_format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.predict_compression_rgba(ptr0, len0, width, height, source_size_bytes, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -344,6 +518,10 @@ function __wbg_get_imports() {
             const ret = new Object();
             return ret;
         },
+        __wbg_new_3eb36ae241fe6f44: function() {
+            const ret = new Array();
+            return ret;
+        },
         __wbg_new_dd2b680c8bf6ae29: function(arg0) {
             const ret = new Uint8Array(arg0);
             return ret;
@@ -354,6 +532,10 @@ function __wbg_get_imports() {
         },
         __wbg_prototypesetcall_bdcdcc5842e4d77d: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+        },
+        __wbg_push_8ffdcb2063340ba5: function(arg0, arg1) {
+            const ret = arg0.push(arg1);
+            return ret;
         },
         __wbg_set_6cb8631f80447a67: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);

@@ -1,6 +1,9 @@
 "use client";
 
-import { compressImageWithAlgorithms } from "@/utils/compress-algorithms";
+import {
+  compressImageAutomatically,
+  compressImageWithAlgorithms,
+} from "@/utils/compress-algorithms";
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
 import { initWasm } from "@/utils/wasm-runtime";
 
@@ -22,6 +25,17 @@ export type ImageQualityComparison = {
   compressedEdgeEnergy: number;
   originalLaplacianVariance: number;
   compressedLaplacianVariance: number;
+  meanDeltaE: number;
+  p95DeltaE: number;
+  p99DeltaE: number;
+  p95MaskedDeltaE: number;
+  p99MaskedDeltaE: number;
+  p95LuminanceError: number;
+  p95ChromaError: number;
+  perceptualDistance: number;
+  meanAlphaError: number;
+  p95AlphaError: number;
+  p99AlphaError: number;
 };
 
 export type ImageAnalysisMetrics = {
@@ -32,12 +46,21 @@ export type ImageAnalysisMetrics = {
   sourceSizeMb: number;
   sourceFormat: string;
   hasAlpha: boolean;
+  hasAlphaChannel: boolean;
+  hasRealAlpha: boolean;
+  alphaMin: number;
+  alphaMax: number;
   alphaRatio: number;
+  transparentPixelRatio: number;
+  semiTransparentRatio: number;
   sampleStride: number;
   sampleCount: number;
   edgeStrength: number;
   brightnessVariance: number;
   colorComplexity: number;
+  colorEntropy: number;
+  noiseLevel: number;
+  gradientCoverage: number;
   detailCoverage: number;
   flatCoverage: number;
   complexityScore: number;
@@ -49,8 +72,11 @@ export async function compressWithWasm(
   quality = 80,
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
+  automatic = false,
 ) {
-  return compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
+  return automatic
+    ? compressImageAutomatically(file, quality)
+    : compressImageWithAlgorithms(file, quality, targetFormat, allowAlphaLoss);
 }
 
 export async function compareImageQuality(

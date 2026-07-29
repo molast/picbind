@@ -9,7 +9,6 @@ export default function AdminDashboard() {
     <AdminDashboardView
       {...admin}
       onCompressedCountChange={admin.setShowCompressedCount}
-      onCompareSectionChange={admin.setShowCompareSection}
       onSave={admin.saveConfig}
       onRefresh={admin.refreshState}
     />

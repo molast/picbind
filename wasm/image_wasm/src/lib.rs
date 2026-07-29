@@ -13,6 +13,7 @@ pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_INPUT_MB_TEXT: &str = "5 MB";
 const MAX_SHARE_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_SHARE_THUMBNAIL_BYTES: usize = 10 * 1024;
+const MAX_AVIF_INTERMEDIATE_BYTES: usize = 128 * 1024 * 1024;
 
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -25,6 +26,34 @@ pub fn ensure_input_size_limit(input: &[u8]) -> Result<(), JsValue> {
         )));
     }
     Ok(())
+}
+
+fn ensure_avif_intermediate_size_limit(input: &[u8]) -> Result<(), JsValue> {
+    if input.len() > MAX_AVIF_INTERMEDIATE_BYTES {
+        return Err(JsValue::from_str(
+            "Decoded AVIF intermediate exceeds 128 MB",
+        ));
+    }
+    Ok(())
+}
+
+fn rgba_image_from_bytes(
+    input: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<image::RgbaImage, JsValue> {
+    ensure_avif_intermediate_size_limit(input)?;
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| JsValue::from_str("RGBA dimensions overflow"))?;
+    if input.len() != expected_len {
+        return Err(JsValue::from_str(
+            "RGBA byte length does not match dimensions",
+        ));
+    }
+    image::RgbaImage::from_raw(width, height, input.to_vec())
+        .ok_or_else(|| JsValue::from_str("Invalid RGBA image"))
 }
 
 #[wasm_bindgen]
@@ -94,6 +123,54 @@ pub fn compress_image_to_format_with_options(
 }
 
 #[wasm_bindgen]
+pub fn compress_rgba_to_png(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<CompressionResult, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::pipeline::compress_dynamic_image_to_png(&img, quality, source_size_bytes)
+}
+
+#[wasm_bindgen]
+pub fn compress_rgba_to_png_with_gain(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::pipeline::compress_dynamic_image_to_png_with_gain(
+        &img,
+        quality,
+        source_size_bytes,
+        compression_gain,
+    )
+}
+
+#[wasm_bindgen]
+pub fn compress_image_to_format_with_plan_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
+    core::pipeline::compress_image_to_format_with_plan_options(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        compression_gain,
+    )
+}
+
+#[wasm_bindgen]
 pub fn create_zip_from_items(items: Array) -> Result<Vec<u8>, JsValue> {
     let mut entries = Vec::with_capacity(items.length() as usize);
 
@@ -123,6 +200,17 @@ pub fn compare_image_quality(
 }
 
 #[wasm_bindgen]
+pub fn compare_image_quality_for_guardrails(
+    original_input: &[u8],
+    compressed_input: &[u8],
+) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(original_input)?;
+    ensure_input_size_limit(compressed_input)?;
+    core::metrics::compare_image_quality_for_guardrails(original_input, compressed_input)?
+        .to_js_value()
+}
+
+#[wasm_bindgen]
 pub fn calculate_image_quality_score(
     original_input: &[u8],
     assessed_input: &[u8],
@@ -136,6 +224,98 @@ pub fn calculate_image_quality_score(
 pub fn analyze_image_metrics(input: &[u8]) -> Result<JsValue, JsValue> {
     ensure_input_size_limit(input)?;
     core::analysis::analyze_image_metrics(input)?.to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn predict_compression(input: &[u8]) -> Result<JsValue, JsValue> {
+    ensure_input_size_limit(input)?;
+    core::predictor::predict_image(input)?.to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn predict_compression_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source_size_bytes: usize,
+    source_format: &str,
+) -> Result<JsValue, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::predictor::predict_dynamic_image(&img, source_size_bytes, source_format).to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn create_avif_encoding_plan(
+    input: &[u8],
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<JsValue, JsValue> {
+    ensure_avif_intermediate_size_limit(input)?;
+    let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let img = image::load_from_memory_with_format(input, format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    core::quality::avif_encoding_plan(&img, quality, source_size_bytes).to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn compare_avif_candidate_quality(
+    original_input: &[u8],
+    candidate_input: &[u8],
+) -> Result<JsValue, JsValue> {
+    ensure_avif_intermediate_size_limit(original_input)?;
+    ensure_avif_intermediate_size_limit(candidate_input)?;
+    core::metrics::compare_image_quality_for_guardrails(original_input, candidate_input)?
+        .to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn create_avif_encoding_plan_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+) -> Result<JsValue, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::quality::avif_encoding_plan(&img, quality, source_size_bytes).to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn create_avif_encoding_plan_rgba_with_gain(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    source_size_bytes: usize,
+    compression_gain: f64,
+) -> Result<JsValue, JsValue> {
+    let img = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    core::quality::avif_encoding_plan_with_gain(&img, quality, source_size_bytes, compression_gain)
+        .to_js_value()
+}
+
+#[wasm_bindgen]
+pub fn compare_avif_candidate_rgba(
+    original_rgba: &[u8],
+    candidate_rgba: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<JsValue, JsValue> {
+    let original = DynamicImage::ImageRgba8(rgba_image_from_bytes(original_rgba, width, height)?);
+    let candidate = DynamicImage::ImageRgba8(rgba_image_from_bytes(candidate_rgba, width, height)?);
+    let max_edge = width.max(height);
+    let (original, candidate) = if max_edge > 1920 {
+        let scale = 1920.0 / max_edge as f64;
+        let target_width = ((width as f64 * scale).round() as u32).max(1);
+        let target_height = ((height as f64 * scale).round() as u32).max(1);
+        (
+            original.resize_exact(target_width, target_height, FilterType::Triangle),
+            candidate.resize_exact(target_width, target_height, FilterType::Triangle),
+        )
+    } else {
+        (original, candidate)
+    };
+    core::metrics::compare_dynamic_images_for_guardrails(&original, &candidate)?.to_js_value()
 }
 
 fn square_crop(img: DynamicImage) -> DynamicImage {

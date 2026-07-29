@@ -20,7 +20,6 @@ type FormatMetrics = {
 
 type MetricsConfig = {
   showCompressedCount: boolean;
-  showCompareSection: boolean;
   updatedAt: string;
 };
 
@@ -73,7 +72,6 @@ function json(data: unknown, init?: ResponseInit) {
 function createInitialConfig(): MetricsConfig {
   return {
     showCompressedCount: false,
-    showCompareSection: false,
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -84,10 +82,6 @@ function normalizeConfig(input: Partial<MetricsConfig> | null): MetricsConfig {
     showCompressedCount:
       typeof input?.showCompressedCount === "boolean"
         ? input.showCompressedCount
-        : false,
-    showCompareSection:
-      typeof input?.showCompareSection === "boolean"
-        ? input.showCompareSection
         : false,
     updatedAt: input?.updatedAt || initial.updatedAt,
   };
@@ -171,7 +165,6 @@ function publicMetrics(counter: MetricsCounterState, config: MetricsConfig) {
     totalSavedBytes: counter.totalSavedBytes,
     formatStats: counter.formatStats,
     showCompressedCount: config.showCompressedCount,
-    showCompareSection: config.showCompareSection,
   };
 }
 
@@ -473,14 +466,10 @@ async function handleAdminState(request: Request, env: Env) {
 
   const body = (await request.json().catch(() => ({}))) as {
     showCompressedCount?: boolean;
-    showCompareSection?: boolean;
   };
   const config = await readConfig(env);
   if (typeof body.showCompressedCount === "boolean") {
     config.showCompressedCount = body.showCompressedCount;
-  }
-  if (typeof body.showCompareSection === "boolean") {
-    config.showCompareSection = body.showCompareSection;
   }
   config.updatedAt = new Date().toISOString();
   await writeConfig(env, config);
