@@ -18,6 +18,10 @@
           <p>Lightweight vector animation instruction lab</p>
         </div>
         <div class="header-actions">
+          <button id="clear-button" class="icon-command secondary" type="button" title="Clear commands and effects">
+            <span aria-hidden="true">×</span>
+            Clear
+          </button>
           <button id="reset-button" class="icon-command secondary" type="button" title="Reset preset">
             <span aria-hidden="true">↺</span>
             Reset
@@ -42,18 +46,32 @@
             </div>
           </section>
 
+          <fieldset class="animation-mode" aria-label="Animation assignment mode">
+            <legend>Animation mode</legend>
+            <label>
+              <input type="radio" name="animation-mode" value="synchronized" checked />
+              <span>Synchronized</span>
+            </label>
+            <label>
+              <input type="radio" name="animation-mode" value="perSegment" />
+              <span>Per segment</span>
+            </label>
+          </fieldset>
+
+          <div id="per-segment-modules" class="per-segment-modules" hidden></div>
+
           <section class="control-section">
-            <div class="section-heading"><span class="section-index">01</span><h2>Transform</h2></div>
+            <div class="section-heading"><span class="section-index">02</span><h2>Transform</h2></div>
             <div class="command-grid" data-group="transform">
               <button class="command" data-command="translate" type="button">Translate</button>
-              <button class="command active" data-command="scale" type="button">Scale</button>
-              <button class="command active" data-command="rotate" type="button">Rotate 720°</button>
+              <button class="command" data-command="scale" type="button">Scale</button>
+              <button class="command" data-command="rotate" type="button">Rotate 720°</button>
               <button class="command" data-command="skew" type="button">Skew</button>
             </div>
           </section>
 
           <section class="control-section">
-            <div class="section-heading"><span class="section-index">02</span><h2>Motion Path</h2></div>
+            <div class="section-heading"><span class="section-index">03</span><h2>Motion Path</h2></div>
             <div class="command-grid three" data-group="path" data-exclusive="true">
               <button class="command" data-command="line" type="button">Line</button>
               <button class="command" data-command="bezier" type="button">Bezier</button>
@@ -61,15 +79,29 @@
             </div>
           </section>
 
-          <section class="control-section">
+          <section class="control-section motion-frames-control">
             <div class="section-heading timeline-heading">
-              <span class="section-index">03</span>
+              <span class="section-index">01</span>
               <h2>Motion Frames</h2>
               <label class="mini-toggle">Enabled <input id="timeline-enabled" type="checkbox" checked /></label>
             </div>
-            <div id="frame-strip" class="frame-strip" aria-label="Motion frames"></div>
+            <div id="frame-strip" class="frame-strip" role="listbox" aria-label="Motion frame segments"></div>
+            <div class="system-path-options" aria-label="Add system path">
+              <button type="button" data-add-system-path="circle" title="Add circle path" aria-label="Add circle path">
+                <svg viewBox="0 0 48 24" aria-hidden="true"><path d="M 24 3 A 9 9 0 1 1 23.99 3" /></svg>
+              </button>
+              <button type="button" data-add-system-path="square" title="Add square path" aria-label="Add square path">
+                <svg viewBox="0 0 48 24" aria-hidden="true"><path d="M 15 3 H 33 V 21 H 15 Z" /></svg>
+              </button>
+              <button type="button" data-add-system-path="heart" title="Add heart path" aria-label="Add heart path">
+                <svg viewBox="0 0 48 24" aria-hidden="true"><path d="M 24 22 C 20 18 14 13 14 7.5 C 14 3 18 1.5 21 3.5 C 22.5 4.5 23.5 5.8 24 7 C 24.5 5.8 25.5 4.5 27 3.5 C 30 1.5 34 3 34 7.5 C 34 13 28 18 24 22 Z" /></svg>
+              </button>
+              <button type="button" data-add-system-path="wave" title="Add wave path" aria-label="Add wave path">
+                <svg viewBox="0 0 48 24" aria-hidden="true"><path d="M 3 17 C 11 5 17 5 24 12 S 37 19 45 7" /></svg>
+              </button>
+            </div>
             <div id="segment-list" class="segment-list" aria-label="Motion segments"></div>
-            <div class="segment-actions">
+            <div id="segment-actions" class="segment-actions">
               <button id="add-segment" type="button">+ Add segment</button>
               <button id="remove-segment" type="button">Remove last</button>
             </div>
@@ -78,12 +110,15 @@
               <svg id="curve-editor" viewBox="0 0 260 150" role="img" aria-label="Bezier curve editor">
                 <path id="curve-grid-x" d="M 0 75 H 260" />
                 <path id="curve-grid-y" d="M 130 0 V 150" />
+                <line id="curve-guide-x" class="curve-alignment-guide" x1="0" y1="0" x2="0" y2="150" />
+                <line id="curve-guide-y" class="curve-alignment-guide" x1="0" y1="0" x2="260" y2="0" />
                 <path id="curve-control-line" />
                 <path id="curve-path" />
-                <circle id="curve-start" r="5" data-handle="start" />
-                <circle id="curve-control-1" r="5" data-handle="control1" />
-                <circle id="curve-control-2" r="5" data-handle="control2" />
-                <circle id="curve-end" r="5" data-handle="end" />
+                <g id="curve-frame-handles"></g>
+                <circle id="curve-control-1-hit" class="curve-handle-hit" r="13" data-handle="control1" />
+                <circle id="curve-control-1" class="curve-handle-visual" r="5" />
+                <circle id="curve-control-2-hit" class="curve-handle-hit" r="13" data-handle="control2" />
+                <circle id="curve-control-2" class="curve-handle-visual" r="5" />
               </svg>
             </div>
           </section>
@@ -92,7 +127,7 @@
             <div class="section-heading"><span class="section-index">04</span><h2>Opacity</h2></div>
             <div class="command-grid" data-group="opacity" data-exclusive="true">
               <button class="command" data-command="fadeIn" type="button">Fade in</button>
-              <button class="command active" data-command="fadeOut" type="button">Fade out</button>
+              <button class="command" data-command="fadeOut" type="button">Fade out</button>
             </div>
           </section>
 
@@ -129,20 +164,29 @@
             </div>
             <label class="color-field">Effect color <input id="color-input" type="color" value="#22d3ee" /></label>
           </section>
+
+          <div id="per-segment-actions" class="per-segment-actions" hidden></div>
         </aside>
 
         <section class="stage-column">
           <div class="stage-toolbar">
             <div class="status-line"><span id="status-dot"></span><span id="status-text">Ready</span></div>
-            <button id="stop-button" class="small-command" type="button"><span aria-hidden="true">■</span> Stop</button>
+            <div class="stage-tools">
+              <button id="select-preview-button" class="stage-tool" type="button" title="Select preview area" aria-label="Select preview area" aria-pressed="false">
+                <span aria-hidden="true">▧</span>
+              </button>
+              <button id="stop-button" class="small-command" type="button"><span aria-hidden="true">■</span> Stop</button>
+            </div>
           </div>
           <div id="mip-stage" class="mip-stage" aria-label="Motion preview">
             <div class="axis horizontal"></div>
             <div class="axis vertical"></div>
+            <div id="preview-viewport" class="preview-viewport"></div>
+            <div id="preview-selection" class="preview-selection" hidden></div>
           </div>
           <div class="preset-bar" aria-label="Presets">
             <span>Presets</span>
-            <button class="preset active" data-preset="flight" type="button">Corner flight</button>
+            <button class="preset" data-preset="flight" type="button">Corner flight</button>
             <button class="preset" data-preset="orbit" type="button">Orbit pulse</button>
             <button class="preset" data-preset="effects" type="button">Effect stack</button>
           </div>

@@ -31,6 +31,55 @@ timeline: {
 }
 ```
 
+MIP supports two animation assignment modes. `synchronized` keeps shared
+commands in the document-level `instructions` array. `perSegment` keeps the
+document-level array empty and stores commands in the owning timeline segment,
+with instruction timing relative to the start of that segment:
+
+```ts
+{
+  animationMode: "perSegment",
+  instructions: [],
+  timeline: {
+    frames: [/* ... */],
+    segments: [
+      {
+        id: "segment-a",
+        from: "frame-a",
+        to: "frame-b",
+        motion: "bezier",
+        duration: 900,
+        instructions: [
+          {
+            id: "segment.segment-a.effect.glow",
+            category: "effect",
+            type: "glow",
+            color: "#22d3ee",
+            timing: { duration: 900, delay: 0, easing: "easeOut" },
+          },
+        ],
+      },
+    ],
+  },
+}
+```
+
+Documents without `animationMode` remain valid and are interpreted as
+`synchronized` for backward compatibility.
+
+An authored preview region is serialized as a viewport. Its origin is local
+`(0, 0)` and its dimensions provide the scaling reference used by the player:
+
+```ts
+{
+  viewport: { width: 640, height: 360 },
+}
+```
+
+`viewport` is optional for backward compatibility. When present, the player
+adapts spatial coordinates and visual effect dimensions to the actual playback
+container while preserving the authored aspect ratio.
+
 ## Development
 
 ```bash

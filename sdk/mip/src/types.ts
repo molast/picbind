@@ -18,6 +18,22 @@ export type MipTiming = {
 
 export type MipPoint = { x: number; y: number };
 
+export type MipAnimationMode = "synchronized" | "perSegment";
+
+export type MipViewport = {
+  width: number;
+  height: number;
+};
+
+export type MipPathAnchor = {
+  id: string;
+  label: string;
+  position: MipPoint;
+  motionToNext?: "line" | "bezier";
+  controlIn?: MipPoint;
+  controlOut?: MipPoint;
+};
+
 export type MipMotionFrame = {
   id: string;
   label: string;
@@ -36,6 +52,8 @@ export type MipMotionSegment = {
   easing?: MipEasing;
   control1?: MipPoint;
   control2?: MipPoint;
+  anchors?: MipPathAnchor[];
+  instructions?: MipInstruction[];
 };
 
 export type MipTimeline = {
@@ -144,6 +162,8 @@ export type MotionIntentDocument = {
     value: string;
     ariaLabel?: string;
   };
+  animationMode?: MipAnimationMode;
+  viewport?: MipViewport;
   instructions: MipInstruction[];
   timeline?: MipTimeline;
 };

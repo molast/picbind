@@ -31,13 +31,16 @@ const EASINGS: Record<NonNullable<MipTiming["easing"]>, string> = {
   elastic: "cubic-bezier(0.22, 1.8, 0.36, 1)",
 };
 
-function animationOptions(timing: MipTiming): KeyframeAnimationOptions {
+function animationOptions(
+  timing: MipTiming,
+  fill: NonNullable<KeyframeAnimationOptions["fill"]> = "both",
+): KeyframeAnimationOptions {
   return {
     duration: Math.max(0, timing.duration),
     delay: Math.max(0, timing.delay ?? 0),
     iterations: timing.loop ? Infinity : Math.max(1, (timing.repeat ?? 0) + 1),
     easing: EASINGS[timing.easing ?? "ease"],
-    fill: "both",
+    fill,
   };
 }
 
@@ -45,24 +48,24 @@ function point(point: { x: number; y: number }) {
   return `${point.x} ${point.y}`;
 }
 
-function motionPath(instruction: MipMotionPathInstruction) {
+function motionPath(instruction: MipMotionPathInstruction, scale = 1) {
   if (instruction.type === "line") {
-    return `path("M ${point(instruction.from)} L ${point(instruction.to)}")`;
+    return `path("M ${point({ x: instruction.from.x * scale, y: instruction.from.y * scale })} L ${point({ x: instruction.to.x * scale, y: instruction.to.y * scale })}")`;
   }
   if (instruction.type === "bezier") {
-    return `path("M ${point(instruction.from)} C ${point(instruction.control1)}, ${point(instruction.control2)}, ${point(instruction.to)}")`;
+    const scaled = (value: { x: number; y: number }) => ({
+      x: value.x * scale,
+      y: value.y * scale,
+    });
+    return `path("M ${point(scaled(instruction.from))} C ${point(scaled(instruction.control1))}, ${point(scaled(instruction.control2))}, ${point(scaled(instruction.to))}")`;
   }
-  const radius = Math.max(1, instruction.radius);
+  const radius = Math.max(1, instruction.radius * scale);
   const angle = ((instruction.startAngle ?? -90) * Math.PI) / 180;
   const x = Math.cos(angle) * radius;
   const y = Math.sin(angle) * radius;
   const oppositeX = -x;
   const oppositeY = -y;
   return `path("M ${x} ${y} A ${radius} ${radius} 0 1 1 ${oppositeX} ${oppositeY} A ${radius} ${radius} 0 1 1 ${x} ${y}")`;
-}
-
-function distance(left: { x: number; y: number }, right: { x: number; y: number }) {
-  return Math.hypot(right.x - left.x, right.y - left.y);
 }
 
 function cubicPoint(
@@ -87,30 +90,6 @@ function cubicPoint(
   };
 }
 
-function segmentLength(
-  segment: MipMotionSegment,
-  start: MipMotionFrame,
-  end: MipMotionFrame,
-) {
-  if (segment.motion === "line" || !segment.control1 || !segment.control2) {
-    return distance(start.position, end.position);
-  }
-  let length = 0;
-  let previous = start.position;
-  for (let step = 1; step <= 16; step += 1) {
-    const current = cubicPoint(
-      start.position,
-      segment.control1,
-      segment.control2,
-      end.position,
-      step / 16,
-    );
-    length += distance(previous, current);
-    previous = current;
-  }
-  return length;
-}
-
 export type MipPlayerOptions = {
   assetSize?: number;
   className?: string;
@@ -123,6 +102,8 @@ export class MipPlayer {
   private animations: Animation[] = [];
   private particleElements: HTMLElement[] = [];
   private document: MotionIntentDocument | null = null;
+  private spatialScale = 1;
+  private renderedAssetSize = 104;
 
   constructor(container: HTMLElement, options: MipPlayerOptions = {}) {
     this.container = container;
@@ -133,6 +114,25 @@ export class MipPlayer {
     this.stop();
     this.document = intent;
     this.layers = new Map();
+    const authoredWidth = intent.viewport?.width ?? this.container.clientWidth;
+    const authoredHeight = intent.viewport?.height ?? this.container.clientHeight;
+    const authoredScale = intent.viewport
+      ? Math.min(authoredWidth / 440, authoredHeight / 320)
+      : 1;
+    const containerScale = intent.viewport
+      ? Math.min(
+          this.container.clientWidth / Math.max(1, intent.viewport.width),
+          this.container.clientHeight / Math.max(1, intent.viewport.height),
+        )
+      : 1;
+    this.spatialScale = Math.max(0.05, authoredScale * containerScale);
+    const requestedAssetSize =
+      (this.options.assetSize ?? 104) * Math.min(1, this.spatialScale);
+    const viewportAssetLimit = Math.max(
+      12,
+      Math.min(this.container.clientWidth, this.container.clientHeight) * 0.34,
+    );
+    this.renderedAssetSize = Math.min(requestedAssetSize, viewportAssetLimit);
     const ownerDocument = this.container.ownerDocument;
     const root = ownerDocument.createElement("div");
     root.className = `mip-player-node ${this.options.className ?? ""}`.trim();
@@ -170,7 +170,7 @@ export class MipPlayer {
     }
 
     const asset = emojiToSvg(intent.asset.value, {
-      size: this.options.assetSize ?? 104,
+      size: this.renderedAssetSize,
       padding: 8,
     });
     const image = ownerDocument.createElement("img");
@@ -196,6 +196,26 @@ export class MipPlayer {
     this.load(intent);
     if (intent.timeline) {
       this.animations.push(...this.animateTimeline(intent.timeline));
+      if (intent.animationMode === "perSegment") {
+        let elapsed = Math.max(0, intent.timeline.delay ?? 0);
+        intent.timeline.segments.forEach((segment) => {
+          segment.instructions?.forEach((instruction) => {
+            this.animations.push(
+              ...this.animateInstruction(
+                {
+                  ...instruction,
+                  timing: {
+                    ...instruction.timing,
+                    delay: elapsed + Math.max(0, instruction.timing.delay ?? 0),
+                  },
+                },
+                "forwards",
+              ),
+            );
+          });
+          elapsed += Math.max(1, segment.duration);
+        });
+      }
     }
     for (const instruction of intent.instructions) {
       this.animations.push(...this.animateInstruction(instruction));
@@ -229,15 +249,18 @@ export class MipPlayer {
     return layer;
   }
 
-  private animateInstruction(instruction: MipInstruction): Animation[] {
-    const options = animationOptions(instruction.timing);
+  private animateInstruction(
+    instruction: MipInstruction,
+    fill: NonNullable<KeyframeAnimationOptions["fill"]> = "both",
+  ): Animation[] {
+    const options = animationOptions(instruction.timing, fill);
     if (instruction.category === "transform") {
       if (instruction.type === "translate") {
         return [
           this.layer("translate").animate(
             [
-              { transform: `translate(${instruction.from.x}px, ${instruction.from.y}px)` },
-              { transform: `translate(${instruction.to.x}px, ${instruction.to.y}px)` },
+              { transform: `translate(${instruction.from.x * this.spatialScale}px, ${instruction.from.y * this.spatialScale}px)` },
+              { transform: `translate(${instruction.to.x * this.spatialScale}px, ${instruction.to.y * this.spatialScale}px)` },
             ],
             options,
           ),
@@ -278,7 +301,7 @@ export class MipPlayer {
 
     if (instruction.category === "motionPath") {
       const layer = this.layer("path");
-      layer.style.offsetPath = motionPath(instruction);
+      layer.style.offsetPath = motionPath(instruction, this.spatialScale);
       layer.style.offsetRotate = "0deg";
       return [
         layer.animate(
@@ -325,45 +348,226 @@ export class MipPlayer {
       (sum, entry) => sum + Math.max(1, entry.segment.duration),
       0,
     );
-    const lengths = segments.map((entry) =>
-      Math.max(0.001, segmentLength(entry.segment, entry.start, entry.end)),
-    );
-    const totalLength = lengths.reduce((sum, length) => sum + length, 0);
-    let path = `M ${point(segments[0].start.position)}`;
-    segments.forEach(({ segment, end }) => {
-      if (segment.motion === "bezier" && segment.control1 && segment.control2) {
-        path += ` C ${point(segment.control1)}, ${point(segment.control2)}, ${point(end.position)}`;
-      } else {
-        path += ` L ${point(end.position)}`;
+    type PathCommand =
+      | { type: "move"; to: { x: number; y: number } }
+      | {
+          type: "line";
+          from: { x: number; y: number };
+          to: { x: number; y: number };
+        }
+      | {
+          type: "bezier";
+          from: { x: number; y: number };
+          control1: { x: number; y: number };
+          control2: { x: number; y: number };
+          to: { x: number; y: number };
+        };
+    const commands: PathCommand[] = [];
+    const boundsPoints: Array<{ x: number; y: number }> = [];
+    const smoothJoin = (
+      previousIndex: number,
+      nextIndex: number,
+      join: { x: number; y: number },
+    ) => {
+      const previous = commands[previousIndex];
+      const next = commands[nextIndex];
+      if (!previous || !next || previous.type === "move" || next.type === "move") return;
+      const previousReference =
+        previous.type === "bezier" ? previous.control2 : previous.from;
+      const nextReference = next.type === "bezier" ? next.control1 : next.to;
+      let dx = nextReference.x - previousReference.x;
+      let dy = nextReference.y - previousReference.y;
+      let magnitude = Math.hypot(dx, dy);
+      if (magnitude < 0.001) {
+        dx = next.to.x - previous.from.x;
+        dy = next.to.y - previous.from.y;
+        magnitude = Math.hypot(dx, dy);
+      }
+      if (magnitude < 0.001) return;
+      const direction = { x: dx / magnitude, y: dy / magnitude };
+      const previousSpan = Math.hypot(join.x - previous.from.x, join.y - previous.from.y);
+      const nextSpan = Math.hypot(next.to.x - join.x, next.to.y - join.y);
+      const previousHandle = Math.min(48, previousSpan * 0.28);
+      const nextHandle = Math.min(48, nextSpan * 0.28);
+      commands[previousIndex] = {
+        type: "bezier",
+        from: previous.from,
+        control1:
+          previous.type === "bezier"
+            ? previous.control1
+            : {
+                x: previous.from.x + (join.x - previous.from.x) / 3,
+                y: previous.from.y + (join.y - previous.from.y) / 3,
+              },
+        control2: {
+          x: join.x - direction.x * previousHandle,
+          y: join.y - direction.y * previousHandle,
+        },
+        to: join,
+      };
+      commands[nextIndex] = {
+        type: "bezier",
+        from: join,
+        control1: {
+          x: join.x + direction.x * nextHandle,
+          y: join.y + direction.y * nextHandle,
+        },
+        control2:
+          next.type === "bezier"
+            ? next.control2
+            : {
+                x: join.x + ((next.to.x - join.x) * 2) / 3,
+                y: join.y + ((next.to.y - join.y) * 2) / 3,
+              },
+        to: next.to,
+      };
+    };
+    let previousEnd: { x: number; y: number } | null = null;
+    segments.forEach(({ segment, start, end }) => {
+      const anchors =
+        segment.anchors && segment.anchors.length >= 2
+          ? segment.anchors
+          : [
+              {
+                id: `${segment.id}-start`,
+                label: "1",
+                position: start.position,
+                motionToNext: segment.motion,
+                controlOut: segment.control1,
+              },
+              {
+                id: `${segment.id}-end`,
+                label: "2",
+                position: end.position,
+                controlIn: segment.control2,
+              },
+            ];
+      const first = anchors[0].position;
+      const offset = previousEnd
+        ? { x: previousEnd.x - first.x, y: previousEnd.y - first.y }
+        : { x: 0, y: 0 };
+      const translated = (value: { x: number; y: number }) => ({
+        x: value.x + offset.x,
+        y: value.y + offset.y,
+      });
+      const translatedFirst = translated(first);
+      if (!commands.length) commands.push({ type: "move", to: translatedFirst });
+      const firstCommandIndex = commands.length;
+      for (let index = 0; index < anchors.length - 1; index += 1) {
+        const from = anchors[index];
+        const to = anchors[index + 1];
+        if (
+          (from.motionToNext ?? segment.motion) === "bezier" &&
+          from.controlOut &&
+          to.controlIn
+        ) {
+          const translatedFrom = translated(from.position);
+          const translatedControl1 = translated(from.controlOut);
+          const translatedControl2 = translated(to.controlIn);
+          const translatedTo = translated(to.position);
+          commands.push({
+            type: "bezier",
+            from: translatedFrom,
+            control1: translatedControl1,
+            control2: translatedControl2,
+            to: translatedTo,
+          });
+        } else {
+          const translatedFrom = translated(from.position);
+          const translatedTo = translated(to.position);
+          commands.push({ type: "line", from: translatedFrom, to: translatedTo });
+        }
+      }
+      if (previousEnd && firstCommandIndex < commands.length) {
+        smoothJoin(firstCommandIndex - 1, firstCommandIndex, translatedFirst);
+      }
+      previousEnd = translated(anchors[anchors.length - 1].position);
+    });
+
+    commands.forEach((command) => {
+      if (command.type === "move") {
+        boundsPoints.push(command.to);
+        return;
+      }
+      boundsPoints.push(command.from);
+      if (command.type === "line") {
+        boundsPoints.push(command.to);
+        return;
+      }
+      for (let step = 1; step <= 24; step += 1) {
+        boundsPoints.push(
+          cubicPoint(
+            command.from,
+            command.control1,
+            command.control2,
+            command.to,
+            step / 24,
+          ),
+        );
       }
     });
+
+    const xs = boundsPoints.map((value) => value.x);
+    const ys = boundsPoints.map((value) => value.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const pathWidth = Math.max(0, maxX - minX);
+    const pathHeight = Math.max(0, maxY - minY);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const documentInstructions = [
+      ...(this.document?.instructions ?? []),
+      ...(this.document?.timeline?.segments.flatMap(
+        (segment) => segment.instructions ?? [],
+      ) ?? []),
+    ];
+    const instructionScale =
+      documentInstructions.reduce((maximum, instruction) => {
+        if (instruction.category !== "transform" || instruction.type !== "scale") return maximum;
+        return Math.max(maximum, Math.abs(instruction.from), Math.abs(instruction.to));
+      }, 1);
+    const frameScale = timeline.frames.reduce(
+      (maximum, frame) => Math.max(maximum, Math.abs(frame.scale ?? 1)),
+      1,
+    );
+    const assetFootprint =
+      this.renderedAssetSize * Math.max(instructionScale, frameScale) * Math.SQRT2;
+    const safePadding = 16;
+    const availableWidth = Math.max(1, this.container.clientWidth - assetFootprint - safePadding * 2);
+    const availableHeight = Math.max(1, this.container.clientHeight - assetFootprint - safePadding * 2);
+    const widthScale = pathWidth > 0 ? availableWidth / pathWidth : Number.POSITIVE_INFINITY;
+    const heightScale = pathHeight > 0 ? availableHeight / pathHeight : Number.POSITIVE_INFINITY;
+    const availableScale = Math.min(widthScale, heightScale);
+    const fitScale = Number.isFinite(availableScale)
+      ? Math.max(0.01, availableScale)
+      : 1;
+    const fitPoint = (value: { x: number; y: number }) => ({
+      x: (value.x - centerX) * fitScale,
+      y: (value.y - centerY) * fitScale,
+    });
+    const path = commands
+      .map((command) => {
+        if (command.type === "move") return `M ${point(fitPoint(command.to))}`;
+        if (command.type === "line") return `L ${point(fitPoint(command.to))}`;
+        return `C ${point(fitPoint(command.control1))}, ${point(fitPoint(command.control2))}, ${point(fitPoint(command.to))}`;
+      })
+      .join(" ");
 
     const pathLayer = this.layer("path");
     pathLayer.style.offsetPath = `path("${path}")`;
     pathLayer.style.offsetRotate = "0deg";
     let elapsed = 0;
-    let traversed = 0;
     const pathFrames: Keyframe[] = [
-      {
-        offset: 0,
-        offsetDistance: "0%",
-        easing: EASINGS[segments[0].segment.easing ?? "ease"],
-      },
+      { offset: 0, offsetDistance: "0%" },
+      { offset: 1, offsetDistance: "100%" },
     ];
     const timelineFrames: Array<{ frame: MipMotionFrame; offset: number }> = [
       { frame: segments[0].start, offset: 0 },
     ];
-    segments.forEach((entry, index) => {
+    segments.forEach((entry) => {
       elapsed += Math.max(1, entry.segment.duration);
-      traversed += lengths[index];
-      pathFrames.push({
-        offset: elapsed / totalDuration,
-        offsetDistance: `${(traversed / totalLength) * 100}%`,
-        easing:
-          index + 1 < segments.length
-            ? EASINGS[segments[index + 1].segment.easing ?? "ease"]
-            : "linear",
-      });
       timelineFrames.push({ frame: entry.end, offset: elapsed / totalDuration });
     });
 
@@ -404,7 +608,7 @@ export class MipPlayer {
     options: KeyframeAnimationOptions,
   ) {
     if (instruction.type === "shake") {
-      const intensity = instruction.intensity ?? 12;
+      const intensity = (instruction.intensity ?? 12) * this.spatialScale;
       return [
         this.layer("shake").animate(
           [0, -1, 1, -0.75, 0.75, 0].map((factor) => ({
@@ -428,7 +632,7 @@ export class MipPlayer {
       ];
     }
     if (instruction.type === "blur") {
-      const radius = instruction.radius ?? 10;
+      const radius = (instruction.radius ?? 10) * this.spatialScale;
       return [
         this.layer("blur").animate(
           [
@@ -442,7 +646,7 @@ export class MipPlayer {
     }
     if (instruction.type === "glow") {
       const color = instruction.color ?? "#22d3ee";
-      const radius = instruction.radius ?? 18;
+      const radius = (instruction.radius ?? 18) * this.spatialScale;
       return [
         this.layer("glow").animate(
           [
@@ -462,7 +666,7 @@ export class MipPlayer {
     options: KeyframeAnimationOptions,
   ) {
     const count = Math.min(60, Math.max(1, instruction.count ?? 18));
-    const spread = Math.max(10, instruction.spread ?? 110);
+    const spread = Math.max(4, (instruction.spread ?? 110) * this.spatialScale);
     const animations: Animation[] = [];
     for (let index = 0; index < count; index += 1) {
       const particle = document.createElement("span");
@@ -470,7 +674,7 @@ export class MipPlayer {
       particle.style.position = "absolute";
       particle.style.left = "50%";
       particle.style.top = "50%";
-      particle.style.width = `${3 + (index % 4)}px`;
+      particle.style.width = `${Math.max(2, (3 + (index % 4)) * this.spatialScale)}px`;
       particle.style.height = particle.style.width;
       particle.style.borderRadius = "50%";
       particle.style.background = instruction.color ?? "#fbbf24";
