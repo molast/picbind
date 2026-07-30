@@ -10,6 +10,7 @@ import {
 } from "./realtime/share-room";
 import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
+import type { QiniuStorageEnv } from "./qiniu-storage";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -23,7 +24,7 @@ type MetricsConfig = {
   updatedAt: string;
 };
 
-type Env = RuntimeLogEnv & {
+type Env = RuntimeLogEnv & QiniuStorageEnv & {
   LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
@@ -40,6 +41,7 @@ type Env = RuntimeLogEnv & {
   };
   ADMIN_KEY?: string;
   SITE_URL?: string;
+  ROOM_URL?: string;
   ALLOWED_ORIGINS?: string;
   BAIDU_PUSH_SITE?: string;
   BAIDU_PUSH_TOKEN?: string;
@@ -232,6 +234,13 @@ function allowedOrigins(env: Env, request: Request) {
       .map((item) => item.trim())
       .filter(Boolean),
   );
+  if (env.ROOM_URL) {
+    try {
+      values.add(new URL(env.ROOM_URL).origin);
+    } catch {
+      // Invalid configuration remains excluded from CORS.
+    }
+  }
   values.add(new URL(request.url).origin);
   return values;
 }

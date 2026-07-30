@@ -15,7 +15,7 @@ Responsibilities:
 - `migration.ts` applies ordered SQL migrations using `PRAGMA user_version`.
 - `repositories/` is the only business-data access layer.
 - `file-storage.ts` owns OPFS file operations.
-- SQLite stores metadata and review history; image bytes are stored as OPFS files.
+- SQLite stores compression metadata; image bytes are stored as OPFS files.
 
 OPFS layout:
 
@@ -24,8 +24,6 @@ OPFS layout:
 /cache
 /temp/compression
 /files/compressed
-/files/rooms
-/thumbnails/rooms
 ```
 
 Session and UI state remain in `localStorage` or `sessionStorage`; they are not

@@ -32,6 +32,7 @@ Notes:
 - `DEV_MODE`: set to `1` to enable Worker and browser Realtime logs; use `0` in production.
 - `ADMIN_KEY`: enables admin endpoints.
 - `SITE_URL`: canonical site URL.
+- `ROOM_URL`: optional standalone Room SDK entry URL used for generated invite links.
 - `ALLOWED_ORIGINS`: comma-separated allowed origins.
 - `BAIDU_PUSH_SITE`: Baidu site URL. Defaults to `SITE_URL`.
 - `BAIDU_PUSH_TOKEN`: Baidu push token.
@@ -44,6 +45,11 @@ Notes:
 - `R2_ACCOUNT_ID`: Cloudflare account ID used for the R2 S3 endpoint.
 - `R2_ACCESS_KEY_ID`: R2 S3 API access key ID.
 - `R2_SECRET_ACCESS_KEY`: R2 S3 API secret access key.
+- `QINIU_ACCESS_KEY`: Qiniu server access key. Configure as a Worker secret.
+- `QINIU_SECRET_KEY`: Qiniu server secret key. Configure as a Worker secret.
+- `QINIU_BUCKET`: Qiniu bucket used for future room file storage.
+- `QINIU_UPLOAD_URL`: Qiniu upload endpoint for the bucket region.
+- `QINIU_DOWNLOAD_URL`: Qiniu download/CDN domain used to build download URLs.
 
 `ADMIN_KEY` is a Worker env variable/secret, not a KV entry.
 
@@ -84,7 +90,16 @@ For production, store the API tokens as Worker secrets:
 npx wrangler secret put TURN_API_TOKEN
 npx wrangler secret put R2_ACCESS_KEY_ID
 npx wrangler secret put R2_SECRET_ACCESS_KEY
+npx wrangler secret put QINIU_ACCESS_KEY
+npx wrangler secret put QINIU_SECRET_KEY
 ```
+
+The Worker uses the Qiniu server SDK signing utilities to create short-lived
+upload tokens. The full SDK entrypoint is intentionally not bundled because its
+Node HTTP stack is incompatible with Cloudflare Workers. AK/SK must never be
+exposed through `NEXT_PUBLIC_*` variables or returned to the browser. The
+browser will receive only an object key, upload endpoint, and short-lived upload
+token when Qiniu room storage is enabled.
 
 Set `TURN_TOKEN_ID` as a Worker environment variable. The Worker generates
 one-hour ICE credentials and relays SDP signaling through the room Durable
@@ -130,7 +145,8 @@ Recommended Worker env values:
 
 ```text
 SITE_URL=https://picbind.com
-ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com
+ROOM_URL=https://room.picbind.com
+ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com,https://room.picbind.com
 BAIDU_PUSH_SITE=https://picbind.com
 ADMIN_KEY=<your-admin-key>
 BAIDU_PUSH_TOKEN=<your-baidu-token>

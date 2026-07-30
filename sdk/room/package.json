@@ -1,0 +1,52 @@
+{
+  "name": "@picbind/room",
+  "version": "0.1.0",
+  "description": "Embeddable PicBind realtime image room SDK with a standalone browser demo.",
+  "type": "module",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./dist/room.css",
+    "./source": "./src/index.ts",
+    "./source.css": "./src/embed.css",
+    "./source/config": "./src/config.ts",
+    "./source/create-room-button": "./src/components/share/create-room-button.tsx",
+    "./source/types": "./src/public-types.ts"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4174",
+    "check": "tsc --noEmit",
+    "build:sdk": "vite build --mode library && tsc -p tsconfig.build.json",
+    "build:preview": "vite build --outDir preview-dist",
+    "build": "pnpm run build:sdk && pnpm run build:preview"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@sqlite.org/sqlite-wasm": "3.53.0-build1",
+    "konva": "^9.3.22",
+    "pixi.js": "^8.19.0",
+    "react-icons": "^5.5.0",
+    "react-zoom-pan-pinch": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.9.3",
+    "vite": "^7.0.0"
+  }
+}

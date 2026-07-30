@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
+  transpilePackages: ["@picbind/room"],
   ...(process.env.NODE_ENV === "development"
     ? {
         async headers() {

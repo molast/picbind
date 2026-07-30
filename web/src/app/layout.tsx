@@ -1,4 +1,5 @@
 import "./globals.css";
+import "@picbind/room/source.css";
 import type { Metadata } from "next";
 import Script from "next/script";
 import { getSiteUrl } from "@/server/site-config";

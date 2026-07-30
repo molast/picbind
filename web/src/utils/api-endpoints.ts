@@ -39,22 +39,3 @@ export function getAdminStateApiPath() {
     joinUrl(API_BASE_URL, "/api/admin/state")
   );
 }
-
-export function getShareRoomApiPath() {
-  return (
-    process.env.NEXT_PUBLIC_SHARE_ROOM_API_PATH ||
-    joinUrl(API_BASE_URL, "/api/realtime/room/create")
-  );
-}
-
-export function getShareRoomRealtimeApiPath(action: string) {
-  return joinUrl(API_BASE_URL, `/api/realtime/room/${action}`);
-}
-
-export function getShareRoomSocketUrl(roomId: string, sessionId: string) {
-  const url = new URL(getShareRoomRealtimeApiPath("socket"));
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.searchParams.set("roomId", roomId);
-  url.searchParams.set("sessionId", sessionId);
-  return url.toString();
-}

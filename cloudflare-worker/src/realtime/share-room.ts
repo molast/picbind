@@ -21,6 +21,7 @@ export type RealtimeRoomEnv = RuntimeLogEnv & ShareRoomR2Env & {
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
   SITE_URL?: string;
+  ROOM_URL?: string;
   MAX_IMAGE_TRANSFER_SIZE_MB?: string;
 };
 
@@ -62,6 +63,16 @@ function siteUrl(env: RealtimeRoomEnv, request: Request) {
     request.headers.get("origin")?.replace(/\/+$/, "") ||
     new URL(request.url).origin
   );
+}
+
+function roomShareUrl(env: RealtimeRoomEnv, request: Request, roomId: string) {
+  const standalone = (env.ROOM_URL || "").trim();
+  if (standalone) {
+    const url = new URL(standalone);
+    url.searchParams.set("roomId", roomId);
+    return url.toString();
+  }
+  return `${siteUrl(env, request)}/share?roomId=${encodeURIComponent(roomId)}`;
 }
 
 async function readJson<T>(response: Response | Request, label: string) {
@@ -671,7 +682,7 @@ export async function handleCreateShareRoom(
     {
       roomId,
       ownerToken,
-      shareUrl: `${siteUrl(env, request)}/share?roomId=${encodeURIComponent(roomId)}`,
+      shareUrl: roomShareUrl(env, request, roomId),
       createdAt: room.createdAt,
       expiresAt: room.expiresAt,
     },

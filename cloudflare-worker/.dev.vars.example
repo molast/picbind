@@ -1,7 +1,12 @@
 DEV_MODE=1
 LOCAL_RUNTIME=1
 SITE_URL=http://localhost:3000
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+ROOM_URL=http://127.0.0.1:4174
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:4174
 FILE_TRANSFER_MODE=p2p
 MAX_IMAGE_TRANSFER_SIZE_MB=10
 ADMIN_KEY=local-admin
+QINIU_ACCESS_KEY=replace-with-qiniu-access-key
+QINIU_SECRET_KEY=replace-with-qiniu-secret-key
+QINIU_BUCKET=replace-with-qiniu-bucket
+QINIU_UPLOAD_URL=https://upload.qiniup.com
