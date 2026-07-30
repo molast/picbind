@@ -54,6 +54,9 @@ const curveFrameHandles = requiredElement<SVGGElement>("#curve-frame-handles");
 const curveGuideX = requiredElement<SVGLineElement>("#curve-guide-x");
 const curveGuideY = requiredElement<SVGLineElement>("#curve-guide-y");
 const curveSegmentLabel = requiredElement<HTMLElement>("#curve-segment-label");
+const deleteAnchorButton = requiredElement<HTMLButtonElement>("#delete-anchor-button");
+const curveEditTool = requiredElement<HTMLButtonElement>("#curve-edit-tool");
+const curvePanTool = requiredElement<HTMLButtonElement>("#curve-pan-tool");
 const player = new MipPlayer(previewViewport, { assetSize: 104 });
 const MAX_SEGMENTS = 26;
 const segmentEditorSections = [
@@ -85,6 +88,7 @@ const frames: MipMotionFrame[] = structuredClone(INITIAL_FRAMES);
 const segments: MipMotionSegment[] = structuredClone(INITIAL_SEGMENTS);
 let activeSegmentId = segments[0].id;
 let activeAnchorIndex = 0;
+let selectedAnchorId: string | null = null;
 type AnimationMode = "synchronized" | "perSegment";
 let animationMode: AnimationMode = "synchronized";
 const synchronizedCommands = new Set<string>();
@@ -108,15 +112,36 @@ const synchronizedSettings: AnimationSettings = {
 const segmentSettings = new Map<string, AnimationSettings>();
 type DraggedHandle =
   | { kind: "anchor"; anchorId: string }
-  | { kind: "control1" | "control2"; segmentId: string; anchorIndex: number };
+  | { kind: "control1" | "control2"; segmentId: string; anchorIndex: number }
+  | {
+      kind: "path";
+      segmentId: string;
+      start: MipPoint;
+      anchors: Array<{
+        id: string;
+        position: MipPoint;
+        controlIn?: MipPoint;
+        controlOut?: MipPoint;
+      }>;
+    };
 let draggedHandle: DraggedHandle | null = null;
 let draggedPointerId: number | null = null;
+type CurveToolMode = "edit" | "pan";
+let curveToolMode: CurveToolMode = "edit";
 const ALIGNMENT_SNAP_DISTANCE = 5;
 type PreviewRegion = { x: number; y: number; width: number; height: number };
+type PreviewResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+type PreviewResizeState = {
+  handle: PreviewResizeHandle;
+  pointerId: number;
+  startPointer: MipPoint;
+  startRegion: PreviewRegion;
+};
 let previewRegion: PreviewRegion | null = null;
 let previewSelectionStart: MipPoint | null = null;
 let previewSelectionPointerId: number | null = null;
 let previewSelectionMode = false;
+let previewResizeState: PreviewResizeState | null = null;
 const MIN_PREVIEW_REGION_SIZE = 40;
 
 function stagePoint(event: PointerEvent): MipPoint {
@@ -134,6 +159,35 @@ function regionFromPoints(start: MipPoint, end: MipPoint): PreviewRegion {
     width: Math.abs(end.x - start.x),
     height: Math.abs(end.y - start.y),
   };
+}
+
+function resizedPreviewRegion(state: PreviewResizeState, pointer: MipPoint) {
+  const deltaX = pointer.x - state.startPointer.x;
+  const deltaY = pointer.y - state.startPointer.y;
+  let left = state.startRegion.x;
+  let top = state.startRegion.y;
+  let right = state.startRegion.x + state.startRegion.width;
+  let bottom = state.startRegion.y + state.startRegion.height;
+
+  if (state.handle.includes("w")) {
+    left = Math.max(0, Math.min(right - MIN_PREVIEW_REGION_SIZE, left + deltaX));
+  }
+  if (state.handle.includes("e")) {
+    right = Math.min(
+      stage.clientWidth,
+      Math.max(left + MIN_PREVIEW_REGION_SIZE, right + deltaX),
+    );
+  }
+  if (state.handle.includes("n")) {
+    top = Math.max(0, Math.min(bottom - MIN_PREVIEW_REGION_SIZE, top + deltaY));
+  }
+  if (state.handle.includes("s")) {
+    bottom = Math.min(
+      stage.clientHeight,
+      Math.max(top + MIN_PREVIEW_REGION_SIZE, bottom + deltaY),
+    );
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function normalizedRegion(region: PreviewRegion): PreviewRegion {
@@ -371,6 +425,7 @@ function replaceCurrentPath(path: SystemPathName) {
   segment.control1 = anchors[0].controlOut ? { ...anchors[0].controlOut } : undefined;
   segment.control2 = anchors[1].controlIn ? { ...anchors[1].controlIn } : undefined;
   activeAnchorIndex = 0;
+  selectedAnchorId = null;
   timelineEnabled.checked = true;
   syncTimelineMode();
   renderTimelineEditor();
@@ -404,6 +459,7 @@ function resetTimeline() {
   });
   activeSegmentId = segments[0].id;
   activeAnchorIndex = 0;
+  selectedAnchorId = null;
 }
 
 function frameById(id: string) {
@@ -639,6 +695,105 @@ function worldPoint(point: { x: number; y: number }) {
   };
 }
 
+function curveEventEditorPoint(event: PointerEvent) {
+  const rect = curveEditor.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(260, ((event.clientX - rect.left) / rect.width) * 260)),
+    y: Math.max(0, Math.min(150, ((event.clientY - rect.top) / rect.height) * 150)),
+  };
+}
+
+function syncSegmentControlsFromAnchors(segment: MipMotionSegment) {
+  const anchors = ensureSegmentAnchors(segment);
+  segment.motion = anchors[0]?.motionToNext ?? segment.motion;
+  segment.control1 = anchors[0]?.controlOut
+    ? { ...anchors[0].controlOut }
+    : undefined;
+  segment.control2 = anchors[1]?.controlIn
+    ? { ...anchors[1].controlIn }
+    : undefined;
+}
+
+function appendAnchorAt(position: MipPoint) {
+  const segment = activeSegment();
+  const anchors = ensureSegmentAnchors(segment);
+  const previous = anchors[anchors.length - 1];
+  const anchor: MipPathAnchor = {
+    id: `anchor-${crypto.randomUUID()}`,
+    label: "",
+    position,
+  };
+  previous.motionToNext = segment.motion;
+  if (segment.motion === "bezier") {
+    const controls = defaultControls(
+      { id: previous.id, label: previous.label, position: previous.position },
+      { id: anchor.id, label: anchor.label, position: anchor.position },
+    );
+    previous.controlOut = controls.control1;
+    anchor.controlIn = controls.control2;
+  } else {
+    previous.controlOut = undefined;
+    anchor.controlIn = undefined;
+  }
+  anchors.push(anchor);
+  activeAnchorIndex = anchors.length - 2;
+  selectedAnchorId = anchor.id;
+  ensureSegmentAnchors(segment);
+  syncSegmentControlsFromAnchors(segment);
+}
+
+function deleteSelectedAnchor() {
+  if (!selectedAnchorId) return;
+  const segment = activeSegment();
+  const anchors = ensureSegmentAnchors(segment);
+  if (anchors.length <= 2) return;
+  const index = anchors.findIndex((anchor) => anchor.id === selectedAnchorId);
+  if (index < 0) return;
+  const hadPrevious = index > 0;
+  const hadNext = index < anchors.length - 1;
+  anchors.splice(index, 1);
+
+  if (hadPrevious && hadNext) {
+    const previous = anchors[index - 1];
+    const next = anchors[index];
+    previous.motionToNext = segment.motion;
+    if (segment.motion === "bezier") {
+      const controls = defaultControls(
+        { id: previous.id, label: previous.label, position: previous.position },
+        { id: next.id, label: next.label, position: next.position },
+      );
+      previous.controlOut = controls.control1;
+      next.controlIn = controls.control2;
+    } else {
+      previous.controlOut = undefined;
+      next.controlIn = undefined;
+    }
+  }
+  anchors[0].controlIn = undefined;
+  const last = anchors[anchors.length - 1];
+  last.controlOut = undefined;
+  last.motionToNext = undefined;
+  selectedAnchorId = null;
+  activeAnchorIndex = Math.max(0, Math.min(index - 1, anchors.length - 2));
+  ensureSegmentAnchors(segment);
+  syncSegmentControlsFromAnchors(segment);
+  renderTimelineEditor();
+  refreshInspector();
+}
+
+function setCurveToolMode(mode: CurveToolMode) {
+  curveToolMode = mode;
+  const isEdit = mode === "edit";
+  curveEditTool.classList.toggle("active", isEdit);
+  curveEditTool.setAttribute("aria-pressed", String(isEdit));
+  curvePanTool.classList.toggle("active", !isEdit);
+  curvePanTool.setAttribute("aria-pressed", String(!isEdit));
+  curveEditor.classList.toggle("pan-mode", !isEdit);
+  draggedHandle = null;
+  draggedPointerId = null;
+  hideAlignmentGuides();
+}
+
 function setControlHandlePosition(handle: "control1" | "control2", pointValue: MipPoint) {
   const id = handle === "control1" ? "control-1" : "control-2";
   const converted = editorPoint(pointValue);
@@ -726,6 +881,64 @@ function snapToOtherHandles(point: MipPoint, currentHandle: DraggedHandle) {
   return snapped;
 }
 
+function snapPathTranslation(
+  handle: Extract<DraggedHandle, { kind: "path" }>,
+  pointer: MipPoint,
+) {
+  const delta = {
+    x: pointer.x - handle.start.x,
+    y: pointer.y - handle.start.y,
+  };
+  const movedPoints = handle.anchors.map((anchor) =>
+    editorPoint({
+      x: anchor.position.x + delta.x,
+      y: anchor.position.y + delta.y,
+    }),
+  );
+  const xs = movedPoints.map((point) => point.x);
+  const ys = movedPoints.map((point) => point.y);
+  movedPoints.push({
+    x: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y: (Math.min(...ys) + Math.max(...ys)) / 2,
+  });
+
+  const verticalAxis = 130;
+  const horizontalAxis = 75;
+  const nearestX = movedPoints.reduce(
+    (nearest, point) =>
+      Math.abs(point.x - verticalAxis) < Math.abs(nearest - verticalAxis)
+        ? point.x
+        : nearest,
+    movedPoints[0].x,
+  );
+  const nearestY = movedPoints.reduce(
+    (nearest, point) =>
+      Math.abs(point.y - horizontalAxis) < Math.abs(nearest - horizontalAxis)
+        ? point.y
+        : nearest,
+    movedPoints[0].y,
+  );
+  const editorScale = Math.min(260 / 440, 150 / 320);
+
+  if (Math.abs(nearestX - verticalAxis) <= ALIGNMENT_SNAP_DISTANCE) {
+    delta.x += (verticalAxis - nearestX) / editorScale;
+    curveGuideX.setAttribute("x1", String(verticalAxis));
+    curveGuideX.setAttribute("x2", String(verticalAxis));
+    curveGuideX.style.display = "inline";
+  } else {
+    curveGuideX.style.display = "none";
+  }
+  if (Math.abs(nearestY - horizontalAxis) <= ALIGNMENT_SNAP_DISTANCE) {
+    delta.y += (horizontalAxis - nearestY) / editorScale;
+    curveGuideY.setAttribute("y1", String(horizontalAxis));
+    curveGuideY.setAttribute("y2", String(horizontalAxis));
+    curveGuideY.style.display = "inline";
+  } else {
+    curveGuideY.style.display = "none";
+  }
+  return delta;
+}
+
 function renderFrameHandles(segment: MipMotionSegment) {
   const namespace = "http://www.w3.org/2000/svg";
   curveFrameHandles.replaceChildren();
@@ -746,6 +959,9 @@ function renderFrameHandles(segment: MipMotionSegment) {
     if (index === activeAnchorIndex || index === activeAnchorIndex + 1) {
       visual.classList.add("active");
     }
+    if (anchor.id === selectedAnchorId) {
+      visual.classList.add("selected");
+    }
     visual.setAttribute("r", "5");
     visual.setAttribute("cx", String(point.x));
     visual.setAttribute("cy", String(point.y));
@@ -764,6 +980,11 @@ function updateCurveEditor() {
   ensureControls(segment);
   const anchors = ensureSegmentAnchors(segment);
   if (anchors.length < 2) return;
+  if (selectedAnchorId && !anchors.some((anchor) => anchor.id === selectedAnchorId)) {
+    selectedAnchorId = null;
+  }
+  deleteAnchorButton.hidden = !selectedAnchorId;
+  deleteAnchorButton.disabled = anchors.length <= 2;
   activeAnchorIndex = Math.min(activeAnchorIndex, anchors.length - 2);
   const activeStart = anchors[activeAnchorIndex];
   const activeEnd = anchors[activeAnchorIndex + 1];
@@ -1235,8 +1456,35 @@ removeSegmentButton.addEventListener("click", () => {
 });
 
 curveEditor.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  if (curveToolMode === "pan") {
+    const segment = activeSegment();
+    const anchors = ensureSegmentAnchors(segment);
+    draggedHandle = {
+      kind: "path",
+      segmentId: segment.id,
+      start: worldPoint(curveEventEditorPoint(event)),
+      anchors: anchors.map((anchor) => ({
+        id: anchor.id,
+        position: { ...anchor.position },
+        ...(anchor.controlIn ? { controlIn: { ...anchor.controlIn } } : {}),
+        ...(anchor.controlOut ? { controlOut: { ...anchor.controlOut } } : {}),
+      })),
+    };
+    draggedPointerId = event.pointerId;
+    hideAlignmentGuides();
+    event.preventDefault();
+    curveEditor.setPointerCapture(event.pointerId);
+    return;
+  }
   const target = event.target;
-  if (!(target instanceof SVGCircleElement)) return;
+  if (!(target instanceof SVGCircleElement)) {
+    appendAnchorAt(worldPoint(curveEventEditorPoint(event)));
+    event.preventDefault();
+    renderTimelineEditor();
+    refreshInspector();
+    return;
+  }
   const handle = target.dataset.handle;
   if (handle === "anchor") {
     const anchorId = target.dataset.anchorId;
@@ -1244,6 +1492,7 @@ curveEditor.addEventListener("pointerdown", (event) => {
     if (!anchorId || !Number.isInteger(anchorIndex)) return;
     const anchors = ensureSegmentAnchors(activeSegment());
     activeAnchorIndex = Math.min(anchorIndex, anchors.length - 2);
+    selectedAnchorId = anchorId;
     draggedHandle = { kind: "anchor", anchorId };
   } else if (handle === "control1" || handle === "control2") {
     draggedHandle = {
@@ -1264,12 +1513,11 @@ curveEditor.addEventListener("pointerdown", (event) => {
 curveEditor.addEventListener("pointermove", (event) => {
   if (!draggedHandle || draggedPointerId !== event.pointerId) return;
   const handle = draggedHandle;
-  const rect = curveEditor.getBoundingClientRect();
-  const editorPointValue = {
-    x: Math.max(0, Math.min(260, ((event.clientX - rect.left) / rect.width) * 260)),
-    y: Math.max(0, Math.min(150, ((event.clientY - rect.top) / rect.height) * 150)),
-  };
-  const snappedEditorPoint = snapToOtherHandles(editorPointValue, handle);
+  const editorPointValue = curveEventEditorPoint(event);
+  const snappedEditorPoint =
+    handle.kind === "path"
+      ? editorPointValue
+      : snapToOtherHandles(editorPointValue, handle);
   const next = worldPoint(snappedEditorPoint);
   const segment = activeSegment();
   const anchors = ensureSegmentAnchors(segment);
@@ -1278,6 +1526,31 @@ curveEditor.addEventListener("pointermove", (event) => {
     if (anchorIndex >= 0) {
       anchors[anchorIndex].position = next;
     }
+  } else if (handle.kind === "path") {
+    const targetSegment = segments.find((item) => item.id === handle.segmentId);
+    const targetAnchors = targetSegment ? ensureSegmentAnchors(targetSegment) : [];
+    const delta = snapPathTranslation(handle, next);
+    handle.anchors.forEach((snapshot) => {
+      const anchor = targetAnchors.find((item) => item.id === snapshot.id);
+      if (!anchor) return;
+      anchor.position = {
+        x: snapshot.position.x + delta.x,
+        y: snapshot.position.y + delta.y,
+      };
+      anchor.controlIn = snapshot.controlIn
+        ? {
+            x: snapshot.controlIn.x + delta.x,
+            y: snapshot.controlIn.y + delta.y,
+          }
+        : undefined;
+      anchor.controlOut = snapshot.controlOut
+        ? {
+            x: snapshot.controlOut.x + delta.x,
+            y: snapshot.controlOut.y + delta.y,
+          }
+        : undefined;
+    });
+    if (targetSegment) syncSegmentControlsFromAnchors(targetSegment);
   } else {
     const targetSegment = segments.find((item) => item.id === handle.segmentId);
     const targetAnchors = targetSegment ? ensureSegmentAnchors(targetSegment) : [];
@@ -1305,6 +1578,9 @@ function releaseCurveHandle(event: PointerEvent) {
 
 curveEditor.addEventListener("pointerup", releaseCurveHandle);
 curveEditor.addEventListener("pointercancel", releaseCurveHandle);
+deleteAnchorButton.addEventListener("click", deleteSelectedAnchor);
+curveEditTool.addEventListener("click", () => setCurveToolMode("edit"));
+curvePanTool.addEventListener("click", () => setCurveToolMode("pan"));
 
 document.querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1335,6 +1611,47 @@ selectPreviewButton.addEventListener("click", () => {
     statusDot.classList.remove("running");
   }
 });
+previewSelection
+  .querySelectorAll<HTMLElement>("[data-preview-resize]")
+  .forEach((handleElement) => {
+    handleElement.addEventListener("pointerdown", (event) => {
+      if (!previewRegion || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      previewResizeState = {
+        handle: handleElement.dataset.previewResize as PreviewResizeHandle,
+        pointerId: event.pointerId,
+        startPointer: stagePoint(event),
+        startRegion: pixelRegion(previewRegion),
+      };
+      handleElement.setPointerCapture(event.pointerId);
+    });
+    handleElement.addEventListener("pointermove", (event) => {
+      if (!previewResizeState || previewResizeState.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const region = resizedPreviewRegion(previewResizeState, stagePoint(event));
+      previewRegion = normalizedRegion(region);
+      applyPreviewRegion();
+    });
+    const finishResize = (event: PointerEvent, cancelled = false) => {
+      if (!previewResizeState || previewResizeState.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (cancelled) {
+        previewRegion = normalizedRegion(previewResizeState.startRegion);
+        applyPreviewRegion();
+      }
+      if (handleElement.hasPointerCapture(event.pointerId)) {
+        handleElement.releasePointerCapture(event.pointerId);
+      }
+      previewResizeState = null;
+      statusText.textContent = "Preview area resized";
+      refreshInspector();
+    };
+    handleElement.addEventListener("pointerup", (event) => finishResize(event));
+    handleElement.addEventListener("pointercancel", (event) => finishResize(event, true));
+  });
 stage.addEventListener("pointerdown", (event) => {
   if (!previewSelectionMode || event.button !== 0) return;
   event.preventDefault();

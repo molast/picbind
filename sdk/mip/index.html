@@ -106,7 +106,17 @@
               <button id="remove-segment" type="button">Remove last</button>
             </div>
             <div class="curve-editor-shell">
-              <div class="curve-editor-heading"><span>Bezier curve</span><strong id="curve-segment-label">A → B</strong></div>
+              <div class="curve-editor-heading">
+                <span>Bezier curve</span>
+                <div class="curve-editor-actions">
+                  <div class="curve-tools" role="group" aria-label="Curve editing tool">
+                    <button id="curve-edit-tool" class="active" type="button" title="Edit anchors" aria-label="Edit anchors" aria-pressed="true">✛</button>
+                    <button id="curve-pan-tool" type="button" title="Move entire path" aria-label="Move entire path" aria-pressed="false">✋</button>
+                  </div>
+                  <strong id="curve-segment-label">A → B</strong>
+                  <button id="delete-anchor-button" type="button" title="Delete selected anchor" aria-label="Delete selected anchor" hidden>×</button>
+                </div>
+              </div>
               <svg id="curve-editor" viewBox="0 0 260 150" role="img" aria-label="Bezier curve editor">
                 <path id="curve-grid-x" d="M 0 75 H 260" />
                 <path id="curve-grid-y" d="M 130 0 V 150" />
@@ -182,7 +192,16 @@
             <div class="axis horizontal"></div>
             <div class="axis vertical"></div>
             <div id="preview-viewport" class="preview-viewport"></div>
-            <div id="preview-selection" class="preview-selection" hidden></div>
+            <div id="preview-selection" class="preview-selection" hidden>
+              <span class="preview-resize-handle north-west" data-preview-resize="nw"></span>
+              <span class="preview-resize-handle north" data-preview-resize="n"></span>
+              <span class="preview-resize-handle north-east" data-preview-resize="ne"></span>
+              <span class="preview-resize-handle east" data-preview-resize="e"></span>
+              <span class="preview-resize-handle south-east" data-preview-resize="se"></span>
+              <span class="preview-resize-handle south" data-preview-resize="s"></span>
+              <span class="preview-resize-handle south-west" data-preview-resize="sw"></span>
+              <span class="preview-resize-handle west" data-preview-resize="w"></span>
+            </div>
           </div>
           <div class="preset-bar" aria-label="Presets">
             <span>Presets</span>
