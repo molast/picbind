@@ -55,7 +55,7 @@ function openDatabase() {
         if (!crossOriginIsolated) {
           throw new Error("SQLite OPFS requires cross-origin isolation");
         }
-        if (!("opfs" in sqlite3)) {
+        if (typeof sqlite3.oo1.OpfsDb !== "function") {
           throw new Error("SQLite OPFS VFS failed to initialize");
         }
         const database = new sqlite3.oo1.OpfsDb(DATABASE_FILE, "c");

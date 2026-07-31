@@ -5,6 +5,9 @@
   "scripts": {
     "build": "npm run build:image && npm run build:perceptual",
     "build:image": "cd ../../wasm/image_wasm && wasm-pack build --target web --out-dir ../../sdk/wasm/image-wasm",
-    "build:perceptual": "cd ../../wasm/perceptual_wasm && RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --target web --out-dir ../../sdk/wasm/perceptual-wasm"
+    "build:perceptual": "cd ../../wasm/perceptual_wasm && cross-env RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --target web --out-dir ../../sdk/wasm/perceptual-wasm"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
   }
 }

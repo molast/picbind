@@ -9,9 +9,8 @@ import {
 import "../src/styles.css";
 
 configureRoomSdk({
-  apiBaseUrl: import.meta.env.DEV
-    ? window.location.origin
-    : "https://api.picbind.com",
+  apiBaseUrl:
+    import.meta.env.VITE_ROOM_API_URL || "https://api.picbind.com",
   roomUrl: import.meta.env.VITE_ROOM_APP_URL || window.location.origin,
 });
 
