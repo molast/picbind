@@ -1,0 +1,10 @@
+{
+  "name": "@picbind/wasm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:image && npm run build:perceptual",
+    "build:image": "cd ../../wasm/image_wasm && wasm-pack build --target web --out-dir ../../sdk/wasm/image-wasm",
+    "build:perceptual": "cd ../../wasm/perceptual_wasm && RUSTFLAGS='-C target-feature=+simd128' wasm-pack build --target web --out-dir ../../sdk/wasm/perceptual-wasm"
+  }
+}

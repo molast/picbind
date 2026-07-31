@@ -47,7 +47,7 @@ R2_ACCOUNT_ID = "a3af9fe482ea605e4cc8b2496a45b806"
 SITE_URL = "https://picbind.com"
 # Optional standalone @picbind/room deployment origin. Defaults to SITE_URL.
 # ROOM_URL = "https://room.picbind.com"
-ALLOWED_ORIGINS = "https://picbind.com"
+ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,https://room.picbind.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4174,http://127.0.0.1:4174"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
 
 [[ratelimits]]

@@ -5,19 +5,23 @@ import { getRoomSdkConfig } from "../config";
 let cachedMod: any = null;
 let cachedModPromise: Promise<any> | null = null;
 
+async function loadWasmModule() {
+  const configuredBaseUrl = getRoomSdkConfig().wasmBaseUrl?.trim();
+  if (!configuredBaseUrl) {
+    return import("../../../wasm/image-wasm/image_wasm.js");
+  }
+
+  const baseUrl = configuredBaseUrl.replace(/\/$/, "");
+  const moduleUrl = `${baseUrl}/image_wasm.js`;
+  return import(/* webpackIgnore: true */ /* @vite-ignore */ moduleUrl);
+}
+
 export async function initWasm() {
   if (cachedMod) return cachedMod;
   if (!cachedModPromise) {
     cachedModPromise = (async () => {
       try {
-        const baseUrl = (getRoomSdkConfig().wasmBaseUrl || "/wasm").replace(
-          /\/$/,
-          "",
-        );
-        const moduleUrl = `${baseUrl}/image_wasm.js`;
-        const mod: any = await import(
-          /* webpackIgnore: true */ /* @vite-ignore */ moduleUrl
-        );
+        const mod: any = await loadWasmModule();
         await mod.default();
         cachedMod = mod;
         return mod;

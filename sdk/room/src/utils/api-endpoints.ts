@@ -6,16 +6,7 @@ const DEFAULT_API_BASE_URL = "https://api.picbind.com";
 
 function normalizeBaseUrl(value?: string) {
   const raw = (value || "").trim();
-  if (!raw) {
-    if (
-      typeof window !== "undefined" &&
-      (window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1")
-    ) {
-      return "http://127.0.0.1:8787";
-    }
-    return DEFAULT_API_BASE_URL;
-  }
+  if (!raw) return DEFAULT_API_BASE_URL;
   return raw.replace(/\/+$/, "");
 }
 

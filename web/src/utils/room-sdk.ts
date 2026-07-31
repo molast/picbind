@@ -6,11 +6,11 @@ import {
   ShareRoomPage,
 } from "@picbind/room/source";
 
+const ONLINE_ROOM_API_BASE_URL = "https://api.picbind.com";
+
 configureRoomSdk({
-  apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL,
-  createRoomUrl: process.env.NEXT_PUBLIC_SHARE_ROOM_API_PATH,
+  apiBaseUrl: ONLINE_ROOM_API_BASE_URL,
   roomUrl: process.env.NEXT_PUBLIC_ROOM_APP_URL,
-  wasmBaseUrl: "/wasm",
 });
 
 export { CreateRoomButton, ShareRoomPage };
