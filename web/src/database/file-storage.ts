@@ -5,7 +5,6 @@ const ROOT_DIRECTORIES = [
   "cache",
   "temp",
   "files",
-  "thumbnails",
 ] as const;
 
 function safeSegment(value: string) {

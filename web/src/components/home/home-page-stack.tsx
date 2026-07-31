@@ -5,10 +5,10 @@ import dynamic from "next/dynamic";
 import { FiLoader } from "react-icons/fi";
 import HomeCompressLanding from "./home-compress-landing";
 import type { Lang } from "@/locales";
-import type { ShareRoom } from "@/utils/share-room";
+import type { ShareRoom } from "@picbind/room/source/types";
 
 const ShareRoomPage = dynamic(
-  () => import("@/components/share/share-room-page"),
+  () => import("@/utils/room-sdk").then((module) => module.ShareRoomPage),
   {
     ssr: false,
     loading: () => (

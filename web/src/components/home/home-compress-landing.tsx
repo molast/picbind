@@ -11,7 +11,7 @@ import RoomUnavailableDialog, {
 } from "./room-unavailable-dialog";
 import { useHomeCompression } from "./use-home-compression";
 import type { Lang } from "@/locales";
-import type { ShareRoom } from "@/utils/share-room";
+import type { ShareRoom } from "@picbind/room/source/types";
 
 type HomeCompressLandingProps = {
   initialLang: Lang;

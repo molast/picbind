@@ -25,11 +25,11 @@
       "@/*": [
         "./src/*"
       ],
-      "@wasm/*": [
-        "./public/wasm/*"
+      "@image-wasm/*": [
+        "../sdk/wasm/image-wasm/*"
       ],
       "@perceptual-wasm/*": [
-        "./public/perceptual-wasm/*"
+        "../sdk/wasm/perceptual-wasm/*"
       ]
     },
     "target": "ES2017"

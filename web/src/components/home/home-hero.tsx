@@ -3,10 +3,10 @@
 import type React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import CreateRoomButton from "@/components/share/create-room-button";
+import CreateRoomButton from "@/components/room-create-button";
+import type { ShareRoom } from "@picbind/room/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
-import type { ShareRoom } from "@/utils/share-room";
 
 type HomeHeroProps = {
   copy: HomeCompressLandingCopy;

@@ -18,6 +18,12 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 ```text
 .
 ├── cloudflare-worker/      # Cloudflare Worker API 服务骨架
+├── sdk/                    # 可独立构建和复用的前端 SDK
+│   ├── wasm/               # 可复用的 WASM Web SDK
+│   │   ├── image-wasm/     # 图片处理 WASM Web 产物
+│   │   └── perceptual-wasm/ # 感知质量 WASM Web 产物
+│   ├── mip/                # Motion Intent Protocol SDK
+│   └── room/               # Room SDK 与独立 Demo
 ├── wasm/image_wasm/        # Rust WASM 图片处理库
 └── web/                    # Next.js 前端应用（SQLite WASM + OPFS 本地存储）
 ```
@@ -74,14 +80,17 @@ dev-local.cmd
 Rust WASM 代码位于 `wasm/image_wasm/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：
 
 ```bash
-cd web
-npm run wasm:build
+cd sdk/wasm
+npm run build
 ```
+
+也可以单独执行 `npm run build:image` 或 `npm run build:perceptual`。
 
 生成文件会输出到：
 
 ```text
-web/public/wasm/
+sdk/wasm/image-wasm/
+sdk/wasm/perceptual-wasm/
 ```
 
 ## Cloudflare Pages 部署

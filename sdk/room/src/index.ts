@@ -1,0 +1,19 @@
+"use client";
+
+export { default as ShareRoomPage } from "./components/share/share-room-page";
+export { default as CreateRoomButton } from "./components/share/create-room-button";
+export { configureRoomSdk } from "./config";
+export type { RoomSdkConfig } from "./config";
+export type { ShareRoom } from "./utils/share-room";
+export type { Lang } from "./locales";
+export type {
+  ActivityItem,
+  ConnectionState,
+  RoomImage,
+} from "./components/share/share-room-types";
+export type { ImagePlaceholderMetadata } from "./utils/share-placeholder";
+export type {
+  ReviewAnchor,
+  ReviewAnnotation,
+  ReviewOperation,
+} from "./utils/review-collaboration";

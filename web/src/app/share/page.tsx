@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import ShareRoomPage from "@/components/share/share-room-page";
+import RoomPageClient from "@/components/room-page-client";
 
 export const metadata: Metadata = {
   title: "Share room",
@@ -10,5 +10,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return <ShareRoomPage />;
+  return <RoomPageClient />;
 }
