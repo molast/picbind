@@ -1,5 +1,6 @@
 import type { ReviewAnchor, ReviewOperation } from "../../utils/review-collaboration";
 import type { ImagePlaceholderMetadata } from "../../utils/share-placeholder";
+import type { ImageObjectMetadata } from "../../utils/image-object";
 
 export type CachedCompressedImage = {
   id: string;
@@ -14,7 +15,7 @@ export type CachedCompressedImage = {
   createdAt: number;
 };
 
-export type CachedRoomImage = {
+export type CachedRoomImage = ImageObjectMetadata & {
   id: string;
   roomId: string;
   name: string;
@@ -39,6 +40,9 @@ export type CachedRoomImage = {
   thumbnail?: Blob;
   reviewStatus?: "in-review" | "approved";
   reviewAnchorCount?: number;
+  pinnedAt?: number | null;
+  wantedByMe?: boolean;
+  wantedByPeer?: boolean;
   createdAt: number;
 };
 

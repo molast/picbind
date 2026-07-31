@@ -6,6 +6,7 @@ use js_sys::{Array, Reflect, Uint8Array};
 use std::io::Cursor;
 use wasm_bindgen::prelude::*;
 
+mod content_identity;
 mod core;
 mod share_placeholder;
 
@@ -26,6 +27,22 @@ pub fn ensure_input_size_limit(input: &[u8]) -> Result<(), JsValue> {
         )));
     }
     Ok(())
+}
+
+#[wasm_bindgen]
+pub fn calculate_image_md5(input: &[u8]) -> Result<String, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+    }
+    Ok(content_identity::md5_hex(input))
+}
+
+#[wasm_bindgen]
+pub fn read_image_metadata(input: &[u8]) -> Result<js_sys::Object, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+    }
+    content_identity::metadata(input)
 }
 
 fn ensure_avif_intermediate_size_limit(input: &[u8]) -> Result<(), JsValue> {
@@ -168,6 +185,65 @@ pub fn compress_image_to_format_with_plan_options(
         allow_alpha_loss,
         compression_gain,
     )
+}
+
+#[wasm_bindgen]
+pub fn compress_image_to_format_with_resize_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+    target_width: u32,
+    target_height: u32,
+) -> Result<CompressionResult, JsValue> {
+    ensure_input_size_limit(input)?;
+    ensure_target_pixel_limit(target_width, target_height)?;
+    core::pipeline::compress_image_to_format_with_resize_options(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        compression_gain,
+        target_width,
+        target_height,
+    )
+}
+
+fn ensure_target_pixel_limit(width: u32, height: u32) -> Result<(), JsValue> {
+    if width == 0 || height == 0 || width > 16_384 || height > 16_384 {
+        return Err(JsValue::from_str(
+            "Target dimensions must be between 1 and 16384 pixels",
+        ));
+    }
+    let byte_len = usize::try_from(width)
+        .ok()
+        .and_then(|value| value.checked_mul(usize::try_from(height).ok()?))
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| JsValue::from_str("Target dimensions overflow"))?;
+    if byte_len > MAX_AVIF_INTERMEDIATE_BYTES {
+        return Err(JsValue::from_str(
+            "Target image pixel buffer exceeds 128 MB",
+        ));
+    }
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn resize_image_to_rgba(
+    input: &[u8],
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    ensure_input_size_limit(input)?;
+    ensure_target_pixel_limit(target_width, target_height)?;
+    let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let image = image::load_from_memory_with_format(input, format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(image
+        .resize_exact(target_width, target_height, FilterType::Lanczos3)
+        .to_rgba8()
+        .into_raw())
 }
 
 #[wasm_bindgen]

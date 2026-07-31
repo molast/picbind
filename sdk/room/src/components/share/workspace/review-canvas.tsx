@@ -82,6 +82,7 @@ type ReviewCanvasProps = {
   onLaserEvent(event: ReviewLaserEvent): void;
   onAnchorUpsert(anchor: ReviewAnchor): void;
   onAnchorDelete(anchor: ReviewAnchor): void;
+  onAnnotationSnapshotChange(dataUrl: string): void;
 };
 
 export default function ReviewCanvas({
@@ -116,6 +117,7 @@ export default function ReviewCanvas({
   onLaserEvent,
   onAnchorUpsert,
   onAnchorDelete,
+  onAnnotationSnapshotChange,
 }: ReviewCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -146,6 +148,13 @@ export default function ReviewCanvas({
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
   const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(
     null,
+  );
+  const handleAnnotationSnapshot = React.useCallback(
+    (dataUrl: string) => {
+      setAnnotationSnapshot(dataUrl);
+      onAnnotationSnapshotChange(dataUrl);
+    },
+    [onAnnotationSnapshotChange],
   );
   const [textEditor, setTextEditor] = React.useState<{
     sessionId: string;
@@ -609,7 +618,7 @@ export default function ReviewCanvas({
                     before: annotation,
                   });
                 }}
-                onSnapshotChange={setAnnotationSnapshot}
+                onSnapshotChange={handleAnnotationSnapshot}
                 onCreate={onCreate}
                 onUpdate={onUpdate}
               />

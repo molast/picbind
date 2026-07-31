@@ -1,4 +1,4 @@
-use image::DynamicImage;
+use image::{DynamicImage, imageops::FilterType};
 use wasm_bindgen::JsValue;
 
 use crate::CompressionResult;
@@ -336,11 +336,55 @@ pub fn compress_image_to_target_format_with_gain(
     Ok(candidate.into_result())
 }
 
+pub fn compress_image_to_target_format_with_resize(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+    target_width: u32,
+    target_height: u32,
+) -> Result<CompressionResult, JsValue> {
+    if target_width == 0 || target_height == 0 {
+        return Err(JsValue::from_str("Target dimensions must be positive"));
+    }
+    let format = image::guess_format(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let img = image::load_from_memory_with_format(input, format)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let dimensions_changed = img.width() != target_width || img.height() != target_height;
+    let resized = if dimensions_changed {
+        img.resize_exact(target_width, target_height, FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // A resized image is a newly generated pixel source. Treating it as a
+    // same-format candidate would incorrectly enforce the original file-size
+    // guard and could reject a valid resized output.
+    let encoding_source_format = if dimensions_changed {
+        image::ImageFormat::Bmp
+    } else {
+        format
+    };
+    let candidate = encode_candidate_for_format(
+        &resized,
+        input,
+        encoding_source_format,
+        &target_format.to_ascii_lowercase(),
+        quality,
+        allow_alpha_loss,
+        compression_gain,
+    )?;
+    Ok(candidate.into_result())
+}
+
 #[cfg(test)]
 mod tests {
-    use image::{DynamicImage, Rgba, RgbaImage};
+    use std::io::Cursor;
 
-    use super::compress_dynamic_image_to_png;
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+
+    use super::{compress_dynamic_image_to_png, compress_image_to_target_format_with_resize};
 
     #[test]
     fn rgba_cross_format_png_uses_an_indexed_palette() {
@@ -356,5 +400,22 @@ mod tests {
         assert_eq!(&result.bytes[1..4], b"PNG");
         assert_eq!(result.bytes[24], 8);
         assert_eq!(result.bytes[25], 3);
+    }
+
+    #[test]
+    fn resized_compression_outputs_requested_dimensions() {
+        let source =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(80, 40, Rgba([24, 96, 180, 255])));
+        let mut input = Vec::new();
+        source
+            .write_to(&mut Cursor::new(&mut input), ImageFormat::Png)
+            .unwrap();
+
+        let result =
+            compress_image_to_target_format_with_resize(&input, 82, "png", false, 1.0, 32, 16)
+                .unwrap();
+        let decoded = image::load_from_memory(&result.bytes).unwrap();
+
+        assert_eq!((decoded.width(), decoded.height()), (32, 16));
     }
 }

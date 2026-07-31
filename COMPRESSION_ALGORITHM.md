@@ -450,3 +450,39 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PNG / Oxipng | `wasm/image_wasm/src/core/png_oxipng.rs` |
 | 感知指标 | `wasm/image_wasm/src/core/metrics.rs`、`wasm/image_wasm/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `wasm/image_wasm/src/core/pipeline/to_format.rs` |
+
+## 16. Room Image Workspace 压缩入口
+
+`sdk/room` 现在提供独立的图片版本压缩入口。它复用共享 `image-wasm`，但不等同于首页完整的 Worker/PCE 候选调度链：
+
+1. `自动`模式调用 WASM `predict_compression`，从 JPEG、WebP、AVIF 中选择建议格式；PNG 源图在预测不可用时回退到 WebP，以避免自动选择 JPEG 后丢失透明度。用户也可以在 Room 压缩弹窗中显式选择 JPEG、PNG、WebP 或 AVIF；显式选择 PNG 时直接进入共享 WASM PNG 编码路径。
+2. JPEG 和 PNG 编码调用共享 WASM。WASM 无法直接解码输入时，先由浏览器解码为 RGBA；PNG 调用 `compress_rgba_to_png_with_gain`，JPEG 仅在图片没有真实 Alpha 时使用 `OffscreenCanvas` 回退，透明图片会被明确拒绝而不会静默压平。
+3. WebP 使用 `@jsquash/webp`，AVIF 使用 `@jsquash/avif`。保持原始尺寸时，两者通过 `createImageBitmap` 解码为 RGBA，并在 `finally` 中关闭 `ImageBitmap`；传入目标尺寸时改用第 4 条的 WASM RGBA 缩放路径，不生成 Canvas 中间图片。Room Worker 显式导入 WebP 普通/SIMD WASM、AVIF 单线程/多线程 WASM 和 AVIF 线程 Worker 的构建 URL，并通过 Emscripten `locateFile` 映射资源，不能使用 Worker 页面地址推导相对路径；Web 主项目将带 `?url` 的 `.wasm` 和 `.mjs` 声明为静态资源，避免路由回退 HTML 被当成 WASM 编译。
+4. 同格式且保持原始像素尺寸时，结果不小于源文件会返回原 Blob。Room 压缩弹窗同时提供固定原图宽高比的目标尺寸输入，不允许解除比例锁定；修改任一边会自动计算另一边。主线程只把目标宽高传给专用 Worker，不执行像素缩放。目标尺寸与原图不同时，`image-wasm` 使用 `Lanczos3` 在编码前生成目标像素：JPEG/PNG 通过 `compress_image_to_format_with_resize_options` 在同一 WASM 调用内完成解码、缩放和编码；WebP/AVIF 通过 `resize_image_to_rgba` 获取 WASM 缩放后的 RGBA，再交给对应 jsquash 编码器。自动格式预测使用目标尺寸 RGBA。改变尺寸时不会执行同格式返回原图保护，否则会错误恢复原始尺寸。目标单边限制为 `16384` 像素，RGBA 缓冲上限为 `128 MB`。
+5. 压缩、转换和编辑结果统一进入结果弹窗。用户可选择“存储到本地”或“分享给对方”：本地存储会创建独立的根图片并进入左侧本地图片列表；分享会创建独立图片、生成 placeholder、发送接收确认请求，并在弹窗中依次展示准备、等待确认、传输和接收完成状态。对方拒绝时不会自动保存生成图，结果弹窗会提供“保存”和“不保存”，分别将临时图片移入左侧列表或彻底删除。图片 Blob 写入 OPFS，SQLite 只记录图片元数据、工作区位置和关联字段。
+6. Room 当前不启用首页的 Butteraugli 外层多候选校验，也不复用首页 Worker 并发队列。每次 Room 压缩会创建一个专用的一次性 Worker，完成或失败后立即终止。
+7. Room 压缩弹窗允许在压缩期间终止任务。点击“取消压缩”会触发 `AbortController` 并直接终止当前压缩 Worker，但保留弹窗以便重新选择格式和启动压缩；关闭按钮或 `Esc` 会终止任务并关闭弹窗。点击遮罩不会关闭压缩、格式转换、裁剪、尺寸调整或色彩调整弹窗，避免编辑结果因误触丢失。正在执行的 WASM 编码和 Worker 内存会一起停止和释放，任务代次标记同时防止旧任务结果覆盖后续状态。
+8. Room 图片操作菜单提供裁剪和尺寸调整。裁剪选区由现有 Konva 画布和 Transformer 实现，支持自由比例、原始比例、1:1、4:3、3:4、16:9 和 9:16；尺寸调整支持锁定原始宽高比或自由输入宽高。两条编辑路径都通过 `OffscreenCanvas` 生成实际像素结果，优先保持源 MIME；浏览器不支持源格式编码时，JPEG 源优先回退 WebP，可能包含 Alpha 的格式回退 PNG，不能静默压平透明像素。编辑生成的临时 `ImageBitmap` 在完成或失败后关闭。
+9. Room 格式转换弹窗支持用户显式选择 JPEG、PNG、WebP 或 AVIF，并禁用当前源格式。转换任务复用 Room 专用压缩 Worker 和对应目标格式编码链，操作类型记录为 `convert`，不会进入自动格式推荐。跨格式转换不执行“结果必须小于源文件”保护，因为用户明确要求改变格式；转换 JPEG 时仍禁止静默丢失真实 Alpha。取消转换会直接终止 Worker 并保留弹窗，关闭弹窗则终止 Worker 后退出。
+10. Room 图片使用持久化的 `workspaceLocation` 区分左侧 `library` 与主区域 `outbox`，并使用 `outboxOrigin` 记录图片由 `library`、直接生成或对方接收进入右侧。新导入图片只进入 `library`，文件选择阶段不会生成 placeholder，也不会弹出压缩建议；用户点击加入待发送区域时才按正常网络 `1 MB`、弱网 `300 KB` 的阈值决定是否提示压缩，确认继续后再切换到 `outbox`、生成 placeholder 并通知对方。裁剪、尺寸调整、格式转换和色彩调整生成的新图片在选择分享时也经过相同阈值；已经由 Room 压缩弹窗生成的结果不重复提示，Review 输出遵循第 13 节的直接分享流程。选择压缩会直接打开 Room 内部压缩弹窗，不再离开房间跳转到首页；弹窗左侧固定展示原图及其文件信息，右侧作为压缩结果等待区，完成后展示结果图、格式、尺寸和体积变化。右侧统一使用垃圾桶按钮：`library` 来源点击后无需确认，直接移回左侧并通知对方删除对应占位；直接生成、分享成功或接收的图片点击后显示“取消 / 删除 / 移入左侧”，删除仅清理当前端，移入左侧也不会删除对端副本。接收图片移入左侧时会转换为具有新 ID 的本端独立图片，避免后续再次发送时与对端原对象冲突。待发送区卡片可以在当前端置顶，`pinnedAt` 持久化到 SQLite；置顶项按最近置顶时间优先，未置顶项中带有 `wantedByPeer` 的提供方图片排在普通图片之前，其余继续按 `updatedAt` 倒序排列。置顶状态不向对端同步，取消“想要”会恢复普通排序。只有 `received` 图片允许点赞，自己的 `sent` 图片只展示对方产生的点赞数和红心动画。点击可点赞的图片区域会即时累计并持久化 `likeCount`，网络事件按图片进入内存队列，延迟 `2s` 后每批最多 `12` 张图片、单图最多 `100` 次增量通过 instruction 通道发送；只有成功写入通道的增量才从队列扣除，断线时保留并延迟重试。接收端按增量累加计数，并在图片容器内错峰生成本地红心动画，不传输动画帧。尚未收到原图的接收卡片可以切换“想要”状态，再次点击会取消；双方分别持久化 `wantedByMe` 和 `wantedByPeer`，并通过布尔事件同步高亮与取消。图片对象分别持久化不可变的创建时间 `createdAt` 和列表位置更新时间 `updatedAt`；只有新建对象及在 `library`、`outbox` 之间移动时才更新 `updatedAt`，传输进度和状态变化不会更新它。两个时间会随 placeholder、P2P/R2 元数据和处理图片分享请求发送，接收端在完整二进制替换占位时保持不变；左右列表及刷新恢复均按 `updatedAt` 倒序排列，旧数据迁移时以 `createdAt` 初始化 `updatedAt`。分享接收确认弹窗会报告预览容器尺寸，并通过独立 thumbnail 通道接收缩略图；只有缩略图实际到达后才显示长按查看按钮。接收方确认接收分享后会立即创建合法空 Blob 的占位卡片，完整二进制到达后原位替换并保留互动字段。历史数据迁移时默认将已发送图片标记为直接进入右侧，接收图片标记为 `received`，接收图片无论 `workspaceLocation` 为何值都显示在主区域。
+11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线依次应用 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色。色调曲线支持添加、移动和删除控制点，端点保留且可调整输出值，控制点最多 `12` 个；处理时按输入值排序，经 Catmull-Rom 插值生成 `256` 项 LUT，并分别映射 R、G、B 通道。弹窗在最长边不超过 `720×420` 的 Canvas 预览副本上实时执行同一像素函数，最终输出在原始尺寸 `OffscreenCanvas` 上执行。颜色替换可从预览点击取样，Alpha 始终保持原值且不会被静默压平；生成结果记录为 `adjust`，后续由统一结果弹窗决定本地存储或分享。全部设置保持默认值时禁止生成无意义结果。
+12. Review 标注线宽以图片归一化比例保存，渲染时乘以原图到当前适配画布的缩放比例。因此不同像素尺寸的图片在相同线宽档位和初始适配视图下具有一致的屏幕视觉粗细，同时图形自身拉伸不会放大描边。自由画笔、直线、箭头、矩形、圆形、虚线和圆点线共用该换算。Transformer 锚点、旋转手柄、旋转偏移和选框边框属于操作 UI，只按视口缩放反向补偿，不受原图分辨率影响。
+13. Review 保存图片时先在全尺寸 `OffscreenCanvas` 合成原图与标注快照，但合成得到的 PNG 只作为临时无损像素载体，不再直接作为最终文件。随后通过一次性压缩 Worker 编码为源图格式：JPEG、PNG 使用共享 `image-wasm`，WebP、AVIF 使用 Room 现有对应编码器。若首选结果超过 `max(原图大小 × 1.5, 原图大小 + 512 KB)`，会额外尝试 WebP；WebP 源则尝试 AVIF，并选择两个有效结果中更小的一个。该护栏不能退回原图，因为原图不包含新标注。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
+
+关键实现：
+
+- Room 压缩适配：`sdk/room/src/utils/room-image-compression.ts`
+- 压缩与预览 UI：`sdk/room/src/components/share/workspace/image-compression-dialog.tsx`
+- 格式转换 UI：`sdk/room/src/components/share/workspace/image-conversion-dialog.tsx`
+- 裁剪与尺寸调整 UI：`sdk/room/src/components/share/workspace/image-crop-dialog.tsx`、`sdk/room/src/components/share/workspace/konva-crop-editor.tsx`、`sdk/room/src/components/share/workspace/image-resize-dialog.tsx`
+- 色彩调整 UI：`sdk/room/src/components/share/workspace/image-color-adjustment-dialog.tsx`
+- 色彩实时预览：`sdk/room/src/components/share/workspace/color-adjustment-preview.tsx`
+- 色调曲线编辑器：`sdk/room/src/components/share/workspace/tone-curve-editor.tsx`
+- 处理结果动作弹窗：`sdk/room/src/components/share/workspace/image-result-dialog.tsx`
+- 本地图片列表：`sdk/room/src/components/share/workspace/local-image-list.tsx`
+- 色彩像素处理：`sdk/room/src/utils/room-color-adjustments.ts`
+- Room 格式转换适配：`sdk/room/src/utils/room-image-conversion.ts`
+- Room 图片编辑编码：`sdk/room/src/utils/room-image-editing.ts`
+- Review 标注渲染：`sdk/room/src/components/share/workspace/review-annotation-layer.tsx`
+- Review 图片合成与编码：`sdk/room/src/utils/review-image-export.ts`
+- 图片内容身份与 metadata：`wasm/image_wasm/src/content_identity.rs`

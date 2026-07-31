@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
   return {
     base: "./",
     plugins: [react()],
+    worker: {
+      format: "es",
+    },
     server: {
       fs: {
         allow: [sdkRoot],

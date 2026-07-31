@@ -1,0 +1,8 @@
+ALTER TABLE room_images
+  ADD COLUMN wanted_by_me INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE room_images
+  ADD COLUMN wanted_by_peer INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE room_images
+  ADD COLUMN like_count INTEGER NOT NULL DEFAULT 0;

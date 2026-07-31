@@ -79,3 +79,23 @@ pub fn compress_image_to_format_with_plan_options(
         compression_gain,
     )
 }
+
+pub fn compress_image_to_format_with_resize_options(
+    input: &[u8],
+    quality: u8,
+    target_format: &str,
+    allow_alpha_loss: bool,
+    compression_gain: f64,
+    target_width: u32,
+    target_height: u32,
+) -> Result<CompressionResult, JsValue> {
+    to_format::compress_image_to_target_format_with_resize(
+        input,
+        quality,
+        target_format,
+        allow_alpha_loss,
+        compression_gain,
+        target_width,
+        target_height,
+    )
+}

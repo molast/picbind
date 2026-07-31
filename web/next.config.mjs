@@ -28,6 +28,11 @@ const nextConfig = {
         test: /\.sql$/i,
         type: 'asset/source',
       },
+      {
+        test: /\.(wasm|mjs)$/i,
+        resourceQuery: /url/,
+        type: 'asset/resource',
+      },
       // Reapply the existing rule, but only for svg imports ending in ?url
       {
         ...fileLoaderRule,

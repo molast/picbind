@@ -2,6 +2,7 @@
 
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
 import type { RealtimeMessageChannel } from "./weak-network-socket";
+import type { ImageObjectMetadata } from "./image-object";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;
 const TRANSFER_ID_BYTES = 16;
@@ -25,6 +26,7 @@ export type ImageTransferMeta = {
   size: number;
   chunkSize: number;
   totalChunks: number;
+  workspace?: ImageObjectMetadata;
 };
 
 type TransferInstruction =
@@ -122,6 +124,7 @@ export function createImageTransferMeta(
   file: Blob & { name?: string },
   id = createTransferId(),
   chunkSize = IMAGE_CHUNK_SIZE,
+  workspace?: ImageObjectMetadata,
 ) {
   return {
     id,
@@ -130,6 +133,7 @@ export function createImageTransferMeta(
     size: file.size,
     chunkSize,
     totalChunks: Math.ceil(file.size / chunkSize),
+    ...(workspace ? { workspace } : {}),
   } satisfies ImageTransferMeta;
 }
 
@@ -193,6 +197,46 @@ function isValidMeta(
     return false;
   }
   const meta = value as Partial<ImageTransferMeta>;
+  const workspace = meta.workspace;
+  const validWorkspace =
+    workspace === undefined ||
+    (typeof workspace === "object" &&
+      workspace !== null &&
+      typeof workspace.rootImageId === "string" &&
+      /^[a-f0-9]{32}$/.test(workspace.rootImageId) &&
+      (workspace.parentImageId === null ||
+        (typeof workspace.parentImageId === "string" &&
+          /^[a-f0-9]{32}$/.test(workspace.parentImageId))) &&
+      typeof workspace.ownerId === "string" &&
+      workspace.ownerId.length <= 128 &&
+      Number.isSafeInteger(workspace.width) &&
+      workspace.width >= 0 &&
+      workspace.width <= 100_000 &&
+      Number.isSafeInteger(workspace.height) &&
+      workspace.height >= 0 &&
+      workspace.height <= 100_000 &&
+      ["local", "received", "compressed", "review-export"].includes(
+        workspace.source,
+      ) &&
+      [
+        "original",
+        "compress",
+        "convert",
+        "crop",
+        "resize",
+        "adjust",
+        "review-export",
+      ].includes(workspace.operation) &&
+      Number.isSafeInteger(workspace.version) &&
+      workspace.version >= 1 &&
+      (workspace.outboxOrigin === undefined ||
+        ["library", "direct", "received"].includes(workspace.outboxOrigin)) &&
+      (workspace.createdAt === undefined ||
+        (Number.isSafeInteger(workspace.createdAt) && workspace.createdAt > 0)) &&
+      (workspace.updatedAt === undefined ||
+        (Number.isSafeInteger(workspace.updatedAt) && workspace.updatedAt > 0)) &&
+      (workspace.likeCount === undefined ||
+        (Number.isSafeInteger(workspace.likeCount) && workspace.likeCount >= 0)));
   return (
     typeof meta.id === "string" &&
     /^[a-f0-9]{32}$/.test(meta.id) &&
@@ -210,7 +254,8 @@ function isValidMeta(
     meta.chunkSize >= WEAK_NETWORK_CHUNK_SIZE &&
     meta.chunkSize <= IMAGE_CHUNK_SIZE &&
     typeof meta.totalChunks === "number" &&
-    meta.totalChunks === Math.ceil(meta.size / meta.chunkSize)
+    meta.totalChunks === Math.ceil(meta.size / meta.chunkSize) &&
+    validWorkspace
   );
 }
 
@@ -436,6 +481,7 @@ export async function sendImageFile(
   chunkSize = IMAGE_CHUNK_SIZE,
   waitUntilReady?: (id: string) => Promise<void>,
   signal?: AbortSignal,
+  workspace?: ImageObjectMetadata,
 ) {
   if (
     instructionChannel.readyState !== "open" ||
@@ -444,7 +490,7 @@ export async function sendImageFile(
     throw new Error("DataChannels are not open");
   }
 
-  const meta = createImageTransferMeta(file, transferId, chunkSize);
+  const meta = createImageTransferMeta(file, transferId, chunkSize, workspace);
   sendInstruction(instructionChannel, { type: "IMAGE_START", payload: meta });
   await waitUntilReady?.(meta.id);
   if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");

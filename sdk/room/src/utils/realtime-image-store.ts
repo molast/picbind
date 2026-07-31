@@ -57,11 +57,11 @@ export async function listRoomImages(roomId: string) {
   return listFallbackRoomImages(roomId);
 }
 
-export async function deleteRoomImage(id: string) {
+export async function deleteRoomImage(roomId: string, id: string) {
   await deleteFallbackRoomImage(id).catch(() => undefined);
   if (sqliteUnavailable) return;
   try {
-    await deleteRoom(id);
+    await deleteRoom(roomId, id);
   } catch (error) {
     disableSqliteCache("delete", error);
   }

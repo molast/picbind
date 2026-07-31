@@ -23,11 +23,18 @@ import ReviewCanvas, {
 import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
 import ReviewClearCommentsDialog from "./review-clear-comments-dialog";
+import ReviewImageExportDialog from "./review-image-export-dialog";
 import { useReviewHistory } from "./use-review-history";
 import {
   loadReviewHistory,
   saveReviewHistory,
 } from "../../../utils/realtime-review-history-store";
+import {
+  generateReviewImage,
+  type ReviewImageExport,
+  type ReviewImageExportOutcome,
+  type ReviewImageExportStage,
+} from "../../../utils/review-image-export";
 
 type ReviewWorkspaceProps = {
   roomId: string;
@@ -49,6 +56,13 @@ type ReviewWorkspaceProps = {
     anchorCount: number,
   ): void;
   onFullscreenChange(fullscreen: boolean): void;
+  onGenerateImage(
+    source: RoomImage,
+    result: ReviewImageExport,
+    share: boolean,
+    report: (stage: ReviewImageExportStage) => void,
+  ): Promise<ReviewImageExportOutcome>;
+  onResolveRejectedImage(imageId: string, save: boolean): Promise<void>;
   onBack(): void;
 };
 
@@ -92,6 +106,8 @@ export default function ReviewWorkspace({
   onSendMessage,
   onReviewStatusChange,
   onFullscreenChange,
+  onGenerateImage,
+  onResolveRejectedImage,
   onBack,
 }: ReviewWorkspaceProps) {
   const [scale, setScale] = React.useState(1);
@@ -121,6 +137,9 @@ export default function ReviewWorkspace({
   const [magnifierHighlightEnabled, setMagnifierHighlightEnabled] =
     React.useState(true);
   const [laserColor, setLaserColor] = React.useState("#eab308");
+  const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(null);
+  const [generatingImage, setGeneratingImage] = React.useState(false);
+  const [generatedImage, setGeneratedImage] = React.useState<ReviewImageExport | null>(null);
   const [remoteLaserEvent, setRemoteLaserEvent] =
     React.useState<ReviewRemoteLaserEvent | null>(null);
   const [incomingMessages, setIncomingMessages] = React.useState<
@@ -803,6 +822,15 @@ export default function ReviewWorkspace({
     });
   }, [annotations, baseMessage, commit, geometryContext, onSendMessage, resetViewport]);
 
+  const handleGenerateImage = React.useCallback(() => {
+    if (generatingImage) return;
+    setGeneratingImage(true);
+    const source = new File([image.blob], image.name, { type: image.type });
+    void generateReviewImage(source, annotationSnapshot)
+      .then(setGeneratedImage)
+      .finally(() => setGeneratingImage(false));
+  }, [annotationSnapshot, generatingImage, image.blob, image.name, image.type]);
+
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -917,6 +945,8 @@ export default function ReviewWorkspace({
         onZoomOut={() => setScale((current) => Math.max(0.25, current - 0.25))}
         onFit={resetViewport}
         onReset={resetWorkspace}
+        onGenerateImage={handleGenerateImage}
+        generatingImage={generatingImage}
       />
       <ReviewCanvas
         image={image}
@@ -950,6 +980,7 @@ export default function ReviewWorkspace({
         onLaserEvent={sendLaser}
         onAnchorUpsert={upsertAnchor}
         onAnchorDelete={deleteAnchor}
+        onAnnotationSnapshotChange={setAnnotationSnapshot}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
       {deletedAnchors.length ? (
@@ -973,6 +1004,15 @@ export default function ReviewWorkspace({
           setClearCommentsOpen(false);
           deleteAnchors(clearableAnchors);
         }}
+      />
+      <ReviewImageExportDialog
+        result={generatedImage}
+        onClose={() => setGeneratedImage(null)}
+        onSave={async (share, report) => {
+          if (!generatedImage) throw new Error("生成图片结果不存在");
+          return onGenerateImage(image, generatedImage, share, report);
+        }}
+        onResolveRejected={onResolveRejectedImage}
       />
     </div>
   );
