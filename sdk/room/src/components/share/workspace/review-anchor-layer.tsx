@@ -37,8 +37,6 @@ type DraftAnchor = {
 };
 
 const REACTIONS = ["👍", "👎", "❤️", "🔥", "🎉", "😂", "😮", "🤔"];
-const LABELS = ["Approved", "Needs changes", "Question", "Copy"];
-
 function newAnchor(
   kind: ReviewAnchorKind,
   draft: DraftAnchor,
@@ -97,6 +95,12 @@ export default function ReviewAnchorLayer({
   const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOriginRef = React.useRef<{ x: number; y: number } | null>(null);
   const longPressTriggeredRef = React.useRef<string | null>(null);
+  const anchorLabels = [
+    labels.anchorApprovedLabel,
+    labels.anchorNeedsChangesLabel,
+    labels.anchorQuestionLabel,
+    labels.anchorCopyLabel,
+  ];
 
   React.useEffect(() => {
     if (!commentMode) setDraft(null);
@@ -355,7 +359,7 @@ export default function ReviewAnchorLayer({
           ) : (
             <div className="w-60 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
               <div className="mb-2 flex flex-wrap gap-1.5">
-                {LABELS.map((label) => (
+                {anchorLabels.map((label) => (
                   <button key={label} type="button" onClick={() => createLabel(label)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-blue-400 hover:bg-blue-50">{label}</button>
                 ))}
               </div>

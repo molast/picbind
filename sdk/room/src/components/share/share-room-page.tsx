@@ -6,6 +6,12 @@ import CreatedRoomDialog from "./created-room-dialog";
 import FloatingEmojiLayer from "./floating-emoji-layer";
 import ExitRoomDialog from "./exit-room-dialog";
 import GalleryWorkspace from "./workspace/gallery-workspace";
+import type {
+  ProcessedImageAction,
+  ProcessedImageActionOutcome,
+  ProcessedImageActionStage,
+  ProcessedImageResult,
+} from "./workspace/image-result-dialog";
 import { canReviewRoomImage } from "./workspace/gallery-image-card";
 import ReviewWorkspace from "./workspace/review-workspace";
 import FullscreenSidebarRail from "./workspace/fullscreen-sidebar-rail";
@@ -22,6 +28,7 @@ import type {
   ActivityItem,
   ConnectionState,
   FloatingEmoji,
+  ImageReactionSignal,
   MessageTransportMode,
   RoomDockNotification,
   RoomImage,
@@ -68,6 +75,25 @@ import {
 } from "../../utils/realtime-peer-messages";
 import { generateSharePlaceholder } from "../../utils/share-placeholder";
 import { initWasm } from "../../utils/wasm-runtime";
+import { identifyImage } from "../../utils/image-object";
+import {
+  sendImageWorkspaceMessage,
+  type ImageReactionBatch,
+  type ImageShareRequest,
+  type ImageShareResponse,
+  type ImageWanted,
+} from "../../utils/image-workspace-messages";
+import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
+import type {
+  ReviewImageExport,
+  ReviewImageExportOutcome,
+  ReviewImageExportStage,
+} from "../../utils/review-image-export";
+import {
+  clearOperationLogs,
+  listOperationLogs,
+  upsertOperationLog,
+} from "../../database/repositories/operation-log-repository";
 import { uploadFileToR2 } from "../../utils/realtime-r2-transfer";
 import {
   type RealtimeMessageChannel,
@@ -82,6 +108,9 @@ import {
   sendReviewCollaborationMessage,
   type ReviewCollaborationMessage,
 } from "../../utils/review-collaboration";
+import {
+  deleteReviewHistory,
+} from "../../utils/realtime-review-history-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -128,12 +157,19 @@ export default function ShareRoomPage({
   );
   const placeholderAckDimensionsRef = React.useRef(new Map<string, string>());
   const imagesRef = React.useRef<RoomImage[]>([]);
+  const roomIdRef = React.useRef<string | null>(null);
   const roomExitHandledRef = React.useRef(false);
   const minimizedRef = React.useRef(false);
   const exitRequestSourceRef = React.useRef<"button" | "history" | null>(null);
   const transferAbortControllersRef = React.useRef(
     new Map<string, AbortController>(),
   );
+  const outgoingShareRequestsRef = React.useRef(new Map<string, string>());
+  const pendingShareImagesRef = React.useRef(new Map<string, CachedRoomImage>());
+  const seenShareRequestsRef = React.useRef(new Set<string>());
+  const imageLikeQueueRef = React.useRef(new Map<string, number>());
+  const imageLikeFlushTimerRef = React.useRef<number | null>(null);
+  const flushImageLikeQueueRef = React.useRef<() => void>(() => undefined);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
@@ -156,6 +192,7 @@ export default function ShareRoomPage({
   >(null);
   const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
+  const [operationLogs, setOperationLogs] = React.useState<ActivityItem[]>([]);
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
@@ -165,7 +202,8 @@ export default function ShareRoomPage({
   const [isWeakNetwork, setIsWeakNetwork] = React.useState(false);
   const [isSourceDialogOpen, setIsSourceDialogOpen] = React.useState(false);
   const [isCompressedPickerOpen, setIsCompressedPickerOpen] = React.useState(false);
-  const [pendingLocalFiles, setPendingLocalFiles] = React.useState<File[] | null>(null);
+  const [pendingOutboxImage, setPendingOutboxImage] = React.useState<RoomImage | null>(null);
+  const [compressionRequest, setCompressionRequest] = React.useState<RoomImage | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
   const [textMessage, setTextMessage] = React.useState("");
@@ -180,6 +218,16 @@ export default function ShareRoomPage({
   const [kickingClientId, setKickingClientId] = React.useState<string | null>(
     null,
   );
+  const [incomingShareRequest, setIncomingShareRequest] =
+    React.useState<ImageShareRequest | null>(null);
+  const incomingShareRequestRef = React.useRef<ImageShareRequest | null>(null);
+  const [incomingShareThumbnail, setIncomingShareThumbnail] = React.useState<Blob | null>(null);
+  const [acceptedShareImage, setAcceptedShareImage] =
+    React.useState<RoomImage | null>(null);
+  const [imageReactionSignals, setImageReactionSignals] = React.useState<
+    Record<string, ImageReactionSignal>
+  >({});
+  roomIdRef.current = roomId;
   const reviewMessageSequenceRef = React.useRef(0);
   const pendingReviewMessagesRef = React.useRef<
     Array<{ sequence: number; message: ReviewCollaborationMessage }>
@@ -331,15 +379,26 @@ export default function ShareRoomPage({
   }, [reviewImage]);
 
   const upsertActivity = React.useCallback((activity: ActivityItem) => {
-    setActivities((current) => {
+    const update = (current: ActivityItem[], limit: number) => {
       const index = current.findIndex((item) => item.id === activity.id);
       if (index === -1) {
-        return [...current, activity].slice(-60);
+        return [...current, activity].slice(-limit);
       }
       const next = [...current];
       next[index] = { ...next[index], ...activity };
       return next;
-    });
+    };
+    if (activity.id.startsWith("message-")) {
+      setActivities((current) => update(current, 60));
+      return;
+    }
+    setOperationLogs((current) => update(current, 500));
+    const currentRoomId = roomIdRef.current;
+    if (currentRoomId) {
+      void upsertOperationLog(currentRoomId, activity).catch((error) => {
+        console.warn("Failed to persist room operation log", error);
+      });
+    }
   }, []);
 
   const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
@@ -398,8 +457,22 @@ export default function ShareRoomPage({
   }, []);
 
   const addRoomImage = React.useCallback((image: CachedRoomImage) => {
+    const blob = image.blob instanceof Blob
+      ? image.blob
+      : image.placeholderOnly
+        ? new Blob([], { type: image.type })
+        : null;
+    if (!blob) {
+      console.warn("Ignored room image with invalid binary payload", image.id);
+      return;
+    }
+    const thumbnail = image.thumbnail instanceof Blob
+      ? image.thumbnail
+      : undefined;
     const normalized: CachedRoomImage = {
       ...image,
+      blob,
+      thumbnail,
       transferStatus:
         image.transferStatus ||
         (image.direction === "sent" ? "sent" : "received"),
@@ -407,10 +480,10 @@ export default function ShareRoomPage({
         image.progress ??
         (image.direction === "sent" || image.direction === "received" ? 1 : 0),
     };
-    const url = URL.createObjectURL(image.blob);
+    const url = URL.createObjectURL(blob);
     objectUrlsRef.current.add(url);
-    const thumbnailUrl = image.thumbnail
-      ? URL.createObjectURL(image.thumbnail)
+    const thumbnailUrl = thumbnail
+      ? URL.createObjectURL(thumbnail)
       : undefined;
     if (thumbnailUrl) objectUrlsRef.current.add(thumbnailUrl);
     const nextImage = { ...normalized, url, thumbnailUrl };
@@ -420,7 +493,7 @@ export default function ShareRoomPage({
     let next: RoomImage[];
     if (existingIndex === -1) {
       imageIdsRef.current.add(image.id);
-      next = [...imagesRef.current, nextImage];
+      next = [nextImage, ...imagesRef.current];
     } else {
       const existing = imagesRef.current[existingIndex];
       URL.revokeObjectURL(existing.url);
@@ -459,11 +532,27 @@ export default function ShareRoomPage({
           : undefined;
         if (thumbnailUrl) objectUrlsRef.current.add(thumbnailUrl);
       }
-      next[index] = { ...current, ...patch, thumbnailUrl };
+      const locationChanged =
+        patch.workspaceLocation !== undefined &&
+        patch.workspaceLocation !== current.workspaceLocation;
+      const updated = {
+        ...current,
+        ...patch,
+        ...(locationChanged && patch.updatedAt === undefined
+          ? { updatedAt: Date.now() }
+          : {}),
+        thumbnailUrl,
+      };
+      if (locationChanged) {
+        next.splice(index, 1);
+        next.unshift(updated);
+      } else {
+        next[index] = updated;
+      }
       imagesRef.current = next;
       setImages(next);
       if (persist) {
-        const { url: _url, thumbnailUrl: _thumbnailUrl, ...cached } = next[index];
+        const { url: _url, thumbnailUrl: _thumbnailUrl, ...cached } = updated;
         void storeRoomImage(cached).catch((error) => {
           console.warn("Failed to persist image transfer state", error);
         });
@@ -487,6 +576,13 @@ export default function ShareRoomPage({
     [updateRoomImage],
   );
 
+  const handleReviewEditingChange = React.useCallback(
+    (imageId: string, operationCount: number) => {
+      updateRoomImage(imageId, { reviewOperationCount: operationCount }, true);
+    },
+    [updateRoomImage],
+  );
+
   const removeRoomImage = React.useCallback((id: string) => {
     const image = imagesRef.current.find((current) => current.id === id);
     if (!image) return;
@@ -497,6 +593,7 @@ export default function ShareRoomPage({
       objectUrlsRef.current.delete(image.thumbnailUrl);
     }
     imageIdsRef.current.delete(id);
+    imageLikeQueueRef.current.delete(id);
     const next = imagesRef.current.filter((current) => current.id !== id);
     imagesRef.current = next;
     setImages(next);
@@ -596,10 +693,38 @@ export default function ShareRoomPage({
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return;
     setIsPageStateLoaded(false);
     const cached = loadRoomPageState(roomId);
-    setActivities(cached?.activities || []);
+    setActivities(
+      (cached?.activities || []).filter((item) => item.id.startsWith("message-")),
+    );
     setTextMessage(cached?.textMessage || "");
     setReviewImageId(cached?.reviewImageId || null);
     setIsPageStateLoaded(true);
+  }, [roomId]);
+
+  React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+      setOperationLogs([]);
+      return;
+    }
+    let disposed = false;
+    setOperationLogs([]);
+    void listOperationLogs(roomId)
+      .then((stored) => {
+        if (disposed) return;
+        setOperationLogs((current) => {
+          const merged = new Map(stored.map((item) => [item.id, item]));
+          current.forEach((item) => merged.set(item.id, item));
+          return [...merged.values()]
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .slice(-500);
+        });
+      })
+      .catch((error) => {
+        console.warn("Failed to load room operation logs", error);
+      });
+    return () => {
+      disposed = true;
+    };
   }, [roomId]);
 
   React.useEffect(() => {
@@ -632,6 +757,23 @@ export default function ShareRoomPage({
                 }
               : cachedImage;
             addRoomImage(restoredImage);
+            if (
+              restoredImage.direction === "sent" &&
+              restoredImage.workspaceLocation !== "library" &&
+              !restoredImage.placeholder &&
+              !restoredImage.placeholderOnly &&
+              !restoredImage.previewOnly
+            ) {
+              void generateSharePlaceholder(restoredImage.blob)
+                .then((placeholder) => {
+                  if (!disposed) {
+                    updateRoomImage(restoredImage.id, { placeholder }, true);
+                  }
+                })
+                .catch((error) => {
+                  console.warn("Failed to restore image placeholder", error);
+                });
+            }
             if (interrupted) {
               void storeRoomImage(restoredImage);
               upsertActivity({
@@ -652,7 +794,124 @@ export default function ShareRoomPage({
     return () => {
       disposed = true;
     };
-  }, [addRoomImage, labels.transferInterrupted, roomId, upsertActivity]);
+  }, [addRoomImage, labels.transferInterrupted, roomId, updateRoomImage, upsertActivity]);
+
+  const handleImageShareRequest = React.useCallback((message: ImageShareRequest) => {
+    if (seenShareRequestsRef.current.has(message.payload.requestId)) return;
+    seenShareRequestsRef.current.add(message.payload.requestId);
+    incomingShareRequestRef.current = message;
+    setIncomingShareThumbnail(null);
+    setIncomingShareRequest(message);
+  }, []);
+
+  const handlePendingShareThumbnail = React.useCallback((imageId: string, thumbnail: Blob) => {
+    if (incomingShareRequestRef.current?.payload.image.imageId === imageId) {
+      setIncomingShareThumbnail(thumbnail);
+    }
+  }, []);
+
+  const handleImageShareResponse = React.useCallback(
+    (message: ImageShareResponse) => {
+      const imageId = outgoingShareRequestsRef.current.get(message.payload.requestId);
+      if (!imageId || imageId !== message.payload.imageId) return;
+      outgoingShareRequestsRef.current.delete(message.payload.requestId);
+      const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+      const pendingImage = pendingShareImagesRef.current.get(imageId);
+      const image = visibleImage || pendingImage;
+      if (message.payload.decision === "accept" && image) {
+        const accepted = { ...image, shareStatus: "accepted" as const };
+        if (pendingImage) {
+          pendingShareImagesRef.current.delete(imageId);
+          addRoomImage(accepted);
+          void storeRoomImage(accepted).catch((error) => {
+            console.warn("Failed to persist accepted shared image", error);
+          });
+        } else {
+          updateRoomImage(imageId, { shareStatus: "accepted" }, true);
+        }
+        const acceptedVisibleImage = imagesRef.current.find(
+          (candidate) => candidate.id === imageId,
+        );
+        if (acceptedVisibleImage) setAcceptedShareImage(acceptedVisibleImage);
+      } else {
+        if (pendingImage) {
+          pendingShareImagesRef.current.set(imageId, {
+            ...pendingImage,
+            shareStatus: "rejected",
+          });
+        } else {
+          updateRoomImage(imageId, { shareStatus: "rejected" }, true);
+        }
+        upsertActivity({
+          id: `share-${message.payload.requestId}`,
+          kind: "cancelled",
+          title: image?.name || labels.imageShare,
+          detail: labels.peerRejectedReceive,
+          createdAt: Date.now(),
+        });
+      }
+    },
+    [addRoomImage, updateRoomImage, upsertActivity],
+  );
+
+  const handleImageReactionBatch = React.useCallback(
+    (message: ImageReactionBatch) => {
+      message.payload.events.forEach(({ imageId, count }) => {
+        const image = imagesRef.current.find((candidate) => candidate.id === imageId);
+        if (!image) return;
+        updateRoomImage(
+          imageId,
+          { likeCount: (image.likeCount || 0) + count },
+          true,
+        );
+        setImageReactionSignals((current) => ({
+          ...current,
+          [imageId]: {
+            sequence: (current[imageId]?.sequence || 0) + 1,
+            count,
+          },
+        }));
+      });
+    },
+    [updateRoomImage],
+  );
+
+  const handleImageWanted = React.useCallback(
+    (message: ImageWanted) => {
+      const image = imagesRef.current.find(
+        (candidate) => candidate.id === message.payload.imageId,
+      );
+      if (!image || image.direction !== "sent") return;
+      updateRoomImage(image.id, { wantedByPeer: message.payload.wanted }, true);
+    },
+    [updateRoomImage],
+  );
+
+  React.useEffect(() => {
+    if (connection === "connected") return;
+    for (const [requestId, imageId] of outgoingShareRequestsRef.current) {
+      const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+      const pendingImage = pendingShareImagesRef.current.get(imageId);
+      const image = visibleImage || pendingImage;
+      if (pendingImage) {
+        pendingShareImagesRef.current.set(imageId, {
+          ...pendingImage,
+          shareStatus: "failed",
+        });
+      } else {
+        updateRoomImage(imageId, { shareStatus: "failed" }, true);
+      }
+      upsertActivity({
+        id: `share-${requestId}`,
+        kind: "error",
+        title: image?.name || labels.imageShare,
+        detail: labels.peerOfflineShareCancelled,
+        createdAt: Date.now(),
+      });
+    }
+    outgoingShareRequestsRef.current.clear();
+    setIncomingShareRequest(null);
+  }, [connection, updateRoomImage, upsertActivity]);
 
   useShareRoomConnection({
     roomId,
@@ -676,6 +935,11 @@ export default function ShareRoomPage({
     onWeakNetworkChange: handleWeakNetworkChange,
     onMessageTransportChange: setMessageTransportMode,
     onReviewMessage: handleReviewMessage,
+    onImageShareRequest: handleImageShareRequest,
+    onImageShareResponse: handleImageShareResponse,
+    onImageReactionBatch: handleImageReactionBatch,
+    onImageWanted: handleImageWanted,
+    onPendingShareThumbnail: handlePendingShareThumbnail,
     setPacketLossRate,
     setActivities,
     setConnection,
@@ -685,6 +949,92 @@ export default function ShareRoomPage({
     setMaxImageTransferSize,
     setRole,
   });
+
+  const flushImageLikeQueue = React.useCallback(() => {
+    imageLikeFlushTimerRef.current = null;
+    const queue = imageLikeQueueRef.current;
+    const channel = instructionChannelRef.current;
+    if (channel?.readyState === "open") {
+      const entries = [...queue.entries()];
+      for (let offset = 0; offset < entries.length; offset += 12) {
+        const batch = entries.slice(offset, offset + 12).map(([imageId, count]) => ({
+          imageId,
+          count: Math.min(count, 100),
+        }));
+        try {
+          if (!sendImageWorkspaceMessage(channel, {
+            type: "IMAGE_REACTION_BATCH",
+            payload: { events: batch },
+          })) break;
+          batch.forEach(({ imageId, count }) => {
+            const remaining = (queue.get(imageId) || 0) - count;
+            if (remaining > 0) queue.set(imageId, remaining);
+            else queue.delete(imageId);
+          });
+        } catch (error) {
+          console.warn("Failed to send image reaction batch", error);
+          break;
+        }
+      }
+    }
+    if (queue.size > 0 && imageLikeFlushTimerRef.current === null) {
+      imageLikeFlushTimerRef.current = window.setTimeout(
+        () => flushImageLikeQueueRef.current(),
+        2000,
+      );
+    }
+  }, []);
+  flushImageLikeQueueRef.current = flushImageLikeQueue;
+
+  const handleLikeImage = React.useCallback(
+    (image: RoomImage) => {
+      const current = imagesRef.current.find((candidate) => candidate.id === image.id);
+      if (!current || current.direction !== "received") return;
+      updateRoomImage(
+        image.id,
+        { likeCount: (current.likeCount || 0) + 1 },
+        true,
+      );
+      imageLikeQueueRef.current.set(
+        image.id,
+        (imageLikeQueueRef.current.get(image.id) || 0) + 1,
+      );
+      if (imageLikeFlushTimerRef.current === null) {
+        imageLikeFlushTimerRef.current = window.setTimeout(
+          () => flushImageLikeQueueRef.current(),
+          2000,
+        );
+      }
+    },
+    [updateRoomImage],
+  );
+
+  const handleWantImage = React.useCallback(
+    (image: RoomImage) => {
+      if (
+        image.direction !== "received" ||
+        !image.placeholderOnly
+      ) {
+        return;
+      }
+      const sent = sendImageWorkspaceMessage(instructionChannelRef.current, {
+        type: "IMAGE_WANTED",
+        payload: { imageId: image.id, wanted: !image.wantedByMe },
+      });
+      if (sent) updateRoomImage(image.id, { wantedByMe: !image.wantedByMe }, true);
+    },
+    [updateRoomImage],
+  );
+
+  React.useEffect(
+    () => () => {
+      if (imageLikeFlushTimerRef.current !== null) {
+        window.clearTimeout(imageLikeFlushTimerRef.current);
+        imageLikeFlushTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   const updateSendingActivity = React.useCallback(
     (progress: TransferProgress) => {
@@ -718,18 +1068,6 @@ export default function ShareRoomPage({
   );
 
   const addFilesToGallery = async (fileList: FileList | File[]) => {
-    const channel = instructionChannelRef.current;
-    if (connection !== "connected" || channel?.readyState !== "open") {
-      upsertActivity({
-        id: `error-${Date.now()}`,
-        kind: "error",
-        title: labels.waiting,
-        detail: labels.guestEmpty,
-        createdAt: Date.now(),
-      });
-      return;
-    }
-
     const files = Array.from(fileList);
     try {
       for (const file of files) {
@@ -754,10 +1092,28 @@ export default function ShareRoomPage({
           continue;
         }
 
+        const identity = await identifyImage(file);
+        const createdAt = Date.now();
+        const workspace = {
+          rootImageId: identity.imageId,
+          parentImageId: null,
+          ownerId: getShareRoomClientId(roomId!),
+          width: identity.width,
+          height: identity.height,
+          source: "local" as const,
+          operation: "original" as const,
+          version: 1,
+          shareStatus: "local" as const,
+          workspaceLocation: "library" as const,
+          outboxOrigin: "library" as const,
+          createdAt,
+          updatedAt: createdAt,
+        };
         const meta = createImageTransferMeta(
           file,
-          undefined,
+          identity.imageId,
           transferChunkSizeRef.current,
+          workspace,
         );
         const image: CachedRoomImage = {
           id: meta.id,
@@ -771,53 +1127,14 @@ export default function ShareRoomPage({
           progress: 0,
           previewOnly: false,
           placeholderOnly: false,
-          createdAt: Date.now(),
+          ...workspace,
+          createdAt,
+          updatedAt: createdAt,
         };
         addRoomImage(image);
-        const initialPersist = storeRoomImage(image).catch((error) => {
+        void storeRoomImage(image).catch((error) => {
           console.warn("Failed to cache pending image", error);
         });
-        sendImagePlaceholderPending(channel, meta);
-        void (async () => {
-          try {
-            const placeholder = await generateSharePlaceholder(file);
-            if (
-              deletedImageIdsRef.current.has(meta.id) ||
-              !imagesRef.current.some((current) => current.id === meta.id)
-            ) {
-              return;
-            }
-            updateRoomImage(meta.id, { placeholder });
-            const activeChannel = instructionChannelRef.current;
-            if (activeChannel?.readyState !== "open") {
-              throw new Error("Image instruction channel is not open");
-            }
-            sendImagePlaceholder(activeChannel, meta, placeholder);
-            await initialPersist;
-            if (
-              !deletedImageIdsRef.current.has(meta.id) &&
-              imagesRef.current.some((current) => current.id === meta.id)
-            ) {
-              updateRoomImage(meta.id, { placeholder }, true);
-            }
-          } catch (error) {
-            if (!deletedImageIdsRef.current.has(meta.id)) {
-              updateRoomImage(meta.id, { transferStatus: "failed" });
-              await initialPersist;
-              if (imagesRef.current.some((current) => current.id === meta.id)) {
-                updateRoomImage(meta.id, { transferStatus: "failed" }, true);
-              }
-              upsertActivity({
-                id: `error-${Date.now()}-${file.name}`,
-                kind: "error",
-                title: file.name,
-                detail:
-                  error instanceof Error ? error.message : labels.previewFailed,
-                createdAt: Date.now(),
-              });
-            }
-          }
-        })();
       }
     } finally {
       if (inputRef.current) {
@@ -826,15 +1143,490 @@ export default function ShareRoomPage({
     }
   };
 
-  const handleLocalFiles = (fileList: FileList | File[]) => {
-    const files = Array.from(fileList);
-    const suggestionThreshold = isWeakNetwork ? 300 * 1024 : 1024 * 1024;
-    if (files.some((file) => file.size > suggestionThreshold)) {
-      if (inputRef.current) inputRef.current.value = "";
-      setPendingLocalFiles(files);
+  const moveImageToOutbox = async (image: RoomImage) => {
+    const channel = instructionChannelRef.current;
+    if (connection !== "connected" || channel?.readyState !== "open") {
+      throw new Error(labels.realtimeNotConnected);
+    }
+    const file = new File([image.blob], image.name, { type: image.type });
+    const queuedAt = Date.now();
+    const queuedImage = {
+      rootImageId: image.rootImageId,
+      parentImageId: image.parentImageId,
+      ownerId: image.ownerId,
+      width: image.width,
+      height: image.height,
+      source: image.source,
+      operation: image.operation,
+      version: image.version,
+      shareStatus: image.shareStatus,
+      workspaceLocation: "outbox" as const,
+      outboxOrigin: "library" as const,
+      createdAt: image.createdAt,
+      updatedAt: queuedAt,
+      likeCount: image.likeCount ?? 0,
+    };
+    const meta = createImageTransferMeta(
+      file,
+      image.id,
+      transferChunkSizeRef.current,
+      queuedImage,
+    );
+    updateRoomImage(
+      image.id,
+      {
+        workspaceLocation: "outbox",
+        outboxOrigin: "library",
+        transferStatus: "waiting",
+        progress: 0,
+        updatedAt: queuedAt,
+      },
+      true,
+    );
+    sendImagePlaceholderPending(channel, meta);
+    try {
+      const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
+      const activeChannel = instructionChannelRef.current;
+      if (activeChannel?.readyState !== "open") throw new Error(labels.imageCommandDisconnected);
+      sendImagePlaceholder(activeChannel, meta, placeholder);
+      updateRoomImage(image.id, { placeholder }, true);
+    } catch (error) {
+      const activeChannel = instructionChannelRef.current;
+      if (activeChannel) sendImageDelete(activeChannel, image.id);
+      updateRoomImage(image.id, { workspaceLocation: "library", transferStatus: "failed" }, true);
+      throw error;
+    }
+  };
+
+  const handleMoveToOutbox = async (image: RoomImage) => {
+    if (image.size > (isWeakNetwork ? 300 * 1024 : 1024 * 1024)) {
+      setPendingOutboxImage(image);
       return;
     }
-    void addFilesToGallery(files);
+    await moveImageToOutbox(image);
+  };
+
+  const handleMoveToLibrary = async (image: RoomImage) => {
+    const channel = instructionChannelRef.current;
+    if (connection !== "connected" || channel?.readyState !== "open") return;
+    sendImageDelete(channel, image.id);
+    updateRoomImage(
+      image.id,
+      {
+        workspaceLocation: "library",
+        transferStatus: "waiting",
+        shareStatus: "local",
+        progress: 0,
+        transferMode: undefined,
+        reviewStatus: undefined,
+        reviewAnchorCount: 0,
+        reviewOperationCount: 0,
+        updatedAt: Date.now(),
+      },
+      true,
+    );
+    await deleteReviewHistory(image.roomId, image.id);
+  };
+
+  const handleToggleImagePin = (image: RoomImage) => {
+    updateRoomImage(
+      image.id,
+      { pinnedAt: image.pinnedAt ? null : Date.now() },
+      true,
+    );
+  };
+
+  const handleArchiveToLibrary = async (image: RoomImage) => {
+    const archivedAt = Date.now();
+    if (image.direction === "sent") {
+      updateRoomImage(
+        image.id,
+        {
+          workspaceLocation: "library",
+          outboxOrigin: "library",
+          shareStatus: "local",
+          transferStatus: "waiting",
+          progress: 0,
+          transferMode: undefined,
+          reviewStatus: undefined,
+          reviewAnchorCount: 0,
+          reviewOperationCount: 0,
+          updatedAt: archivedAt,
+        },
+        true,
+      );
+      await deleteReviewHistory(image.roomId, image.id);
+      return;
+    }
+
+    const id = crypto.randomUUID().replace(/-/g, "");
+    const archived: CachedRoomImage = {
+      id,
+      rootImageId: id,
+      parentImageId: null,
+      ownerId: getShareRoomClientId(roomId!),
+      width: image.width,
+      height: image.height,
+      source: image.source,
+      operation: image.operation,
+      version: 1,
+      shareStatus: "local",
+      workspaceLocation: "library",
+      outboxOrigin: "library",
+      roomId: image.roomId,
+      name: image.name,
+      type: image.type,
+      size: image.size,
+      blob: image.blob,
+      thumbnail: image.thumbnail,
+      direction: "sent",
+      transferStatus: "waiting",
+      progress: 0,
+      previewOnly: false,
+      placeholderOnly: false,
+      placeholder: image.placeholder,
+      likeCount: image.likeCount ?? 0,
+      createdAt: archivedAt,
+      updatedAt: archivedAt,
+    };
+    await storeRoomImage(archived);
+    addRoomImage(archived);
+    deletedImageIdsRef.current.add(image.id);
+    removeRoomImage(image.id);
+    await deleteRoomImage(image.roomId, image.id).catch((error) => {
+      console.warn("Failed to remove received image after archiving", error);
+    });
+    await deleteReviewHistory(image.roomId, image.id);
+  };
+
+  const handleDeleteLocalImage = async (image: RoomImage) => {
+    if (image.direction !== "sent" || image.workspaceLocation !== "library") return;
+    deletedImageIdsRef.current.add(image.id);
+    removeRoomImage(image.id);
+    await Promise.all([
+      deleteRoomImage(image.roomId, image.id),
+      deleteReviewHistory(image.roomId, image.id),
+    ]);
+  };
+
+  const createStandaloneProcessedImage = async (
+    result: ProcessedImageResult,
+    workspaceLocation: "library" | "outbox",
+    insert = true,
+  ) => {
+    const id = crypto.randomUUID().replace(/-/g, "");
+    const createdAt = Date.now();
+    const placeholder = workspaceLocation === "outbox"
+      ? await generateSharePlaceholder(result.blob)
+      : undefined;
+    const image: CachedRoomImage = {
+      id,
+      rootImageId: id,
+      parentImageId: null,
+      ownerId: getShareRoomClientId(roomId!),
+      width: result.width,
+      height: result.height,
+      source: result.operation === "compress" ? "compressed" : "local",
+      operation: result.operation,
+      version: 1,
+      shareStatus: "local",
+      workspaceLocation,
+      outboxOrigin: workspaceLocation === "outbox" ? "direct" : "library",
+      updatedAt: createdAt,
+      roomId: roomId!,
+      name: result.name,
+      type: result.blob.type,
+      size: result.blob.size,
+      blob: result.blob,
+      direction: "sent",
+      transferStatus: "waiting",
+      progress: 0,
+      previewOnly: false,
+      placeholderOnly: false,
+      placeholder,
+      createdAt,
+    };
+    if (insert) {
+      await storeRoomImage(image);
+      addRoomImage(image);
+    }
+    return image;
+  };
+
+  const waitForProcessedImageShare = async (
+    imageId: string,
+    report: (stage: ProcessedImageActionStage) => void,
+  ) => {
+    const deadline = Date.now() + 10 * 60_000;
+    let reported: ProcessedImageActionStage | null = null;
+    while (Date.now() < deadline) {
+      const current = imagesRef.current.find((image) => image.id === imageId)
+        || pendingShareImagesRef.current.get(imageId);
+      if (!current) throw new Error(labels.sharedImageRemoved);
+      if (current.shareStatus === "rejected") throw new Error(labels.peerRejectedImage);
+      if (current.shareStatus === "failed" || current.transferStatus === "failed") throw new Error(labels.imageShareFailed);
+      if (current.transferStatus === "cancelled") throw new Error(labels.imageShareCancelled);
+      if (current.transferStatus === "sent" || current.shareStatus === "available") {
+        report("complete");
+        return;
+      }
+      const nextStage: ProcessedImageActionStage =
+        current.shareStatus === "accepted" ||
+        current.shareStatus === "transferring" ||
+        current.transferStatus === "sending" ||
+        current.transferStatus === "awaiting-receipt"
+          ? "transferring"
+          : "waiting";
+      if (nextStage !== reported) {
+        reported = nextStage;
+        report(nextStage);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+    throw new Error(labels.peerAcceptanceTimeout);
+  };
+
+  const handleProcessedImageResult = async (
+    _source: RoomImage,
+    result: ProcessedImageResult,
+    action: ProcessedImageAction,
+    report: (stage: ProcessedImageActionStage) => void,
+  ): Promise<ProcessedImageActionOutcome> => {
+    report("preparing");
+    const shouldSuggestCompression =
+      action === "share" &&
+      result.operation !== "compress" &&
+      result.blob.size > (isWeakNetwork ? 300 * 1024 : 1024 * 1024);
+    const insertImmediately = action === "store" || shouldSuggestCompression;
+    const stored = await createStandaloneProcessedImage(
+      result,
+      action === "store" || shouldSuggestCompression ? "library" : "outbox",
+      insertImmediately,
+    );
+    const image = insertImmediately
+      ? imagesRef.current.find((candidate) => candidate.id === stored.id)
+      : stored;
+    if (!image) throw new Error(labels.imageNotAdded);
+    if (action === "store") {
+      report("complete");
+      return { status: "stored", imageId: image.id };
+    }
+    if (shouldSuggestCompression) {
+      const visibleImage = imagesRef.current.find(
+        (candidate) => candidate.id === stored.id,
+      );
+      if (!visibleImage) throw new Error(labels.imageNotAdded);
+      setPendingOutboxImage(visibleImage);
+      report("complete");
+      return { status: "stored", imageId: image.id };
+    }
+    report("waiting");
+    try {
+      const requested = await handleRequestImageShare(image, true);
+      if (!requested) throw new Error(labels.receiveRequestFailed);
+      await waitForProcessedImageShare(image.id, report);
+      return { status: "shared", imageId: image.id };
+    } catch (error) {
+      const current = imagesRef.current.find((candidate) => candidate.id === image.id)
+        || pendingShareImagesRef.current.get(image.id);
+      if (current?.shareStatus === "rejected") {
+        return { status: "rejected", imageId: image.id };
+      }
+      pendingShareImagesRef.current.delete(image.id);
+      throw error;
+    }
+  };
+
+  const handleCompressedImageToOutbox = async (
+    _source: RoomImage,
+    result: ProcessedImageResult,
+  ) => {
+    await createStandaloneProcessedImage(result, "outbox");
+  };
+
+  const handleResolveRejectedProcessedImage = async (
+    imageId: string,
+    save: boolean,
+  ) => {
+    const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const pendingImage = pendingShareImagesRef.current.get(imageId);
+    const image = visibleImage || pendingImage;
+    if (!image) throw new Error(labels.imageMissing);
+    if (save) {
+      if (pendingImage) {
+        const stored = {
+          ...pendingImage,
+          workspaceLocation: "library" as const,
+          outboxOrigin: "library" as const,
+          shareStatus: "local" as const,
+          transferStatus: "waiting" as const,
+          progress: 0,
+          updatedAt: Date.now(),
+        };
+        pendingShareImagesRef.current.delete(imageId);
+        await storeRoomImage(stored);
+        addRoomImage(stored);
+      } else {
+        updateRoomImage(
+          imageId,
+          {
+            workspaceLocation: "library",
+            outboxOrigin: "library",
+            shareStatus: "local",
+            transferStatus: "waiting",
+            progress: 0,
+            updatedAt: Date.now(),
+          },
+          true,
+        );
+      }
+      return;
+    }
+    if (pendingImage) {
+      pendingShareImagesRef.current.delete(imageId);
+      return;
+    }
+    deletedImageIdsRef.current.add(imageId);
+    removeRoomImage(imageId);
+    await deleteRoomImage(image.roomId, imageId);
+  };
+
+  const handleCreateReviewImage = async (
+    _source: RoomImage,
+    result: ReviewImageExport,
+    share: boolean,
+    report: (stage: ReviewImageExportStage) => void,
+  ): Promise<ReviewImageExportOutcome> => {
+    if (!(result.blob instanceof Blob)) {
+      throw new Error(labels.invalidGeneratedImage);
+    }
+    report("preparing");
+    const identity = await identifyImage(result.blob);
+    const id = crypto.randomUUID().replace(/-/g, "");
+    const createdAt = Date.now();
+    const placeholder = share
+      ? await generateSharePlaceholder(result.blob)
+      : undefined;
+    const stored: CachedRoomImage = {
+      id,
+      rootImageId: id,
+      parentImageId: null,
+      ownerId: getShareRoomClientId(roomId!),
+      width: identity.width,
+      height: identity.height,
+      source: "review-export",
+      operation: "review-export",
+      version: 1,
+      shareStatus: "local",
+      workspaceLocation: share ? "outbox" : "library",
+      outboxOrigin: share ? "direct" : "library",
+      updatedAt: createdAt,
+      roomId: roomId!,
+      name: result.name,
+      type: result.blob.type,
+      size: result.blob.size,
+      blob: result.blob,
+      direction: "sent",
+      transferStatus: "waiting",
+      progress: 0,
+      previewOnly: false,
+      placeholderOnly: false,
+      placeholder,
+      createdAt,
+    };
+    if (!share) {
+      await storeRoomImage(stored);
+      addRoomImage(stored);
+    }
+    upsertActivity({
+      id: `review-export-${stored.id}`,
+      kind: "complete",
+      title: stored.name,
+      detail: labels.generatedImageLog(formatBytes(stored.size)),
+      createdAt: Date.now(),
+    });
+
+    if (!share) {
+      report("complete");
+      setReviewWorkspaceFullscreen(false);
+      setReviewImageId(null);
+      return { status: "saved", imageId: stored.id };
+    }
+
+    report("waiting");
+    try {
+      const requested = await handleRequestImageShare(stored, true);
+      if (!requested) throw new Error(labels.receiveRequestFailed);
+      await waitForProcessedImageShare(stored.id, report);
+      setReviewWorkspaceFullscreen(false);
+      setReviewImageId(null);
+      return { status: "shared", imageId: stored.id };
+    } catch (error) {
+      const current = imagesRef.current.find((image) => image.id === stored.id)
+        || pendingShareImagesRef.current.get(stored.id);
+      if (current?.shareStatus === "rejected") {
+        return { status: "rejected", imageId: stored.id };
+      }
+      pendingShareImagesRef.current.delete(stored.id);
+      throw error;
+    }
+  };
+
+  const handleResolveRejectedReviewImage = async (
+    imageId: string,
+    save: boolean,
+  ) => {
+    const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const pendingImage = pendingShareImagesRef.current.get(imageId);
+    const image = visibleImage || pendingImage;
+    if (!image) throw new Error(labels.imageMissing);
+
+    if (save) {
+      if (pendingImage) {
+        const saved = {
+          ...pendingImage,
+          workspaceLocation: "library" as const,
+          outboxOrigin: "library" as const,
+          shareStatus: "local" as const,
+          transferStatus: "waiting" as const,
+          progress: 0,
+          updatedAt: Date.now(),
+        };
+        pendingShareImagesRef.current.delete(imageId);
+        await storeRoomImage(saved);
+        addRoomImage(saved);
+      } else {
+        updateRoomImage(
+          imageId,
+          {
+            workspaceLocation: "library",
+            outboxOrigin: "library",
+            shareStatus: "local",
+            transferStatus: "waiting",
+            progress: 0,
+            updatedAt: Date.now(),
+          },
+          true,
+        );
+      }
+    } else {
+      if (pendingImage) {
+        pendingShareImagesRef.current.delete(imageId);
+        setReviewWorkspaceFullscreen(false);
+        setReviewImageId(null);
+        return;
+      }
+      deletedImageIdsRef.current.add(imageId);
+      removeRoomImage(imageId);
+      await deleteRoomImage(image.roomId, imageId);
+    }
+
+    setReviewWorkspaceFullscreen(false);
+    setReviewImageId(null);
+  };
+
+  const handleLocalFiles = (fileList: FileList | File[]) => {
+    void addFilesToGallery(fileList);
   };
 
   const goCompressImages = async (files: File[] = []) => {
@@ -864,11 +1656,27 @@ export default function ShareRoomPage({
     setIsSending(true);
     updateRoomImage(
       image.id,
-      { transferStatus: "sending", progress: 0 },
+      {
+        transferStatus: "sending",
+        progress: 0,
+        ...(image.operation === "original" ? {} : { shareStatus: "transferring" as const }),
+      },
       true,
     );
     try {
       const file = new File([image.blob], image.name, { type: image.type });
+      if (image.operation !== "original" && image.placeholder) {
+        sendImagePlaceholder(
+          controlChannel,
+          createImageTransferMeta(
+            file,
+            image.id,
+            transferChunkSizeRef.current,
+            { ...image, shareStatus: "accepted" },
+          ),
+          image.placeholder,
+        );
+      }
       const transferImage = {
         id: image.id,
         name: image.name,
@@ -890,6 +1698,7 @@ export default function ShareRoomPage({
           file,
           image.id,
           transferChunkSizeRef.current,
+          image,
         );
         await uploadFileToR2(
           preparation.uploadUrl,
@@ -925,7 +1734,7 @@ export default function ShareRoomPage({
         );
       } else {
         if (fileChannel?.readyState !== "open") {
-          throw new Error("File DataChannel is not open");
+          throw new Error(labels.imageFileChannelDisconnected);
         }
         meta = await sendImageFile(
           controlChannel,
@@ -936,6 +1745,7 @@ export default function ShareRoomPage({
           transferChunkSizeRef.current,
           waitUntilImageReady,
           abortController.signal,
+          image,
         );
       }
       updateRoomImage(
@@ -978,6 +1788,140 @@ export default function ShareRoomPage({
     }
   };
 
+  const handleRequestImageShare = async (
+    image: CachedRoomImage | RoomImage,
+    deferUntilAccepted = false,
+  ) => {
+    const channel = instructionChannelRef.current;
+    if (
+      channel?.readyState !== "open" ||
+      image.placeholderOnly ||
+      image.previewOnly ||
+      image.shareStatus === "awaiting-response" ||
+      image.shareStatus === "transferring"
+    ) {
+      return false;
+    }
+    const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
+    if (!image.placeholder) updateRoomImage(image.id, { placeholder }, true);
+    const requestId = crypto.randomUUID().replace(/-/g, "");
+    outgoingShareRequestsRef.current.set(requestId, image.id);
+    const sent = sendImageWorkspaceMessage(channel, {
+      type: "IMAGE_SHARE_REQUEST",
+      payload: {
+        requestId,
+        sourceImageId: image.parentImageId || image.rootImageId,
+        image: {
+          imageId: image.id,
+          rootImageId: image.rootImageId,
+          parentImageId: image.parentImageId,
+          ownerId: image.ownerId,
+          width: image.width,
+          height: image.height,
+          source: image.source,
+          operation: image.operation,
+          version: image.version,
+          shareStatus: "awaiting-response",
+          workspaceLocation: "outbox",
+          outboxOrigin: image.outboxOrigin || "direct",
+          name: image.name,
+          type: image.type,
+          size: image.size,
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt ?? image.createdAt,
+          likeCount: image.likeCount ?? 0,
+        },
+        placeholder,
+      },
+    });
+    if (!sent) {
+      outgoingShareRequestsRef.current.delete(requestId);
+      if (deferUntilAccepted) pendingShareImagesRef.current.delete(image.id);
+      return false;
+    }
+    if (deferUntilAccepted) {
+      const { url: _url, thumbnailUrl: _thumbnailUrl, ...cached } = image as RoomImage;
+      pendingShareImagesRef.current.set(image.id, {
+        ...cached,
+        placeholder,
+        shareStatus: "awaiting-response",
+      });
+    } else {
+      updateRoomImage(image.id, { placeholder, shareStatus: "awaiting-response" }, true);
+    }
+    upsertActivity({
+      id: `share-${requestId}`,
+      kind: "sending",
+      title: image.name,
+      detail: labels.waitingPeerAcceptance,
+      createdAt: Date.now(),
+    });
+    return true;
+  };
+
+  React.useEffect(() => {
+    if (!acceptedShareImage || isSending) return;
+    const image = acceptedShareImage;
+    setAcceptedShareImage(null);
+    void handleSendImage(image);
+  }, [acceptedShareImage, isSending]);
+
+  const handleShareDecision = React.useCallback(
+    (decision: "accept" | "reject") => {
+      const request = incomingShareRequest;
+      if (!request) return;
+      if (decision === "accept" && roomId) {
+        const descriptor = request.payload.image;
+        const receivedAt = Date.now();
+        const received: CachedRoomImage = {
+          id: descriptor.imageId,
+          rootImageId: descriptor.rootImageId,
+          parentImageId: descriptor.parentImageId,
+          ownerId: descriptor.ownerId,
+          width: descriptor.width,
+          height: descriptor.height,
+          source: descriptor.source,
+          operation: descriptor.operation,
+          version: descriptor.version,
+          shareStatus: "accepted",
+          workspaceLocation: "outbox",
+          outboxOrigin: "received",
+          roomId,
+          name: descriptor.name,
+          type: descriptor.type,
+          size: descriptor.size,
+          blob: new Blob([], { type: descriptor.type }),
+          direction: "received",
+          transferStatus: "waiting",
+          progress: 0,
+          previewOnly: false,
+          placeholderOnly: true,
+          placeholder: request.payload.placeholder,
+          thumbnail: incomingShareThumbnail || undefined,
+          likeCount: descriptor.likeCount ?? 0,
+          createdAt: descriptor.createdAt ?? receivedAt,
+          updatedAt: receivedAt,
+        };
+        addRoomImage(received);
+        void storeRoomImage(received).catch((error) => {
+          console.warn("Failed to cache accepted image placeholder", error);
+        });
+      }
+      sendImageWorkspaceMessage(instructionChannelRef.current, {
+        type: "IMAGE_SHARE_RESPONSE",
+        payload: {
+          requestId: request.payload.requestId,
+          imageId: request.payload.image.imageId,
+          decision,
+        },
+      });
+      incomingShareRequestRef.current = null;
+      setIncomingShareThumbnail(null);
+      setIncomingShareRequest(null);
+    },
+    [addRoomImage, incomingShareRequest, incomingShareThumbnail, roomId],
+  );
+
   const handleCancelTransfer = (image: RoomImage) => {
     transferAbortControllersRef.current.get(image.id)?.abort();
     const channel = instructionChannelRef.current;
@@ -986,20 +1930,27 @@ export default function ShareRoomPage({
 
   const handleDeleteImage = async (image: RoomImage) => {
     const status = image.transferStatus || "waiting";
-    const channel = instructionChannelRef.current;
     if (
-      image.direction !== "sent" ||
-      (status !== "waiting" && status !== "failed" && status !== "cancelled") ||
-      connection !== "connected" ||
-      channel?.readyState !== "open"
+      image.outboxOrigin === "library" ||
+      image.placeholderOnly ||
+      status === "sending" ||
+      status === "receiving" ||
+      status === "awaiting-receipt" ||
+      image.shareStatus === "awaiting-response" ||
+      image.shareStatus === "transferring"
     ) {
       return;
     }
-    sendImageDelete(channel, image.id);
+    for (const [requestId, imageId] of outgoingShareRequestsRef.current) {
+      if (imageId === image.id) outgoingShareRequestsRef.current.delete(requestId);
+    }
     deletedImageIdsRef.current.add(image.id);
     removeRoomImage(image.id);
     try {
-      await deleteRoomImage(image.id);
+      await Promise.all([
+        deleteRoomImage(image.roomId, image.id),
+        deleteReviewHistory(image.roomId, image.id),
+      ]);
     } catch (error) {
       console.warn("Failed to delete local pending image", error);
     }
@@ -1146,6 +2097,16 @@ export default function ShareRoomPage({
     }
   };
 
+  const handleClearOperationLogs = async () => {
+    setOperationLogs([]);
+    if (!roomId) return;
+    try {
+      await clearOperationLogs(roomId);
+    } catch (error) {
+      console.warn("Failed to clear room operation logs", error);
+    }
+  };
+
   const reviewFullscreenActive = Boolean(
     reviewImage && reviewWorkspaceFullscreen,
   );
@@ -1232,7 +2193,10 @@ export default function ShareRoomPage({
                 subscribeMessages={subscribeReviewMessages}
                 onSendMessage={sendReviewMessage}
                 onReviewStatusChange={handleReviewStatusChange}
+                onReviewEditingChange={handleReviewEditingChange}
                 onFullscreenChange={setReviewWorkspaceFullscreen}
+                onGenerateImage={handleCreateReviewImage}
+                onResolveRejectedImage={handleResolveRejectedReviewImage}
                 onBack={() => {
                   setReviewWorkspaceFullscreen(false);
                   setReviewImageId(null);
@@ -1252,9 +2216,27 @@ export default function ShareRoomPage({
                 onPreview={setPreviewImageId}
                 onPlaceholderMeasured={handlePlaceholderMeasured}
                 onReview={handleReviewImage}
-                onSend={handleSendImage}
+                onSend={async (image) => {
+                  if (image.operation === "original") await handleSendImage(image);
+                  else await handleRequestImageShare(image);
+                }}
                 onCancelTransfer={handleCancelTransfer}
                 onDelete={handleDeleteImage}
+                onDeleteLocal={handleDeleteLocalImage}
+                onArchiveToLibrary={handleArchiveToLibrary}
+                onMoveToOutbox={handleMoveToOutbox}
+                onMoveToLibrary={handleMoveToLibrary}
+                onTogglePin={handleToggleImagePin}
+                onLike={handleLikeImage}
+                onWant={handleWantImage}
+                reactionSignals={imageReactionSignals}
+                onProcessResult={handleProcessedImageResult}
+                onCompressionToOutbox={handleCompressedImageToOutbox}
+                onResolveRejectedImage={handleResolveRejectedProcessedImage}
+                compressionRequest={compressionRequest}
+                onCompressionRequestConsumed={() => setCompressionRequest(null)}
+                operationLogs={operationLogs}
+                onClearOperationLogs={handleClearOperationLogs}
               />
             )}
           </section>
@@ -1316,23 +2298,24 @@ export default function ShareRoomPage({
         }}
       />
       <CompressionSuggestionDialog
-        open={Boolean(pendingLocalFiles)}
+        open={Boolean(pendingOutboxImage)}
         weakNetwork={isWeakNetwork}
         labels={labels}
-        onCancel={() => setPendingLocalFiles(null)}
+        onCancel={() => setPendingOutboxImage(null)}
         onContinue={() => {
-          const files = pendingLocalFiles || [];
-          setPendingLocalFiles(null);
-          void addFilesToGallery(files);
+          const image = pendingOutboxImage;
+          setPendingOutboxImage(null);
+          if (image) void moveImageToOutbox(image);
         }}
         onCompress={() => {
-          const files = pendingLocalFiles || [];
-          setPendingLocalFiles(null);
-          return goCompressImages(files);
+          const image = pendingOutboxImage;
+          setPendingOutboxImage(null);
+          if (image) setCompressionRequest(image);
         }}
       />
       {previewImage ? (
         <RoomImagePreviewDialog
+          labels={labels}
           open
           onOpenChange={(open) => {
             if (!open) setPreviewImageId(null);
@@ -1347,6 +2330,13 @@ export default function ShareRoomPage({
         />
       ) : null}
       <FloatingEmojiLayer items={floatingEmojis} />
+      <ImageShareRequestDialog
+        request={incomingShareRequest}
+        labels={labels}
+        thumbnail={incomingShareThumbnail}
+        onPlaceholderMeasured={handlePlaceholderMeasured}
+        onDecision={handleShareDecision}
+      />
       </main>
       {isMinimized && roomId ? (
         <TemporaryRoomDock

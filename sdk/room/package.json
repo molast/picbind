@@ -16,6 +16,7 @@
     "./source": "./src/index.ts",
     "./source.css": "./src/embed.css",
     "./source/config": "./src/config.ts",
+    "./source/locales": "./src/locales/index.ts",
     "./source/create-room-button": "./src/components/share/create-room-button.tsx",
     "./source/types": "./src/public-types.ts"
   },
@@ -31,14 +32,16 @@
     "react-dom": "^18.3.1"
   },
   "dependencies": {
+    "@picbind/image-codecs": "link:../wasm/image-codecs",
     "@radix-ui/react-dialog": "^1.1.15",
-    "@sqlite.org/sqlite-wasm": "3.53.0-build1",
+    "dexie": "^4.4.4",
     "konva": "^9.3.22",
     "pixi.js": "^8.19.0",
     "react-icons": "^5.5.0",
     "react-zoom-pan-pinch": "^3.7.0"
   },
   "devDependencies": {
+    "@types/node": "^22.12.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",

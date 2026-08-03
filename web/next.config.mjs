@@ -1,7 +1,36 @@
+function isJsquashAvifCircularChunkWarning(warning, compilation) {
+  const match = warning.message?.match(
+    /^Circular dependency between chunks with runtime \(([^)]+)\)/,
+  )
+  if (!match) return false
+
+  // Development chunk IDs are descriptive names rather than numeric IDs.
+  if (match[1].includes('jsquash_avif')) return true
+
+  const chunkIds = new Set(
+    match[1]
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value && value !== 'webpack' && value !== 'webpack-runtime'),
+  )
+
+  return [...compilation.chunks].some((chunk) => {
+    if (!chunkIds.has(String(chunk.id))) return false
+    return [...compilation.chunkGraph.getChunkModulesIterable(chunk)].some(
+      (module) =>
+        module.resource?.includes('@jsquash/avif/codec/enc/avif_enc_mt') ||
+        module.identifier().includes('@jsquash/avif/codec/enc/avif_enc_mt'),
+    )
+  })
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
-  transpilePackages: ["@picbind/room"],
+  transpilePackages: [
+    "@picbind/image-codecs",
+    "@picbind/room",
+  ],
   ...(process.env.NODE_ENV === "development"
     ? {
         async headers() {
@@ -17,7 +46,7 @@ const nextConfig = {
         },
       }
     : {}),
-  webpack(config) {
+  webpack(config, { isServer }) {
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
       rule.test?.test?.('.svg'),
@@ -25,8 +54,9 @@ const nextConfig = {
 
     config.module.rules.push(
       {
-        test: /\.sql$/i,
-        type: 'asset/source',
+        test: /\.(wasm|mjs)$/i,
+        resourceQuery: /url/,
+        type: 'asset/resource',
       },
       // Reapply the existing rule, but only for svg imports ending in ?url
       {
@@ -46,7 +76,24 @@ const nextConfig = {
     // Modify the file loader rule to ignore *.svg, since we have it handled now.
     fileLoaderRule.exclude = /\.svg$/i
 
-    config.externals = [...config.externals, { canvas: 'canvas' }]; // required to make Konva & react-konva work
+    // Konva's Node entry treats `canvas` as an optional dependency. Room only
+    // uses Konva in the browser, so keep that Node-only package out of the
+    // prerender bundle instead of forcing the whole Room page behind ssr:false.
+    if (isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        canvas: false,
+      }
+    }
+
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings ?? []),
+      {
+        module: /@jsquash[\\/]avif[\\/]codec[\\/]enc[\\/]avif_enc_mt\.worker\.mjs$/,
+        message: /Critical dependency: the request of a dependency is an expression/,
+      },
+      isJsquashAvifCircularChunkWarning,
+    ]
 
     return config
   },

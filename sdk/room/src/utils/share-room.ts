@@ -1,6 +1,7 @@
 "use client";
 
 import { getShareRoomApiPath } from "./api-endpoints";
+import { getLang, getShareRoomLabels } from "../locales";
 
 export type ShareRoom = {
   roomId: string;
@@ -33,7 +34,7 @@ export async function createShareRoom(): Promise<ShareRoom> {
     | null;
 
   if (!response.ok) {
-    throw new Error(result?.error || "Failed to create share room");
+    throw new Error(result?.error || getShareRoomLabels(getLang()).createRoomFailed);
   }
   if (
     !result?.roomId ||
@@ -42,7 +43,7 @@ export async function createShareRoom(): Promise<ShareRoom> {
     !result.createdAt ||
     !result.expiresAt
   ) {
-    throw new Error("The room service returned an invalid response");
+    throw new Error(getShareRoomLabels(getLang()).invalidRoomResponse);
   }
 
   sessionStorage.setItem(ownerTokenKey(result.roomId), result.ownerToken);
@@ -87,7 +88,7 @@ export function getShareRoomClientId(roomId: string) {
 export function markShareRoomTemporarilyAway(roomId: string) {
   const raw = sessionStorage.getItem(`${OWNED_ROOM_PREFIX}${roomId}`);
   if (!raw) {
-    throw new Error("Owned room metadata is unavailable");
+    throw new Error(getShareRoomLabels(getLang()).ownedRoomMetadataUnavailable);
   }
   localStorage.setItem(TEMPORARY_ROOM_KEY, raw);
 }

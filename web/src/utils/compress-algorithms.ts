@@ -24,26 +24,10 @@ import {
   BUTTERAUGLI_TARGET_SCORE,
 } from "@/utils/feature-flags";
 import { encodeWithLibavif } from "@/utils/libavif-codec";
+import { encodeWithLibwebp } from "@picbind/image-codecs";
 import { initWasm } from "@/utils/wasm-runtime";
 
 export type { CompressResult } from "@/utils/compression-engine";
-
-type WebpEncodeOptions = {
-  quality?: number;
-  alpha_quality?: number;
-  lossless?: 0 | 1;
-  method?: number;
-  pass?: number;
-  exact?: number;
-  alpha_compression?: number;
-  alpha_filtering?: number;
-  autofilter?: number;
-  use_sharp_yuv?: number;
-};
-
-type JsQuashWebpModule = {
-  encode(data: ImageData, options?: WebpEncodeOptions): Promise<ArrayBuffer>;
-};
 
 type PerceptualMetrics = {
   ssim: number;
@@ -86,8 +70,6 @@ type AvifEncodingPlan = {
   maxP95AlphaError: number;
   maxP99AlphaError: number;
 };
-
-let cachedWebpCodec: Promise<JsQuashWebpModule> | null = null;
 
 function toBlobPart(bytes: Uint8Array) {
   return new Uint8Array(bytes);
@@ -447,13 +429,6 @@ function shouldUsePngCanvasFallback(
   );
 }
 
-async function getWebpCodec() {
-  if (!cachedWebpCodec) {
-    cachedWebpCodec = import("@jsquash/webp") as unknown as Promise<JsQuashWebpModule>;
-  }
-  return cachedWebpCodec;
-}
-
 function perceptualWebpQualities(
   quality: number,
   sameFormat: boolean,
@@ -490,8 +465,7 @@ async function compressPerceptualWebp(
   quality: number,
   compressionGain: number,
 ): Promise<CompressResult> {
-  const [codec, imageData, mod, sourceBuffer] = await Promise.all([
-    getWebpCodec(),
+  const [imageData, mod, sourceBuffer] = await Promise.all([
     decodeFileToImageData(file),
     initWasm(),
     file.arrayBuffer(),
@@ -508,7 +482,7 @@ async function compressPerceptualWebp(
   )) {
     try {
       const encoded = new Uint8Array(
-        await codec.encode(imageData, {
+        await encodeWithLibwebp(imageData, {
           quality: candidateQuality,
           alpha_quality: 100,
           lossless: 0,

@@ -1,27 +1,19 @@
 import type { CachedRoomImage } from "../../utils/realtime-image-store";
+import type { RoomEventItem } from "../../utils/room-event";
 
 export type ConnectionState = "waiting" | "connecting" | "connected" | "error";
 export type MessageTransportMode = "p2p" | "relay";
 
-export type ActivityItem = {
-  id: string;
-  kind:
-    | "connection"
-    | "message"
-    | "sending"
-    | "receiving"
-    | "complete"
-    | "cancelled"
-    | "error";
-  title: string;
-  detail?: string;
-  progress?: number;
-  createdAt: number;
-};
+export type ActivityItem = RoomEventItem;
 
 export type RoomImage = CachedRoomImage & {
   url: string;
   thumbnailUrl?: string;
+};
+
+export type ImageReactionSignal = {
+  sequence: number;
+  count: number;
 };
 
 export type FloatingEmoji = {

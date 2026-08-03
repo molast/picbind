@@ -19,6 +19,6 @@ The monorepo Web application uses the `@picbind/room/source` export so a clean W
 
 The browser always connects to the online realtime Worker at `https://api.picbind.com`. Placeholder and thumbnail generation use the shared artifacts in `sdk/wasm/image-wasm`; consumers may still set `wasmBaseUrl` to load an externally hosted build.
 
-During `pnpm dev`, Vite proxies `/api` and WebSocket requests to the online Worker at `https://api.picbind.com`. Both local and deployed Room pages always use that online Worker; Room never connects to the local Worker runtime.
+During `pnpm dev`, the preview directly requests the online Worker at `https://api.picbind.com`. Both local and deployed Room pages always use that online Worker; Room never connects to the local Worker runtime. The Worker must allow the local preview origin in `ALLOWED_ORIGINS`. Set `VITE_ROOM_API_URL` only when the preview should use a different Worker URL.
 
 Set `VITE_ROOM_APP_URL` and the Worker's optional `ROOM_URL` to the standalone Room entry URL when generated invite links should point to that deployment. Also allow its origin in R2 CORS. Without `ROOM_URL`, the Worker keeps generating the existing `${SITE_URL}/share` links.

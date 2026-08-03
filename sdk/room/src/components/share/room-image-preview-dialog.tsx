@@ -11,6 +11,7 @@ import {
   FiZoomOut,
 } from "react-icons/fi";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
+import type { ShareRoomLabels } from "./share-room-labels";
 
 export type PreviewImage = {
   id: string;
@@ -20,6 +21,7 @@ export type PreviewImage = {
 
 type RoomImagePreviewDialogProps = {
   open: boolean;
+  labels: ShareRoomLabels;
   onOpenChange(open: boolean): void;
   images: PreviewImage[];
   activeId: string;
@@ -28,6 +30,7 @@ type RoomImagePreviewDialogProps = {
 
 export default function RoomImagePreviewDialog({
   open,
+  labels,
   onOpenChange,
   images,
   activeId,
@@ -87,17 +90,17 @@ export default function RoomImagePreviewDialog({
               {({ zoomIn, zoomOut, resetTransform }) => (
                 <>
                   <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md bg-slate-900/85 p-1 text-white shadow-lg">
-                    <button type="button" onClick={() => zoomOut()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label="Zoom out" title="Zoom out">
+                    <button type="button" onClick={() => zoomOut()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label={labels.zoomOut} title={labels.zoomOut}>
                       <FiZoomOut className="h-4 w-4" />
                     </button>
-                    <button type="button" onClick={() => zoomIn()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label="Zoom in" title="Zoom in">
+                    <button type="button" onClick={() => zoomIn()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label={labels.zoomIn} title={labels.zoomIn}>
                       <FiZoomIn className="h-4 w-4" />
                     </button>
-                    <button type="button" onClick={() => resetTransform()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label="Reset zoom" title="Reset zoom">
+                    <button type="button" onClick={() => resetTransform()} className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label={labels.resetZoom} title={labels.resetZoom}>
                       <FiMaximize className="h-4 w-4" />
                     </button>
                     <Dialog.Close asChild>
-                      <button type="button" className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label="Close preview" title="Close preview">
+                      <button type="button" className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-white/10" aria-label={labels.closePreview} title={labels.closePreview}>
                         <FiX className="h-4 w-4" />
                       </button>
                     </Dialog.Close>
@@ -111,10 +114,10 @@ export default function RoomImagePreviewDialog({
             </TransformWrapper>
             {images.length > 1 ? (
               <>
-                <button type="button" onClick={() => move(-1)} className="absolute left-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md bg-slate-900/75 text-white shadow-lg hover:bg-slate-800" aria-label="Previous image" title="Previous image">
+                <button type="button" onClick={() => move(-1)} className="absolute left-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md bg-slate-900/75 text-white shadow-lg hover:bg-slate-800" aria-label={labels.previousImage} title={labels.previousImage}>
                   <FiChevronLeft className="h-6 w-6" />
                 </button>
-                <button type="button" onClick={() => move(1)} className="absolute right-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md bg-slate-900/75 text-white shadow-lg hover:bg-slate-800" aria-label="Next image" title="Next image">
+                <button type="button" onClick={() => move(1)} className="absolute right-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md bg-slate-900/75 text-white shadow-lg hover:bg-slate-800" aria-label={labels.nextImage} title={labels.nextImage}>
                   <FiChevronRight className="h-6 w-6" />
                 </button>
               </>
@@ -122,7 +125,7 @@ export default function RoomImagePreviewDialog({
           </div>
           <div className="flex items-center gap-2 overflow-x-auto border-t border-white/10 bg-slate-900 px-3 py-2">
             {images.map((image) => (
-              <button key={image.id} type="button" onClick={() => onActiveChange(image.id)} className={`h-14 w-14 shrink-0 overflow-hidden rounded-md border-2 ${image.id === active.id ? "border-blue-400" : "border-transparent opacity-55 hover:opacity-100"}`} aria-label={`Preview ${image.name}`} title={image.name}>
+              <button key={image.id} type="button" onClick={() => onActiveChange(image.id)} className={`h-14 w-14 shrink-0 overflow-hidden rounded-md border-2 ${image.id === active.id ? "border-blue-400" : "border-transparent opacity-55 hover:opacity-100"}`} aria-label={labels.previewNamedImage(image.name)} title={image.name}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={image.src} alt="" className="h-full w-full object-cover" />
               </button>

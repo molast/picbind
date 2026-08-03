@@ -90,6 +90,7 @@ function annotationAtPoint(
 function createAnnotationNode(
   annotation: ReviewAnnotation,
   selectable: boolean,
+  imageRenderScale: number,
 ) {
   const hitEntireBounds = (context: Konva.Context, shape: Konva.Shape) => {
     const bounds = shape.getSelfRect();
@@ -98,11 +99,12 @@ function createAnnotationNode(
     context.closePath();
     context.fillStrokeShape(shape);
   };
+  const displayStrokeWidth = Math.max(0.75, annotation.strokeWidth * imageRenderScale);
   const dash =
     annotation.strokeStyle === "dashed"
-      ? [annotation.strokeWidth * 4, annotation.strokeWidth * 2.5]
+      ? [displayStrokeWidth * 4, displayStrokeWidth * 2.5]
       : annotation.strokeStyle === "dotted"
-        ? [Math.max(0.01, annotation.strokeWidth * 0.1), annotation.strokeWidth * 2.2]
+        ? [Math.max(0.01, displayStrokeWidth * 0.1), displayStrokeWidth * 2.2]
         : [];
   const shared: Konva.NodeConfig = {
     id: annotation.id,
@@ -119,7 +121,7 @@ function createAnnotationNode(
       points: annotation.points || [0, 0, annotation.width, annotation.height],
       stroke: annotation.stroke,
       fill: annotation.stroke,
-      strokeWidth: annotation.strokeWidth,
+      strokeWidth: displayStrokeWidth,
       pointerLength: annotation.strokeWidth * 4,
       pointerWidth: annotation.strokeWidth * 3,
       strokeScaleEnabled: false,
@@ -135,7 +137,7 @@ function createAnnotationNode(
       points: annotation.points || [0, 0, annotation.width, annotation.height],
       stroke: annotation.stroke,
       fill: "rgba(0, 0, 0, 0)",
-      strokeWidth: annotation.strokeWidth,
+      strokeWidth: displayStrokeWidth,
       strokeScaleEnabled: false,
       dash,
       hitFunc: hitEntireBounds,
@@ -150,7 +152,7 @@ function createAnnotationNode(
       height: annotation.height,
       stroke: annotation.stroke,
       fill: annotation.fill ?? "rgba(0, 0, 0, 0)",
-      strokeWidth: annotation.strokeWidth,
+      strokeWidth: displayStrokeWidth,
       strokeScaleEnabled: false,
     });
   }
@@ -161,7 +163,7 @@ function createAnnotationNode(
       radiusY: Math.max(0, annotation.height / 2),
       stroke: annotation.stroke,
       fill: annotation.fill ?? "rgba(0, 0, 0, 0)",
-      strokeWidth: annotation.strokeWidth,
+      strokeWidth: displayStrokeWidth,
       strokeScaleEnabled: false,
     });
   }
@@ -171,7 +173,7 @@ function createAnnotationNode(
       points: annotation.points || [],
       stroke: annotation.stroke,
       fill: "rgba(0, 0, 0, 0)",
-      strokeWidth: annotation.strokeWidth,
+      strokeWidth: displayStrokeWidth,
       strokeScaleEnabled: false,
       lineCap: "round",
       lineJoin: "round",
@@ -241,7 +243,12 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     const layer = layerRef.current;
     if (!layer) return;
     draftNodeRef.current?.destroy();
-    const node = createAnnotationNode(annotation, false);
+    const current = propsRef.current;
+    const imageRenderScale = Math.max(
+      current.width / Math.max(1, current.imageWidth),
+      current.height / Math.max(1, current.imageHeight),
+    );
+    const node = createAnnotationNode(annotation, false, imageRenderScale);
     draftNodeRef.current = node;
     layer.add(node);
     layer.batchDraw();
@@ -317,8 +324,11 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
             height: 0,
             fill: "rgba(37, 99, 235, 0.12)",
             stroke: "#2563eb",
-            strokeWidth: Math.max(1, currentProps.imageWidth * 0.001),
-            dash: [6, 4],
+            strokeWidth: 1 / Math.max(0.1, currentProps.viewportScale),
+            dash: [
+              6 / Math.max(0.1, currentProps.viewportScale),
+              4 / Math.max(0.1, currentProps.viewportScale),
+            ],
             strokeScaleEnabled: false,
             listening: false,
           });
@@ -519,14 +529,19 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
     draftNodeRef.current = null;
     const scaleX = props.width / Math.max(1, props.imageWidth);
     const scaleY = props.height / Math.max(1, props.imageHeight);
-    const controlScale = Math.max(scaleX, scaleY) * props.viewportScale;
+    const imageRenderScale = Math.max(scaleX, scaleY);
+    const viewportScale = Math.max(0.1, props.viewportScale);
     layer.scale({ x: scaleX, y: scaleY });
     selectionLayerRef.current?.scale({ x: scaleX, y: scaleY });
 
     const selectedNodes: Konva.Node[] = [];
     let selectedContainsEmoji = false;
     for (const annotation of props.annotations) {
-      const node = createAnnotationNode(annotation, props.activeTool === "select");
+      const node = createAnnotationNode(
+        annotation,
+        props.activeTool === "select",
+        imageRenderScale,
+      );
       node.on("click tap", (event) => {
         event.cancelBubble = true;
         if (propsRef.current.activeTool === "select") {
@@ -604,17 +619,19 @@ export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps)
       shouldOverdrawWholeArea: selectedNodes.length > 1,
       rotateEnabled: true,
       rotateAnchorCursor: ROTATE_CURSOR,
-      rotateAnchorOffset: 12 / controlScale,
+      rotateAnchorOffset: 14 / viewportScale,
       rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315],
       rotationSnapTolerance: 4,
       borderStroke: "#2563eb",
+      borderStrokeWidth: 1 / viewportScale,
       anchorFill: "#ffffff",
       anchorStroke: "#2563eb",
-      anchorSize: 2 / controlScale,
+      anchorStrokeWidth: 1 / viewportScale,
+      anchorSize: 6 / viewportScale,
       anchorStyleFunc: (anchor) => {
-        anchor.hitStrokeWidth(12 / controlScale);
+        anchor.hitStrokeWidth(14 / viewportScale);
         if (!anchor.hasName("rotater")) return;
-        const size = 7 / controlScale;
+        const size = 10 / viewportScale;
         anchor.width(size);
         anchor.height(size);
         anchor.offsetX(size / 2);

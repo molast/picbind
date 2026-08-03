@@ -159,6 +159,21 @@
   }
 }
 
+@keyframes picbind-image-heart-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 8px) scale(0.65) rotate(-8deg);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.05) rotate(4deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -110px) scale(1.25) rotate(-6deg);
+  }
+}
+
 
 /* mosaic-bg */
 .mosaic-bg {

@@ -1,25 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
-const sdkRoot = decodeURIComponent(new URL("..", import.meta.url).pathname);
+const sdkRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export default defineConfig(({ mode }) => {
   return {
     base: "./",
     plugins: [react()],
+    worker: {
+      format: "es",
+    },
     server: {
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+      },
       fs: {
         allow: [sdkRoot],
-      },
-      proxy: {
-        "/api": {
-          target: "https://api.picbind.com",
-          changeOrigin: true,
-          ws: true,
-          headers: {
-            origin: "https://picbind.com",
-          },
-        },
       },
     },
     build:

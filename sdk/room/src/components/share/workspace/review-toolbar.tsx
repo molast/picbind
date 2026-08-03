@@ -8,6 +8,8 @@ import {
   FiCornerUpLeft,
   FiCornerUpRight,
   FiEdit3,
+  FiImage,
+  FiLoader,
   FiMaximize2,
   FiMinimize2,
   FiMessageSquare,
@@ -89,6 +91,8 @@ type ReviewToolbarProps = {
   onZoomOut(): void;
   onFit(): void;
   onReset(): void;
+  onGenerateImage(): void;
+  generatingImage: boolean;
 };
 
 type ToolButtonProps = {
@@ -172,6 +176,8 @@ export default function ReviewToolbar({
   onZoomOut,
   onFit,
   onReset,
+  onGenerateImage,
+  generatingImage,
 }: ReviewToolbarProps) {
   const [openPanel, setOpenPanel] = React.useState<
     | "emoji"
@@ -234,6 +240,20 @@ export default function ReviewToolbar({
         <div className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800" title={imageName}>
           {middleEllipsisFileName(imageName, 42)}
         </div>
+        <button
+          type="button"
+          onClick={onGenerateImage}
+          disabled={generatingImage}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#2f65cf] px-2.5 text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:opacity-50"
+          title={labels.generateImage}
+        >
+          {generatingImage ? (
+            <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <FiImage className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span>{generatingImage ? labels.generatingImage : labels.generateImage}</span>
+        </button>
         <div className="shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-slate-600">
           {zoomPercent}%
         </div>

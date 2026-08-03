@@ -58,6 +58,17 @@ import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import { downloadFileFromR2 } from "../../utils/realtime-r2-transfer";
 import { clearRoomPageState } from "../../utils/realtime-room-page-store";
 import {
+  createLegacyImageObjectMetadata,
+  type ImageObjectMetadata,
+} from "../../utils/image-object";
+import {
+  parseImageWorkspaceMessage,
+  type ImageShareRequest,
+  type ImageShareResponse,
+  type ImageReactionBatch,
+  type ImageWanted,
+} from "../../utils/image-workspace-messages";
+import {
   parseReviewCollaborationMessage,
   type ReviewCollaborationMessage,
 } from "../../utils/review-collaboration";
@@ -133,6 +144,11 @@ type UseShareRoomConnectionOptions = {
   onWeakNetworkChange(weakNetwork: boolean): void;
   onMessageTransportChange(mode: MessageTransportMode): void;
   onReviewMessage(message: ReviewCollaborationMessage): void;
+  onImageShareRequest(message: ImageShareRequest): void;
+  onImageShareResponse(message: ImageShareResponse): void;
+  onImageReactionBatch(message: ImageReactionBatch): void;
+  onImageWanted(message: ImageWanted): void;
+  onPendingShareThumbnail(imageId: string, thumbnail: Blob): void;
   setActivities: React.Dispatch<React.SetStateAction<ActivityItem[]>>;
   setConnection: React.Dispatch<React.SetStateAction<ConnectionState>>;
   setConnectionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -165,6 +181,11 @@ export function useShareRoomConnection({
   onWeakNetworkChange,
   onMessageTransportChange,
   onReviewMessage,
+  onImageShareRequest,
+  onImageShareResponse,
+  onImageReactionBatch,
+  onImageWanted,
+  onPendingShareThumbnail,
   setActivities,
   setConnection,
   setConnectionError,
@@ -264,6 +285,45 @@ export function useShareRoomConnection({
       });
     };
 
+    const resolveImageObjectMetadata = (
+      meta: ImageTransferMeta,
+      current?: RoomImage,
+    ): ImageObjectMetadata => {
+      if (current) {
+        return {
+          rootImageId: current.rootImageId,
+          parentImageId: current.parentImageId,
+          ownerId: current.ownerId,
+          width: current.width,
+          height: current.height,
+          source: current.source,
+          operation: current.operation,
+          version: current.version,
+          shareStatus: current.shareStatus,
+          workspaceLocation: current.workspaceLocation,
+          outboxOrigin: current.outboxOrigin,
+          createdAt: current.createdAt,
+          updatedAt: current.updatedAt,
+          likeCount: current.likeCount,
+        };
+      }
+      return {
+        ...(meta.workspace ?? createLegacyImageObjectMetadata(meta.id, "received")),
+        workspaceLocation: "outbox",
+        outboxOrigin: "received",
+      };
+    };
+
+    const resolveImageCreatedAt = (
+      meta: ImageTransferMeta,
+      current?: RoomImage,
+    ) => current?.createdAt ?? meta.workspace?.createdAt ?? Date.now();
+
+    const resolveImageUpdatedAt = (
+      meta: ImageTransferMeta,
+      current?: RoomImage,
+    ) => current?.updatedAt ?? meta.workspace?.updatedAt ?? resolveImageCreatedAt(meta, current);
+
     const cacheIncomingPlaceholder = async (
       meta: ImageTransferMeta,
       placeholder: ImagePlaceholderMetadata,
@@ -275,7 +335,11 @@ export function useShareRoomConnection({
       }
       if (current?.placeholderOnly) {
         if (!placeholder.pending || current.placeholder?.pending) {
-          updateRoomImage(meta.id, { placeholder }, true);
+          updateRoomImage(
+            meta.id,
+            { placeholder, ...resolveImageObjectMetadata(meta, current) },
+            true,
+          );
         }
         return;
       }
@@ -293,7 +357,13 @@ export function useShareRoomConnection({
         placeholderOnly: true,
         placeholder,
         thumbnail: current?.thumbnail,
-        createdAt: current?.createdAt || Date.now(),
+        pinnedAt: current?.pinnedAt,
+        wantedByMe: current?.wantedByMe,
+        wantedByPeer: current?.wantedByPeer,
+        likeCount: current?.likeCount,
+        ...resolveImageObjectMetadata(meta, current),
+        createdAt: resolveImageCreatedAt(meta, current),
+        updatedAt: resolveImageUpdatedAt(meta, current),
       };
       notifyIncomingImage(meta.id, meta.name);
       if (!disposed) addRoomImage(image);
@@ -328,7 +398,13 @@ export function useShareRoomConnection({
           progress: 0,
           previewOnly: true,
           placeholderOnly: false,
-          createdAt: current?.createdAt || Date.now(),
+          pinnedAt: current?.pinnedAt,
+          wantedByMe: current?.wantedByMe,
+          wantedByPeer: current?.wantedByPeer,
+          likeCount: current?.likeCount,
+          ...resolveImageObjectMetadata(meta, current),
+          createdAt: resolveImageCreatedAt(meta, current),
+          updatedAt: resolveImageUpdatedAt(meta, current),
         };
         notifyIncomingImage(meta.id, meta.name);
         try {
@@ -366,7 +442,7 @@ export function useShareRoomConnection({
               }
               await new Promise((resolve) => window.setTimeout(resolve, 100));
             }
-            throw new Error("Image file channel is not open");
+            throw new Error(labels.imageFileChannelDisconnected);
           } catch (error) {
             if (thumbnailRequests.get(id) === requestKey) {
               thumbnailRequests.delete(id);
@@ -377,7 +453,11 @@ export function useShareRoomConnection({
       },
       async onThumbnail(id, thumbnail) {
         const current = imagesRef.current.find((image) => image.id === id);
-        if (!current || current.direction !== "received") return;
+        if (!current) {
+          onPendingShareThumbnail(id, thumbnail);
+          return;
+        }
+        if (current.direction !== "received") return;
         updateRoomImage(id, { thumbnail }, true);
       },
       onStart(meta) {
@@ -429,7 +509,13 @@ export function useShareRoomConnection({
           placeholder: current?.placeholder,
           thumbnail: current?.thumbnail,
           transferMode: current?.transferMode || "p2p",
-          createdAt: current?.createdAt || Date.now(),
+          pinnedAt: current?.pinnedAt,
+          wantedByMe: current?.wantedByMe,
+          wantedByPeer: current?.wantedByPeer,
+          likeCount: current?.likeCount,
+          ...resolveImageObjectMetadata(meta, current),
+          createdAt: resolveImageCreatedAt(meta, current),
+          updatedAt: resolveImageUpdatedAt(meta, current),
         };
         try {
           await storeRoomImage(image);
@@ -476,22 +562,18 @@ export function useShareRoomConnection({
       onReceipt(id) {
         updateRoomImage(
           id,
-          { transferStatus: "sent", progress: 1 },
+          { transferStatus: "sent", progress: 1, shareStatus: "available" },
           true,
         );
-        setActivities((current) =>
-          current.map((activity) =>
-            activity.id === `transfer-${id}`
-              ? {
-                  ...activity,
-                  kind: "complete",
-                  detail: labels.complete,
-                  progress: 1,
-                  createdAt: Date.now(),
-                }
-              : activity,
-          ),
-        );
+        const image = imagesRef.current.find((current) => current.id === id);
+        upsertActivity({
+          id: `transfer-${id}`,
+          kind: "complete",
+          title: image?.name || labels.complete,
+          detail: labels.complete,
+          progress: 1,
+          createdAt: Date.now(),
+        });
       },
       onReady(id) {
         imageReadyWaiters.get(id)?.resolve();
@@ -516,7 +598,7 @@ export function useShareRoomConnection({
         deletedImageIdsRef.current.add(id);
         removeRoomImage(id);
         try {
-          await deleteRoomImage(id);
+          await deleteRoomImage(roomId, id);
         } catch (error) {
           console.warn("Failed to delete remote image placeholder", error);
         }
@@ -578,7 +660,13 @@ export function useShareRoomConnection({
             placeholder: current?.placeholder,
             thumbnail: current?.thumbnail,
             transferMode: "r2",
-            createdAt: current?.createdAt || Date.now(),
+            pinnedAt: current?.pinnedAt,
+            wantedByMe: current?.wantedByMe,
+            wantedByPeer: current?.wantedByPeer,
+            likeCount: current?.likeCount,
+            ...resolveImageObjectMetadata(meta, current),
+            createdAt: resolveImageCreatedAt(meta, current),
+            updatedAt: resolveImageUpdatedAt(meta, current),
           };
           await storeRoomImage(image);
           if (disposed) return;
@@ -663,6 +751,9 @@ export function useShareRoomConnection({
           image.direction !== "sent" ||
           image.previewOnly ||
           image.placeholderOnly ||
+          (image.operation !== "original" &&
+            image.shareStatus !== "accepted" &&
+            image.shareStatus !== "transferring") ||
           (image.transferStatus !== "waiting" &&
             image.transferStatus !== "failed" &&
             image.transferStatus !== "cancelled")
@@ -675,6 +766,7 @@ export function useShareRoomConnection({
             file,
             image.id,
             transferChunkSizeRef.current,
+            image,
           );
           sendImagePlaceholderPending(activeChannel, meta);
           const placeholder =
@@ -825,6 +917,23 @@ export function useShareRoomConnection({
       const reviewMessage = parseReviewCollaborationMessage(event.data);
       if (reviewMessage) {
         onReviewMessage(reviewMessage);
+        return;
+      }
+      const workspaceMessage = parseImageWorkspaceMessage(event.data);
+      if (workspaceMessage?.type === "IMAGE_SHARE_REQUEST") {
+        onImageShareRequest(workspaceMessage);
+        return;
+      }
+      if (workspaceMessage?.type === "IMAGE_SHARE_RESPONSE") {
+        onImageShareResponse(workspaceMessage);
+        return;
+      }
+      if (workspaceMessage?.type === "IMAGE_REACTION_BATCH") {
+        onImageReactionBatch(workspaceMessage);
+        return;
+      }
+      if (workspaceMessage?.type === "IMAGE_WANTED") {
+        onImageWanted(workspaceMessage);
         return;
       }
       receiver.handle(event.data);
@@ -1492,7 +1601,7 @@ export function useShareRoomConnection({
             return;
           }
           const message =
-            error instanceof Error ? error.message : "Could not connect";
+            error instanceof Error ? error.message : labels.failed;
           setConnection("error");
           setConnectionError(message);
           setConnectionActivity("error", message);
@@ -1564,6 +1673,11 @@ export function useShareRoomConnection({
     onWeakNetworkChange,
     onMessageTransportChange,
     onReviewMessage,
+    onImageShareRequest,
+    onImageShareResponse,
+    onImageReactionBatch,
+    onImageWanted,
+    onPendingShareThumbnail,
     removeRoomImage,
     roomId,
     sessionIdRef,
