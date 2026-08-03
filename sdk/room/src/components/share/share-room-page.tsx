@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { getRoomShareUrl } from "../../config";
+import { getRoomSdkConfig, getRoomShareUrl } from "../../config";
 import CreatedRoomDialog from "./created-room-dialog";
 import FloatingEmojiLayer from "./floating-emoji-layer";
 import ExitRoomDialog from "./exit-room-dialog";
@@ -20,6 +20,8 @@ import CompressedImagePickerDialog from "./workspace/compressed-image-picker-dia
 import CompressionSuggestionDialog from "./workspace/compression-suggestion-dialog";
 import RoomImagePreviewDialog from "./room-image-preview-dialog";
 import RoomHeader from "./room-header";
+import MessagingServiceDialog from "./messaging-service-dialog";
+import WeixinChatDialog, { type WeixinChatItem } from "./weixin-chat-dialog";
 import RoomSidebar from "./room-sidebar";
 import TemporaryRoomDock from "./temporary-room-dock";
 import { formatBytes } from "./share-room-formatters";
@@ -85,6 +87,10 @@ import {
 } from "../../utils/image-workspace-messages";
 import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
 import { useRoomTabNotifications } from "./use-room-tab-notifications";
+import type {
+  MessagingProviderSnapshot,
+  WeixinIlinkProvider,
+} from "@picbind/messaging-service/source";
 import type {
   ReviewImageExport,
   ReviewImageExportOutcome,
@@ -170,12 +176,14 @@ export default function ShareRoomPage({
   const seenShareRequestsRef = React.useRef(new Set<string>());
   const imageLikeQueueRef = React.useRef(new Map<string, number>());
   const imageLikeFlushTimerRef = React.useRef<number | null>(null);
+  const messagingStatusRef = React.useRef(new Map<string, string>());
   const flushImageLikeQueueRef = React.useRef<() => void>(() => undefined);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const [shareUrl, setShareUrl] = React.useState("");
   const [isShareDialogOpen, setIsShareDialogOpen] = React.useState(false);
+  const [isMessagingServiceOpen, setIsMessagingServiceOpen] = React.useState(false);
   const [role, setRole] = React.useState<RoomRole | null>(null);
   const [connection, setConnection] =
     React.useState<ConnectionState>("waiting");
@@ -208,6 +216,8 @@ export default function ShareRoomPage({
   const [isDragging, setIsDragging] = React.useState(false);
   const [pressedEmoji, setPressedEmoji] = React.useState<string | null>(null);
   const [textMessage, setTextMessage] = React.useState("");
+  const [selectedMessageTargetId, setSelectedMessageTargetId] =
+    React.useState<string | null>(null);
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
   const [isInternallyMinimized, setIsInternallyMinimized] = React.useState(false);
@@ -228,6 +238,31 @@ export default function ShareRoomPage({
   const [imageReactionSignals, setImageReactionSignals] = React.useState<
     Record<string, ImageReactionSignal>
   >({});
+  const messagingService = React.useMemo(
+    () => getRoomSdkConfig().messagingService,
+    [],
+  );
+  const [messagingProviders, setMessagingProviders] = React.useState<
+    MessagingProviderSnapshot[]
+  >(() => messagingService?.getProviders() || []);
+  const [messagingChatProviderId, setMessagingChatProviderId] =
+    React.useState<string | null>(null);
+  const [messagingChatMessages, setMessagingChatMessages] = React.useState<
+    WeixinChatItem[]
+  >([]);
+  const [isMessagingChatSending, setIsMessagingChatSending] = React.useState(false);
+  const appendMessagingChatMessage = React.useCallback((message: WeixinChatItem) => {
+    setMessagingChatMessages((current) => {
+      const all = [...current, message];
+      const removed = all.slice(0, Math.max(0, all.length - 300));
+      removed.forEach((item) => {
+        if (!item.url) return;
+        URL.revokeObjectURL(item.url);
+        objectUrlsRef.current.delete(item.url);
+      });
+      return all.slice(-300);
+    });
+  }, []);
   roomIdRef.current = roomId;
   const reviewMessageSequenceRef = React.useRef(0);
   const pendingReviewMessagesRef = React.useRef<
@@ -315,6 +350,30 @@ export default function ShareRoomPage({
   const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
   const isMinimized = minimized ?? isInternallyMinimized;
   const notifyInactiveTab = useRoomTabNotifications();
+
+  React.useEffect(() => {
+    if (!messagingService) {
+      setMessagingProviders([]);
+      return;
+    }
+    const refresh = () => setMessagingProviders(messagingService.getProviders());
+    refresh();
+    const unsubscribe = messagingService.subscribeStatus(refresh);
+    const provider = messagingService.getProvider("weixin-ilink") as
+      | WeixinIlinkProvider
+      | undefined;
+    if (provider) {
+      void provider.getGatewayStatus().then((status) => {
+        if (status.configured && provider.getSnapshot().status === "disconnected") {
+          return messagingService.startProvider(provider.id);
+        }
+        return undefined;
+      }).catch((error) => {
+        console.warn("Failed to restore Weixin messaging connection", error);
+      });
+    }
+    return unsubscribe;
+  }, [messagingService]);
 
   React.useEffect(() => {
     minimizedRef.current = isMinimized;
@@ -405,6 +464,88 @@ export default function ShareRoomPage({
       });
     }
   }, []);
+
+  React.useEffect(() => {
+    const previous = messagingStatusRef.current;
+    messagingProviders.forEach((provider) => {
+      if (
+        provider.status === "connected" &&
+        previous.get(provider.id) !== "connected"
+      ) {
+        upsertActivity({
+          id: `messaging-connected-${provider.id}-${Date.now()}`,
+          kind: "connection",
+          title: labels.messagingConnectionLogTitle,
+          detail: `${provider.displayName} · ${labels.messagingConnectionLogDetail}`,
+          createdAt: Date.now(),
+        });
+      }
+    });
+    messagingStatusRef.current = new Map(
+      messagingProviders.map((provider) => [provider.id, provider.status]),
+    );
+  }, [labels.messagingConnectionLogDetail, labels.messagingConnectionLogTitle, messagingProviders, upsertActivity]);
+
+  React.useEffect(() => {
+    const currentClientId = roomId ? getShareRoomClientId(roomId) : null;
+    const targets = [
+      ...members
+        .filter(
+          (member) =>
+            member.status === "online" && member.clientId !== currentClientId,
+        )
+        .map((member) => `room:${member.clientId}`),
+    ];
+    setSelectedMessageTargetId((current) =>
+      current && targets.includes(current) ? current : targets[0] || null,
+    );
+  }, [members, roomId]);
+
+  React.useEffect(() => {
+    if (!messagingService) return;
+    return messagingService.subscribe((message) => {
+      const provider = messagingService
+        .getProviders()
+        .find((candidate) => candidate.channel === message.channel);
+      const providerId = provider?.id || message.channel;
+      const title = message.payload.text || message.payload.fileName || labels.messagingImage;
+      upsertActivity({
+        id: `message-${provider?.id || message.channel}-${message.id}`,
+        kind: "message",
+        title,
+        detail: `${labels.messageReceived} · ${provider?.displayName || message.channel}`,
+        createdAt: message.timestamp || Date.now(),
+      });
+      const chatItem: WeixinChatItem = {
+        id: message.id,
+        providerId,
+        direction: "incoming",
+        type: message.type === "image" ? "image" : "text",
+        text: message.payload.text,
+        fileName: message.payload.fileName,
+        mimeType: message.payload.mimeType,
+        size: message.payload.size,
+        createdAt: message.timestamp || Date.now(),
+        status: "sent",
+      };
+      appendMessagingChatMessage(chatItem);
+      if (message.type === "image" && message.payload.fileId && provider) {
+        void messagingService.download(provider.id, message.payload.fileId).then((blob) => {
+          const url = URL.createObjectURL(blob);
+          objectUrlsRef.current.add(url);
+          setMessagingChatMessages((current) => current.map((item) =>
+            item.id === message.id ? { ...item, blob, url, size: blob.size, mimeType: blob.type || item.mimeType } : item,
+          ));
+        }).catch((error) => {
+          console.warn("Failed to download Weixin image", error);
+          setMessagingChatMessages((current) => current.map((item) =>
+            item.id === message.id ? { ...item, status: "error" } : item,
+          ));
+        });
+      }
+      notifyInactiveTab(title);
+    });
+  }, [appendMessagingChatMessage, labels.messageReceived, labels.messagingImage, messagingService, notifyInactiveTab, upsertActivity]);
 
   const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
     const sequence = emojiSequenceRef.current++;
@@ -2039,6 +2180,15 @@ export default function ShareRoomPage({
     }
   };
 
+  const selectedRoomMember = selectedMessageTargetId?.startsWith("room:")
+    ? members.find(
+        (member) => member.clientId === selectedMessageTargetId.slice("room:".length),
+      )
+    : undefined;
+  const canSendSelectedText = Boolean(
+    selectedRoomMember && connection === "connected",
+  );
+
   const handleEmoji = (emoji: string) => {
     if (connection !== "connected") {
       return;
@@ -2060,8 +2210,9 @@ export default function ShareRoomPage({
 
   const handleTextMessage = () => {
     const text = textMessage.trim().slice(0, 200);
-    if (!text || connection !== "connected") return;
+    if (!text || !canSendSelectedText) return;
     const id = createPeerMessageId();
+    if (connection !== "connected") return;
     if (
       !sendPeerMessage(controlChannelRef.current, {
         type: "TEXT",
@@ -2078,6 +2229,144 @@ export default function ShareRoomPage({
       detail: labels.messageSending,
       createdAt: Date.now(),
     });
+  };
+
+  const activeMessagingChatProvider = messagingChatProviderId
+    ? messagingProviders.find(
+        (provider) => provider.id === messagingChatProviderId,
+      ) || null
+    : null;
+
+  const handleMessagingChatSend = async (textValue: string) => {
+    const provider = activeMessagingChatProvider;
+    const text = textValue.trim().slice(0, 2000);
+    if (
+      !provider ||
+      !provider.recipientId ||
+      provider.status !== "connected" ||
+      !messagingService ||
+      !text ||
+      isMessagingChatSending
+    ) {
+      return false;
+    }
+    const id = createPeerMessageId();
+    const activityId = `message-${provider.id}-${id}`;
+    const outgoing: WeixinChatItem = {
+      id,
+      providerId: provider.id,
+      direction: "outgoing",
+      type: "text",
+      text,
+      createdAt: Date.now(),
+      status: "sending",
+    };
+    appendMessagingChatMessage(outgoing);
+    setIsMessagingChatSending(true);
+    upsertActivity({
+      id: activityId,
+      kind: "message",
+      title: text,
+      detail: `${labels.messageSending} · ${provider.displayName}`,
+      createdAt: outgoing.createdAt,
+    });
+    try {
+      await messagingService.send(provider.id, {
+        id,
+        channel: provider.channel,
+        senderId: roomId ? getShareRoomClientId(roomId) : "picbind-room",
+        conversationId: provider.recipientId,
+        type: "text",
+        payload: { text },
+        timestamp: outgoing.createdAt,
+      });
+      setMessagingChatMessages((current) => current.map((message) =>
+        message.id === id ? { ...message, status: "sent" } : message,
+      ));
+      upsertActivity({
+        id: activityId,
+        kind: "complete",
+        title: text,
+        detail: `${labels.messageSent} · ${provider.displayName}`,
+        createdAt: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      setMessagingChatMessages((current) => current.map((message) =>
+        message.id === id ? { ...message, status: "error" } : message,
+      ));
+      upsertActivity({
+        id: activityId,
+        kind: "error",
+        title: text,
+        detail: error instanceof Error ? error.message : labels.messagingConnectionFailed,
+        createdAt: Date.now(),
+      });
+      return false;
+    } finally {
+      setIsMessagingChatSending(false);
+    }
+  };
+
+  const handleMoveWeixinImageToLibrary = async (item: WeixinChatItem) => {
+    if (!roomId || !item.blob || item.movedToLibrary) return false;
+    try {
+      const identity = await identifyImage(item.blob);
+      const now = Date.now();
+      const extensionByMime: Record<string, string> = {
+        "image/avif": "avif",
+        "image/gif": "gif",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+      };
+      const extension =
+        extensionByMime[item.blob.type || item.mimeType || ""] || "jpg";
+      const name = item.fileName || `wechat-image.${extension}`;
+      const image: CachedRoomImage = {
+        id: identity.imageId,
+        rootImageId: identity.imageId,
+        parentImageId: null,
+        ownerId: getShareRoomClientId(roomId),
+        width: identity.width,
+        height: identity.height,
+        source: "received",
+        operation: "original",
+        version: 1,
+        shareStatus: "local",
+        workspaceLocation: "library",
+        outboxOrigin: "library",
+        roomId,
+        name,
+        type: item.blob.type || item.mimeType || "image/jpeg",
+        size: item.blob.size,
+        blob: item.blob,
+        direction: "sent",
+        transferStatus: "waiting",
+        progress: 0,
+        previewOnly: false,
+        placeholderOnly: false,
+        likeCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await storeRoomImage(image);
+      addRoomImage(image);
+      setMessagingChatMessages((current) => current.map((message) =>
+        message.id === item.id ? { ...message, movedToLibrary: true } : message,
+      ));
+      return true;
+    } catch (error) {
+      console.warn("Failed to move Weixin image to the workspace library", error);
+      upsertActivity({
+        id: `weixin-image-library-error-${item.id}-${Date.now()}`,
+        kind: "error",
+        title: item.fileName || labels.messagingImage,
+        detail: labels.messagingImageMoveFailed,
+        createdAt: Date.now(),
+      });
+      return false;
+    }
   };
 
   const handleReviewImage = (imageId: string) => {
@@ -2125,8 +2414,12 @@ export default function ShareRoomPage({
       roomId={roomId}
       copied={copied}
       actionPending={isRoomActionPending}
+      messagingConnected={messagingProviders.some(
+        (provider) => provider.status === "connected",
+      )}
       labels={labels}
       onCopy={handleCopy}
+      onOpenMessaging={() => setIsMessagingServiceOpen(true)}
       onTemporaryLeave={handleTemporaryLeave}
       onExitRoom={requestExitRoom}
     />
@@ -2143,12 +2436,18 @@ export default function ShareRoomPage({
       roomId={roomId}
       role={role}
       members={members}
+      messagingProviders={messagingProviders}
+      selectedMessageTargetId={selectedMessageTargetId}
+      canSendText={canSendSelectedText}
+      canSendReaction={Boolean(selectedRoomMember && connection === "connected")}
       activities={activities}
       kickingClientId={kickingClientId}
       textMessage={textMessage}
       pressedEmoji={pressedEmoji}
       labels={labels}
       onKick={handleKickMember}
+      onSelectMessageTarget={setSelectedMessageTargetId}
+      onOpenMessagingChat={setMessagingChatProviderId}
       onTextChange={setTextMessage}
       onTextSubmit={handleTextMessage}
       onEmoji={handleEmoji}
@@ -2253,7 +2552,12 @@ export default function ShareRoomPage({
             <FullscreenSidebarRail
               connection={connection}
               messageTransportMode={messageTransportMode}
-              memberCount={members.length}
+              memberCount={
+                members.length +
+                messagingProviders.filter(
+                  (provider) => provider.status === "connected",
+                ).length
+              }
               activityCount={activities.length}
               labels={labels}
             >
@@ -2345,6 +2649,23 @@ export default function ShareRoomPage({
         thumbnail={incomingShareThumbnail}
         onPlaceholderMeasured={handlePlaceholderMeasured}
         onDecision={handleShareDecision}
+      />
+      <MessagingServiceDialog
+        open={isMessagingServiceOpen}
+        service={messagingService}
+        providers={messagingProviders}
+        labels={labels}
+        onClose={() => setIsMessagingServiceOpen(false)}
+      />
+      <WeixinChatDialog
+        open={Boolean(messagingChatProviderId)}
+        provider={activeMessagingChatProvider}
+        messages={messagingChatMessages}
+        labels={labels}
+        sending={isMessagingChatSending}
+        onSend={handleMessagingChatSend}
+        onMoveImage={handleMoveWeixinImageToLibrary}
+        onClose={() => setMessagingChatProviderId(null)}
       />
       </main>
       {isMinimized && roomId ? (

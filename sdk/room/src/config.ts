@@ -1,8 +1,11 @@
+import type { MessagingService } from "@picbind/messaging-service/source";
+
 export type RoomSdkConfig = {
   apiBaseUrl?: string;
   createRoomUrl?: string;
   roomUrl?: string;
   wasmBaseUrl?: string;
+  messagingService?: MessagingService;
 };
 
 const runtimeConfig: RoomSdkConfig = {};

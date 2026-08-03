@@ -1,6 +1,7 @@
 packages:
   - "."
   - "../sdk/room"
+  - "../messaging-service"
   - "../sdk/wasm/image-codecs"
   - "../sdk/wasm/image-wasm"
   - "../sdk/wasm/perceptual-wasm"

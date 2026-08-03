@@ -2,6 +2,7 @@ import {
   FiCheck,
   FiCopy,
   FiLogOut,
+  FiMessageCircle,
   FiMinimize2,
 } from "react-icons/fi";
 import type { RoomRole } from "../../utils/realtime-room";
@@ -13,8 +14,10 @@ type RoomHeaderProps = {
   roomId: string | null;
   copied: boolean;
   actionPending: boolean;
+  messagingConnected: boolean;
   labels: ShareRoomLabels;
   onCopy(): void | Promise<void>;
+  onOpenMessaging(): void;
   onTemporaryLeave(): void | Promise<void>;
   onExitRoom(): void | Promise<void>;
 };
@@ -24,8 +27,10 @@ export default function RoomHeader({
   roomId,
   copied,
   actionPending,
+  messagingConnected,
   labels,
   onCopy,
+  onOpenMessaging,
   onTemporaryLeave,
   onExitRoom,
 }: RoomHeaderProps) {
@@ -68,6 +73,18 @@ export default function RoomHeader({
         </div>
       </div>
       <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onOpenMessaging}
+          className="relative flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-blue-50 hover:text-[#2f65cf]"
+          aria-label={labels.messagingService}
+          title={labels.messagingService}
+        >
+          <FiMessageCircle className="h-4 w-4" aria-hidden="true" />
+          {messagingConnected ? (
+            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-white bg-emerald-500" aria-hidden="true" />
+          ) : null}
+        </button>
         <button
           type="button"
           onClick={() => void onCopy()}

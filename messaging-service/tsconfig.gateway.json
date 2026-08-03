@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": "gateway",
+    "outDir": "gateway-dist",
+    "sourceMap": true
+  },
+  "include": ["gateway"]
+}

@@ -34,6 +34,7 @@ const nextConfig = {
   output: "export",
   transpilePackages: [
     "@picbind/image-codecs",
+    "@picbind/messaging-service",
     "@picbind/image-wasm",
     "@picbind/perceptual-wasm",
     "@picbind/room",
@@ -62,6 +63,11 @@ const nextConfig = {
       path.resolve(webRoot, "node_modules"),
       ...(config.resolve.modules ?? ["node_modules"]),
     ]
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"],
+      ".mjs": [".mts", ".mjs"],
+    }
 
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>

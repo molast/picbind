@@ -4,6 +4,7 @@ export { default as ShareRoomPage } from "./components/share/share-room-page";
 export { default as CreateRoomButton } from "./components/share/create-room-button";
 export { configureRoomSdk } from "./config";
 export { ROOM_VERSION } from "./version";
+export * from "@picbind/messaging-service/source";
 export type { RoomSdkConfig } from "./config";
 export type { ShareRoom } from "./utils/share-room";
 export {

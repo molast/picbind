@@ -1,0 +1,132 @@
+import { randomBytes } from "node:crypto";
+
+export const ILINK_BASE_URL = "https://ilinkai.weixin.qq.com";
+export const ILINK_CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
+
+const ILINK_APP_ID = "bot";
+const ILINK_APP_CLIENT_VERSION = (2 << 16) | (2 << 8);
+const CHANNEL_VERSION = "2.2.0";
+
+type JsonRecord = Record<string, unknown>;
+
+function randomWechatUin() {
+  const value = randomBytes(4).readUInt32BE(0);
+  return Buffer.from(String(value)).toString("base64");
+}
+
+function requestHeaders(body?: string, token?: string): HeadersInit {
+  const headers: Record<string, string> = {
+    "iLink-App-Id": ILINK_APP_ID,
+    "iLink-App-ClientVersion": String(ILINK_APP_CLIENT_VERSION),
+  };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    headers.AuthorizationType = "ilink_bot_token";
+    headers["Content-Length"] = String(Buffer.byteLength(body));
+    headers["X-WECHAT-UIN"] = randomWechatUin();
+  }
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+async function readJson(response: Response) {
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`iLink HTTP ${response.status}: ${raw.slice(0, 200)}`);
+  }
+  return JSON.parse(raw) as JsonRecord;
+}
+
+async function get(baseUrl: string, endpoint: string, signal?: AbortSignal) {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${endpoint}`, {
+    headers: requestHeaders(),
+    signal,
+  });
+  return readJson(response);
+}
+
+async function post(
+  baseUrl: string,
+  endpoint: string,
+  payload: JsonRecord,
+  token: string,
+  signal?: AbortSignal,
+) {
+  const body = JSON.stringify({ ...payload, base_info: { channel_version: CHANNEL_VERSION } });
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${endpoint}`, {
+    method: "POST",
+    headers: requestHeaders(body, token),
+    body,
+    signal,
+  });
+  return readJson(response);
+}
+
+export type IlinkQrCode = {
+  value: string;
+  scanData: string;
+};
+
+export type IlinkQrStatus = {
+  status: "wait" | "scaned" | "scaned_but_redirect" | "expired" | "confirmed";
+  redirectHost?: string;
+  accountId?: string;
+  token?: string;
+  baseUrl?: string;
+  userId?: string;
+};
+
+export async function requestQrCode(): Promise<IlinkQrCode> {
+  const response = await get(ILINK_BASE_URL, "ilink/bot/get_bot_qrcode?bot_type=3");
+  const value = String(response.qrcode || "");
+  const scanData = String(response.qrcode_img_content || value);
+  if (!value || !scanData) throw new Error("iLink QR response is incomplete");
+  return { value, scanData };
+}
+
+export async function requestQrStatus(
+  qrcode: string,
+  baseUrl = ILINK_BASE_URL,
+): Promise<IlinkQrStatus> {
+  const response = await get(
+    baseUrl,
+    `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
+  );
+  const status = String(response.status || "wait") as IlinkQrStatus["status"];
+  return {
+    status,
+    redirectHost: response.redirect_host ? String(response.redirect_host) : undefined,
+    accountId: response.ilink_bot_id ? String(response.ilink_bot_id) : undefined,
+    token: response.bot_token ? String(response.bot_token) : undefined,
+    baseUrl: response.baseurl ? String(response.baseurl) : undefined,
+    userId: response.ilink_user_id ? String(response.ilink_user_id) : undefined,
+  };
+}
+
+export async function getUpdates(
+  baseUrl: string,
+  token: string,
+  syncBuffer: string,
+  signal?: AbortSignal,
+) {
+  return post(baseUrl, "ilink/bot/getupdates", { get_updates_buf: syncBuffer }, token, signal);
+}
+
+export async function sendTextMessage(
+  baseUrl: string,
+  token: string,
+  toUserId: string,
+  text: string,
+  contextToken?: string,
+) {
+  const message: JsonRecord = {
+    from_user_id: "",
+    to_user_id: toUserId,
+    client_id: `picbind-${crypto.randomUUID()}`,
+    message_type: 2,
+    message_state: 2,
+    item_list: [{ type: 1, text_item: { text } }],
+  };
+  if (contextToken) message.context_token = contextToken;
+  return post(baseUrl, "ilink/bot/sendmessage", { msg: message }, token);
+}

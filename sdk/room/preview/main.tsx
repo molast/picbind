@@ -5,6 +5,9 @@ import {
   CreateRoomButton,
   ShareRoomPage,
   type ShareRoom,
+  IlinkHttpGatewayTransport,
+  MessagingService,
+  WeixinIlinkProvider,
 } from "../src";
 import "../src/styles.css";
 
@@ -12,6 +15,13 @@ configureRoomSdk({
   apiBaseUrl:
     import.meta.env.VITE_ROOM_API_URL || "https://api.picbind.com",
   roomUrl: import.meta.env.VITE_ROOM_APP_URL || window.location.origin,
+  messagingService: import.meta.env.VITE_MESSAGING_GATEWAY_URL
+    ? new MessagingService([
+        new WeixinIlinkProvider(
+          new IlinkHttpGatewayTransport(import.meta.env.VITE_MESSAGING_GATEWAY_URL),
+        ),
+      ])
+    : undefined,
 });
 
 function PreviewApp() {

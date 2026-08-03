@@ -200,7 +200,6 @@ site.webmanifest
 - WASM 承担重计算和图像编码逻辑。
 - 前端页面保持可静态导出，减少部署复杂度。
 - 动态统计和管理能力迁移到 Cloudflare Worker。
-- 不再使用 Docker 部署。
 
 ## 高清图片下载
 https://www.pexels.com/

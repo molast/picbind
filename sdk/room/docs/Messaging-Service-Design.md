@@ -7,6 +7,28 @@
 | 版本 | 1.0 |
 | 状态 | 设计阶段 |
 
+> 微信 Provider 的具体实现以 `Messaging-Service-WeChat-iLink-Integration.md` 为准。
+> 当前采用腾讯 iLink Bot API、扫码登录和常驻 Gateway 长轮询，不使用微信公众号
+> Webhook，也不由浏览器或 Cloudflare Worker 直接持有 iLink token。
+
+## 当前实现范围
+
+当前仓库已经实现：
+
+- 统一消息模型与 Provider 接口
+- `MessageEventDispatcher`
+- `MessagingService` Provider 注册、生命周期、收发与状态订阅
+- `WeixinIlinkProvider` 与可注入的 `IlinkGatewayTransport`
+- Room 顶部消息服务入口、Provider 状态和连接控制
+
+当前尚未实现：
+
+- iLink 扫码登录、token 持久化和长轮询 Gateway
+- Messaging Service 后端网关
+- 微信用户与 PicBind 用户、Room 的持久化绑定
+
+`WeixinIlinkProvider` 通过 `IlinkGatewayTransport` 对接常驻网关。iLink token 不得放入浏览器或 Room SDK。
+
 ## 1. 背景
 
 PicBind 当前定位：
@@ -157,25 +179,27 @@ R2
 
 ## 5. Messaging Service 模块设计
 
-目录结构：
+当前 TypeScript 实现的目录结构：
 
 ```text
-services/
-└── messaging/
-    ├── core/
-    │   ├── message.go
-    │   ├── event.go
-    │   └── provider.go
-    ├── providers/
-    │   ├── wechat/
-    │   │   ├── client.go
-    │   │   ├── receiver.go
-    │   │   ├── sender.go
-    │   │   └── parser.go
-    │   ├── telegram/
-    │   └── discord/
-    └── dispatcher/
-        └── event_dispatcher.go
+messaging-service/
+├── src/
+│   ├── core/
+│   │   ├── message.ts
+│   │   ├── event.ts
+│   │   └── provider.ts
+│   ├── providers/
+│   │   ├── mock/
+│   │   │   └── provider.ts
+│   │   ├── weixin/
+│   │   │   └── provider.ts
+│   │   └── wechat/              # 旧名称兼容导出
+│   │       └── provider.ts
+│   ├── router/
+│   │   └── dispatcher.ts
+│   └── index.ts
+├── package.json
+└── tsconfig.json
 ```
 
 ---
@@ -217,7 +241,7 @@ services/
 
 每个消息平台实现一个 Provider，例如：
 
-- `WechatProvider`
+- `WeixinIlinkProvider`
 - `TelegramProvider`
 - `DiscordProvider`
 
@@ -241,17 +265,12 @@ type MessageProvider interface {
 
 ## 8. 微信 Provider 设计
 
-第一阶段实现 `WechatProvider`。
+微信渠道实现为 `WeixinIlinkProvider`，通过常驻 Gateway 接入腾讯 iLink Bot API。
 
 ### 8.1 建立微信连接
 
-根据微信提供的能力，可能采用以下方式：
-
-- Webhook
-- WebSocket
-- Long Poll
-
-具体连接方式由 Provider 内部处理。
+iLink 使用 HTTP 长轮询。二维码登录、`getupdates` 轮询、同步游标和 token
+持久化由常驻 Gateway 处理，不使用公众号 Webhook 或浏览器 WebSocket 直连 iLink。
 
 ### 8.2 接收消息
 
@@ -260,7 +279,7 @@ type MessageProvider interface {
    |
 微信消息服务
    |
-WechatProvider
+WeixinIlinkProvider
    |
 Message Parser
    |
@@ -276,7 +295,7 @@ PicBind
    |
 Messaging Service
    |
-WechatProvider
+WeixinIlinkProvider
    |
 微信接口
    |
@@ -458,7 +477,7 @@ PicBind 收到图片
 
 ```text
 providers/
-├── wechat/
+├── weixin/
 ├── telegram/
 ├── discord/
 ├── slack/

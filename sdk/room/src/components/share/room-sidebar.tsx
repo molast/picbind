@@ -16,6 +16,8 @@ import {
   FiXCircle,
 } from "react-icons/fi";
 import { TbDevicesShare, TbWorldShare } from "react-icons/tb";
+import { RiRobot2Line } from "react-icons/ri";
+import type { MessagingProviderSnapshot } from "@picbind/messaging-service/source";
 import { getShareRoomClientId } from "../../utils/share-room";
 import { TEST_EMOJIS } from "../../utils/realtime-peer-messages";
 import type { RoomMemberPresence, RoomRole } from "../../utils/realtime-room";
@@ -38,14 +40,20 @@ type RoomSidebarProps = {
   roomId: string | null;
   role: RoomRole | null;
   members: RoomMemberPresence[];
+  messagingProviders: MessagingProviderSnapshot[];
+  selectedMessageTargetId: string | null;
+  canSendText: boolean;
+  canSendReaction: boolean;
   activities: ActivityItem[];
   kickingClientId: string | null;
   textMessage: string;
   pressedEmoji: string | null;
   labels: ShareRoomLabels;
   onKick(clientId: string): void | Promise<void>;
+  onSelectMessageTarget(targetId: string): void;
+  onOpenMessagingChat(providerId: string): void;
   onTextChange(value: string): void;
-  onTextSubmit(): void;
+  onTextSubmit(): void | Promise<void>;
   onEmoji(emoji: string): void;
   onClearActivities(): void;
 };
@@ -61,17 +69,27 @@ export default function RoomSidebar({
   roomId,
   role,
   members,
+  messagingProviders,
+  selectedMessageTargetId,
+  canSendText,
+  canSendReaction,
   activities,
   kickingClientId,
   textMessage,
   pressedEmoji,
   labels,
   onKick,
+  onSelectMessageTarget,
+  onOpenMessagingChat,
   onTextChange,
   onTextSubmit,
   onEmoji,
   onClearActivities,
 }: RoomSidebarProps) {
+  const connectedBots = messagingProviders.filter(
+    (provider) => provider.status === "connected",
+  );
+
   return (
     <aside className="grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
       <div className="border-b border-slate-200 px-4 py-4">
@@ -172,10 +190,27 @@ export default function RoomSidebar({
                       .slice(0, index + 1)
                       .filter((item) => item.role === "guest").length
                   }`;
+            const targetId = `room:${member.clientId}`;
+            const selectable = online && !isCurrentUser;
+            const selected = selectable && selectedMessageTargetId === targetId;
             return (
               <div
                 key={member.clientId}
-                className="flex items-center justify-between gap-3"
+                role={selectable ? "button" : undefined}
+                tabIndex={selectable ? 0 : undefined}
+                aria-pressed={selectable ? selected : undefined}
+                onClick={selectable ? () => onSelectMessageTarget(targetId) : undefined}
+                onKeyDown={selectable ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectMessageTarget(targetId);
+                  }
+                } : undefined}
+                className={`flex items-center justify-between gap-3 rounded-md border px-2 py-1.5 transition ${
+                  selected
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-transparent"
+                } ${selectable ? "cursor-pointer hover:bg-slate-50" : ""}`}
               >
                 <div className="flex min-w-0 flex-1 items-center gap-2.5">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold uppercase text-slate-600">
@@ -194,7 +229,10 @@ export default function RoomSidebar({
                   {role === "owner" && member.role === "guest" ? (
                     <button
                       type="button"
-                      onClick={() => void onKick(member.clientId)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onKick(member.clientId);
+                      }}
                       disabled={kickingClientId !== null}
                       className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-wait disabled:opacity-45"
                       aria-label={labels.kickMember}
@@ -223,6 +261,41 @@ export default function RoomSidebar({
               </div>
             );
           })}
+          {connectedBots.map((provider) => (
+            <div
+              key={`messaging-${provider.id}`}
+              className="flex items-center justify-between gap-3 rounded-md border border-transparent px-2 py-1.5"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                  <RiRobot2Line className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 truncate text-sm font-medium text-slate-700">
+                  {provider.displayName}
+                  <span className="ml-1 text-xs text-emerald-600">
+                    ({labels.messagingBot})
+                  </span>
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenMessagingChat(provider.id)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-[#07c160] transition hover:bg-emerald-50"
+                  aria-label={labels.messagingOpenChat}
+                  title={labels.messagingOpenChat}
+                >
+                  <FiMessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+                <span
+                  className="block h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white"
+                  title={labels.online}
+                  role="img"
+                  aria-label={labels.online}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -234,20 +307,20 @@ export default function RoomSidebar({
           className="flex items-center gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            onTextSubmit();
+            void onTextSubmit();
           }}
         >
           <input
             value={textMessage}
             onChange={(event) => onTextChange(event.target.value)}
             maxLength={200}
-            disabled={connection !== "connected"}
+            disabled={!canSendText}
             placeholder={labels.textPlaceholder}
             className="h-9 min-w-0 flex-1 rounded-md border border-slate-200 px-3 text-sm outline-none transition focus:border-blue-400 disabled:bg-slate-50 disabled:text-slate-400"
           />
           <button
             type="submit"
-            disabled={connection !== "connected" || !textMessage.trim()}
+            disabled={!canSendText || !textMessage.trim()}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#2f65cf] text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={labels.sendMessage}
             title={labels.sendMessage}
@@ -267,7 +340,7 @@ export default function RoomSidebar({
               key={emoji}
               type="button"
               onClick={() => onEmoji(emoji)}
-              disabled={connection !== "connected"}
+              disabled={!canSendReaction}
               className={`flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-xl transition duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 ${
                 pressedEmoji === emoji
                   ? "-translate-y-1 scale-125 border-blue-400 bg-blue-50 shadow-md"

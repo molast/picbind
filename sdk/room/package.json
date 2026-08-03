@@ -32,6 +32,7 @@
     "react-dom": "^18.3.1"
   },
   "dependencies": {
+    "@picbind/messaging-service": "link:../../messaging-service",
     "@picbind/image-codecs": "link:../wasm/image-codecs",
     "@picbind/image-wasm": "link:../wasm/image-wasm",
     "@radix-ui/react-dialog": "^1.1.15",
