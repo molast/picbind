@@ -84,6 +84,7 @@ import {
   type ImageWanted,
 } from "../../utils/image-workspace-messages";
 import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
+import { useRoomTabNotifications } from "./use-room-tab-notifications";
 import type {
   ReviewImageExport,
   ReviewImageExportOutcome,
@@ -313,6 +314,7 @@ export default function ShareRoomPage({
 
   const labels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
   const isMinimized = minimized ?? isInternallyMinimized;
+  const notifyInactiveTab = useRoomTabNotifications();
 
   React.useEffect(() => {
     minimizedRef.current = isMinimized;
@@ -340,13 +342,16 @@ export default function ShareRoomPage({
 
   const handleIncomingNotification = React.useCallback(
     (notification: RoomDockNotification) => {
+      if (notification.kind === "text" || notification.kind === "emoji") {
+        notifyInactiveTab(notification.label);
+      }
       if (!minimizedRef.current) return;
       setDockNotifications((current) => {
         if (current.some((item) => item.id === notification.id)) return current;
         return [...current, notification].slice(-99);
       });
     },
-    [],
+    [notifyInactiveTab],
   );
   const handleForcedNavigation = React.useCallback(() => {
     if (roomExitHandledRef.current) return false;
