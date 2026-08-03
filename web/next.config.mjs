@@ -1,7 +1,36 @@
+function isJsquashAvifCircularChunkWarning(warning, compilation) {
+  const match = warning.message?.match(
+    /^Circular dependency between chunks with runtime \(([^)]+)\)/,
+  )
+  if (!match) return false
+
+  // Development chunk IDs are descriptive names rather than numeric IDs.
+  if (match[1].includes('jsquash_avif')) return true
+
+  const chunkIds = new Set(
+    match[1]
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value && value !== 'webpack' && value !== 'webpack-runtime'),
+  )
+
+  return [...compilation.chunks].some((chunk) => {
+    if (!chunkIds.has(String(chunk.id))) return false
+    return [...compilation.chunkGraph.getChunkModulesIterable(chunk)].some(
+      (module) =>
+        module.resource?.includes('@jsquash/avif/codec/enc/avif_enc_mt') ||
+        module.identifier().includes('@jsquash/avif/codec/enc/avif_enc_mt'),
+    )
+  })
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
-  transpilePackages: ["@picbind/room"],
+  transpilePackages: [
+    "@picbind/image-codecs",
+    "@picbind/room",
+  ],
   ...(process.env.NODE_ENV === "development"
     ? {
         async headers() {
@@ -24,10 +53,6 @@ const nextConfig = {
     )
 
     config.module.rules.push(
-      {
-        test: /\.sql$/i,
-        type: 'asset/source',
-      },
       {
         test: /\.(wasm|mjs)$/i,
         resourceQuery: /url/,
@@ -52,6 +77,15 @@ const nextConfig = {
     fileLoaderRule.exclude = /\.svg$/i
 
     config.externals = [...config.externals, { canvas: 'canvas' }]; // required to make Konva & react-konva work
+
+    config.ignoreWarnings = [
+      ...(config.ignoreWarnings ?? []),
+      {
+        module: /@jsquash[\\/]avif[\\/]codec[\\/]enc[\\/]avif_enc_mt\.worker\.mjs$/,
+        message: /Critical dependency: the request of a dependency is an expression/,
+      },
+      isJsquashAvifCircularChunkWarning,
+    ]
 
     return config
   },

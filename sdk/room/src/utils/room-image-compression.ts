@@ -4,11 +4,7 @@
 
 import { initWasm } from "./wasm-runtime";
 import { replaceFileExtension } from "./image-object";
-import webpEncoderWasmUrl from "@jsquash/webp/codec/enc/webp_enc.wasm?url";
-import webpEncoderSimdWasmUrl from "@jsquash/webp/codec/enc/webp_enc_simd.wasm?url";
-import avifEncoderWasmUrl from "@jsquash/avif/codec/enc/avif_enc.wasm?url";
-import avifEncoderMtWasmUrl from "@jsquash/avif/codec/enc/avif_enc_mt.wasm?url";
-import avifEncoderWorkerUrl from "@jsquash/avif/codec/enc/avif_enc_mt.worker.mjs?url";
+import { encodeWithLibavif, encodeWithLibwebp } from "@picbind/image-codecs";
 import { getLang, getShareRoomLabels, type Lang, type ShareRoomLabels } from "../locales";
 
 export type RoomCompressionFormat = "auto" | "jpeg" | "png" | "webp" | "avif";
@@ -36,20 +32,6 @@ type CompressionResultHandle = {
 
 const FORMATS = new Set(["jpeg", "png", "webp", "avif"]);
 const ROOM_OUTPUT_FORMATS = new Set(["jpeg", "webp", "avif"]);
-let webpEncoderInitialization: Promise<unknown> | null = null;
-let avifEncoderInitialization: Promise<unknown> | null = null;
-
-function webpEncoderAsset(path: string) {
-  return path.includes("webp_enc_simd.wasm")
-    ? webpEncoderSimdWasmUrl
-    : webpEncoderWasmUrl;
-}
-
-function avifEncoderAsset(path: string) {
-  if (path.includes("avif_enc_mt.worker.mjs")) return avifEncoderWorkerUrl;
-  if (path.includes("avif_enc_mt.wasm")) return avifEncoderMtWasmUrl;
-  return avifEncoderWasmUrl;
-}
 
 function sourceFormat(blob: Blob) {
   const subtype = blob.type.split("/")[1]?.toLowerCase();
@@ -177,15 +159,27 @@ async function encodeJsquash(
 ) {
   let bytes: ArrayBuffer;
   if (format === "webp") {
-    const { default: encode, init } = await import("@jsquash/webp/encode");
-    webpEncoderInitialization ??= init({ locateFile: webpEncoderAsset });
-    await webpEncoderInitialization;
-    bytes = await encode(image, { quality: 82 });
+    bytes = toBlobPart(await encodeWithLibwebp(image, { quality: 82 }));
   } else {
-    const { default: encode, init } = await import("@jsquash/avif/encode");
-    avifEncoderInitialization ??= init({ locateFile: avifEncoderAsset });
-    await avifEncoderInitialization;
-    bytes = await encode(image, { quality: 62, speed: 8 });
+    const encoded = await encodeWithLibavif(
+      image,
+      {
+        quality: 62,
+        qualityAlpha: -1,
+        denoiseLevel: 0,
+        tileColsLog2: 0,
+        tileRowsLog2: 0,
+        speed: 8,
+        subsample: 1,
+        chromaDeltaQ: false,
+        sharpness: 0,
+        tune: 0,
+        enableSharpYUV: false,
+        bitDepth: 8,
+        lossless: false,
+      },
+    );
+    bytes = toBlobPart(encoded);
   }
   return new Blob([bytes], { type: `image/${format}` });
 }

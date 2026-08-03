@@ -137,8 +137,8 @@ Original
 
 ## 5. 存储边界
 
-- SQLite 只记录图片对象、版本关系、操作记录和 Room 关联数据。
-- 原图、处理结果和导出图片的 Blob 必须存储在 OPFS，不得写入 SQLite。
+- Dexie / IndexedDB 只记录图片对象、版本关系、操作记录和 Room 关联数据。
+- 原图、处理结果和导出图片的 Blob 必须存储在 OPFS，不得写入 Dexie。
 - 临时预览 URL 使用完毕后必须调用 `URL.revokeObjectURL`。
 - 页面卸载、任务取消或失败后必须释放临时 Blob、`ImageBitmap`、Worker 和 WASM 资源。
 - Room 缓存恢复时先恢复元数据，再按需从 OPFS 读取 Blob，避免一次性加载所有图片。
@@ -361,7 +361,7 @@ v2.0 在共享 `sdk/wasm/image-wasm` 中补充以下能力：
 - 定义 `ImageObject` 和版本关系。
 - Rust WASM 提供 MD5 和 metadata API。
 - Gallery 现有图片迁移为对象模型。
-- SQLite 只保存元数据，Blob 保存到 OPFS。
+- Dexie / IndexedDB 只保存元数据，Blob 保存到 OPFS。
 - 刷新页面后可以恢复对象和版本关系。
 
 ### Phase 2：操作菜单框架

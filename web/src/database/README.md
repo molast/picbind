@@ -1,30 +1,19 @@
 # Local Database
 
-PicBind uses SQLite WASM and OPFS for durable browser data.
+The Web app uses Dexie/IndexedDB for durable metadata and OPFS for image bytes.
 
 ```text
-UI -> compatibility store -> repository -> DatabaseClient -> SQLite Worker -> OPFS
-                                  |
-                                  -> FileStorage -> OPFS
+UI -> repository -> Dexie -> IndexedDB
+                  -> FileStorage -> OPFS
 ```
 
 Responsibilities:
 
-- `client.ts` owns the single SQLite Worker connection.
-- `sqlite.worker.ts` is the only module that opens `database/picbind.db`.
-- `migration.ts` applies ordered SQL migrations using `PRAGMA user_version`.
+- `database.ts` owns the typed Dexie schema and database connection.
 - `repositories/` is the only business-data access layer.
 - `file-storage.ts` owns OPFS file operations.
-- SQLite stores compression metadata; image bytes are stored as OPFS files.
+- IndexedDB stores compression and queued-file metadata.
+- Image bytes are stored as OPFS files, never as Dexie records.
 
-OPFS layout:
-
-```text
-/database/picbind.db
-/cache
-/temp/compression
-/files/compressed
-```
-
-Session and UI state remain in `localStorage` or `sessionStorage`; they are not
-part of this database layer.
+The Web app and Room SDK use the same `picbind-local` database name and schema
+version. Session and transient UI state remain outside this database layer.

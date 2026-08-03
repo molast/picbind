@@ -32,10 +32,9 @@
     "react-dom": "^18.3.1"
   },
   "dependencies": {
-    "@jsquash/avif": "^2.1.1",
-    "@jsquash/webp": "^1.5.0",
+    "@picbind/image-codecs": "link:../wasm/image-codecs",
     "@radix-ui/react-dialog": "^1.1.15",
-    "@sqlite.org/sqlite-wasm": "3.53.0-build1",
+    "dexie": "^4.4.4",
     "konva": "^9.3.22",
     "pixi.js": "^8.19.0",
     "react-icons": "^5.5.0",
