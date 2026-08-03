@@ -8,7 +8,7 @@ export async function initWasm() {
   if (!cachedModPromise) {
     cachedModPromise = (async () => {
       try {
-        const mod: any = await import("@image-wasm/image_wasm");
+        const mod: any = await import("@picbind/image-wasm");
         await mod.default();
         cachedMod = mod;
         return mod;

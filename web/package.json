@@ -2,6 +2,7 @@
   "name": "picbind",
   "version": "1.0.8",
   "private": true,
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -13,6 +14,8 @@
   },
   "dependencies": {
     "@picbind/image-codecs": "link:../sdk/wasm/image-codecs",
+    "@picbind/image-wasm": "link:../sdk/wasm/image-wasm",
+    "@picbind/perceptual-wasm": "link:../sdk/wasm/perceptual-wasm",
     "@picbind/room": "link:../sdk/room",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-checkbox": "^1.1.1",

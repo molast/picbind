@@ -1,10 +1,10 @@
 "use client";
 
-let cachedModule: Promise<typeof import("@perceptual-wasm/perceptual_wasm")> | null = null;
+let cachedModule: Promise<typeof import("@picbind/perceptual-wasm")> | null = null;
 
 export async function initPerceptualWasm() {
   if (!cachedModule) {
-    cachedModule = import("@perceptual-wasm/perceptual_wasm").then(
+    cachedModule = import("@picbind/perceptual-wasm").then(
       async (module) => {
         await module.default();
         return module;
