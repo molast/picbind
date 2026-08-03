@@ -1,3 +1,8 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const webRoot = path.dirname(fileURLToPath(import.meta.url))
+
 function isJsquashAvifCircularChunkWarning(warning, compilation) {
   const match = warning.message?.match(
     /^Circular dependency between chunks with runtime \(([^)]+)\)/,
@@ -47,6 +52,15 @@ const nextConfig = {
       }
     : {}),
   webpack(config, { isServer }) {
+    // Cloudflare Pages installs dependencies from `web`, while the Room SDK is
+    // transpiled directly from the sibling `sdk/room/src` directory. Make the
+    // app dependency boundary explicit so imports inside linked SDK sources do
+    // not depend on a separately installed `sdk/room/node_modules` directory.
+    config.resolve.modules = [
+      path.resolve(webRoot, "node_modules"),
+      ...(config.resolve.modules ?? ["node_modules"]),
+    ]
+
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
       rule.test?.test?.('.svg'),
