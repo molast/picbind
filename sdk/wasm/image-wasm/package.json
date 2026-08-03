@@ -1,0 +1,21 @@
+{
+  "name": "@picbind/image-wasm",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./image_wasm.d.ts",
+      "import": "./image_wasm.js"
+    }
+  },
+  "files": [
+    "image_wasm_bg.wasm",
+    "image_wasm.js",
+    "image_wasm.d.ts"
+  ],
+  "module": "image_wasm.js",
+  "types": "image_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

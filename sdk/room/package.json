@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@picbind/image-codecs": "link:../wasm/image-codecs",
+    "@picbind/image-wasm": "link:../wasm/image-wasm",
     "@radix-ui/react-dialog": "^1.1.15",
     "dexie": "^4.4.4",
     "konva": "^9.3.22",

@@ -1,0 +1,7 @@
+*
+!.gitignore
+!package.json
+!perceptual_wasm.js
+!perceptual_wasm.d.ts
+!perceptual_wasm_bg.wasm
+!perceptual_wasm_bg.wasm.d.ts

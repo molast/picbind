@@ -8,7 +8,7 @@ let cachedModPromise: Promise<any> | null = null;
 async function loadWasmModule() {
   const configuredBaseUrl = getRoomSdkConfig().wasmBaseUrl?.trim();
   if (!configuredBaseUrl) {
-    return import("../../../wasm/image-wasm/image_wasm.js");
+    return import("@picbind/image-wasm");
   }
 
   const baseUrl = configuredBaseUrl.replace(/\/$/, "");

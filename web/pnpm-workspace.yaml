@@ -1,0 +1,11 @@
+packages:
+  - "."
+  - "../sdk/room"
+  - "../sdk/wasm/image-codecs"
+  - "../sdk/wasm/image-wasm"
+  - "../sdk/wasm/perceptual-wasm"
+allowBuilds:
+  "@parcel/watcher": true
+  "esbuild": true
+  "sharp": true
+  "unrs-resolver": true
