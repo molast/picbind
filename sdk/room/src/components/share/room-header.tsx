@@ -6,6 +6,7 @@ import {
 } from "react-icons/fi";
 import type { RoomRole } from "../../utils/realtime-room";
 import type { ShareRoomLabels } from "./share-room-labels";
+import { ROOM_VERSION } from "../../version";
 
 type RoomHeaderProps = {
   role: RoomRole | null;
@@ -51,6 +52,13 @@ export default function RoomHeader({
         >
           {wordmark}
         </button>
+        <span
+          className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-500"
+          aria-label={`Room SDK version ${ROOM_VERSION}`}
+          title={`Room SDK v${ROOM_VERSION}`}
+        >
+          v{ROOM_VERSION}
+        </span>
         <div className="hidden h-7 w-px bg-slate-200 sm:block" />
         <div className="hidden min-w-0 sm:block">
           <div className="text-xs font-medium text-slate-500">{labels.room}</div>
