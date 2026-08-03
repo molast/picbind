@@ -12,6 +12,7 @@ type ImageDeleteConfirmDialogProps = {
   onCancel(): void;
   onConfirm(image: RoomImage): void | Promise<void>;
   onMoveToLibrary(image: RoomImage): void | Promise<void>;
+  onReturnToLibrary(image: RoomImage): void | Promise<void>;
 };
 
 export default function ImageDeleteConfirmDialog({
@@ -20,6 +21,7 @@ export default function ImageDeleteConfirmDialog({
   onCancel,
   onConfirm,
   onMoveToLibrary,
+  onReturnToLibrary,
 }: ImageDeleteConfirmDialogProps) {
   const [pendingAction, setPendingAction] = React.useState<"delete" | "move" | null>(null);
 
@@ -34,11 +36,14 @@ export default function ImageDeleteConfirmDialog({
   }, [image, onCancel, pendingAction]);
 
   if (!image) return null;
+  const returnToLibraryOnly = image.outboxOrigin === "library";
+  const isEditing = Boolean(image.reviewOperationCount);
   const run = async (action: "delete" | "move") => {
     if (pendingAction) return;
     setPendingAction(action);
     try {
       if (action === "delete") await onConfirm(image);
+      else if (returnToLibraryOnly) await onReturnToLibrary(image);
       else await onMoveToLibrary(image);
       onCancel();
     } finally {
@@ -68,9 +73,15 @@ export default function ImageDeleteConfirmDialog({
             <FiX className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <h2 className="mt-4 text-base font-semibold text-slate-900">{labels.removeImageTitle}</h2>
+        <h2 className="mt-4 text-base font-semibold text-slate-900">
+          {isEditing ? labels.editingImageTitle : labels.removeImageTitle}
+        </h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {labels.removeImageDescription}
+          {isEditing
+            ? returnToLibraryOnly
+              ? labels.editingReturnDescription
+              : labels.editingRemoveDescription
+            : labels.removeImageDescription}
         </p>
         <p className="mt-3 truncate rounded-md bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700" title={image.name}>
           {middleEllipsisFileName(image.name, 44)}
@@ -88,20 +99,20 @@ export default function ImageDeleteConfirmDialog({
             type="button"
             disabled={Boolean(pendingAction)}
             onClick={() => void run("move")}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[#2f65cf] px-4 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-[#2f65cf] px-4 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:opacity-50"
           >
             {pendingAction === "move" ? <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FiFolder className="h-3.5 w-3.5" aria-hidden="true" />}
             {labels.moveToLibrary}
           </button>
-          <button
+          {!returnToLibraryOnly ? <button
             type="button"
             disabled={Boolean(pendingAction)}
             onClick={() => void run("delete")}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
           >
             {pendingAction === "delete" ? <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" />}
-            {labels.deleteImage}
-          </button>
+            {labels.deleteAction}
+          </button> : null}
         </div>
       </section>
     </div>

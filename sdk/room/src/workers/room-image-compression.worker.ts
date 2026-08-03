@@ -5,6 +5,7 @@ import { getShareRoomLabels } from "../locales";
 import type { Lang } from "../locales";
 import {
   compressRoomImage,
+  type RoomCompressionEncodingOptions,
   type RoomCompressionFormat,
 } from "../utils/room-image-compression";
 
@@ -16,10 +17,11 @@ type CompressionRequest = {
   targetWidth?: number;
   targetHeight?: number;
   wasmBaseUrl?: string;
+  encodingOptions?: RoomCompressionEncodingOptions;
 };
 
 self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
-  const { image, lang, allowAlphaLoss = false, requestedFormat, targetWidth, targetHeight, wasmBaseUrl } = event.data;
+  const { image, lang, allowAlphaLoss = false, requestedFormat, targetWidth, targetHeight, wasmBaseUrl, encodingOptions } = event.data;
   try {
     if (wasmBaseUrl) configureRoomSdk({ wasmBaseUrl });
     const dimensions =
@@ -32,6 +34,7 @@ self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
       dimensions,
       lang,
       allowAlphaLoss,
+      encodingOptions,
     );
     const bytes = await result.blob.arrayBuffer();
     self.postMessage(

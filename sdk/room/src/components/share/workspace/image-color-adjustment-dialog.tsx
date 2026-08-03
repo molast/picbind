@@ -147,24 +147,24 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
             </div>
           </div>
 
-          <div className="grid min-h-0 grid-cols-[56px_minmax(0,1fr)] border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
+          <div className="grid min-h-0 min-w-0 grid-cols-[56px_minmax(0,1fr)] overflow-hidden border-t border-slate-200 bg-white lg:border-l lg:border-t-0">
             <nav className="flex flex-col items-center gap-2 border-r border-slate-100 px-2 py-3" aria-label={labels.colorCategories}>
               {categories.map((item) => {
                 const Icon = item.icon;
                 return <button key={item.value} type="button" onClick={() => { setCategory(item.value); setSubmenu(DEFAULT_SUBMENU[item.value]); }} className={`relative flex h-10 w-10 items-center justify-center rounded-md transition ${category === item.value ? "bg-[#2f65cf] text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"}`} aria-label={item.label} title={item.label}>{category === item.value ? <span className="absolute -left-2 h-5 w-0.5 rounded-r bg-[#2f65cf]" /> : null}<Icon className="h-[18px] w-[18px]" aria-hidden="true" /></button>;
               })}
             </nav>
-            <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-              <div className="border-b border-slate-100 px-4 pb-3 pt-3">
+            <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+              <div className="min-w-0 overflow-hidden border-b border-slate-100 px-4 pb-3 pt-3">
                 <div className="mb-2 text-xs font-semibold text-slate-800">{categories.find((item) => item.value === category)?.label}</div>
-                <div className="flex items-center gap-1 overflow-x-auto">
+                <div className="grid w-full min-w-0 grid-cols-2 gap-1">
                   {submenus[category].map((item) => {
                     const Icon = item.icon;
-                    return <button key={item.value} type="button" onClick={() => setSubmenu(item.value)} className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-semibold transition ${submenu === item.value ? "bg-blue-50 text-[#2f65cf] ring-1 ring-blue-100" : "text-slate-500 hover:bg-slate-100"}`}><Icon className="h-3.5 w-3.5" aria-hidden="true" />{item.label}</button>;
+                    return <button key={item.value} type="button" onClick={() => setSubmenu(item.value)} className={`inline-flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-center text-[11px] font-semibold leading-tight transition ${submenu === item.value ? "bg-blue-50 text-[#2f65cf] ring-1 ring-blue-100" : "text-slate-500 hover:bg-slate-100"}`}><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="min-w-0 whitespace-normal">{item.label}</span></button>;
                   })}
                 </div>
               </div>
-              <div className="min-h-0 overflow-y-auto p-5">
+              <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-5">
               {submenu === "tone" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.brightnessContrast}</h3><SliderRow label={copy.brightness} resetLabel={labels.resetSetting} value={adjustments.brightness} onChange={(value) => setValue("brightness", value)} /><SliderRow label={copy.contrast} resetLabel={labels.resetSetting} value={adjustments.contrast} min={-99} max={99} onChange={(value) => setValue("contrast", value)} /></div> : null}
               {submenu === "levels" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.levels}</h3><SliderRow label={copy.blackPoint} resetLabel={labels.resetSetting} value={adjustments.blackPoint} min={0} max={100} suffix="" onChange={(value) => setValue("blackPoint", Math.min(value, adjustments.whitePoint - 1))} /><SliderRow label={copy.midtone} resetLabel={labels.resetSetting} value={adjustments.midtone} onChange={(value) => setValue("midtone", value)} /><SliderRow label={copy.whitePoint} resetLabel={labels.resetSetting} value={adjustments.whitePoint} min={155} max={255} resetValue={255} suffix="" onChange={(value) => setValue("whitePoint", Math.max(value, adjustments.blackPoint + 1))} /></div> : null}
               {submenu === "curves" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.toneCurve}</h3><ToneCurveEditor points={adjustments.curvePoints} labels={labels} onChange={(points) => setValue("curvePoints", points)} /></div> : null}

@@ -33,3 +33,7 @@ export async function saveHistory(
     updatedAt: Date.now(),
   });
 }
+
+export async function deleteHistory(roomId: string, imageId: string) {
+  await getDatabase().reviewHistories.delete([roomId, imageId]);
+}

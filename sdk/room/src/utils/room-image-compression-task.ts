@@ -4,6 +4,7 @@ import { getRoomSdkConfig } from "../config";
 import { getLang, getShareRoomLabels } from "../locales";
 import type {
   RoomCompressionDimensions,
+  RoomCompressionEncodingOptions,
   RoomCompressionFormat,
   RoomCompressionResult,
 } from "./room-image-compression";
@@ -35,6 +36,7 @@ export function compressRoomImageTask(
   signal: AbortSignal,
   dimensions?: RoomCompressionDimensions,
   allowAlphaLoss = false,
+  encodingOptions?: RoomCompressionEncodingOptions,
 ): Promise<RoomCompressionResult> {
   if (signal.aborted) return Promise.reject(abortError());
 
@@ -86,6 +88,7 @@ export function compressRoomImageTask(
       targetWidth: dimensions?.width,
       targetHeight: dimensions?.height,
       wasmBaseUrl: getRoomSdkConfig().wasmBaseUrl,
+      encodingOptions,
     });
   });
 }

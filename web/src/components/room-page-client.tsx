@@ -1,16 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import RoomPageLoading from "./room-page-loading";
-
-const RoomPage = dynamic(
-  () => import("@/utils/room-sdk").then((module) => module.ShareRoomPage),
-  {
-    ssr: false,
-    loading: RoomPageLoading,
-  },
-);
+import { ShareRoomPage } from "@/utils/room-sdk";
 
 export default function RoomPageClient() {
-  return <RoomPage />;
+  return <ShareRoomPage />;
 }

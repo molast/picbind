@@ -88,31 +88,14 @@ function hexRgb(hex: string) {
   return [0, 2, 4].map((index) => Number.parseInt(normalized.slice(index, index + 2), 16) || 0);
 }
 
-function rgbToHsl(r: number, g: number, b: number) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b); const min = Math.min(r, g, b);
-  const lightness = (max + min) / 2;
-  if (max === min) return [0, 0, lightness] as const;
-  const delta = max - min;
-  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-  let hue = max === r ? (g - b) / delta + (g < b ? 6 : 0) : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
-  hue /= 6;
-  return [hue, saturation, lightness] as const;
-}
-
-function hslToRgb(hue: number, saturation: number, lightness: number) {
-  hue = ((hue % 1) + 1) % 1;
-  if (saturation <= 0) return [lightness * 255, lightness * 255, lightness * 255];
-  const q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
-  const p = 2 * lightness - q;
-  const channel = (offset: number) => {
-    let t = hue + offset; if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return [channel(1 / 3) * 255, channel(0) * 255, channel(-1 / 3) * 255];
+function hueChannel(p: number, q: number, hue: number) {
+  let value = hue;
+  if (value < 0) value += 1;
+  if (value > 1) value -= 1;
+  if (value < 1 / 6) return p + (q - p) * 6 * value;
+  if (value < 1 / 2) return q;
+  if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+  return p;
 }
 
 const RANGE_HUES: Record<SelectiveColorRange, number> = {
@@ -124,13 +107,7 @@ const RANGE_HUES: Record<SelectiveColorRange, number> = {
   magentas: 5 / 6,
 };
 
-function toneWeights(lightness: number) {
-  return {
-    shadows: clamp((0.58 - lightness) / 0.45, 0, 1),
-    midtones: clamp(1 - Math.abs(lightness - 0.5) / 0.38, 0, 1),
-    highlights: clamp((lightness - 0.42) / 0.45, 0, 1),
-  };
-}
+const BALANCE_TONES = ["shadows", "midtones", "highlights"] as const;
 
 export function isRoomColorAdjustmentsNeutral(settings: RoomColorAdjustments) {
   const balanceIsNeutral = (Object.keys(settings.balance) as ColorToneRange[]).every((tone) => {
@@ -210,70 +187,166 @@ export function applyRoomColorAdjustments(imageData: ImageData, settings: RoomCo
   const contrast = Math.max(-99, Math.min(99, settings.contrast));
   const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
   const gamma = Math.pow(2, -settings.midtone / 100);
-  const [filterR, filterG, filterB] = hexRgb(settings.photoFilterColor);
-  const [replaceR, replaceG, replaceB] = hexRgb(settings.replaceSource);
-  const [targetR, targetG, targetB] = hexRgb(settings.replaceTarget);
-  const [monoR, monoG, monoB] = hexRgb(settings.monochromeColor);
+  const filterMix = settings.photoFilterDensity / 100;
+  const [filterR, filterG, filterB] = filterMix > 0 ? hexRgb(settings.photoFilterColor) : [0, 0, 0];
+  const [replaceR, replaceG, replaceB] = settings.replaceEnabled ? hexRgb(settings.replaceSource) : [0, 0, 0];
+  const [targetR, targetG, targetB] = settings.replaceEnabled ? hexRgb(settings.replaceTarget) : [0, 0, 0];
+  const [monoR, monoG, monoB] = settings.recolorMode === "monochrome" ? hexRgb(settings.monochromeColor) : [0, 0, 0];
   const targetHue = RANGE_HUES[settings.selectiveRange];
   const curveLut = buildToneCurveLut(settings.curvePoints);
+  const levelRange = Math.max(1, settings.whitePoint - settings.blackPoint);
+  const brightness = settings.brightness * 2.55;
+  const channelGains = [
+    1 + settings.redChannel / 100,
+    1 + settings.greenChannel / 100,
+    1 + settings.blueChannel / 100,
+  ];
+  const channelLuts = channelGains.map((gain) => {
+    const lut = new Uint8Array(256);
+    for (let value = 0; value < 256; value += 1) {
+      let next = value * gain + brightness;
+      next = contrastFactor * (next - 128) + 128;
+      next = 255 * Math.pow(clamp((next - settings.blackPoint) / levelRange, 0, 1), gamma);
+      lut[value] = curveLut[Math.round(clamp(next))];
+    }
+    return lut;
+  });
+  const selectiveActive = settings.selectiveHue !== 0
+    || settings.selectiveSaturation !== 0
+    || settings.selectiveLightness !== 0;
+  const hslActive = settings.hue !== 0
+    || settings.saturation !== 0
+    || settings.vibrance !== 0
+    || selectiveActive;
+  const balanceActive = (Object.keys(settings.balance) as ColorToneRange[]).some((tone) => {
+    const axes = settings.balance[tone];
+    return axes.cyanRed !== 0 || axes.magentaGreen !== 0 || axes.yellowBlue !== 0;
+  });
+  const recolorActive = settings.recolorMode !== "color";
+  const temperature = settings.temperature * 0.9;
+  const hueOffset = settings.hue / 360;
+  const saturationGain = 1 + settings.saturation / 100;
+  const vibranceGain = settings.vibrance / 140;
+  const selectiveHueOffset = settings.selectiveHue / 360;
+  const selectiveSaturationGain = settings.selectiveSaturation / 100;
+  const selectiveLightnessOffset = settings.selectiveLightness / 200;
+  const replaceDistanceScale = 100 / 441.67;
+  const replaceTolerance = Math.max(1, settings.replaceTolerance);
+  const replaceStrength = settings.replaceStrength / 100;
 
   for (let index = 0; index < data.length; index += 4) {
-    let r = data[index] * (1 + settings.redChannel / 100);
-    let g = data[index + 1] * (1 + settings.greenChannel / 100);
-    let b = data[index + 2] * (1 + settings.blueChannel / 100);
+    let r = channelLuts[0][data[index]];
+    let g = channelLuts[1][data[index + 1]];
+    let b = channelLuts[2][data[index + 2]];
+    let lightness = 0;
 
-    r += settings.brightness * 2.55; g += settings.brightness * 2.55; b += settings.brightness * 2.55;
-    r = contrastFactor * (r - 128) + 128; g = contrastFactor * (g - 128) + 128; b = contrastFactor * (b - 128) + 128;
-    const range = Math.max(1, settings.whitePoint - settings.blackPoint);
-    r = 255 * Math.pow(clamp((r - settings.blackPoint) / range, 0, 1), gamma);
-    g = 255 * Math.pow(clamp((g - settings.blackPoint) / range, 0, 1), gamma);
-    b = 255 * Math.pow(clamp((b - settings.blackPoint) / range, 0, 1), gamma);
-    r = curveLut[Math.round(clamp(r))];
-    g = curveLut[Math.round(clamp(g))];
-    b = curveLut[Math.round(clamp(b))];
-
-    let [h, s, l] = rgbToHsl(r, g, b);
-    h += settings.hue / 360;
-    h = ((h % 1) + 1) % 1;
-    s = clamp(s * (1 + settings.saturation / 100) + (1 - s) * settings.vibrance / 140, 0, 1);
-    let hueDistance = Math.abs(h - targetHue); hueDistance = Math.min(hueDistance, 1 - hueDistance);
-    const selectiveWeight = clamp(1 - hueDistance / 0.12, 0, 1);
-    h += (settings.selectiveHue / 360) * selectiveWeight;
-    s = clamp(s * (1 + settings.selectiveSaturation / 100 * selectiveWeight), 0, 1);
-    l = clamp(l + settings.selectiveLightness / 200 * selectiveWeight, 0, 1);
-    [r, g, b] = hslToRgb(h, s, l);
-
-    const temperature = settings.temperature * 0.9;
-    r += temperature; b -= temperature;
-    const weights = toneWeights(l);
-    for (const tone of ["shadows", "midtones", "highlights"] as const) {
-      const axes = settings.balance[tone]; const weight = weights[tone] * 0.9;
-      r += axes.cyanRed * weight; g -= axes.cyanRed * weight * 0.35; b -= axes.cyanRed * weight * 0.35;
-      g += axes.magentaGreen * weight; r -= axes.magentaGreen * weight * 0.35; b -= axes.magentaGreen * weight * 0.35;
-      b += axes.yellowBlue * weight; r -= axes.yellowBlue * weight * 0.35; g -= axes.yellowBlue * weight * 0.35;
+    if (hslActive) {
+      const normalizedR = r / 255;
+      const normalizedG = g / 255;
+      const normalizedB = b / 255;
+      const max = Math.max(normalizedR, normalizedG, normalizedB);
+      const min = Math.min(normalizedR, normalizedG, normalizedB);
+      const delta = max - min;
+      lightness = (max + min) / 2;
+      let hue = 0;
+      let saturation = 0;
+      if (delta !== 0) {
+        saturation = lightness > 0.5
+          ? delta / (2 - max - min)
+          : delta / (max + min);
+        hue = max === normalizedR
+          ? (normalizedG - normalizedB) / delta + (normalizedG < normalizedB ? 6 : 0)
+          : max === normalizedG
+            ? (normalizedB - normalizedR) / delta + 2
+            : (normalizedR - normalizedG) / delta + 4;
+        hue /= 6;
+      }
+      hue = ((hue + hueOffset) % 1 + 1) % 1;
+      saturation = clamp(
+        saturation * saturationGain + (1 - saturation) * vibranceGain,
+        0,
+        1,
+      );
+      if (selectiveActive) {
+        let hueDistance = Math.abs(hue - targetHue);
+        hueDistance = Math.min(hueDistance, 1 - hueDistance);
+        const selectiveWeight = clamp(1 - hueDistance / 0.12, 0, 1);
+        hue += selectiveHueOffset * selectiveWeight;
+        saturation = clamp(
+          saturation * (1 + selectiveSaturationGain * selectiveWeight),
+          0,
+          1,
+        );
+        lightness = clamp(
+          lightness + selectiveLightnessOffset * selectiveWeight,
+          0,
+          1,
+        );
+      }
+      hue = ((hue % 1) + 1) % 1;
+      if (saturation <= 0) {
+        r = g = b = lightness * 255;
+      } else {
+        const q = lightness < 0.5
+          ? lightness * (1 + saturation)
+          : lightness + saturation - lightness * saturation;
+        const p = 2 * lightness - q;
+        r = hueChannel(p, q, hue + 1 / 3) * 255;
+        g = hueChannel(p, q, hue) * 255;
+        b = hueChannel(p, q, hue - 1 / 3) * 255;
+      }
+    } else if (balanceActive) {
+      lightness = (Math.max(r, g, b) + Math.min(r, g, b)) / 510;
     }
 
-    const filterMix = settings.photoFilterDensity / 100;
-    r = r * (1 - filterMix) + filterR * filterMix;
-    g = g * (1 - filterMix) + filterG * filterMix;
-    b = b * (1 - filterMix) + filterB * filterMix;
+    if (temperature !== 0) {
+      r += temperature;
+      b -= temperature;
+    }
+    if (balanceActive) {
+      for (let toneIndex = 0; toneIndex < BALANCE_TONES.length; toneIndex += 1) {
+        const tone = BALANCE_TONES[toneIndex];
+        const weight = (toneIndex === 0
+          ? clamp((0.58 - lightness) / 0.45, 0, 1)
+          : toneIndex === 1
+            ? clamp(1 - Math.abs(lightness - 0.5) / 0.38, 0, 1)
+            : clamp((lightness - 0.42) / 0.45, 0, 1)) * 0.9;
+        const axes = settings.balance[tone];
+        r += axes.cyanRed * weight; g -= axes.cyanRed * weight * 0.35; b -= axes.cyanRed * weight * 0.35;
+        g += axes.magentaGreen * weight; r -= axes.magentaGreen * weight * 0.35; b -= axes.magentaGreen * weight * 0.35;
+        b += axes.yellowBlue * weight; r -= axes.yellowBlue * weight * 0.35; g -= axes.yellowBlue * weight * 0.35;
+      }
+    }
+
+    if (filterMix > 0) {
+      r = r * (1 - filterMix) + filterR * filterMix;
+      g = g * (1 - filterMix) + filterG * filterMix;
+      b = b * (1 - filterMix) + filterB * filterMix;
+    }
 
     if (settings.replaceEnabled) {
-      const distance = Math.hypot(r - replaceR, g - replaceG, b - replaceB) / 441.67 * 100;
-      const match = clamp(1 - distance / Math.max(1, settings.replaceTolerance), 0, 1) * settings.replaceStrength / 100;
+      const redDistance = r - replaceR;
+      const greenDistance = g - replaceG;
+      const blueDistance = b - replaceB;
+      const distance = Math.sqrt(
+        redDistance * redDistance + greenDistance * greenDistance + blueDistance * blueDistance,
+      ) * replaceDistanceScale;
+      const match = clamp(1 - distance / replaceTolerance, 0, 1) * replaceStrength;
       r = r * (1 - match) + targetR * match; g = g * (1 - match) + targetG * match; b = b * (1 - match) + targetB * match;
     }
 
-    const gray = clamp(r * 0.299 + g * 0.587 + b * 0.114);
-    if (settings.recolorMode === "grayscale") r = g = b = gray;
-    if (settings.recolorMode === "sepia") {
-      const oldR = r; const oldG = g; const oldB = b;
-      r = oldR * 0.393 + oldG * 0.769 + oldB * 0.189;
-      g = oldR * 0.349 + oldG * 0.686 + oldB * 0.168;
-      b = oldR * 0.272 + oldG * 0.534 + oldB * 0.131;
-    }
-    if (settings.recolorMode === "monochrome") {
-      r = gray * monoR / 255; g = gray * monoG / 255; b = gray * monoB / 255;
+    if (recolorActive) {
+      const gray = clamp(r * 0.299 + g * 0.587 + b * 0.114);
+      if (settings.recolorMode === "grayscale") r = g = b = gray;
+      if (settings.recolorMode === "sepia") {
+        const oldR = r; const oldG = g; const oldB = b;
+        r = oldR * 0.393 + oldG * 0.769 + oldB * 0.189;
+        g = oldR * 0.349 + oldG * 0.686 + oldB * 0.168;
+        b = oldR * 0.272 + oldG * 0.534 + oldB * 0.131;
+      }
+      if (settings.recolorMode === "monochrome") {
+        r = gray * monoR / 255; g = gray * monoG / 255; b = gray * monoB / 255;
+      }
     }
     data[index] = clamp(r); data[index + 1] = clamp(g); data[index + 2] = clamp(b);
   }

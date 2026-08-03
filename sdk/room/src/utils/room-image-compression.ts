@@ -23,6 +23,13 @@ export type RoomCompressionDimensions = {
   height: number;
 };
 
+export type RoomCompressionEncodingOptions = {
+  quality?: number;
+  compressionGain?: number;
+  sourceSizeBytes?: number;
+  forceEncode?: boolean;
+};
+
 type CompressionResultHandle = {
   readonly bytes: Uint8Array;
   readonly ext: string;
@@ -92,26 +99,45 @@ async function encodeWasm(
   labels: ShareRoomLabels,
   allowAlphaLoss: boolean,
   dimensions?: RoomCompressionDimensions,
+  options: RoomCompressionEncodingOptions = {},
 ) {
   const mod = await initWasm();
   const input = new Uint8Array(await blob.arrayBuffer());
+  const quality = Math.max(1, Math.min(100, Math.round(options.quality ?? 82)));
+  const compressionGain = Math.max(0.5, Math.min(2, options.compressionGain ?? 1));
+  const sourceSizeBytes = Math.max(1, Math.round(options.sourceSizeBytes ?? blob.size));
+  if (format === "png" && options.forceEncode) {
+    const image = dimensions
+      ? await resizeImageWithWasm(blob, dimensions.width, dimensions.height)
+      : await decodeImage(blob);
+    return resultFromHandle(
+      mod.compress_rgba_to_png_with_gain(
+        image.data,
+        image.width,
+        image.height,
+        quality,
+        sourceSizeBytes,
+        compressionGain,
+      ) as CompressionResultHandle,
+    );
+  }
   try {
     const handle = dimensions
       ? mod.compress_image_to_format_with_resize_options(
           input,
-          82,
+          quality,
           format,
           allowAlphaLoss,
-          1,
+          compressionGain,
           dimensions.width,
           dimensions.height,
         )
       : mod.compress_image_to_format_with_plan_options(
           input,
-          82,
+          quality,
           format,
           allowAlphaLoss,
-          1,
+          compressionGain,
         );
     return resultFromHandle(handle as CompressionResultHandle);
   } catch (error) {
@@ -124,9 +150,9 @@ async function encodeWasm(
           image.data,
           image.width,
           image.height,
-          82,
-          blob.size,
-          1,
+          quality,
+          sourceSizeBytes,
+          compressionGain,
         ) as CompressionResultHandle,
       );
     }
@@ -147,7 +173,7 @@ async function encodeWasm(
     } finally {
       bitmap.close();
     }
-    const encoded = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
+    const encoded = await canvas.convertToBlob({ type: "image/jpeg", quality: quality / 100 });
     if (encoded.type !== "image/jpeg") throw error;
     return encoded;
   }
@@ -156,15 +182,16 @@ async function encodeWasm(
 async function encodeJsquash(
   image: ImageData,
   format: "webp" | "avif",
+  quality?: number,
 ) {
   let bytes: ArrayBuffer;
   if (format === "webp") {
-    bytes = toBlobPart(await encodeWithLibwebp(image, { quality: 82 }));
+    bytes = toBlobPart(await encodeWithLibwebp(image, { quality: quality ?? 82 }));
   } else {
     const encoded = await encodeWithLibavif(
       image,
       {
-        quality: 62,
+        quality: quality ?? 62,
         qualityAlpha: -1,
         denoiseLevel: 0,
         tileColsLog2: 0,
@@ -182,6 +209,64 @@ async function encodeJsquash(
     bytes = toBlobPart(encoded);
   }
   return new Blob([bytes], { type: `image/${format}` });
+}
+
+export async function encodeRoomImageData(
+  image: ImageData,
+  format: Exclude<RoomCompressionFormat, "auto">,
+  sourceName: string,
+  sourceSizeBytes: number,
+  lang: Lang = getLang(),
+  options: RoomCompressionEncodingOptions = {},
+): Promise<RoomCompressionResult> {
+  const labels = getShareRoomLabels(lang);
+  const encodingOptions = {
+    ...options,
+    sourceSizeBytes,
+    forceEncode: true,
+  };
+  let blob: Blob;
+  if (format === "webp" || format === "avif") {
+    blob = await encodeJsquash(image, format, encodingOptions.quality);
+  } else if (format === "png") {
+    const mod = await initWasm();
+    const quality = Math.max(1, Math.min(100, Math.round(encodingOptions.quality ?? 82)));
+    const compressionGain = Math.max(0.5, Math.min(2, encodingOptions.compressionGain ?? 1));
+    blob = resultFromHandle(
+      mod.compress_rgba_to_png_with_gain(
+        image.data,
+        image.width,
+        image.height,
+        quality,
+        Math.max(1, Math.round(sourceSizeBytes)),
+        compressionGain,
+      ) as CompressionResultHandle,
+    );
+  } else {
+    if (hasRealAlpha(image)) throw new Error(labels.jpegAlphaUnsupported);
+    const canvas = new OffscreenCanvas(image.width, image.height);
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("Canvas 2D context is unavailable");
+    context.putImageData(image, 0, 0);
+    const carrier = await canvas.convertToBlob({ type: "image/png" });
+    blob = await encodeWasm(
+      carrier,
+      "jpeg",
+      labels,
+      false,
+      undefined,
+      encodingOptions,
+    );
+  }
+  const extension = format === "jpeg" ? "jpg" : format;
+  return {
+    blob,
+    format,
+    name: replaceFileExtension(sourceName || "image", extension),
+    width: image.width,
+    height: image.height,
+    operation: "compress",
+  };
 }
 
 async function recommendedFormat(blob: Blob, resizedImage?: ImageData) {
@@ -217,6 +302,7 @@ export async function compressRoomImage(
   dimensions?: RoomCompressionDimensions,
   lang: Lang = getLang(),
   allowAlphaLoss = false,
+  encodingOptions: RoomCompressionEncodingOptions = {},
 ): Promise<RoomCompressionResult> {
   const labels = getShareRoomLabels(lang);
   const decoded = await decodeImage(image);
@@ -252,6 +338,7 @@ export async function compressRoomImage(
               ? await resizeImageWithWasm(image, targetWidth, targetHeight)
               : decoded),
           format,
+          encodingOptions.quality,
         )
       : await encodeWasm(
           image,
@@ -259,8 +346,14 @@ export async function compressRoomImage(
           labels,
           allowAlphaLoss,
           resized ? { width: targetWidth, height: targetHeight } : undefined,
+          encodingOptions,
         );
-  if (!resized && format === sourceFormat(image) && blob.size >= image.size) {
+  if (
+    !encodingOptions.forceEncode &&
+    !resized &&
+    format === sourceFormat(image) &&
+    blob.size >= image.size
+  ) {
     blob = image;
   }
   const extension = format === "jpeg" ? "jpg" : format;

@@ -13,6 +13,7 @@ import {
   type GeneratorMode,
 } from "./favicon-tools";
 import { useFaviconGenerator } from "./use-favicon-generator";
+import FaviconPageLoading from "./favicon-page-loading";
 
 export default function FaviconGeneratorPage({
   initialMode = "text",
@@ -62,7 +63,7 @@ export default function FaviconGeneratorPage({
   } = useFaviconGenerator({ initialMode });
 
   if (!langReady) {
-    return <main className="min-h-screen w-full bg-[#efefef]" />;
+    return <FaviconPageLoading />;
   }
 
   const homeCopy = getHomeCompressLandingCopy(lang);

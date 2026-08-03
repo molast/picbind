@@ -55,6 +55,7 @@ type ReviewWorkspaceProps = {
     status: "in-review" | "approved" | undefined,
     anchorCount: number,
   ): void;
+  onReviewEditingChange(imageId: string, operationCount: number): void;
   onFullscreenChange(fullscreen: boolean): void;
   onGenerateImage(
     source: RoomImage,
@@ -105,6 +106,7 @@ export default function ReviewWorkspace({
   subscribeMessages,
   onSendMessage,
   onReviewStatusChange,
+  onReviewEditingChange,
   onFullscreenChange,
   onGenerateImage,
   onResolveRejectedImage,
@@ -368,6 +370,11 @@ export default function ReviewWorkspace({
     if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
     void saveReviewHistory(roomId, image.id, operations, cursor, anchors).catch(() => undefined);
   }, [anchors, cursor, hydratedHistoryKey, image.id, operations, roomId]);
+
+  React.useEffect(() => {
+    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
+    onReviewEditingChange(image.id, operations.length);
+  }, [hydratedHistoryKey, image.id, onReviewEditingChange, operations.length, roomId]);
 
   React.useEffect(() => {
     if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;

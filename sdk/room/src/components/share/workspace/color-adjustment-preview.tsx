@@ -28,6 +28,9 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
   const editedCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const sourceRef = React.useRef<ImageData | null>(null);
   const draggingRef = React.useRef(false);
+  const adjustmentsRef = React.useRef(adjustments);
+  const previewTimerRef = React.useRef<number | null>(null);
+  const lastPreviewAtRef = React.useRef(0);
   const [ready, setReady] = React.useState(false);
   const [showOriginal, setShowOriginal] = React.useState(false);
   const [split, setSplit] = React.useState(50);
@@ -59,20 +62,39 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
       setReady(true);
     };
     image.src = imageUrl;
-    return () => { disposed = true; sourceRef.current = null; setReady(false); };
+    return () => {
+      disposed = true;
+      sourceRef.current = null;
+      setReady(false);
+      if (previewTimerRef.current !== null) {
+        window.clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+    };
   }, [imageUrl, mode]);
+
+  React.useEffect(() => {
+    adjustmentsRef.current = adjustments;
+  }, [adjustments]);
+
+  React.useEffect(() => () => {
+    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+  }, []);
 
   React.useEffect(() => {
     const canvas = editedCanvasRef.current;
     const source = sourceRef.current;
     if (!canvas || !source || !ready) return;
-    const frame = requestAnimationFrame(() => {
+    if (previewTimerRef.current !== null) return;
+    const delay = Math.max(0, 36 - (performance.now() - lastPreviewAtRef.current));
+    previewTimerRef.current = window.setTimeout(() => {
+      previewTimerRef.current = null;
       const context = canvas.getContext("2d");
       if (!context) return;
       const pixels = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
-      context.putImageData(applyRoomColorAdjustments(pixels, adjustments), 0, 0);
-    });
-    return () => cancelAnimationFrame(frame);
+      context.putImageData(applyRoomColorAdjustments(pixels, adjustmentsRef.current), 0, 0);
+      lastPreviewAtRef.current = performance.now();
+    }, delay);
   }, [adjustments, mode, ready]);
 
   const sampleColor = (clientX: number, clientY: number) => {

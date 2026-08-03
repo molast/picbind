@@ -46,7 +46,7 @@ const nextConfig = {
         },
       }
     : {}),
-  webpack(config) {
+  webpack(config, { isServer }) {
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
       rule.test?.test?.('.svg'),
@@ -76,7 +76,15 @@ const nextConfig = {
     // Modify the file loader rule to ignore *.svg, since we have it handled now.
     fileLoaderRule.exclude = /\.svg$/i
 
-    config.externals = [...config.externals, { canvas: 'canvas' }]; // required to make Konva & react-konva work
+    // Konva's Node entry treats `canvas` as an optional dependency. Room only
+    // uses Konva in the browser, so keep that Node-only package out of the
+    // prerender bundle instead of forcing the whole Room page behind ssr:false.
+    if (isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        canvas: false,
+      }
+    }
 
     config.ignoreWarnings = [
       ...(config.ignoreWarnings ?? []),

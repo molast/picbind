@@ -50,7 +50,7 @@ export default function LocalImageList({ images, labels, disabled, collapsed, on
             </div>
           </article>
         )) : (
-          <button type="button" disabled={disabled} onClick={onChoose} className="flex h-full min-h-40 w-full flex-col items-center justify-center px-4 text-center text-slate-400 transition hover:bg-white/70 hover:text-[#2f65cf] disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-slate-400">
+          <button type="button" disabled={disabled} onClick={onChoose} className="flex h-full min-h-40 w-full cursor-pointer flex-col items-center justify-center px-4 text-center text-slate-400 transition hover:bg-white/70 hover:text-[#2f65cf] disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400">
             <span className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiImage className="h-5 w-5" aria-hidden="true" /></span>
             <span className="mt-3 text-xs font-semibold text-slate-700">{labels.guestEmpty}</span>
             <span className="mt-1 text-[10px] leading-4 text-slate-400">{labels.dropHint}</span>

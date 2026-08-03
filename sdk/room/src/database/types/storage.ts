@@ -40,6 +40,7 @@ export type CachedRoomImage = ImageObjectMetadata & {
   thumbnail?: Blob;
   reviewStatus?: "in-review" | "approved";
   reviewAnchorCount?: number;
+  reviewOperationCount?: number;
   pinnedAt?: number | null;
   wantedByMe?: boolean;
   wantedByPeer?: boolean;

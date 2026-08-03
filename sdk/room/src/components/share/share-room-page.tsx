@@ -108,6 +108,9 @@ import {
   sendReviewCollaborationMessage,
   type ReviewCollaborationMessage,
 } from "../../utils/review-collaboration";
+import {
+  deleteReviewHistory,
+} from "../../utils/realtime-review-history-store";
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{12}$/;
 
@@ -162,6 +165,7 @@ export default function ShareRoomPage({
     new Map<string, AbortController>(),
   );
   const outgoingShareRequestsRef = React.useRef(new Map<string, string>());
+  const pendingShareImagesRef = React.useRef(new Map<string, CachedRoomImage>());
   const seenShareRequestsRef = React.useRef(new Set<string>());
   const imageLikeQueueRef = React.useRef(new Map<string, number>());
   const imageLikeFlushTimerRef = React.useRef<number | null>(null);
@@ -572,6 +576,13 @@ export default function ShareRoomPage({
     [updateRoomImage],
   );
 
+  const handleReviewEditingChange = React.useCallback(
+    (imageId: string, operationCount: number) => {
+      updateRoomImage(imageId, { reviewOperationCount: operationCount }, true);
+    },
+    [updateRoomImage],
+  );
+
   const removeRoomImage = React.useCallback((id: string) => {
     const image = imagesRef.current.find((current) => current.id === id);
     if (!image) return;
@@ -804,12 +815,33 @@ export default function ShareRoomPage({
       const imageId = outgoingShareRequestsRef.current.get(message.payload.requestId);
       if (!imageId || imageId !== message.payload.imageId) return;
       outgoingShareRequestsRef.current.delete(message.payload.requestId);
-      const image = imagesRef.current.find((candidate) => candidate.id === imageId);
+      const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+      const pendingImage = pendingShareImagesRef.current.get(imageId);
+      const image = visibleImage || pendingImage;
       if (message.payload.decision === "accept" && image) {
-        updateRoomImage(imageId, { shareStatus: "accepted" }, true);
-        setAcceptedShareImage({ ...image, shareStatus: "accepted" });
+        const accepted = { ...image, shareStatus: "accepted" as const };
+        if (pendingImage) {
+          pendingShareImagesRef.current.delete(imageId);
+          addRoomImage(accepted);
+          void storeRoomImage(accepted).catch((error) => {
+            console.warn("Failed to persist accepted shared image", error);
+          });
+        } else {
+          updateRoomImage(imageId, { shareStatus: "accepted" }, true);
+        }
+        const acceptedVisibleImage = imagesRef.current.find(
+          (candidate) => candidate.id === imageId,
+        );
+        if (acceptedVisibleImage) setAcceptedShareImage(acceptedVisibleImage);
       } else {
-        updateRoomImage(imageId, { shareStatus: "rejected" }, true);
+        if (pendingImage) {
+          pendingShareImagesRef.current.set(imageId, {
+            ...pendingImage,
+            shareStatus: "rejected",
+          });
+        } else {
+          updateRoomImage(imageId, { shareStatus: "rejected" }, true);
+        }
         upsertActivity({
           id: `share-${message.payload.requestId}`,
           kind: "cancelled",
@@ -819,7 +851,7 @@ export default function ShareRoomPage({
         });
       }
     },
-    [updateRoomImage, upsertActivity],
+    [addRoomImage, updateRoomImage, upsertActivity],
   );
 
   const handleImageReactionBatch = React.useCallback(
@@ -858,8 +890,17 @@ export default function ShareRoomPage({
   React.useEffect(() => {
     if (connection === "connected") return;
     for (const [requestId, imageId] of outgoingShareRequestsRef.current) {
-      const image = imagesRef.current.find((candidate) => candidate.id === imageId);
-      updateRoomImage(imageId, { shareStatus: "failed" }, true);
+      const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+      const pendingImage = pendingShareImagesRef.current.get(imageId);
+      const image = visibleImage || pendingImage;
+      if (pendingImage) {
+        pendingShareImagesRef.current.set(imageId, {
+          ...pendingImage,
+          shareStatus: "failed",
+        });
+      } else {
+        updateRoomImage(imageId, { shareStatus: "failed" }, true);
+      }
       upsertActivity({
         id: `share-${requestId}`,
         kind: "error",
@@ -1177,10 +1218,14 @@ export default function ShareRoomPage({
         shareStatus: "local",
         progress: 0,
         transferMode: undefined,
+        reviewStatus: undefined,
+        reviewAnchorCount: 0,
+        reviewOperationCount: 0,
         updatedAt: Date.now(),
       },
       true,
     );
+    await deleteReviewHistory(image.roomId, image.id);
   };
 
   const handleToggleImagePin = (image: RoomImage) => {
@@ -1203,10 +1248,14 @@ export default function ShareRoomPage({
           transferStatus: "waiting",
           progress: 0,
           transferMode: undefined,
+          reviewStatus: undefined,
+          reviewAnchorCount: 0,
+          reviewOperationCount: 0,
           updatedAt: archivedAt,
         },
         true,
       );
+      await deleteReviewHistory(image.roomId, image.id);
       return;
     }
 
@@ -1247,18 +1296,23 @@ export default function ShareRoomPage({
     await deleteRoomImage(image.roomId, image.id).catch((error) => {
       console.warn("Failed to remove received image after archiving", error);
     });
+    await deleteReviewHistory(image.roomId, image.id);
   };
 
   const handleDeleteLocalImage = async (image: RoomImage) => {
     if (image.direction !== "sent" || image.workspaceLocation !== "library") return;
     deletedImageIdsRef.current.add(image.id);
     removeRoomImage(image.id);
-    await deleteRoomImage(image.roomId, image.id);
+    await Promise.all([
+      deleteRoomImage(image.roomId, image.id),
+      deleteReviewHistory(image.roomId, image.id),
+    ]);
   };
 
   const createStandaloneProcessedImage = async (
     result: ProcessedImageResult,
     workspaceLocation: "library" | "outbox",
+    insert = true,
   ) => {
     const id = crypto.randomUUID().replace(/-/g, "");
     const createdAt = Date.now();
@@ -1292,9 +1346,11 @@ export default function ShareRoomPage({
       placeholder,
       createdAt,
     };
-    await storeRoomImage(image);
-    addRoomImage(image);
-    return imagesRef.current.find((candidate) => candidate.id === image.id) || null;
+    if (insert) {
+      await storeRoomImage(image);
+      addRoomImage(image);
+    }
+    return image;
   };
 
   const waitForProcessedImageShare = async (
@@ -1304,7 +1360,8 @@ export default function ShareRoomPage({
     const deadline = Date.now() + 10 * 60_000;
     let reported: ProcessedImageActionStage | null = null;
     while (Date.now() < deadline) {
-      const current = imagesRef.current.find((image) => image.id === imageId);
+      const current = imagesRef.current.find((image) => image.id === imageId)
+        || pendingShareImagesRef.current.get(imageId);
       if (!current) throw new Error(labels.sharedImageRemoved);
       if (current.shareStatus === "rejected") throw new Error(labels.peerRejectedImage);
       if (current.shareStatus === "failed" || current.transferStatus === "failed") throw new Error(labels.imageShareFailed);
@@ -1340,59 +1397,93 @@ export default function ShareRoomPage({
       action === "share" &&
       result.operation !== "compress" &&
       result.blob.size > (isWeakNetwork ? 300 * 1024 : 1024 * 1024);
-    const image = await createStandaloneProcessedImage(
+    const insertImmediately = action === "store" || shouldSuggestCompression;
+    const stored = await createStandaloneProcessedImage(
       result,
       action === "store" || shouldSuggestCompression ? "library" : "outbox",
+      insertImmediately,
     );
+    const image = insertImmediately
+      ? imagesRef.current.find((candidate) => candidate.id === stored.id)
+      : stored;
     if (!image) throw new Error(labels.imageNotAdded);
     if (action === "store") {
       report("complete");
       return { status: "stored", imageId: image.id };
     }
     if (shouldSuggestCompression) {
-      setPendingOutboxImage(image);
+      const visibleImage = imagesRef.current.find(
+        (candidate) => candidate.id === stored.id,
+      );
+      if (!visibleImage) throw new Error(labels.imageNotAdded);
+      setPendingOutboxImage(visibleImage);
       report("complete");
       return { status: "stored", imageId: image.id };
     }
     report("waiting");
     try {
-      const requested = await handleRequestImageShare(image);
+      const requested = await handleRequestImageShare(image, true);
       if (!requested) throw new Error(labels.receiveRequestFailed);
       await waitForProcessedImageShare(image.id, report);
       return { status: "shared", imageId: image.id };
     } catch (error) {
-      const current = imagesRef.current.find((candidate) => candidate.id === image.id);
+      const current = imagesRef.current.find((candidate) => candidate.id === image.id)
+        || pendingShareImagesRef.current.get(image.id);
       if (current?.shareStatus === "rejected") {
         return { status: "rejected", imageId: image.id };
       }
-      updateRoomImage(
-        image.id,
-        { workspaceLocation: "library", transferStatus: "waiting", shareStatus: "local", progress: 0 },
-        true,
-      );
+      pendingShareImagesRef.current.delete(image.id);
       throw error;
     }
+  };
+
+  const handleCompressedImageToOutbox = async (
+    _source: RoomImage,
+    result: ProcessedImageResult,
+  ) => {
+    await createStandaloneProcessedImage(result, "outbox");
   };
 
   const handleResolveRejectedProcessedImage = async (
     imageId: string,
     save: boolean,
   ) => {
-    const image = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const pendingImage = pendingShareImagesRef.current.get(imageId);
+    const image = visibleImage || pendingImage;
     if (!image) throw new Error(labels.imageMissing);
     if (save) {
-      updateRoomImage(
-        imageId,
-        {
-          workspaceLocation: "library",
-          outboxOrigin: "library",
-          shareStatus: "local",
-          transferStatus: "waiting",
+      if (pendingImage) {
+        const stored = {
+          ...pendingImage,
+          workspaceLocation: "library" as const,
+          outboxOrigin: "library" as const,
+          shareStatus: "local" as const,
+          transferStatus: "waiting" as const,
           progress: 0,
           updatedAt: Date.now(),
-        },
-        true,
-      );
+        };
+        pendingShareImagesRef.current.delete(imageId);
+        await storeRoomImage(stored);
+        addRoomImage(stored);
+      } else {
+        updateRoomImage(
+          imageId,
+          {
+            workspaceLocation: "library",
+            outboxOrigin: "library",
+            shareStatus: "local",
+            transferStatus: "waiting",
+            progress: 0,
+            updatedAt: Date.now(),
+          },
+          true,
+        );
+      }
+      return;
+    }
+    if (pendingImage) {
+      pendingShareImagesRef.current.delete(imageId);
       return;
     }
     deletedImageIdsRef.current.add(imageId);
@@ -1443,8 +1534,10 @@ export default function ShareRoomPage({
       placeholder,
       createdAt,
     };
-    await storeRoomImage(stored);
-    addRoomImage(stored);
+    if (!share) {
+      await storeRoomImage(stored);
+      addRoomImage(stored);
+    }
     upsertActivity({
       id: `review-export-${stored.id}`,
       kind: "complete",
@@ -1460,27 +1553,21 @@ export default function ShareRoomPage({
       return { status: "saved", imageId: stored.id };
     }
 
-    const added = imagesRef.current.find((image) => image.id === stored.id);
-    if (!added) throw new Error(labels.imageNotAddedToOutbox);
-
     report("waiting");
     try {
-      const requested = await handleRequestImageShare(added);
+      const requested = await handleRequestImageShare(stored, true);
       if (!requested) throw new Error(labels.receiveRequestFailed);
       await waitForProcessedImageShare(stored.id, report);
       setReviewWorkspaceFullscreen(false);
       setReviewImageId(null);
       return { status: "shared", imageId: stored.id };
     } catch (error) {
-      const current = imagesRef.current.find((image) => image.id === stored.id);
+      const current = imagesRef.current.find((image) => image.id === stored.id)
+        || pendingShareImagesRef.current.get(stored.id);
       if (current?.shareStatus === "rejected") {
         return { status: "rejected", imageId: stored.id };
       }
-      deletedImageIdsRef.current.add(stored.id);
-      removeRoomImage(stored.id);
-      await deleteRoomImage(stored.roomId, stored.id).catch((deleteError) => {
-        console.warn("Failed to remove unsuccessful review export", deleteError);
-      });
+      pendingShareImagesRef.current.delete(stored.id);
       throw error;
     }
   };
@@ -1489,23 +1576,46 @@ export default function ShareRoomPage({
     imageId: string,
     save: boolean,
   ) => {
-    const image = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
+    const pendingImage = pendingShareImagesRef.current.get(imageId);
+    const image = visibleImage || pendingImage;
     if (!image) throw new Error(labels.imageMissing);
 
     if (save) {
-      updateRoomImage(
-        imageId,
-        {
-          workspaceLocation: "library",
-          outboxOrigin: "library",
-          shareStatus: "local",
-          transferStatus: "waiting",
+      if (pendingImage) {
+        const saved = {
+          ...pendingImage,
+          workspaceLocation: "library" as const,
+          outboxOrigin: "library" as const,
+          shareStatus: "local" as const,
+          transferStatus: "waiting" as const,
           progress: 0,
           updatedAt: Date.now(),
-        },
-        true,
-      );
+        };
+        pendingShareImagesRef.current.delete(imageId);
+        await storeRoomImage(saved);
+        addRoomImage(saved);
+      } else {
+        updateRoomImage(
+          imageId,
+          {
+            workspaceLocation: "library",
+            outboxOrigin: "library",
+            shareStatus: "local",
+            transferStatus: "waiting",
+            progress: 0,
+            updatedAt: Date.now(),
+          },
+          true,
+        );
+      }
     } else {
+      if (pendingImage) {
+        pendingShareImagesRef.current.delete(imageId);
+        setReviewWorkspaceFullscreen(false);
+        setReviewImageId(null);
+        return;
+      }
       deletedImageIdsRef.current.add(imageId);
       removeRoomImage(imageId);
       await deleteRoomImage(image.roomId, imageId);
@@ -1678,7 +1788,10 @@ export default function ShareRoomPage({
     }
   };
 
-  const handleRequestImageShare = async (image: RoomImage) => {
+  const handleRequestImageShare = async (
+    image: CachedRoomImage | RoomImage,
+    deferUntilAccepted = false,
+  ) => {
     const channel = instructionChannelRef.current;
     if (
       channel?.readyState !== "open" ||
@@ -1723,9 +1836,19 @@ export default function ShareRoomPage({
     });
     if (!sent) {
       outgoingShareRequestsRef.current.delete(requestId);
+      if (deferUntilAccepted) pendingShareImagesRef.current.delete(image.id);
       return false;
     }
-    updateRoomImage(image.id, { placeholder, shareStatus: "awaiting-response" }, true);
+    if (deferUntilAccepted) {
+      const { url: _url, thumbnailUrl: _thumbnailUrl, ...cached } = image as RoomImage;
+      pendingShareImagesRef.current.set(image.id, {
+        ...cached,
+        placeholder,
+        shareStatus: "awaiting-response",
+      });
+    } else {
+      updateRoomImage(image.id, { placeholder, shareStatus: "awaiting-response" }, true);
+    }
     upsertActivity({
       id: `share-${requestId}`,
       kind: "sending",
@@ -1824,7 +1947,10 @@ export default function ShareRoomPage({
     deletedImageIdsRef.current.add(image.id);
     removeRoomImage(image.id);
     try {
-      await deleteRoomImage(image.roomId, image.id);
+      await Promise.all([
+        deleteRoomImage(image.roomId, image.id),
+        deleteReviewHistory(image.roomId, image.id),
+      ]);
     } catch (error) {
       console.warn("Failed to delete local pending image", error);
     }
@@ -2067,6 +2193,7 @@ export default function ShareRoomPage({
                 subscribeMessages={subscribeReviewMessages}
                 onSendMessage={sendReviewMessage}
                 onReviewStatusChange={handleReviewStatusChange}
+                onReviewEditingChange={handleReviewEditingChange}
                 onFullscreenChange={setReviewWorkspaceFullscreen}
                 onGenerateImage={handleCreateReviewImage}
                 onResolveRejectedImage={handleResolveRejectedReviewImage}
@@ -2104,6 +2231,7 @@ export default function ShareRoomPage({
                 onWant={handleWantImage}
                 reactionSignals={imageReactionSignals}
                 onProcessResult={handleProcessedImageResult}
+                onCompressionToOutbox={handleCompressedImageToOutbox}
                 onResolveRejectedImage={handleResolveRejectedProcessedImage}
                 compressionRequest={compressionRequest}
                 onCompressionRequestConsumed={() => setCompressionRequest(null)}

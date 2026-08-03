@@ -45,6 +45,7 @@ type GalleryWorkspaceProps = {
   onWant(image: RoomImage): void;
   reactionSignals: Record<string, ImageReactionSignal>;
   onProcessResult(source: RoomImage, result: ProcessedImageResult, action: ProcessedImageAction, report: (stage: ProcessedImageActionStage) => void): Promise<ProcessedImageActionOutcome>;
+  onCompressionToOutbox(source: RoomImage, result: ProcessedImageResult): void | Promise<void>;
   onResolveRejectedImage(imageId: string, save: boolean): Promise<void>;
   compressionRequest: RoomImage | null;
   onCompressionRequestConsumed(): void;
@@ -77,6 +78,7 @@ export default function GalleryWorkspace({
   onWant,
   reactionSignals,
   onProcessResult,
+  onCompressionToOutbox,
   onResolveRejectedImage,
   compressionRequest,
   onCompressionRequestConsumed,
@@ -84,6 +86,7 @@ export default function GalleryWorkspace({
   onClearOperationLogs,
 }: GalleryWorkspaceProps) {
   const [compressionImage, setCompressionImage] = React.useState<RoomImage | null>(null);
+  const [compressionDestination, setCompressionDestination] = React.useState<"result" | "outbox">("result");
   const [conversionImage, setConversionImage] = React.useState<RoomImage | null>(null);
   const [cropImage, setCropImage] = React.useState<RoomImage | null>(null);
   const [resizeImage, setResizeImage] = React.useState<RoomImage | null>(null);
@@ -95,6 +98,7 @@ export default function GalleryWorkspace({
   const [operationLogOpen, setOperationLogOpen] = React.useState(false);
   React.useEffect(() => {
     if (!compressionRequest) return;
+    setCompressionDestination("outbox");
     setCompressionImage(compressionRequest);
     onCompressionRequestConsumed();
   }, [compressionRequest, onCompressionRequestConsumed]);
@@ -241,7 +245,10 @@ export default function GalleryWorkspace({
                 onWant={onWant}
                 reactionSignal={reactionSignals[image.id]}
                 onConvert={setConversionImage}
-                onCompress={setCompressionImage}
+                onCompress={(image) => {
+                  setCompressionDestination("result");
+                  setCompressionImage(image);
+                }}
                 onCrop={setCropImage}
                 onResize={setResizeImage}
                 onAdjust={setAdjustmentImage}
@@ -256,8 +263,19 @@ export default function GalleryWorkspace({
       <ImageCompressionDialog
         image={compressionImage}
         labels={labels}
-        onClose={() => setCompressionImage(null)}
-        onSave={finishProcessing}
+        onClose={() => {
+          setCompressionImage(null);
+          setCompressionDestination("result");
+        }}
+        onSave={async (source, result) => {
+          if (compressionDestination === "outbox") {
+            await onCompressionToOutbox(source, result);
+            setCompressionImage(null);
+            setCompressionDestination("result");
+            return;
+          }
+          finishProcessing(source, result);
+        }}
       />
       <ImageConversionDialog
         image={conversionImage}
@@ -290,6 +308,7 @@ export default function GalleryWorkspace({
         onCancel={() => setDeleteCandidate(null)}
         onConfirm={onDelete}
         onMoveToLibrary={onArchiveToLibrary}
+        onReturnToLibrary={onMoveToLibrary}
       />
       <OperationLogDialog
         open={operationLogOpen}

@@ -5,6 +5,7 @@ import {
   FiCheckCircle,
   FiClock,
   FiDownload,
+  FiEdit3,
   FiEye,
   FiImage,
   FiMaximize2,
@@ -390,7 +391,13 @@ export default function GalleryImageCard({
         {canRemove ? (
           <button
             type="button"
-            onClick={() => void (enteredFromLibrary ? onMoveToLibrary(image) : onDelete(image))}
+            onClick={() => {
+              if (enteredFromLibrary && !image.reviewOperationCount) {
+                void onMoveToLibrary(image);
+                return;
+              }
+              void onDelete(image);
+            }}
             disabled={enteredFromLibrary && connection !== "connected"}
             className={`absolute top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45 ${
               canReview ? "right-20" : "right-11"
@@ -410,8 +417,19 @@ export default function GalleryImageCard({
       </div>
 
       <div className="p-3">
-        <div className="truncate text-sm font-semibold text-slate-800" title={image.name}>
-          {middleEllipsisFileName(image.name)}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="min-w-0 truncate text-sm font-semibold text-slate-800" title={image.name}>
+            {middleEllipsisFileName(image.name)}
+          </div>
+          {image.reviewOperationCount ? (
+            <span
+              className="inline-flex h-5 shrink-0 items-center gap-1 rounded bg-blue-50 px-1.5 text-[10px] font-semibold text-[#2f65cf]"
+              title={labels.editingImage}
+            >
+              <FiEdit3 className="h-3 w-3" aria-hidden="true" />
+              {labels.editingImage}
+            </span>
+          ) : null}
         </div>
         <div className="mt-1 flex min-h-10 items-center justify-between gap-2 text-xs text-slate-500">
           <span className="flex min-w-0 flex-1 flex-col justify-center gap-1">
