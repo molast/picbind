@@ -2,6 +2,7 @@
 
 import type { ImageObjectOperation } from "./image-object";
 import { replaceFileExtension } from "./image-object";
+import { getLang, getShareRoomLabels } from "../locales";
 import {
   applyRoomColorAdjustments,
   type RoomColorAdjustments,
@@ -52,7 +53,7 @@ async function encodeCanvas(canvas: OffscreenCanvas, sourceType: string) {
       // Try the next Alpha-safe browser encoder.
     }
   }
-  throw new Error("当前浏览器无法编码编辑后的图片");
+  throw new Error(getShareRoomLabels(getLang()).browserCannotEncode);
 }
 
 async function decodeImage(blob: Blob) {

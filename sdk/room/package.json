@@ -16,6 +16,7 @@
     "./source": "./src/index.ts",
     "./source.css": "./src/embed.css",
     "./source/config": "./src/config.ts",
+    "./source/locales": "./src/locales/index.ts",
     "./source/create-room-button": "./src/components/share/create-room-button.tsx",
     "./source/types": "./src/public-types.ts"
   },

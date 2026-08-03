@@ -813,8 +813,8 @@ export default function ShareRoomPage({
         upsertActivity({
           id: `share-${message.payload.requestId}`,
           kind: "cancelled",
-          title: image?.name || "图片分享",
-          detail: "对方拒绝接收",
+          title: image?.name || labels.imageShare,
+          detail: labels.peerRejectedReceive,
           createdAt: Date.now(),
         });
       }
@@ -863,8 +863,8 @@ export default function ShareRoomPage({
       upsertActivity({
         id: `share-${requestId}`,
         kind: "error",
-        title: image?.name || "图片分享",
-        detail: "对方已离线，分享请求已取消",
+        title: image?.name || labels.imageShare,
+        detail: labels.peerOfflineShareCancelled,
         createdAt: Date.now(),
       });
     }
@@ -1105,7 +1105,7 @@ export default function ShareRoomPage({
   const moveImageToOutbox = async (image: RoomImage) => {
     const channel = instructionChannelRef.current;
     if (connection !== "connected" || channel?.readyState !== "open") {
-      throw new Error("实时通道尚未连接");
+      throw new Error(labels.realtimeNotConnected);
     }
     const file = new File([image.blob], image.name, { type: image.type });
     const queuedAt = Date.now();
@@ -1146,7 +1146,7 @@ export default function ShareRoomPage({
     try {
       const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
       const activeChannel = instructionChannelRef.current;
-      if (activeChannel?.readyState !== "open") throw new Error("图片指令通道已断开");
+      if (activeChannel?.readyState !== "open") throw new Error(labels.imageCommandDisconnected);
       sendImagePlaceholder(activeChannel, meta, placeholder);
       updateRoomImage(image.id, { placeholder }, true);
     } catch (error) {
@@ -1305,10 +1305,10 @@ export default function ShareRoomPage({
     let reported: ProcessedImageActionStage | null = null;
     while (Date.now() < deadline) {
       const current = imagesRef.current.find((image) => image.id === imageId);
-      if (!current) throw new Error("待分享图片已被移除");
-      if (current.shareStatus === "rejected") throw new Error("对方拒绝接收图片");
-      if (current.shareStatus === "failed" || current.transferStatus === "failed") throw new Error("图片分享失败");
-      if (current.transferStatus === "cancelled") throw new Error("图片分享已取消");
+      if (!current) throw new Error(labels.sharedImageRemoved);
+      if (current.shareStatus === "rejected") throw new Error(labels.peerRejectedImage);
+      if (current.shareStatus === "failed" || current.transferStatus === "failed") throw new Error(labels.imageShareFailed);
+      if (current.transferStatus === "cancelled") throw new Error(labels.imageShareCancelled);
       if (current.transferStatus === "sent" || current.shareStatus === "available") {
         report("complete");
         return;
@@ -1326,7 +1326,7 @@ export default function ShareRoomPage({
       }
       await new Promise((resolve) => window.setTimeout(resolve, 150));
     }
-    throw new Error("等待对方接收超时");
+    throw new Error(labels.peerAcceptanceTimeout);
   };
 
   const handleProcessedImageResult = async (
@@ -1344,7 +1344,7 @@ export default function ShareRoomPage({
       result,
       action === "store" || shouldSuggestCompression ? "library" : "outbox",
     );
-    if (!image) throw new Error("图片未能加入列表");
+    if (!image) throw new Error(labels.imageNotAdded);
     if (action === "store") {
       report("complete");
       return { status: "stored", imageId: image.id };
@@ -1357,7 +1357,7 @@ export default function ShareRoomPage({
     report("waiting");
     try {
       const requested = await handleRequestImageShare(image);
-      if (!requested) throw new Error("无法发送图片接收请求");
+      if (!requested) throw new Error(labels.receiveRequestFailed);
       await waitForProcessedImageShare(image.id, report);
       return { status: "shared", imageId: image.id };
     } catch (error) {
@@ -1379,7 +1379,7 @@ export default function ShareRoomPage({
     save: boolean,
   ) => {
     const image = imagesRef.current.find((candidate) => candidate.id === imageId);
-    if (!image) throw new Error("图片不存在或已被移除");
+    if (!image) throw new Error(labels.imageMissing);
     if (save) {
       updateRoomImage(
         imageId,
@@ -1407,7 +1407,7 @@ export default function ShareRoomPage({
     report: (stage: ReviewImageExportStage) => void,
   ): Promise<ReviewImageExportOutcome> => {
     if (!(result.blob instanceof Blob)) {
-      throw new Error("生成图片的二进制数据无效");
+      throw new Error(labels.invalidGeneratedImage);
     }
     report("preparing");
     const identity = await identifyImage(result.blob);
@@ -1449,7 +1449,7 @@ export default function ShareRoomPage({
       id: `review-export-${stored.id}`,
       kind: "complete",
       title: stored.name,
-      detail: `已生成新图片 · ${formatBytes(stored.size)}`,
+      detail: labels.generatedImageLog(formatBytes(stored.size)),
       createdAt: Date.now(),
     });
 
@@ -1461,12 +1461,12 @@ export default function ShareRoomPage({
     }
 
     const added = imagesRef.current.find((image) => image.id === stored.id);
-    if (!added) throw new Error("图片未能加入待发送列表");
+    if (!added) throw new Error(labels.imageNotAddedToOutbox);
 
     report("waiting");
     try {
       const requested = await handleRequestImageShare(added);
-      if (!requested) throw new Error("无法发送图片接收请求");
+      if (!requested) throw new Error(labels.receiveRequestFailed);
       await waitForProcessedImageShare(stored.id, report);
       setReviewWorkspaceFullscreen(false);
       setReviewImageId(null);
@@ -1490,7 +1490,7 @@ export default function ShareRoomPage({
     save: boolean,
   ) => {
     const image = imagesRef.current.find((candidate) => candidate.id === imageId);
-    if (!image) throw new Error("图片不存在或已被移除");
+    if (!image) throw new Error(labels.imageMissing);
 
     if (save) {
       updateRoomImage(
@@ -1624,7 +1624,7 @@ export default function ShareRoomPage({
         );
       } else {
         if (fileChannel?.readyState !== "open") {
-          throw new Error("File DataChannel is not open");
+          throw new Error(labels.imageFileChannelDisconnected);
         }
         meta = await sendImageFile(
           controlChannel,
@@ -1730,7 +1730,7 @@ export default function ShareRoomPage({
       id: `share-${requestId}`,
       kind: "sending",
       title: image.name,
-      detail: "等待对方确认接收",
+      detail: labels.waitingPeerAcceptance,
       createdAt: Date.now(),
     });
     return true;
@@ -2187,6 +2187,7 @@ export default function ShareRoomPage({
       />
       {previewImage ? (
         <RoomImagePreviewDialog
+          labels={labels}
           open
           onOpenChange={(open) => {
             if (!open) setPreviewImageId(null);
@@ -2203,6 +2204,7 @@ export default function ShareRoomPage({
       <FloatingEmojiLayer items={floatingEmojis} />
       <ImageShareRequestDialog
         request={incomingShareRequest}
+        labels={labels}
         thumbnail={incomingShareThumbnail}
         onPlaceholderMeasured={handlePlaceholderMeasured}
         onDecision={handleShareDecision}

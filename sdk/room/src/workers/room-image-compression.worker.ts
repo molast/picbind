@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 
 import { configureRoomSdk } from "../config";
+import { getShareRoomLabels } from "../locales";
+import type { Lang } from "../locales";
 import {
   compressRoomImage,
   type RoomCompressionFormat,
@@ -8,6 +10,8 @@ import {
 
 type CompressionRequest = {
   image: File;
+  lang: Lang;
+  allowAlphaLoss?: boolean;
   requestedFormat: RoomCompressionFormat;
   targetWidth?: number;
   targetHeight?: number;
@@ -15,14 +19,20 @@ type CompressionRequest = {
 };
 
 self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
-  const { image, requestedFormat, targetWidth, targetHeight, wasmBaseUrl } = event.data;
+  const { image, lang, allowAlphaLoss = false, requestedFormat, targetWidth, targetHeight, wasmBaseUrl } = event.data;
   try {
     if (wasmBaseUrl) configureRoomSdk({ wasmBaseUrl });
     const dimensions =
       targetWidth !== undefined && targetHeight !== undefined
         ? { width: targetWidth, height: targetHeight }
         : undefined;
-    const result = await compressRoomImage(image, requestedFormat, dimensions);
+    const result = await compressRoomImage(
+      image,
+      requestedFormat,
+      dimensions,
+      lang,
+      allowAlphaLoss,
+    );
     const bytes = await result.blob.arrayBuffer();
     self.postMessage(
       {
@@ -39,7 +49,7 @@ self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
   } catch (reason) {
     self.postMessage({
       ok: false,
-      error: reason instanceof Error ? reason.message : "图片压缩失败",
+      error: reason instanceof Error ? reason.message : getShareRoomLabels(lang).compressionFailed,
     });
   }
 };

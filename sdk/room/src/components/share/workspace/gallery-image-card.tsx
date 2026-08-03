@@ -201,6 +201,7 @@ export default function GalleryImageCard({
       {canReview ? (
         <ImageOperationMenu
           disabled={false}
+          labels={labels}
           onConvert={() => onConvert(image)}
           onCompress={() => onCompress(image)}
           onCrop={() => onCrop(image)}
@@ -401,6 +402,7 @@ export default function GalleryImageCard({
           </button>
         ) : null}
         <ImageVersionMenu
+          labels={labels}
           versions={versions}
           selectedId={image.id}
           onSelect={onSelectVersion}
@@ -478,11 +480,11 @@ export default function GalleryImageCard({
                 {sendComplete
                   ? labels.sent
                   : isLocalImage && image.shareStatus === "awaiting-response"
-                    ? "等待对方确认"
+                    ? labels.waitingPeerConfirmation
                     : isLocalImage && image.shareStatus === "accepted"
-                      ? "对方已接受"
+                      ? labels.peerAccepted
                       : isLocalImage && image.shareStatus === "rejected"
-                        ? "对方已拒绝"
+                        ? labels.peerRejected
                         : statusLabel}
               </span>
             )}

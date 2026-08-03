@@ -7,9 +7,11 @@ import {
   FiSliders,
 } from "react-icons/fi";
 import { TbArrowsExchange, TbArrowsMinimize, TbDimensions } from "react-icons/tb";
+import type { ShareRoomLabels } from "../share-room-labels";
 
 type ImageOperationMenuProps = {
   disabled: boolean;
+  labels: ShareRoomLabels;
   onConvert(): void;
   onCompress(): void;
   onCrop(): void;
@@ -20,7 +22,7 @@ type ImageOperationMenuProps = {
 const operations = [
   {
     icon: TbArrowsExchange,
-    label: "格式转换",
+    labelKey: "imageConvert",
     action: "convert",
     x: 36,
     y: 0,
@@ -28,7 +30,7 @@ const operations = [
   },
   {
     icon: TbArrowsMinimize,
-    label: "压缩",
+    labelKey: "imageCompress",
     action: "compress",
     x: 36,
     y: 34,
@@ -36,7 +38,7 @@ const operations = [
   },
   {
     icon: FiCrop,
-    label: "裁剪",
+    labelKey: "imageCrop",
     action: "crop",
     x: 36,
     y: 68,
@@ -44,7 +46,7 @@ const operations = [
   },
   {
     icon: TbDimensions,
-    label: "调整尺寸",
+    labelKey: "imageResize",
     action: "resize",
     x: 36,
     y: 102,
@@ -52,7 +54,7 @@ const operations = [
   },
   {
     icon: FiSliders,
-    label: "色彩调整",
+    labelKey: "imageAdjust",
     action: "adjust",
     x: 36,
     y: 136,
@@ -62,6 +64,7 @@ const operations = [
 
 export default function ImageOperationMenu({
   disabled,
+  labels,
   onConvert,
   onCompress,
   onCrop,
@@ -89,11 +92,12 @@ export default function ImageOperationMenu({
 
   return (
     <div ref={rootRef} className="pointer-events-none absolute right-2 top-2 z-30 h-7 w-7">
-      {operations.map(({ icon: Icon, label, action, x, y, ...operation }, index) => {
+      {operations.map(({ icon: Icon, labelKey, action, x, y, ...operation }, index) => {
+        const label = labels[labelKey];
         const available = "available" in operation && operation.available;
         return (
           <button
-            key={label}
+            key={labelKey}
             type="button"
             role="menuitem"
             disabled={!available || disabled}
@@ -126,12 +130,12 @@ export default function ImageOperationMenu({
             title={
               available
                 ? disabled
-                  ? "请先接收完整原图"
+                  ? labels.imageRequiresOriginal
                   : label
-                : `${label}（即将推出）`
+                : labels.comingSoon(label)
             }
             aria-label={
-              available ? label : `${label}（即将推出）`
+              available ? label : labels.comingSoon(label)
             }
             tabIndex={open ? 0 : -1}
           >
@@ -145,8 +149,8 @@ export default function ImageOperationMenu({
         className={`pointer-events-auto absolute inset-0 flex h-7 w-7 items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf] ${
           open ? "text-[#2f65cf] ring-2 ring-blue-200" : ""
         }`}
-        title="图片操作"
-        aria-label="图片操作"
+        title={labels.imageActions}
+        aria-label={labels.imageActions}
         aria-haspopup="menu"
         aria-expanded={open}
       >

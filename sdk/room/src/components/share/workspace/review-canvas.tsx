@@ -629,7 +629,7 @@ export default function ReviewCanvas({
               ref={textInputRef}
               value={textEditor.value}
               rows={1}
-              aria-label="Text annotation"
+              aria-label={labels.textTool}
               className="absolute z-20 min-h-8 resize-none overflow-hidden border-0 bg-white/90 px-1.5 py-1 text-slate-950 shadow-lg outline-none ring-2 ring-blue-500"
               style={{
                 left: `${(textEditor.x / Math.max(1, imageSize.width)) * 100}%`,

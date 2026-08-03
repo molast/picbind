@@ -5,7 +5,13 @@ export { default as CreateRoomButton } from "./components/share/create-room-butt
 export { configureRoomSdk } from "./config";
 export type { RoomSdkConfig } from "./config";
 export type { ShareRoom } from "./utils/share-room";
-export type { Lang } from "./locales";
+export {
+  getLang,
+  getShareRoomLabels,
+  setLang,
+  type Lang,
+  type ShareRoomLabels,
+} from "./locales";
 export type {
   ActivityItem,
   ConnectionState,

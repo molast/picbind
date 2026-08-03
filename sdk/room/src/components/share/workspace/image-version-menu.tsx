@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 import { FiClock } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
 import { formatBytes } from "../share-room-formatters";
+import type { ShareRoomLabels } from "../share-room-labels";
 
 type ImageVersionMenuProps = {
   versions: RoomImage[];
+  labels: ShareRoomLabels;
   selectedId: string;
   onSelect(imageId: string): void;
 };
@@ -16,6 +18,7 @@ const MENU_WIDTH = 192;
 
 export default function ImageVersionMenu({
   versions,
+  labels,
   selectedId,
   onSelect,
 }: ImageVersionMenuProps) {
@@ -67,7 +70,7 @@ export default function ImageVersionMenu({
         type="button"
         onClick={() => setOpen((value) => !value)}
         className="inline-flex h-6 items-center gap-1 rounded-md bg-white/95 px-1.5 text-[9px] font-semibold text-slate-700 shadow-sm"
-        title="图片版本"
+        title={labels.imageVersion}
         aria-haspopup="listbox"
         aria-expanded={open}
       >

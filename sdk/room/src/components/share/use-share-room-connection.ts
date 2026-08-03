@@ -442,7 +442,7 @@ export function useShareRoomConnection({
               }
               await new Promise((resolve) => window.setTimeout(resolve, 100));
             }
-            throw new Error("Image file channel is not open");
+            throw new Error(labels.imageFileChannelDisconnected);
           } catch (error) {
             if (thumbnailRequests.get(id) === requestKey) {
               thumbnailRequests.delete(id);
@@ -1601,7 +1601,7 @@ export function useShareRoomConnection({
             return;
           }
           const message =
-            error instanceof Error ? error.message : "Could not connect";
+            error instanceof Error ? error.message : labels.failed;
           setConnection("error");
           setConnectionError(message);
           setConnectionActivity("error", message);

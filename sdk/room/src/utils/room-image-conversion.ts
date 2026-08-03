@@ -11,7 +11,13 @@ export async function convertRoomImageTask(
   format: RoomConversionFormat,
   signal: AbortSignal,
 ): Promise<RoomImageEditResult> {
-  const result = await compressRoomImageTask(image, format, signal);
+  const result = await compressRoomImageTask(
+    image,
+    format,
+    signal,
+    undefined,
+    format === "jpeg",
+  );
   return {
     blob: result.blob,
     name: result.name,

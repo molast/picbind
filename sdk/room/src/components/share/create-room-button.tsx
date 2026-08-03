@@ -3,7 +3,7 @@
 import React from "react";
 import { FiAlertCircle, FiLoader, FiShare2, FiX } from "react-icons/fi";
 import { createShareRoom, type ShareRoom } from "../../utils/share-room";
-import type { Lang } from "../../locales";
+import { getShareRoomLabels, type Lang } from "../../locales";
 
 type CreateRoomButtonProps = {
   lang: Lang;
@@ -26,29 +26,17 @@ export default function CreateRoomButton({
   const [isCreating, setIsCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const labels =
-    lang === "zh"
-      ? {
-          trigger: "分享图片",
-          failedTitle: "房间创建失败",
-          activeRoomTitle: "已有分享房间",
-          activeRoomMessage: "当前已有一个最小化的分享房间，请先返回并退出该房间。",
-          restoreRoom: "返回现有房间",
-          creating: "正在创建",
-          retry: "重试",
-          close: "关闭",
-        }
-      : {
-          trigger: "Share Images",
-          failedTitle: "Could not create room",
-          activeRoomTitle: "Share room already active",
-          activeRoomMessage:
-            "A minimized share room is still active. Return to it and exit before creating another room.",
-          restoreRoom: "Return to room",
-          creating: "Creating",
-          retry: "Try again",
-          close: "Close",
-        };
+  const copy = getShareRoomLabels(lang);
+  const labels = {
+    trigger: copy.createRoom,
+    failedTitle: copy.createRoomFailed,
+    activeRoomTitle: copy.activeRoomTitle,
+    activeRoomMessage: copy.activeRoomMessage,
+    restoreRoom: copy.restoreRoom,
+    creating: copy.creatingRoom,
+    retry: copy.retry,
+    close: copy.closeDialog,
+  };
 
   React.useEffect(() => {
     if (!dialog) {
@@ -82,7 +70,7 @@ export default function CreateRoomButton({
       }
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Failed to create share room",
+        caught instanceof Error ? caught.message : copy.createRoomFailed,
       );
       setDialog("error");
     } finally {

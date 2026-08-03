@@ -7,7 +7,7 @@ import {
   FiRadio,
 } from "react-icons/fi";
 import { createPortal } from "react-dom";
-import type { Lang } from "../../locales";
+import { getShareRoomLabels, type Lang } from "../../locales";
 import type {
   ConnectionState,
   RoomDockNotification,
@@ -39,9 +39,9 @@ export default function TemporaryRoomDock({
   onRestore,
 }: TemporaryRoomDockProps) {
   const isConnected = connection === "connected";
-  const title = lang === "zh" ? "分享房间仍在运行" : "Share room is active";
-  const enter = lang === "zh" ? "恢复房间" : "Restore room";
-  const unread = lang === "zh" ? "条新消息" : "new";
+  const labels = getShareRoomLabels(lang);
+  const title = labels.activeRoomDock;
+  const enter = labels.activeRoomDockEnter;
   const recent = notifications.slice(-3).reverse();
 
   if (typeof document === "undefined") return null;
@@ -63,7 +63,7 @@ export default function TemporaryRoomDock({
         </div>
         {notifications.length > 0 ? (
           <span className="shrink-0 rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-semibold text-white">
-            {notifications.length} {unread}
+            {labels.newMessages(notifications.length)}
           </span>
         ) : null}
         <button

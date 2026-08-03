@@ -5,12 +5,14 @@ import {
   applyRoomColorAdjustments,
   type RoomColorAdjustments,
 } from "../../../utils/room-color-adjustments";
+import type { ShareRoomLabels } from "../share-room-labels";
 
 export type ColorComparisonMode = "stacked" | "in-place" | "split";
 
 type ColorAdjustmentPreviewProps = {
   imageUrl: string;
   adjustments: RoomColorAdjustments;
+  labels: ShareRoomLabels;
   mode: ColorComparisonMode;
   samplingEnabled: boolean;
   onSample(color: string): void;
@@ -20,7 +22,7 @@ function channelHex(value: number) {
   return Math.round(value).toString(16).padStart(2, "0");
 }
 
-export default function ColorAdjustmentPreview({ imageUrl, adjustments, mode, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
+export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, mode, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const originalCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const editedCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -96,7 +98,7 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, mode, sa
     <div
       ref={containerRef}
       className={`relative h-full min-h-72 w-full overflow-hidden rounded-md bg-slate-900 ${samplingEnabled ? "cursor-crosshair" : mode === "in-place" ? "cursor-pointer" : ""}`}
-      title={samplingEnabled ? "取样替换颜色" : mode === "in-place" ? "切换原图与调整结果" : undefined}
+      title={samplingEnabled ? labels.colorTools.sampleReplacement : mode === "in-place" ? labels.colorTools.toggleOriginal : undefined}
       onClick={(event) => {
         if (samplingEnabled) sampleColor(event.clientX, event.clientY);
         else if (mode === "in-place") setShowOriginal((value) => !value);
@@ -124,7 +126,7 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, mode, sa
               type="button"
               className="absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 cursor-ew-resize bg-white shadow-[0_0_0_1px_rgba(15,23,42,.35)]"
               style={{ left: `${split}%` }}
-              aria-label="拖动对比分割线"
+              aria-label={labels.colorTools.dragDivider}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => {
                 event.stopPropagation();

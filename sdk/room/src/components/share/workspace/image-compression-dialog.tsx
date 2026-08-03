@@ -3,6 +3,7 @@
 import React from "react";
 import { FiCheck, FiLink, FiLoader, FiX } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
+import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes } from "../share-room-formatters";
 import {
   type RoomCompressionFormat,
@@ -12,17 +13,10 @@ import { compressRoomImageTask } from "../../../utils/room-image-compression-tas
 
 type ImageCompressionDialogProps = {
   image: RoomImage | null;
+  labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomCompressionResult): void | Promise<void>;
 };
-
-const formats: Array<{ value: RoomCompressionFormat; label: string }> = [
-  { value: "auto", label: "自动" },
-  { value: "jpeg", label: "JPEG" },
-  { value: "png", label: "PNG" },
-  { value: "webp", label: "WebP" },
-  { value: "avif", label: "AVIF" },
-];
 
 const MAX_DIMENSION = 16384;
 
@@ -32,6 +26,7 @@ function validDimension(value: number) {
 
 export default function ImageCompressionDialog({
   image,
+  labels,
   onClose,
   onSave,
 }: ImageCompressionDialogProps) {
@@ -101,16 +96,23 @@ export default function ImageCompressionDialog({
   const savedPercent = image.size ? (savedBytes / image.size) * 100 : 0;
   const validSize = validDimension(width) && validDimension(height);
   const resized = width !== image.width || height !== image.height;
+  const formats: Array<{ value: RoomCompressionFormat; label: string }> = [
+    { value: "auto", label: labels.automatic },
+    { value: "jpeg", label: "JPEG" },
+    { value: "png", label: "PNG" },
+    { value: "webp", label: "WebP" },
+    { value: "avif", label: "AVIF" },
+  ];
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4">
-      <section className="w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="压缩图片">
+      <section className="w-full max-w-4xl overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label={labels.imageCompress}>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">压缩图片</h2>
+            <h2 className="text-base font-semibold text-slate-900">{labels.imageCompress}</h2>
             <p className="mt-0.5 max-w-sm truncate text-xs text-slate-500">{image.name}</p>
           </div>
-          <button type="button" onClick={closeDialog} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="关闭">
+          <button type="button" onClick={closeDialog} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={labels.closeDialog}>
             <FiX className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
@@ -125,27 +127,27 @@ export default function ImageCompressionDialog({
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
               <label className="space-y-1.5 text-xs font-medium text-slate-600">
-                <span>宽度（px）</span>
+                <span>{labels.widthPx}</span>
                 <input type="number" min={1} max={MAX_DIMENSION} value={width} disabled={working} onChange={(event) => { const next = Number(event.target.value); setWidth(next); setResult(null); if (validDimension(next)) setHeight(Math.max(1, Math.round(next / ratioRef.current))); }} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100 disabled:opacity-50" />
               </label>
-              <span className="mb-0.5 flex h-9 w-9 items-center justify-center rounded-md border border-[#2f65cf] bg-blue-50 text-[#2f65cf]" aria-label="宽高比已锁定" title="固定原图宽高比">
+              <span className="mb-0.5 flex h-9 w-9 items-center justify-center rounded-md border border-[#2f65cf] bg-blue-50 text-[#2f65cf]" aria-label={labels.aspectRatioLocked} title={labels.lockOriginalRatio}>
                 <FiLink className="h-4 w-4" aria-hidden="true" />
               </span>
               <label className="space-y-1.5 text-xs font-medium text-slate-600">
-                <span>高度（px）</span>
+                <span>{labels.heightPx}</span>
                 <input type="number" min={1} max={MAX_DIMENSION} value={height} disabled={working} onChange={(event) => { const next = Number(event.target.value); setHeight(next); setResult(null); if (validDimension(next)) setWidth(Math.max(1, Math.round(next * ratioRef.current))); }} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100 disabled:opacity-50" />
               </label>
             </div>
             <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-              <span>原始尺寸：{image.width} × {image.height}</span>
-              <span>固定原图比例</span>
+              <span>{labels.originalDimensions(image.width, image.height)}</span>
+              <span>{labels.lockOriginalRatio}</span>
             </div>
-            {!validSize ? <p className="mt-2 text-xs text-red-600">宽高必须在 1 到 {MAX_DIMENSION} 像素之间</p> : null}
+            {!validSize ? <p className="mt-2 text-xs text-red-600">{labels.dimensionRangeError(MAX_DIMENSION)}</p> : null}
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <h3 className="text-xs font-semibold text-slate-800">原图片</h3>
+                <h3 className="text-xs font-semibold text-slate-800">{labels.originalImage}</h3>
                 <span className="text-[10px] font-medium uppercase text-slate-400">{image.type.split("/")[1] || "image"}</span>
               </div>
               <div className="aspect-video bg-slate-100">
@@ -159,27 +161,27 @@ export default function ImageCompressionDialog({
             </section>
             <section className="overflow-hidden rounded-md border border-slate-200 bg-white">
               <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-                <h3 className="text-xs font-semibold text-slate-800">压缩结果</h3>
-                <span className="text-[10px] font-medium uppercase text-slate-400">{result?.format || "等待压缩"}</span>
+                <h3 className="text-xs font-semibold text-slate-800">{labels.compressionResult}</h3>
+                <span className="text-[10px] font-medium uppercase text-slate-400">{result?.format || labels.waitingForCompression}</span>
               </div>
               {result && previewUrl ? (
                 <>
                   <div className="aspect-video bg-slate-100">
-                    <img src={previewUrl} alt="压缩结果预览" className="h-full w-full object-contain" />
+                    <img src={previewUrl} alt={labels.compressionPreview} className="h-full w-full object-contain" />
                   </div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 bg-slate-50 px-3 py-2.5 text-[11px] text-slate-500">
                     <span className="col-span-2 truncate font-semibold text-slate-700" title={result.name}>{result.name}</span>
                     <span>{formatBytes(result.blob.size)}</span>
                     <span className="text-right">{result.width} × {result.height}</span>
                     <span className={`col-span-2 font-semibold ${savedBytes > 0 ? "text-emerald-700" : "text-slate-500"}`}>
-                      {savedBytes > 0 ? `减少 ${formatBytes(savedBytes)}（${savedPercent.toFixed(1)}%）` : resized ? "已按指定尺寸生成图片" : "同格式结果未变小，已保留原图"}
+                      {savedBytes > 0 ? labels.compressionReduced(formatBytes(savedBytes), savedPercent.toFixed(1)) : resized ? labels.resizedImageGenerated : labels.originalKept}
                     </span>
                   </div>
                 </>
               ) : (
                 <div className="flex aspect-video flex-col items-center justify-center bg-slate-50 text-center text-xs text-slate-400">
                   {working ? <FiLoader className="mb-2 h-5 w-5 animate-spin text-[#2f65cf]" aria-hidden="true" /> : null}
-                  <span>{working ? "正在生成压缩结果" : "选择格式后开始压缩"}</span>
+                  <span>{working ? labels.generatingCompression : labels.chooseFormatToCompress}</span>
                 </div>
               )}
             </section>
@@ -187,14 +189,14 @@ export default function ImageCompressionDialog({
           {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
         </div>
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <button type="button" onClick={working ? cancelCompression : closeDialog} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50">{working ? "取消压缩" : "取消"}</button>
+          <button type="button" onClick={working ? cancelCompression : closeDialog} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50">{working ? labels.cancelCompression : labels.cancel}</button>
           {result ? (
             <button type="button" onClick={() => void onSave(image, result)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd]">
-              <FiCheck className="h-4 w-4" aria-hidden="true" />继续
+              <FiCheck className="h-4 w-4" aria-hidden="true" />{labels.continue}
             </button>
           ) : (
-            <button type="button" disabled={working || !validSize} onClick={() => { const generation = ++compressionGenerationRef.current; compressionAbortRef.current?.abort(); const abortController = new AbortController(); compressionAbortRef.current = abortController; setWorking(true); setError(null); void compressRoomImageTask(new File([image.blob], image.name, { type: image.type }), format, abortController.signal, { width, height }).then((nextResult) => { if (compressionGenerationRef.current === generation) setResult(nextResult); }).catch((reason) => { if (compressionGenerationRef.current === generation && (!(reason instanceof DOMException) || reason.name !== "AbortError")) setError(reason instanceof Error ? reason.message : "压缩失败"); }).finally(() => { if (compressionGenerationRef.current === generation) { compressionAbortRef.current = null; setWorking(false); } }); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
-              {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? "压缩中" : "开始压缩"}
+            <button type="button" disabled={working || !validSize} onClick={() => { const generation = ++compressionGenerationRef.current; compressionAbortRef.current?.abort(); const abortController = new AbortController(); compressionAbortRef.current = abortController; setWorking(true); setError(null); void compressRoomImageTask(new File([image.blob], image.name, { type: image.type }), format, abortController.signal, { width, height }).then((nextResult) => { if (compressionGenerationRef.current === generation) setResult(nextResult); }).catch((reason) => { if (compressionGenerationRef.current === generation && (!(reason instanceof DOMException) || reason.name !== "AbortError")) setError(reason instanceof Error ? reason.message : labels.compressionFailed); }).finally(() => { if (compressionGenerationRef.current === generation) { compressionAbortRef.current = null; setWorking(false); } }); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+              {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? labels.compressing : labels.startCompression}
             </button>
           )}
         </footer>

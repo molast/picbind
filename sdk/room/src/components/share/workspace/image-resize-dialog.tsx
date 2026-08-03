@@ -3,6 +3,7 @@
 import React from "react";
 import { FiLink, FiLoader, FiUnlock, FiX } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
+import type { ShareRoomLabels } from "../share-room-labels";
 import {
   resizeRoomImage,
   type RoomImageEditResult,
@@ -10,6 +11,7 @@ import {
 
 type ImageResizeDialogProps = {
   image: RoomImage | null;
+  labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
 };
@@ -20,7 +22,7 @@ function validDimension(value: number) {
   return Number.isFinite(value) && value >= 1 && value <= MAX_DIMENSION;
 }
 
-export default function ImageResizeDialog({ image, onClose, onSave }: ImageResizeDialogProps) {
+export default function ImageResizeDialog({ image, labels, onClose, onSave }: ImageResizeDialogProps) {
   const [width, setWidth] = React.useState(1);
   const [height, setHeight] = React.useState(1);
   const [locked, setLocked] = React.useState(true);
@@ -54,13 +56,13 @@ export default function ImageResizeDialog({ image, onClose, onSave }: ImageResiz
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4">
-      <section className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="调整图片尺寸">
+      <section className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label={labels.resizeImage}>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">调整图片尺寸</h2>
+            <h2 className="text-base font-semibold text-slate-900">{labels.resizeImage}</h2>
             <p className="mt-0.5 max-w-xs truncate text-xs text-slate-500">{image.name}</p>
           </div>
-          <button type="button" onClick={onClose} disabled={working} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="关闭">
+          <button type="button" onClick={onClose} disabled={working} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label={labels.closeDialog}>
             <FiX className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
@@ -71,30 +73,30 @@ export default function ImageResizeDialog({ image, onClose, onSave }: ImageResiz
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
             <label className="space-y-1.5 text-xs font-medium text-slate-600">
-              <span>宽度（px）</span>
+              <span>{labels.widthPx}</span>
               <input type="number" min={1} max={MAX_DIMENSION} value={width} onChange={(event) => { const next = Number(event.target.value); setWidth(next); if (locked && validDimension(next)) setHeight(Math.max(1, Math.round(next / ratioRef.current))); }} className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100" />
             </label>
-            <button type="button" onClick={() => setLocked((value) => !value)} className={`mb-0.5 flex h-9 w-9 items-center justify-center rounded-md border transition ${locked ? "border-[#2f65cf] bg-blue-50 text-[#2f65cf]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`} aria-label={locked ? "解除宽高比锁定" : "锁定宽高比"} title={locked ? "宽高比已锁定" : "自由调整宽高"}>
+            <button type="button" onClick={() => setLocked((value) => !value)} className={`mb-0.5 flex h-9 w-9 items-center justify-center rounded-md border transition ${locked ? "border-[#2f65cf] bg-blue-50 text-[#2f65cf]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`} aria-label={locked ? labels.unlockAspectRatio : labels.lockAspectRatio} title={locked ? labels.aspectRatioLocked : labels.freelyResize}>
               {locked ? <FiLink className="h-4 w-4" aria-hidden="true" /> : <FiUnlock className="h-4 w-4" aria-hidden="true" />}
             </button>
             <label className="space-y-1.5 text-xs font-medium text-slate-600">
-              <span>高度（px）</span>
+              <span>{labels.heightPx}</span>
               <input type="number" min={1} max={MAX_DIMENSION} value={height} onChange={(event) => { const next = Number(event.target.value); setHeight(next); if (locked && validDimension(next)) setWidth(Math.max(1, Math.round(next * ratioRef.current))); }} className="h-10 w-full rounded-md border border-slate-200 px-3 text-sm text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100" />
             </label>
           </div>
           <div className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            <span>原始尺寸：{image.width} × {image.height}</span>
-            <span>{locked ? "锁定比例" : "自由尺寸"}</span>
+            <span>{labels.originalDimensions(image.width, image.height)}</span>
+            <span>{locked ? labels.aspectRatioLocked : labels.freeDimensions}</span>
           </div>
-          {!valid ? <p className="text-xs text-red-600">宽高必须在 1 到 {MAX_DIMENSION} 像素之间</p> : null}
+          {!valid ? <p className="text-xs text-red-600">{labels.dimensionRangeError(MAX_DIMENSION)}</p> : null}
           {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
         </div>
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">取消</button>
-          <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); void resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)).catch((reason) => setError(reason instanceof Error ? reason.message : "尺寸调整失败")).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+          <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
+          <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); void resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)).catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {working ? "处理中" : "生成处理结果"}
+            {working ? labels.processing : labels.generateResult}
           </button>
         </footer>
       </section>

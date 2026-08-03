@@ -1,4 +1,8 @@
+import en from "./en";
+import zh from "./zh";
+
 export type Lang = "en" | "zh";
+export type ShareRoomLabels = typeof zh;
 
 const LANG_KEY = "ai-translator-lang-v2";
 const LANG_COOKIE_KEY = "picbind-lang";
@@ -36,4 +40,20 @@ export function setLang(lang: Lang) {
     // The current page still updates even when persistence is unavailable.
   }
   document.cookie = `${LANG_COOKIE_KEY}=${lang}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+
+export function getShareRoomLabels(
+  lang: Lang,
+  maxImageTransferSize: number | null = null,
+): ShareRoomLabels {
+  const labels = lang === "zh" ? zh : en;
+  if (!maxImageTransferSize) return labels;
+
+  const sizeMb = maxImageTransferSize / 1024 / 1024;
+  const sizeText = `${Number(sizeMb.toFixed(2))} MB`;
+  return {
+    ...labels,
+    dropHint: labels.dropHintWithSize(sizeText),
+    tooLarge: labels.tooLargeWithSize(sizeText),
+  };
 }

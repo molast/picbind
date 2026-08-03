@@ -3,6 +3,7 @@
 import React from "react";
 import { FiCheck, FiLoader, FiX } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
+import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes } from "../share-room-formatters";
 import {
   convertRoomImageTask,
@@ -12,6 +13,7 @@ import type { RoomImageEditResult } from "../../../utils/room-image-editing";
 
 type ImageConversionDialogProps = {
   image: RoomImage | null;
+  labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
 };
@@ -34,7 +36,7 @@ function defaultTarget(source: RoomConversionFormat): RoomConversionFormat {
   return source === "webp" ? "avif" : "webp";
 }
 
-export default function ImageConversionDialog({ image, onClose, onSave }: ImageConversionDialogProps) {
+export default function ImageConversionDialog({ image, labels, onClose, onSave }: ImageConversionDialogProps) {
   const sourceFormat = image ? formatFromMime(image.type) : "jpeg";
   const [format, setFormat] = React.useState<RoomConversionFormat>("webp");
   const [result, setResult] = React.useState<RoomImageEditResult | null>(null);
@@ -72,6 +74,7 @@ export default function ImageConversionDialog({ image, onClose, onSave }: ImageC
   }, [closeDialog, image]);
 
   if (!image) return null;
+  const targetFormats = FORMATS.filter((item) => item.value !== sourceFormat);
 
   const startConversion = () => {
     const generation = ++generationRef.current;
@@ -89,7 +92,7 @@ export default function ImageConversionDialog({ image, onClose, onSave }: ImageC
       if (generationRef.current === generation) setResult(nextResult);
     }).catch((reason) => {
       if (generationRef.current === generation && (!(reason instanceof DOMException) || reason.name !== "AbortError")) {
-        setError(reason instanceof Error ? reason.message : "格式转换失败");
+        setError(reason instanceof Error ? reason.message : labels.conversionFailed);
       }
     }).finally(() => {
       if (generationRef.current === generation) {
@@ -101,44 +104,43 @@ export default function ImageConversionDialog({ image, onClose, onSave }: ImageC
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4">
-      <section className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="转换图片格式">
+      <section className="w-full max-w-lg overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label={labels.convertImage}>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">转换图片格式</h2>
+            <h2 className="text-base font-semibold text-slate-900">{labels.convertImage}</h2>
             <p className="mt-0.5 max-w-sm truncate text-xs text-slate-500">{image.name}</p>
           </div>
-          <button type="button" onClick={closeDialog} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label="关闭"><FiX className="h-4 w-4" aria-hidden="true" /></button>
+          <button type="button" onClick={closeDialog} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={labels.closeDialog}><FiX className="h-4 w-4" aria-hidden="true" /></button>
         </header>
 
         <div className="space-y-4 p-5">
-          <div className="grid grid-cols-4 gap-2">
-            {FORMATS.map((item) => {
-              const current = item.value === sourceFormat;
-              return <button key={item.value} type="button" disabled={current || working} onClick={() => { setFormat(item.value); setResult(null); setError(null); }} className={`h-9 rounded-md border text-xs font-semibold transition ${format === item.value ? "border-[#2f65cf] bg-blue-50 text-[#2f65cf]" : "border-slate-200 text-slate-600 hover:bg-slate-50"} disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300`}>{item.label}{current ? " · 当前" : ""}</button>;
-            })}
+          <div className="grid grid-cols-3 gap-2">
+            {targetFormats.map((item) => (
+              <button key={item.value} type="button" disabled={working} onClick={() => { setFormat(item.value); setResult(null); setError(null); }} className={`h-9 rounded-md border text-xs font-semibold transition ${format === item.value ? "border-[#2f65cf] bg-blue-50 text-[#2f65cf]" : "border-slate-200 text-slate-600 hover:bg-slate-50"} disabled:cursor-not-allowed disabled:opacity-50`}>{item.label}</button>
+            ))}
           </div>
           <div className="flex items-center justify-center gap-3 rounded-md bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
             <span>{sourceFormat.toUpperCase()}</span><span className="text-slate-400">→</span><span className="text-[#2f65cf]">{format.toUpperCase()}</span>
           </div>
           {result && previewUrl ? (
             <div className="space-y-3">
-              <div className="aspect-video overflow-hidden rounded-md bg-slate-100"><img src={previewUrl} alt="转换结果预览" className="h-full w-full object-contain" /></div>
+              <div className="aspect-video overflow-hidden rounded-md bg-slate-100"><img src={previewUrl} alt={labels.conversionPreview} className="h-full w-full object-contain" /></div>
               <div className="grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-xs text-slate-600">
-                <span>原图：{formatBytes(image.size)}</span><span>结果：{formatBytes(result.blob.size)}</span>
-                <span>格式：{format.toUpperCase()}</span><span>尺寸：{result.width} × {result.height}</span>
+                <span>{labels.originalSizeLabel}: {formatBytes(image.size)}</span><span>{labels.resultSizeLabel}: {formatBytes(result.blob.size)}</span>
+                <span>{labels.formatLabel}: {format.toUpperCase()}</span><span>{labels.dimensionsLabel}: {result.width} × {result.height}</span>
               </div>
             </div>
           ) : null}
-          {format === "jpeg" ? <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">JPEG 不支持透明通道；存在真实透明像素时会停止转换，不会压平背景。</p> : null}
+          {format === "jpeg" ? <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">{labels.jpegTransparencyWarning}</p> : null}
           {error ? <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
         </div>
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <button type="button" onClick={working ? cancelConversion : closeDialog} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50">{working ? "取消转换" : "取消"}</button>
+          <button type="button" onClick={working ? cancelConversion : closeDialog} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50">{working ? labels.cancelConversion : labels.cancel}</button>
           {result ? (
-            <button type="button" onClick={() => void onSave(image, result)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd]"><FiCheck className="h-4 w-4" aria-hidden="true" />继续</button>
+            <button type="button" onClick={() => void onSave(image, result)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd]"><FiCheck className="h-4 w-4" aria-hidden="true" />{labels.continue}</button>
           ) : (
-            <button type="button" disabled={working || format === sourceFormat} onClick={startConversion} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? "转换中" : "开始转换"}</button>
+            <button type="button" disabled={working || format === sourceFormat} onClick={startConversion} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? labels.converting : labels.startConversion}</button>
           )}
         </footer>
       </section>

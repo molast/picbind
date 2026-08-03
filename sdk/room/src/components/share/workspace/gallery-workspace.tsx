@@ -255,32 +255,38 @@ export default function GalleryWorkspace({
       </div>
       <ImageCompressionDialog
         image={compressionImage}
+        labels={labels}
         onClose={() => setCompressionImage(null)}
         onSave={finishProcessing}
       />
       <ImageConversionDialog
         image={conversionImage}
+        labels={labels}
         onClose={() => setConversionImage(null)}
         onSave={finishProcessing}
       />
       <ImageCropDialog
         image={cropImage}
+        labels={labels}
         onClose={() => setCropImage(null)}
         onSave={finishProcessing}
       />
       <ImageResizeDialog
         image={resizeImage}
+        labels={labels}
         onClose={() => setResizeImage(null)}
         onSave={finishProcessing}
       />
       <ImageColorAdjustmentDialog
         image={adjustmentImage}
+        labels={labels}
         onClose={() => setAdjustmentImage(null)}
         onSave={finishProcessing}
       />
-      <ImageResultDialog source={processedResult?.source || null} result={processedResult?.result || null} onClose={() => setProcessedResult(null)} onAction={onProcessResult} onResolveRejected={onResolveRejectedImage} />
+      <ImageResultDialog source={processedResult?.source || null} result={processedResult?.result || null} labels={labels} onClose={() => setProcessedResult(null)} onAction={onProcessResult} onResolveRejected={onResolveRejectedImage} />
       <ImageDeleteConfirmDialog
         image={deleteCandidate}
+        labels={labels}
         onCancel={() => setDeleteCandidate(null)}
         onConfirm={onDelete}
         onMoveToLibrary={onArchiveToLibrary}

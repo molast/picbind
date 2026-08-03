@@ -1007,9 +1007,10 @@ export default function ReviewWorkspace({
       />
       <ReviewImageExportDialog
         result={generatedImage}
+        labels={labels}
         onClose={() => setGeneratedImage(null)}
         onSave={async (share, report) => {
-          if (!generatedImage) throw new Error("生成图片结果不存在");
+          if (!generatedImage) throw new Error(labels.generatedImageMissing);
           return onGenerateImage(image, generatedImage, share, report);
         }}
         onResolveRejected={onResolveRejectedImage}

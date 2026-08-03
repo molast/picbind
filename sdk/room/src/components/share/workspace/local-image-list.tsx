@@ -20,7 +20,7 @@ export default function LocalImageList({ images, labels, disabled, collapsed, on
   if (collapsed) {
     return (
       <aside className="flex min-h-12 items-center justify-center border-b border-slate-200 bg-slate-50/80 lg:min-h-[260px] lg:flex-col lg:border-b-0 lg:border-r">
-        <button type="button" onClick={() => onCollapsedChange(false)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-[#2f65cf]" aria-label="展开本地图片列表" title="展开本地图片列表"><FiChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+        <button type="button" onClick={() => onCollapsedChange(false)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-[#2f65cf]" aria-label={labels.expandLocalList} title={labels.expandLocalList}><FiChevronRight className="h-4 w-4" aria-hidden="true" /></button>
         <button type="button" disabled={disabled} onClick={onChoose} className="relative mt-0 flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#2f65cf] disabled:opacity-35 lg:mt-2" aria-label={labels.upload} title={labels.upload}>
           <FiImage className="h-4 w-4" aria-hidden="true" />
           {images.length ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2f65cf] px-1 text-[8px] font-semibold text-white">{images.length > 99 ? "99+" : images.length}</span> : null}
@@ -32,7 +32,7 @@ export default function LocalImageList({ images, labels, disabled, collapsed, on
     <aside className="flex min-h-[260px] min-w-0 flex-col border-b border-slate-200 bg-slate-50/80 lg:border-b-0 lg:border-r">
       <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-3 py-3">
         <div className="min-w-0"><h2 className="text-xs font-semibold text-slate-800">{labels.localQueue}</h2><p className="mt-0.5 text-[10px] leading-4 text-slate-500">{labels.localQueueHint}</p></div>
-        <button type="button" onClick={() => onCollapsedChange(true)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#2f65cf]" aria-label="收起本地图片列表" title="收起本地图片列表"><FiChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
+        <button type="button" onClick={() => onCollapsedChange(true)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#2f65cf]" aria-label={labels.collapseLocalList} title={labels.collapseLocalList}><FiChevronLeft className="h-4 w-4" aria-hidden="true" /></button>
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {images.length ? images.map((image) => (

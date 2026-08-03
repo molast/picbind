@@ -1,6 +1,7 @@
 "use client";
 
 import { getRoomSdkConfig } from "../config";
+import { getLang, getShareRoomLabels } from "../locales";
 import type {
   RoomCompressionDimensions,
   RoomCompressionFormat,
@@ -25,7 +26,7 @@ type WorkerErrorMessage = {
 type WorkerMessage = WorkerSuccessMessage | WorkerErrorMessage;
 
 function abortError() {
-  return new DOMException("图片压缩已取消", "AbortError");
+  return new DOMException(getShareRoomLabels(getLang()).compressionCancelled, "AbortError");
 }
 
 export function compressRoomImageTask(
@@ -33,6 +34,7 @@ export function compressRoomImageTask(
   requestedFormat: RoomCompressionFormat,
   signal: AbortSignal,
   dimensions?: RoomCompressionDimensions,
+  allowAlphaLoss = false,
 ): Promise<RoomCompressionResult> {
   if (signal.aborted) return Promise.reject(abortError());
 
@@ -72,12 +74,14 @@ export function compressRoomImageTask(
     };
     worker.onerror = (event) => {
       finish(() =>
-        reject(event.error || new Error(event.message || "压缩 Worker 运行失败")),
+        reject(event.error || new Error(event.message || getShareRoomLabels(getLang()).compressionWorkerFailed)),
       );
     };
 
     worker.postMessage({
       image,
+      lang: getLang(),
+      allowAlphaLoss,
       requestedFormat,
       targetWidth: dimensions?.width,
       targetHeight: dimensions?.height,

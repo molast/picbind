@@ -132,12 +132,55 @@ function toneWeights(lightness: number) {
   };
 }
 
+export function isRoomColorAdjustmentsNeutral(settings: RoomColorAdjustments) {
+  const balanceIsNeutral = (Object.keys(settings.balance) as ColorToneRange[]).every((tone) => {
+    const axes = settings.balance[tone];
+    return axes.cyanRed === 0 && axes.magentaGreen === 0 && axes.yellowBlue === 0;
+  });
+  const curveIsNeutral = settings.curvePoints.length === 2
+    && settings.curvePoints[0].x === 0
+    && settings.curvePoints[0].y === 0
+    && settings.curvePoints[1].x === 1
+    && settings.curvePoints[1].y === 1;
+
+  return settings.brightness === 0
+    && settings.contrast === 0
+    && settings.blackPoint === 0
+    && settings.midtone === 0
+    && settings.whitePoint === 255
+    && curveIsNeutral
+    && settings.saturation === 0
+    && settings.vibrance === 0
+    && settings.hue === 0
+    && settings.temperature === 0
+    && balanceIsNeutral
+    && settings.photoFilterDensity === 0
+    && settings.selectiveHue === 0
+    && settings.selectiveSaturation === 0
+    && settings.selectiveLightness === 0
+    && !settings.replaceEnabled
+    && settings.redChannel === 0
+    && settings.greenChannel === 0
+    && settings.blueChannel === 0
+    && settings.recolorMode === "color";
+}
+
 export function buildToneCurveLut(points: ToneCurvePoint[]) {
   const sorted = [...points]
     .map((point) => ({ x: clamp(point.x, 0, 1), y: clamp(point.y, 0, 1) }))
     .sort((a, b) => a.x - b.x);
   if (sorted.length < 2) return Uint8Array.from({ length: 256 }, (_, index) => index);
   const lut = new Uint8Array(256);
+  if (sorted.length === 2) {
+    const [start, end] = sorted;
+    const span = Math.max(0.0001, end.x - start.x);
+    for (let index = 0; index < 256; index += 1) {
+      const x = index / 255;
+      const t = clamp((x - start.x) / span, 0, 1);
+      lut[index] = Math.round(clamp(start.y + (end.y - start.y) * t, 0, 1) * 255);
+    }
+    return lut;
+  }
   for (let index = 0; index < 256; index += 1) {
     const x = index / 255;
     let segment = sorted.findIndex((point, pointIndex) => pointIndex < sorted.length - 1 && x >= point.x && x <= sorted[pointIndex + 1].x);
@@ -162,6 +205,7 @@ export function buildToneCurveLut(points: ToneCurvePoint[]) {
 }
 
 export function applyRoomColorAdjustments(imageData: ImageData, settings: RoomColorAdjustments) {
+  if (isRoomColorAdjustmentsNeutral(settings)) return imageData;
   const data = imageData.data;
   const contrast = Math.max(-99, Math.min(99, settings.contrast));
   const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));

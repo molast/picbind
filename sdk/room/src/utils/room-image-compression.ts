@@ -9,6 +9,7 @@ import webpEncoderSimdWasmUrl from "@jsquash/webp/codec/enc/webp_enc_simd.wasm?u
 import avifEncoderWasmUrl from "@jsquash/avif/codec/enc/avif_enc.wasm?url";
 import avifEncoderMtWasmUrl from "@jsquash/avif/codec/enc/avif_enc_mt.wasm?url";
 import avifEncoderWorkerUrl from "@jsquash/avif/codec/enc/avif_enc_mt.worker.mjs?url";
+import { getLang, getShareRoomLabels, type Lang, type ShareRoomLabels } from "../locales";
 
 export type RoomCompressionFormat = "auto" | "jpeg" | "png" | "webp" | "avif";
 
@@ -106,6 +107,8 @@ function hasRealAlpha(image: ImageData) {
 async function encodeWasm(
   blob: Blob,
   format: "jpeg" | "png",
+  labels: ShareRoomLabels,
+  allowAlphaLoss: boolean,
   dimensions?: RoomCompressionDimensions,
 ) {
   const mod = await initWasm();
@@ -116,7 +119,7 @@ async function encodeWasm(
           input,
           82,
           format,
-          false,
+          allowAlphaLoss,
           1,
           dimensions.width,
           dimensions.height,
@@ -125,7 +128,7 @@ async function encodeWasm(
           input,
           82,
           format,
-          false,
+          allowAlphaLoss,
           1,
         );
     return resultFromHandle(handle as CompressionResultHandle);
@@ -145,12 +148,23 @@ async function encodeWasm(
         ) as CompressionResultHandle,
       );
     }
-    if (hasRealAlpha(image)) {
-      throw new Error("JPEG 不支持透明通道，请选择 WebP 或 AVIF");
+    if (hasRealAlpha(image) && !allowAlphaLoss) {
+      throw new Error(labels.jpegAlphaUnsupported);
     }
     if (dimensions) throw error;
     const canvas = new OffscreenCanvas(image.width, image.height);
-    canvas.getContext("2d")?.putImageData(image, 0, 0);
+    const context = canvas.getContext("2d", { alpha: !allowAlphaLoss });
+    if (!context) throw error;
+    if (allowAlphaLoss) {
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, image.width, image.height);
+    }
+    const bitmap = await createImageBitmap(image);
+    try {
+      context.drawImage(bitmap, 0, 0);
+    } finally {
+      bitmap.close();
+    }
     const encoded = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
     if (encoded.type !== "image/jpeg") throw error;
     return encoded;
@@ -207,7 +221,10 @@ export async function compressRoomImage(
   image: Blob & { name?: string },
   requestedFormat: RoomCompressionFormat,
   dimensions?: RoomCompressionDimensions,
+  lang: Lang = getLang(),
+  allowAlphaLoss = false,
 ): Promise<RoomCompressionResult> {
+  const labels = getShareRoomLabels(lang);
   const decoded = await decodeImage(image);
   const targetWidth = Math.round(dimensions?.width ?? decoded.width);
   const targetHeight = Math.round(dimensions?.height ?? decoded.height);
@@ -219,7 +236,7 @@ export async function compressRoomImage(
     targetWidth > 16384 ||
     targetHeight > 16384
   ) {
-    throw new Error("图片宽高必须在 1 到 16384 像素之间");
+    throw new Error(labels.imageDimensionInvalid);
   }
   const resized = targetWidth !== decoded.width || targetHeight !== decoded.height;
   let resizedImage: ImageData | undefined;
@@ -230,8 +247,8 @@ export async function compressRoomImage(
     requestedFormat === "auto"
       ? await recommendedFormat(image, resizedImage)
       : requestedFormat;
-  if (format === "jpeg" && hasRealAlpha(decoded)) {
-    throw new Error("JPEG 不支持透明通道，请选择 WebP 或 AVIF");
+  if (format === "jpeg" && hasRealAlpha(decoded) && !allowAlphaLoss) {
+    throw new Error(labels.jpegAlphaUnsupported);
   }
   let blob =
     format === "webp" || format === "avif"
@@ -245,6 +262,8 @@ export async function compressRoomImage(
       : await encodeWasm(
           image,
           format,
+          labels,
+          allowAlphaLoss,
           resized ? { width: targetWidth, height: targetHeight } : undefined,
         );
   if (!resized && format === sourceFormat(image) && blob.size >= image.size) {
