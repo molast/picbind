@@ -924,6 +924,7 @@ export default function ShareRoomPage({
     sessionIdRef,
     deletedImageIdsRef,
     imagesRef,
+    pendingShareImagesRef,
     imageReadyWaitersRef,
     addRoomImage,
     updateRoomImage,
@@ -1081,7 +1082,10 @@ export default function ShareRoomPage({
           });
           continue;
         }
-        if (file.size > maxImageTransferSizeRef.current) {
+        if (
+          maxImageTransferSizeRef.current > 0 &&
+          file.size > maxImageTransferSizeRef.current
+        ) {
           upsertActivity({
             id: `error-${Date.now()}-${file.name}`,
             kind: "error",

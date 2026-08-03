@@ -8,7 +8,7 @@ import { formatBytes, middleEllipsisFileName } from "../share-room-formatters";
 type LocalImageListProps = {
   images: RoomImage[];
   labels: ShareRoomLabels;
-  disabled: boolean;
+  outboxDisabled: boolean;
   collapsed: boolean;
   onCollapsedChange(collapsed: boolean): void;
   onChoose(): void;
@@ -16,12 +16,12 @@ type LocalImageListProps = {
   onDelete(image: RoomImage): void | Promise<void>;
 };
 
-export default function LocalImageList({ images, labels, disabled, collapsed, onCollapsedChange, onChoose, onAdd, onDelete }: LocalImageListProps) {
+export default function LocalImageList({ images, labels, outboxDisabled, collapsed, onCollapsedChange, onChoose, onAdd, onDelete }: LocalImageListProps) {
   if (collapsed) {
     return (
       <aside className="flex min-h-12 items-center justify-center border-b border-slate-200 bg-slate-50/80 lg:min-h-[260px] lg:flex-col lg:border-b-0 lg:border-r">
         <button type="button" onClick={() => onCollapsedChange(false)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-[#2f65cf]" aria-label={labels.expandLocalList} title={labels.expandLocalList}><FiChevronRight className="h-4 w-4" aria-hidden="true" /></button>
-        <button type="button" disabled={disabled} onClick={onChoose} className="relative mt-0 flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#2f65cf] disabled:opacity-35 lg:mt-2" aria-label={labels.upload} title={labels.upload}>
+        <button type="button" onClick={onChoose} className="relative mt-0 flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white hover:text-[#2f65cf] lg:mt-2" aria-label={labels.upload} title={labels.upload}>
           <FiImage className="h-4 w-4" aria-hidden="true" />
           {images.length ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2f65cf] px-1 text-[8px] font-semibold text-white">{images.length > 99 ? "99+" : images.length}</span> : null}
         </button>
@@ -45,12 +45,12 @@ export default function LocalImageList({ images, labels, disabled, collapsed, on
               <div className="mt-0.5 text-[10px] text-slate-400">{formatBytes(image.size)}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <button type="button" disabled={disabled} onClick={() => void onAdd(image)} className="flex h-7 w-7 items-center justify-center rounded text-[#2f65cf] hover:bg-blue-50 disabled:opacity-35" aria-label={labels.addToOutbox} title={labels.addToOutbox}><FiArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <button type="button" disabled={outboxDisabled} onClick={() => void onAdd(image)} className="flex h-7 w-7 items-center justify-center rounded text-[#2f65cf] hover:bg-blue-50 disabled:opacity-35" aria-label={labels.addToOutbox} title={labels.addToOutbox}><FiArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
               <button type="button" onClick={() => void onDelete(image)} className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={labels.deleteImage} title={labels.deleteImage}><FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" /></button>
             </div>
           </article>
         )) : (
-          <button type="button" disabled={disabled} onClick={onChoose} className="flex h-full min-h-40 w-full cursor-pointer flex-col items-center justify-center px-4 text-center text-slate-400 transition hover:bg-white/70 hover:text-[#2f65cf] disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-400">
+          <button type="button" onClick={onChoose} className="flex h-full min-h-40 w-full cursor-pointer flex-col items-center justify-center px-4 text-center text-slate-400 transition hover:bg-white/70 hover:text-[#2f65cf]">
             <span className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiImage className="h-5 w-5" aria-hidden="true" /></span>
             <span className="mt-3 text-xs font-semibold text-slate-700">{labels.guestEmpty}</span>
             <span className="mt-1 text-[10px] leading-4 text-slate-400">{labels.dropHint}</span>

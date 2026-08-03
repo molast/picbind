@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FiLoader, FiTerminal, FiUploadCloud } from "react-icons/fi";
+import { FiTerminal, FiUploadCloud } from "react-icons/fi";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { ActivityItem, ConnectionState, ImageReactionSignal, RoomImage } from "../share-room-types";
 import GalleryImageCard from "./gallery-image-card";
@@ -172,15 +172,10 @@ export default function GalleryWorkspace({
         <button
           type="button"
           onClick={onChooseImages}
-          disabled={isSending || connection !== "connected"}
-          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white transition hover:bg-[#2457bd]"
         >
-          {isSending ? (
-            <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <FiUploadCloud className="h-4 w-4" aria-hidden="true" />
-          )}
-          <span>{isSending ? labels.uploading : labels.upload}</span>
+          <FiUploadCloud className="h-4 w-4" aria-hidden="true" />
+          <span>{labels.upload}</span>
         </button>
         <input
           ref={inputRef}
@@ -206,17 +201,17 @@ export default function GalleryWorkspace({
         }`}
         onDragEnter={(event) => {
           event.preventDefault();
-          if (connection === "connected") onDraggingChange(true);
+          onDraggingChange(true);
         }}
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={() => onDraggingChange(false)}
         onDrop={(event) => {
           event.preventDefault();
           onDraggingChange(false);
-          if (connection === "connected") void onFiles(event.dataTransfer.files);
+          void onFiles(event.dataTransfer.files);
         }}
       >
-        <LocalImageList images={localImages} labels={labels} disabled={connection !== "connected"} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} />
+        <LocalImageList images={localImages} labels={labels} outboxDisabled={connection !== "connected"} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} />
         <section className="min-h-0 min-w-0 overflow-y-auto" aria-label={labels.outbox}>
           {versionGroups.length ? (
           <div

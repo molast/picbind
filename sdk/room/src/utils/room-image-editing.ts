@@ -1,7 +1,7 @@
 "use client";
 
 import type { ImageObjectOperation } from "./image-object";
-import { replaceFileExtension } from "./image-object";
+import { appendFileNameSuffix } from "./image-object";
 import { getLang, getShareRoomLabels } from "../locales";
 import {
   type RoomColorAdjustments,
@@ -142,8 +142,12 @@ async function decodeImage(blob: Blob) {
   }
 }
 
-function resultName(name: string, blob: Blob) {
-  return replaceFileExtension(name, MIME_EXTENSIONS[normalizedMime(blob.type)] || "png");
+function resultName(name: string, blob: Blob, suffix: string) {
+  return appendFileNameSuffix(
+    name,
+    suffix,
+    MIME_EXTENSIONS[normalizedMime(blob.type)] || "png",
+  );
 }
 
 export async function resizeRoomImage(
@@ -164,7 +168,7 @@ export async function resizeRoomImage(
     const blob = await encodeCanvas(canvas, image);
     return {
       blob,
-      name: resultName(image.name || "image", blob),
+      name: resultName(image.name || "image", blob, "resize"),
       width: targetWidth,
       height: targetHeight,
       operation: "resize",
@@ -191,7 +195,7 @@ export async function cropRoomImage(
     const blob = await encodeCanvas(canvas, image);
     return {
       blob,
-      name: resultName(image.name || "image", blob),
+      name: resultName(image.name || "image", blob, "crop"),
       width,
       height,
       operation: "crop",
@@ -212,7 +216,7 @@ export async function adjustRoomImage(
   const blob = adjusted.blob;
   return {
     blob,
-    name: resultName(image.name || "image", blob),
+    name: resultName(image.name || "image", blob, "adjust"),
     width: adjusted.width,
     height: adjusted.height,
     operation: "adjust",

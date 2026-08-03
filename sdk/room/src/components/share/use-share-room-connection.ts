@@ -127,6 +127,7 @@ type UseShareRoomConnectionOptions = {
   sessionIdRef: React.MutableRefObject<string | null>;
   deletedImageIdsRef: React.MutableRefObject<Set<string>>;
   imagesRef: React.MutableRefObject<RoomImage[]>;
+  pendingShareImagesRef: React.MutableRefObject<Map<string, CachedRoomImage>>;
   imageReadyWaitersRef: React.MutableRefObject<
     Map<string, { resolve(): void; timeoutId: number }>
   >;
@@ -170,6 +171,7 @@ export function useShareRoomConnection({
   sessionIdRef,
   deletedImageIdsRef,
   imagesRef,
+  pendingShareImagesRef,
   imageReadyWaitersRef,
   addRoomImage,
   updateRoomImage,
@@ -422,13 +424,17 @@ export function useShareRoomConnection({
         thumbnailRequests.set(id, requestKey);
         void (async () => {
           try {
-            const image = imagesRef.current.find(
-              (candidate) =>
-                candidate.id === id &&
-                candidate.direction === "sent" &&
-                !candidate.placeholderOnly,
+            const visibleImage = imagesRef.current.find(
+              (candidate) => candidate.id === id,
             );
-            if (!image) return;
+            const image = visibleImage || pendingShareImagesRef.current.get(id);
+            if (
+              !image ||
+              image.direction !== "sent" ||
+              image.placeholderOnly
+            ) {
+              return;
+            }
             const thumbnail = await generateShareThumbnail(
               image.blob,
               width,
@@ -1665,6 +1671,7 @@ export function useShareRoomConnection({
     deletedImageIdsRef,
     imageReadyWaitersRef,
     imagesRef,
+    pendingShareImagesRef,
     maxImageTransferSizeRef,
     labels,
     outgoingChannelRef,

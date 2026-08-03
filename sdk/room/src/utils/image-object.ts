@@ -105,3 +105,13 @@ export function replaceFileExtension(name: string, extension: string) {
   const stem = name.replace(/\.[^.]+$/, "") || "image";
   return `${stem}.${extension}`;
 }
+
+export function appendFileNameSuffix(
+  name: string,
+  suffix: string,
+  extension: string,
+) {
+  const stem = name.replace(/\.[^.]+$/, "") || "image";
+  const normalizedSuffix = suffix.startsWith("-") ? suffix : `-${suffix}`;
+  return `${stem}${normalizedSuffix}.${extension}`;
+}
