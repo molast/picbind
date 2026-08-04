@@ -41,6 +41,7 @@ type RoomSidebarProps = {
   role: RoomRole | null;
   members: RoomMemberPresence[];
   messagingProviders: MessagingProviderSnapshot[];
+  messagingUnreadCounts: Record<string, number>;
   selectedMessageTargetId: string | null;
   canSendText: boolean;
   canSendReaction: boolean;
@@ -70,6 +71,7 @@ export default function RoomSidebar({
   role,
   members,
   messagingProviders,
+  messagingUnreadCounts,
   selectedMessageTargetId,
   canSendText,
   canSendReaction,
@@ -281,11 +283,26 @@ export default function RoomSidebar({
                 <button
                   type="button"
                   onClick={() => onOpenMessagingChat(provider.id)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[#07c160] transition hover:bg-emerald-50"
-                  aria-label={labels.messagingOpenChat}
-                  title={labels.messagingOpenChat}
+                  className="relative flex h-7 w-7 items-center justify-center rounded-md text-[#07c160] transition hover:bg-emerald-50"
+                  aria-label={
+                    messagingUnreadCounts[provider.id]
+                      ? `${labels.messagingOpenChat}, ${labels.messagingUnreadMessages(messagingUnreadCounts[provider.id])}`
+                      : labels.messagingOpenChat
+                  }
+                  title={
+                    messagingUnreadCounts[provider.id]
+                      ? labels.messagingUnreadMessages(messagingUnreadCounts[provider.id])
+                      : labels.messagingOpenChat
+                  }
                 >
                   <FiMessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                  {messagingUnreadCounts[provider.id] ? (
+                    <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-white">
+                      {messagingUnreadCounts[provider.id] > 99
+                        ? "99+"
+                        : messagingUnreadCounts[provider.id]}
+                    </span>
+                  ) : null}
                 </button>
                 <span
                   className="block h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white"

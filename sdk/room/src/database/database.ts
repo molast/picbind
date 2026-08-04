@@ -2,6 +2,7 @@
 
 import Dexie, { type Table } from "dexie";
 import type { RoomEventItem } from "../utils/room-event";
+import { fileStorage } from "./file-storage";
 import type {
   CachedCompressedImage,
   CachedRoomImage,
@@ -38,6 +39,7 @@ export type OperationLogRecord = RoomEventItem & {
 };
 
 export type MessagingImageRecord = {
+  roomId: string;
   providerId: string;
   messageId: string;
   fileName: string;
@@ -77,7 +79,7 @@ class PicbindDatabase extends Dexie {
   roomImages!: Table<RoomImageRecord, [string, string]>;
   reviewHistories!: Table<ReviewHistoryRecord, [string, string]>;
   operationLogs!: Table<OperationLogRecord, [string, string]>;
-  messagingImages!: Table<MessagingImageRecord, [string, string]>;
+  messagingImages!: Table<MessagingImageRecord, [string, string, string]>;
   imageDeliveries!: Table<ImageDeliveryRecord, [string, string]>;
 
   constructor() {
@@ -106,6 +108,38 @@ class PicbindDatabase extends Dexie {
       operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
       messagingImages:
         "[providerId+messageId], providerId, messageId, createdAt",
+      imageDeliveries:
+        "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
+    });
+    this.version(4)
+      .stores({
+        compressedImages: "id, sourceId, createdAt",
+        queuedFiles: "id, createdAt",
+        roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
+        reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
+        operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+        messagingImages: null,
+        imageDeliveries:
+          "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
+      })
+      .upgrade(async (transaction) => {
+        const records = await transaction.table("messagingImages").toArray() as Array<{
+          filePath?: string;
+        }>;
+        await Dexie.waitFor(Promise.all(
+          records.map((record) =>
+            fileStorage.remove(record.filePath).catch(() => undefined),
+          ),
+        ));
+      });
+    this.version(5).stores({
+      compressedImages: "id, sourceId, createdAt",
+      queuedFiles: "id, createdAt",
+      roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
+      reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
+      operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+      messagingImages:
+        "[roomId+providerId+messageId], roomId, providerId, messageId, [roomId+createdAt], createdAt",
       imageDeliveries:
         "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
     });

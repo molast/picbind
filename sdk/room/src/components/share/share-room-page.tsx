@@ -281,6 +281,10 @@ export default function ShareRoomPage({
   const [messagingChatMessages, setMessagingChatMessages] = React.useState<
     WeixinChatItem[]
   >([]);
+  const [messagingUnreadCounts, setMessagingUnreadCounts] = React.useState<
+    Record<string, number>
+  >({});
+  const messagingChatProviderIdRef = React.useRef<string | null>(null);
   const [isMessagingChatSending, setIsMessagingChatSending] = React.useState(false);
   const appendMessagingChatMessage = React.useCallback((message: WeixinChatItem) => {
     setMessagingChatMessages((current) => {
@@ -296,8 +300,24 @@ export default function ShareRoomPage({
   }, []);
 
   React.useEffect(() => {
+    messagingChatProviderIdRef.current = messagingChatProviderId;
+  }, [messagingChatProviderId]);
+
+  React.useEffect(() => {
+    setMessagingUnreadCounts({});
+    messagingChatProviderIdRef.current = null;
+    setMessagingChatProviderId(null);
+    setMessagingChatMessages((current) => {
+      current.forEach((item) => {
+        if (!item.url) return;
+        URL.revokeObjectURL(item.url);
+        objectUrlsRef.current.delete(item.url);
+      });
+      return [];
+    });
+    if (!roomId) return;
     let cancelled = false;
-    void listMessagingImages()
+    void listMessagingImages(roomId)
       .then((images) => {
         if (cancelled) return;
         const cachedItems = images.map((image): WeixinChatItem => {
@@ -340,7 +360,7 @@ export default function ShareRoomPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [roomId]);
   roomIdRef.current = roomId;
   const reviewMessageSequenceRef = React.useRef(0);
   const pendingReviewMessagesRef = React.useRef<
@@ -722,8 +742,9 @@ export default function ShareRoomPage({
   }, [members, roomId]);
 
   React.useEffect(() => {
-    if (!messagingService) return;
-    return messagingService.subscribe((message) => {
+    if (!messagingService || !roomId) return;
+    let active = true;
+    const unsubscribe = messagingService.subscribe((message) => {
       const provider = messagingService
         .getProviders()
         .find((candidate) => candidate.channel === message.channel);
@@ -758,6 +779,12 @@ export default function ShareRoomPage({
         createdAt: message.timestamp || Date.now(),
         status: "sent",
       };
+      if (messagingChatProviderIdRef.current !== providerId) {
+        setMessagingUnreadCounts((current) => ({
+          ...current,
+          [providerId]: Math.min(999, (current[providerId] || 0) + 1),
+        }));
+      }
       appendMessagingChatMessage(chatItem);
       const downloadReference = message.payload.downloadUrl || message.payload.fileId;
       if (message.type === "image" && downloadReference && provider) {
@@ -767,6 +794,7 @@ export default function ShareRoomPage({
           message.payload.fileId,
         ).then(async (blob) => {
           await storeMessagingImage({
+            roomId,
             providerId,
             messageId: message.id,
             fileName: message.payload.fileName || labels.messagingImage,
@@ -778,6 +806,7 @@ export default function ShareRoomPage({
           }).catch((error) => {
             console.warn("Failed to cache Weixin image", error);
           });
+          if (!active) return;
           const url = URL.createObjectURL(blob);
           objectUrlsRef.current.add(url);
           setMessagingChatMessages((current) => current.map((item) =>
@@ -785,6 +814,7 @@ export default function ShareRoomPage({
           ));
         }).catch((error) => {
           console.warn("Failed to download Weixin image", error);
+          if (!active) return;
           setMessagingChatMessages((current) => current.map((item) =>
             item.id === message.id ? { ...item, status: "error" } : item,
           ));
@@ -792,7 +822,11 @@ export default function ShareRoomPage({
       }
       notifyInactiveTab(title);
     });
-  }, [appendMessagingChatMessage, labels.messageReceived, labels.messagingImage, messagingService, notifyInactiveTab, upsertActivity]);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [appendMessagingChatMessage, labels.messageReceived, labels.messagingImage, messagingService, notifyInactiveTab, roomId, upsertActivity]);
 
   const showFloatingEmoji = React.useCallback((id: string, emoji: string) => {
     const sequence = emojiSequenceRef.current++;
@@ -2180,7 +2214,7 @@ export default function ShareRoomPage({
     image: CachedRoomImage | RoomImage,
     recipient: Extract<ShareRecipient, { kind: "messaging" }>,
   ) => {
-    if (!messagingService || !recipient.provider.recipientId || isSending) {
+    if (!roomId || !messagingService || !recipient.provider.recipientId || isSending) {
       return false;
     }
     if (
@@ -2242,6 +2276,7 @@ export default function ShareRoomPage({
       }, true);
       const createdAt = Date.now();
       const cachedImage = {
+        roomId,
         providerId: recipient.provider.id,
         messageId,
         fileName: image.name,
@@ -2865,6 +2900,17 @@ export default function ShareRoomPage({
       ) || null
     : null;
 
+  const handleOpenMessagingChat = React.useCallback((providerId: string) => {
+    messagingChatProviderIdRef.current = providerId;
+    setMessagingUnreadCounts((current) => {
+      if (!current[providerId]) return current;
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+    setMessagingChatProviderId(providerId);
+  }, []);
+
   const handleMessagingChatSend = async (textValue: string) => {
     const provider = activeMessagingChatProvider;
     const text = textValue.trim().slice(0, 2000);
@@ -3065,6 +3111,7 @@ export default function ShareRoomPage({
       role={role}
       members={members}
       messagingProviders={messagingProviders}
+      messagingUnreadCounts={messagingUnreadCounts}
       selectedMessageTargetId={selectedMessageTargetId}
       canSendText={canSendSelectedText}
       canSendReaction={Boolean(selectedRoomMember && connection === "connected")}
@@ -3075,7 +3122,7 @@ export default function ShareRoomPage({
       labels={labels}
       onKick={handleKickMember}
       onSelectMessageTarget={setSelectedMessageTargetId}
-      onOpenMessagingChat={setMessagingChatProviderId}
+      onOpenMessagingChat={handleOpenMessagingChat}
       onTextChange={setTextMessage}
       onTextSubmit={handleTextMessage}
       onEmoji={handleEmoji}

@@ -172,6 +172,7 @@ const zh = {
   messagingConnectionLogDetail: "微信 Bot 已加入用户列表",
   messagingChat: "微信聊天",
   messagingOpenChat: "打开微信聊天",
+  messagingUnreadMessages: (count: number) => `${count} 条未读消息`,
   messagingNoMessages: "暂无微信消息",
   messagingReceivedImages: "收到的图片",
   messagingImages: "图片",

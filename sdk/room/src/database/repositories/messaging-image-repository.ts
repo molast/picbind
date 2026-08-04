@@ -6,6 +6,7 @@ import { fileStorage } from "../file-storage";
 const MAX_MESSAGING_IMAGES = 100;
 
 export type CachedMessagingImage = {
+  roomId: string;
   providerId: string;
   messageId: string;
   fileName: string;
@@ -16,15 +17,16 @@ export type CachedMessagingImage = {
   blob: Blob;
 };
 
-function imagePath(providerId: string, messageId: string) {
-  return `cache/messaging/${fileStorage.segment(providerId)}/${fileStorage.segment(messageId)}`;
+function imagePath(roomId: string, providerId: string, messageId: string) {
+  return `cache/messaging/${fileStorage.segment(roomId)}/${fileStorage.segment(providerId)}/${fileStorage.segment(messageId)}`;
 }
 
 export async function storeMessagingImage(image: CachedMessagingImage) {
   const database = getDatabase();
-  const filePath = imagePath(image.providerId, image.messageId);
+  const filePath = imagePath(image.roomId, image.providerId, image.messageId);
   await fileStorage.write(filePath, image.blob);
   await database.messagingImages.put({
+    roomId: image.roomId,
     providerId: image.providerId,
     messageId: image.messageId,
     fileName: image.fileName,
@@ -36,14 +38,16 @@ export async function storeMessagingImage(image: CachedMessagingImage) {
   });
 
   const records = await database.messagingImages
-    .orderBy("createdAt")
-    .reverse()
-    .toArray();
+    .where("roomId")
+    .equals(image.roomId)
+    .sortBy("createdAt");
+  records.reverse();
   const expired = records.slice(MAX_MESSAGING_IMAGES);
   if (!expired.length) return;
 
   await database.messagingImages.bulkDelete(
-    expired.map((record): [string, string] => [
+    expired.map((record): [string, string, string] => [
+      record.roomId,
       record.providerId,
       record.messageId,
     ]),
@@ -51,18 +55,19 @@ export async function storeMessagingImage(image: CachedMessagingImage) {
   await Promise.all(expired.map((record) => fileStorage.remove(record.filePath)));
 }
 
-export async function listMessagingImages() {
+export async function listMessagingImages(roomId: string) {
   const database = getDatabase();
   const records = await database.messagingImages
-    .orderBy("createdAt")
-    .reverse()
-    .limit(MAX_MESSAGING_IMAGES)
-    .toArray();
+    .where("roomId")
+    .equals(roomId)
+    .sortBy("createdAt");
+  const recentRecords = records.slice(-MAX_MESSAGING_IMAGES).reverse();
   const images = await Promise.all(
-    records.map(async (record): Promise<CachedMessagingImage | null> => {
+    recentRecords.map(async (record): Promise<CachedMessagingImage | null> => {
       try {
         const stored = await fileStorage.read(record.filePath);
         return {
+          roomId: record.roomId,
           providerId: record.providerId,
           messageId: record.messageId,
           fileName: record.fileName,
@@ -75,6 +80,7 @@ export async function listMessagingImages() {
       } catch (error) {
         if (error instanceof DOMException && error.name === "NotFoundError") {
           await database.messagingImages.delete([
+            record.roomId,
             record.providerId,
             record.messageId,
           ]);

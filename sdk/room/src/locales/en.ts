@@ -174,6 +174,7 @@ const en: typeof zh = {
   messagingConnectionLogDetail: "WeChat Bot joined the member list",
   messagingChat: "WeChat chat",
   messagingOpenChat: "Open WeChat chat",
+  messagingUnreadMessages: (count: number) => `${count} unread messages`,
   messagingNoMessages: "No WeChat messages yet",
   messagingReceivedImages: "Received images",
   messagingImages: "Images",
