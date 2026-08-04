@@ -83,25 +83,21 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
   async download(reference: string, fallbackFileId?: string): Promise<Blob> {
     let downloadUrl = reference;
     if (!/^https:\/\//i.test(downloadUrl)) {
-      const refreshed = await this.request<{ url: string }>(
-        `/files/${encodeURIComponent(reference)}`,
-      );
+      const refreshed = await this.refreshDownloadUrl(reference);
       downloadUrl = refreshed.url;
     }
-    let response: Response;
+    let response: Response | null = null;
+    let usedProxy = false;
     try {
       response = await fetch(downloadUrl);
-    } catch (error) {
-      if (!fallbackFileId || reference === fallbackFileId) throw error;
-      const refreshed = await this.request<{ url: string }>(
-        `/files/${encodeURIComponent(fallbackFileId)}`,
-      );
+    } catch {
+      if (!fallbackFileId) throw new Error("Messaging image download failed");
+      const refreshed = await this.refreshDownloadUrl(fallbackFileId, true);
+      usedProxy = true;
       response = await fetch(refreshed.url);
     }
-    if (!response.ok && fallbackFileId && reference !== fallbackFileId) {
-      const refreshed = await this.request<{ url: string }>(
-        `/files/${encodeURIComponent(fallbackFileId)}`,
-      );
+    if (!response.ok && fallbackFileId && !usedProxy) {
+      const refreshed = await this.refreshDownloadUrl(fallbackFileId, true);
       response = await fetch(refreshed.url);
     }
     if (!response.ok) {
@@ -109,6 +105,13 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
       throw new Error(body.error || `Messaging Gateway HTTP ${response.status}`);
     }
     return response.blob();
+  }
+
+  private refreshDownloadUrl(fileId: string, forceProxy = false) {
+    const proxy = forceProxy ? "?proxy=1" : "";
+    return this.request<{ url: string }>(
+      `/files/${encodeURIComponent(fileId)}${proxy}`,
+    );
   }
 
   private async request<T>(path: string, init?: RequestInit) {

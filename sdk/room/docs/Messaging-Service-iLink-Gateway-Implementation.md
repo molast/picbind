@@ -154,7 +154,9 @@ iLink image_item
 | 签名 URL TTL | 900 秒 |
 
 签名 URL 过期但对象仍存在时，Browser 使用 `fileId` 调用 `/files/:fileId`
-刷新链接。Alarm 删除到期对象；链接到期本身不会删除 R2 数据。
+刷新链接。R2 直链因 CORS、签名或网络原因读取失败时，Browser 使用
+`proxy=1` 强制获取 Worker 代理地址，由 Worker 从 R2 返回图片。Alarm 删除到期
+对象；链接到期本身不会删除 R2 数据。
 
 生产环境配置 R2 S3 签名凭证后返回直接 R2 URL。本地没有签名凭证时返回
 Worker 受控下载 URL，由 Worker 从本地 R2 binding 读取，行为与生产一致。

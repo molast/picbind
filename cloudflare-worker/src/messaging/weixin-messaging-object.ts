@@ -198,7 +198,10 @@ export class WeixinMessagingObject {
     if (request.method === "GET" && fileMatch) {
       const token = url.searchParams.get("token");
       if (token) return this.serveMedia(fileMatch[1], token);
-      return this.refreshMediaUrl(fileMatch[1]);
+      return this.refreshMediaUrl(
+        fileMatch[1],
+        url.searchParams.get("proxy") === "1",
+      );
     }
     if (request.method === "GET" && pathname === "/socket") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
@@ -536,7 +539,7 @@ export class WeixinMessagingObject {
     };
   }
 
-  private async refreshMediaUrl(id: string) {
+  private async refreshMediaUrl(id: string, forceProxy = false) {
     const media = (await this.mediaObjects()).find((item) => item.id === id);
     if (!media || media.expiresAt <= Date.now()) {
       return json({ error: "Messaging image expired" }, { status: 404 });
@@ -550,13 +553,18 @@ export class WeixinMessagingObject {
       ),
     );
     return json({
-      url: await this.createMediaUrl(media, ttl),
+      url: await this.createMediaUrl(media, ttl, forceProxy),
       expiresAt: media.expiresAt,
     });
   }
 
-  private async createMediaUrl(media: MediaObject, ttl: number) {
+  private async createMediaUrl(
+    media: MediaObject,
+    ttl: number,
+    forceProxy = false,
+  ) {
     if (
+      !forceProxy &&
       this.env.R2_ACCOUNT_ID?.trim() &&
       this.env.R2_ACCESS_KEY_ID?.trim() &&
       this.env.R2_SECRET_ACCESS_KEY?.trim() &&

@@ -1,4 +1,4 @@
-export const EXPECTED_WORKER_VERSION = "3.0.1";
+export const EXPECTED_WORKER_VERSION = "3.0.2";
 export const WORKER_VERSION_HEADER = "x-picbind-worker-version";
 
 export type WorkerVersionMismatch = {

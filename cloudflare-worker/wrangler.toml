@@ -44,7 +44,7 @@ tag = "v3"
 new_sqlite_classes = ["WeixinMessagingObject"]
 
 [vars]
-WORKER_VERSION = "3.0.1"
+WORKER_VERSION = "3.0.2"
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
 # Options: "p2p" forces WebRTC DataChannel, "r2" forces R2 transfer,
