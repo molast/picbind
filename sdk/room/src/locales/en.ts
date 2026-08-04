@@ -182,6 +182,7 @@ const en: typeof zh = {
   messagingMoveToImageList: "Move to image list",
   messagingMovedToImageList: "Moved to image list",
   messagingImageMoveFailed: "Failed to move image to the list",
+  messagingAvifUnsupported: "WeChat cannot send AVIF images. Convert the image to JPEG, PNG, or WebP first",
   selectShareRecipient: "Share with",
   selectShareRecipientHint: "Choose one room member or WeChat Bot",
   deliveryNotSent: "Not sent",

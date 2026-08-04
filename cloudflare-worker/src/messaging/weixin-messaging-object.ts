@@ -113,7 +113,6 @@ const IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/webp",
   "image/gif",
-  "image/avif",
 ]);
 
 function json(data: unknown, init?: ResponseInit) {
@@ -253,6 +252,9 @@ export class WeixinMessagingObject {
       return json(await this.snapshot());
     }
     if (request.method === "POST" && pathname === "/disconnect") {
+      if (this.state.getWebSockets("weixin-client").length > 0) {
+        return json(await this.snapshot());
+      }
       await this.updateRuntime({
         enabled: false,
         status: "disconnected",
@@ -282,6 +284,19 @@ export class WeixinMessagingObject {
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server, ["weixin-client"]);
       server.serializeAttachment({ connectedAt: Date.now(), clientId });
+      const [account, runtime] = await Promise.all([
+        this.state.storage.get<StoredAccount>(ACCOUNT_KEY),
+        this.runtime(),
+      ]);
+      if (account && !runtime.enabled) {
+        await this.updateRuntime({
+          enabled: true,
+          status: "connecting",
+          error: undefined,
+          failures: 0,
+        });
+        await this.scheduleNext(Date.now() + 1);
+      }
       server.send(JSON.stringify({
         type: "GATEWAY_STATUS",
         payload: await this.snapshot(),
@@ -295,6 +310,16 @@ export class WeixinMessagingObject {
     await this.cleanupMedia();
     const runtime = await this.runtime();
     if (!runtime.enabled) {
+      await this.scheduleMediaCleanupOnly();
+      return;
+    }
+    if (this.state.getWebSockets("weixin-client").length === 0) {
+      await this.updateRuntime({
+        enabled: false,
+        status: "disconnected",
+        error: undefined,
+        failures: 0,
+      });
       await this.scheduleMediaCleanupOnly();
       return;
     }
@@ -400,13 +425,21 @@ export class WeixinMessagingObject {
     }
   }
 
-  webSocketClose(
+  async webSocketClose(
     _socket: WebSocket,
     _code: number,
     _reason: string,
   ) {
     // Hibernation invokes this after the socket has closed. Closing it again
     // would forward receive-only sentinel codes such as 1005 and throw.
+    if (this.state.getWebSockets("weixin-client").length > 0) return;
+    await this.updateRuntime({
+      enabled: false,
+      status: "disconnected",
+      error: undefined,
+      failures: 0,
+    });
+    await this.scheduleMediaCleanupOnly();
   }
 
   webSocketError(socket: WebSocket) {
@@ -555,6 +588,11 @@ export class WeixinMessagingObject {
     const fileName = String(payload.name || "image").trim().slice(0, 255);
     const mimeType = String(payload.mimeType || "").trim().toLowerCase();
     const size = Number(payload.size || 0);
+    if (mimeType === "image/avif") {
+      throw new Error(
+        "Weixin does not support sending AVIF images; convert the image first",
+      );
+    }
     if (!fileName || !IMAGE_MIME_TYPES.has(mimeType)) {
       throw new Error("Unsupported image type");
     }

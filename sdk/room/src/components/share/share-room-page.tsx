@@ -92,10 +92,7 @@ import ShareRecipientDialog, {
   type ShareRecipient,
 } from "./workspace/share-recipient-dialog";
 import { useRoomTabNotifications } from "./use-room-tab-notifications";
-import type {
-  MessagingProviderSnapshot,
-  WeixinIlinkProvider,
-} from "../../messaging";
+import type { MessagingProviderSnapshot } from "../../messaging";
 import type {
   ReviewImageExport,
   ReviewImageExportOutcome,
@@ -195,6 +192,7 @@ export default function ShareRoomPage({
   const imageLikeQueueRef = React.useRef(new Map<string, number>());
   const imageLikeFlushTimerRef = React.useRef<number | null>(null);
   const messagingStatusRef = React.useRef(new Map<string, string>());
+  const messagingRoomExitStoppedRef = React.useRef(false);
   const flushImageLikeQueueRef = React.useRef<() => void>(() => undefined);
   const [lang, setLang] = React.useState<Lang>("en");
   const [roomId, setRoomId] = React.useState<string | null>(null);
@@ -225,8 +223,11 @@ export default function ShareRoomPage({
   imageDeliveriesRef.current = imageDeliveries;
   const [recipientDialogImageId, setRecipientDialogImageId] = React.useState<string | null>(null);
   const activeDeliveryIdsRef = React.useRef(new Map<string, string>());
-  const [successTip, setSuccessTip] = React.useState<string | null>(null);
-  const successTipTimerRef = React.useRef<number | null>(null);
+  const [topTip, setTopTip] = React.useState<{
+    message: string;
+    tone: "success" | "error";
+  } | null>(null);
+  const topTipTimerRef = React.useRef<number | null>(null);
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
@@ -436,20 +437,18 @@ export default function ShareRoomPage({
     const refresh = () => setMessagingProviders(messagingService.getProviders());
     refresh();
     const unsubscribe = messagingService.subscribeStatus(refresh);
-    const provider = messagingService.getProvider("weixin-ilink") as
-      | WeixinIlinkProvider
-      | undefined;
-    if (provider) {
-      void provider.getGatewayStatus().then((status) => {
-        if (status.configured && provider.getSnapshot().status === "disconnected") {
-          return messagingService.startProvider(provider.id);
-        }
-        return undefined;
-      }).catch((error) => {
-        console.warn("Failed to restore Weixin messaging connection", error);
-      });
-    }
     return unsubscribe;
+  }, [messagingService]);
+
+  const stopMessagingForRoomExit = React.useCallback(async () => {
+    if (!messagingService || messagingRoomExitStoppedRef.current) return;
+    messagingRoomExitStoppedRef.current = true;
+    try {
+      await messagingService.stopProvider("weixin-ilink");
+    } catch (error) {
+      messagingRoomExitStoppedRef.current = false;
+      console.warn("Failed to stop Weixin messaging after leaving the room", error);
+    }
   }, [messagingService]);
 
   React.useEffect(() => {
@@ -619,20 +618,28 @@ export default function ShareRoomPage({
     return delivery;
   }, [labels, latestImageDelivery, roomId, saveImageDelivery]);
 
-  const showSuccessTip = React.useCallback((message: string) => {
-    setSuccessTip(message);
-    if (successTipTimerRef.current !== null) {
-      window.clearTimeout(successTipTimerRef.current);
+  const showTopTip = React.useCallback((message: string, tone: "success" | "error") => {
+    setTopTip({ message, tone });
+    if (topTipTimerRef.current !== null) {
+      window.clearTimeout(topTipTimerRef.current);
     }
-    successTipTimerRef.current = window.setTimeout(() => {
-      successTipTimerRef.current = null;
-      setSuccessTip(null);
+    topTipTimerRef.current = window.setTimeout(() => {
+      topTipTimerRef.current = null;
+      setTopTip(null);
     }, 3000);
   }, []);
+  const showSuccessTip = React.useCallback(
+    (message: string) => showTopTip(message, "success"),
+    [showTopTip],
+  );
+  const showErrorTip = React.useCallback(
+    (message: string) => showTopTip(message, "error"),
+    [showTopTip],
+  );
 
   React.useEffect(() => () => {
-    if (successTipTimerRef.current !== null) {
-      window.clearTimeout(successTipTimerRef.current);
+    if (topTipTimerRef.current !== null) {
+      window.clearTimeout(topTipTimerRef.current);
     }
   }, []);
 
@@ -2176,6 +2183,21 @@ export default function ShareRoomPage({
     if (!messagingService || !recipient.provider.recipientId || isSending) {
       return false;
     }
+    if (
+      image.type.toLowerCase() === "image/avif" ||
+      /\.avif$/i.test(image.name)
+    ) {
+      const createdAt = Date.now();
+      showErrorTip(labels.messagingAvifUnsupported);
+      upsertActivity({
+        id: `messaging-avif-unsupported-${image.id}-${createdAt}`,
+        kind: "error",
+        title: image.name,
+        detail: labels.messagingAvifUnsupported,
+        createdAt,
+      });
+      return false;
+    }
     const delivery = beginImageDelivery(image, recipient);
     if (!delivery) return false;
     setIsSending(true);
@@ -2763,6 +2785,7 @@ export default function ShareRoomPage({
       } else {
         await leaveRealtimeRoom(roomId, sessionId);
       }
+      await stopMessagingForRoomExit();
       clearRoomPageState(roomId);
       roomExitHandledRef.current = true;
       setIsExitDialogOpen(false);
@@ -3073,14 +3096,23 @@ export default function ShareRoomPage({
   return (
     <>
       <WorkerVersionWarning />
-      {successTip ? (
+      {topTip ? (
         <div
-          className="pointer-events-none fixed left-1/2 top-4 z-[200] flex max-w-[min(90vw,420px)] -translate-x-1/2 items-center gap-2 rounded-md border border-emerald-200 bg-white px-4 py-2.5 text-sm font-medium text-emerald-700 shadow-lg"
+          className={`pointer-events-none fixed left-1/2 top-4 z-[200] flex max-w-[min(90vw,520px)] -translate-x-1/2 items-center gap-2 rounded-md border bg-white px-4 py-2.5 text-sm font-medium shadow-lg ${
+            topTip.tone === "error"
+              ? "border-red-200 text-red-700"
+              : "border-emerald-200 text-emerald-700"
+          }`}
           role="status"
           aria-live="polite"
         >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-          <span className="truncate">{successTip}</span>
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              topTip.tone === "error" ? "bg-red-500" : "bg-emerald-500"
+            }`}
+            aria-hidden="true"
+          />
+          <span>{topTip.message}</span>
         </div>
       ) : null}
       {!embedded && isMinimized ? (

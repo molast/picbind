@@ -180,6 +180,7 @@ const zh = {
   messagingMoveToImageList: "移入图片列表",
   messagingMovedToImageList: "已移入图片列表",
   messagingImageMoveFailed: "图片移入列表失败",
+  messagingAvifUnsupported: "微信暂不支持发送 AVIF 图片，请先转换为 JPEG、PNG 或 WebP",
   selectShareRecipient: "分享给谁",
   selectShareRecipientHint: "选择一个用户或微信 Bot 接收这张图片",
   deliveryNotSent: "未发送",

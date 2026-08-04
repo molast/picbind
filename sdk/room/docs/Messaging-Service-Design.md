@@ -256,6 +256,9 @@ WebSocket 上行 RPC：
 
 WebSocket 使用 Durable Object Hibernation，不发送应用层心跳。Browser 通过原生
 `open`、`close`、`error` 事件维护状态，断线后以 1 秒起步、最高 30 秒的指数退避重连。
+最后一个 Browser 消息 WebSocket 关闭后，Worker 停止 iLink Alarm 轮询；如果同一用户
+仍有其他 Room 标签页连接则继续轮询。每次 Alarm 执行前也会检查连接数，避免异常关闭
+遗漏清理。网络断线重连建立新 WebSocket 后恢复轮询。
 
 ## 7. 扫码与长轮询生命周期
 
@@ -267,7 +270,7 @@ WebSocket 使用 Durable Object Hibernation，不发送应用层心跳。Browser
 4. Browser 每 1.5 秒查询一次登录 Session。
 5. 用户在微信确认后，Worker 保存账号记录。
 6. Worker 将状态设为 `connecting`，设置 Alarm 并开始拉取消息。
-7. Room 再次打开时，如果 `/status` 已配置，会自动恢复 Provider 连接。
+7. Room 再次打开时保持 Browser Provider 断开；用户点击“连接”后才建立 WebSocket。
 
 二维码 Session 默认 8 分钟过期。原始 Bot token 永远不会返回 Browser。
 
@@ -347,8 +350,10 @@ Room 图片
   -> Worker 删除 R2 对象和待上传记录
 ```
 
-支持 JPEG、PNG、WebP、GIF 和 AVIF。默认单图上限为 20 MB，同一 Client ID 最多保留
-8 个待上传记录。待上传记录和出站 R2 对象 15 分钟过期；发送成功或失败都会清理。
+向微信发送支持 JPEG、PNG、WebP 和 GIF。微信 CDN 不接受 AVIF，Room 会在上传 R2
+之前拦截并提示先转换格式，Worker 也会拒绝旧客户端提交的 AVIF。接收微信图片仍支持
+识别 AVIF。默认单图上限为 20 MB，同一 Client ID 最多保留 8 个待上传记录。待上传
+记录和出站 R2 对象 15 分钟过期；发送成功或失败都会清理。
 
 iLink 图片发送使用随机 16 字节 AES Key。传给 iLink 的 `aes_key` 是
 `base64(hex(aesKey))`，不能改成原始 AES 字节的 Base64。
@@ -397,6 +402,7 @@ R2 对象关联数据。
 ## 11. Room UI 与业务行为
 
 - 顶部消息服务入口用于扫码、连接、断开和查看 Provider 状态。
+- 用户确认离开或关闭 Room 时停止微信轮询；最小化 Room 仍保持连接和轮询。
 - 微信 Bot 在 Room 用户区显示为只支持发送消息的 Bot 用户，不能作为普通 Room 成员。
 - 点击 Bot 打开独立聊天弹窗；聊天区显示文本和图片消息，右侧显示图片列表。
 - 图片消息气泡只显示图片图标和文件名；点击后定位右侧图片。
