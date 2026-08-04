@@ -755,6 +755,7 @@ export function useShareRoomConnection({
       for (const image of imagesRef.current) {
         if (
           image.direction !== "sent" ||
+          image.workspaceLocation !== "outbox" ||
           image.previewOnly ||
           image.placeholderOnly ||
           (image.operation !== "original" &&

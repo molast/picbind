@@ -48,7 +48,7 @@ export type IlinkGatewayTransport = {
 export class WeixinIlinkProvider implements MessageProvider {
   readonly id = "weixin-ilink";
   readonly channel = "wechat" as const;
-  readonly displayName = "Weixin iLink";
+  readonly displayName = "Weixin";
 
   private status: MessageProviderStatus = "disconnected";
   private error: string | undefined;

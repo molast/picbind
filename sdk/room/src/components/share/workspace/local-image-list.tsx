@@ -8,7 +8,6 @@ import { formatBytes, middleEllipsisFileName } from "../share-room-formatters";
 type LocalImageListProps = {
   images: RoomImage[];
   labels: ShareRoomLabels;
-  outboxDisabled: boolean;
   collapsed: boolean;
   onCollapsedChange(collapsed: boolean): void;
   onChoose(): void;
@@ -16,7 +15,7 @@ type LocalImageListProps = {
   onDelete(image: RoomImage): void | Promise<void>;
 };
 
-export default function LocalImageList({ images, labels, outboxDisabled, collapsed, onCollapsedChange, onChoose, onAdd, onDelete }: LocalImageListProps) {
+export default function LocalImageList({ images, labels, collapsed, onCollapsedChange, onChoose, onAdd, onDelete }: LocalImageListProps) {
   if (collapsed) {
     return (
       <aside className="flex min-h-12 items-center justify-center border-b border-slate-200 bg-slate-50/80 lg:min-h-[260px] lg:flex-col lg:border-b-0 lg:border-r">
@@ -45,7 +44,7 @@ export default function LocalImageList({ images, labels, outboxDisabled, collaps
               <div className="mt-0.5 text-[10px] text-slate-400">{formatBytes(image.size)}</div>
             </div>
             <div className="flex flex-col gap-1">
-              <button type="button" disabled={outboxDisabled} onClick={() => void onAdd(image)} className="flex h-7 w-7 items-center justify-center rounded text-[#2f65cf] hover:bg-blue-50 disabled:opacity-35" aria-label={labels.addToOutbox} title={labels.addToOutbox}><FiArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <button type="button" onClick={() => void onAdd(image)} className="flex h-7 w-7 items-center justify-center rounded text-[#2f65cf] hover:bg-blue-50" aria-label={labels.addToOutbox} title={labels.addToOutbox}><FiArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
               <button type="button" onClick={() => void onDelete(image)} className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label={labels.deleteImage} title={labels.deleteImage}><FiTrash2 className="h-3.5 w-3.5" aria-hidden="true" /></button>
             </div>
           </article>

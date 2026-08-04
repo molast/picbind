@@ -86,6 +86,7 @@ import {
   type ImageWanted,
 } from "../../utils/image-workspace-messages";
 import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
+import ShareRecipientDialog from "./workspace/share-recipient-dialog";
 import { useRoomTabNotifications } from "./use-room-tab-notifications";
 import type {
   MessagingProviderSnapshot,
@@ -218,6 +219,11 @@ export default function ShareRoomPage({
   const [textMessage, setTextMessage] = React.useState("");
   const [selectedMessageTargetId, setSelectedMessageTargetId] =
     React.useState<string | null>(null);
+  const [isShareRecipientDialogOpen, setIsShareRecipientDialogOpen] =
+    React.useState(false);
+  const shareRecipientResolverRef = React.useRef<
+    ((selected: boolean) => void) | null
+  >(null);
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
   const [isInternallyMinimized, setIsInternallyMinimized] = React.useState(false);
@@ -496,9 +502,10 @@ export default function ShareRoomPage({
         )
         .map((member) => `room:${member.clientId}`),
     ];
-    setSelectedMessageTargetId((current) =>
-      current && targets.includes(current) ? current : targets[0] || null,
-    );
+    setSelectedMessageTargetId((current) => {
+      if (current && targets.includes(current)) return current;
+      return targets.length === 1 ? targets[0] : null;
+    });
   }, [members, roomId]);
 
   React.useEffect(() => {
@@ -1295,9 +1302,6 @@ export default function ShareRoomPage({
 
   const moveImageToOutbox = async (image: RoomImage) => {
     const channel = instructionChannelRef.current;
-    if (connection !== "connected" || channel?.readyState !== "open") {
-      throw new Error(labels.realtimeNotConnected);
-    }
     const file = new File([image.blob], image.name, { type: image.type });
     const queuedAt = Date.now();
     const queuedImage = {
@@ -1333,16 +1337,19 @@ export default function ShareRoomPage({
       },
       true,
     );
-    sendImagePlaceholderPending(channel, meta);
     try {
       const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
-      const activeChannel = instructionChannelRef.current;
-      if (activeChannel?.readyState !== "open") throw new Error(labels.imageCommandDisconnected);
-      sendImagePlaceholder(activeChannel, meta, placeholder);
       updateRoomImage(image.id, { placeholder }, true);
+      const activeChannel = instructionChannelRef.current;
+      if (connection === "connected" && activeChannel?.readyState === "open") {
+        sendImagePlaceholderPending(activeChannel, meta);
+        sendImagePlaceholder(activeChannel, meta, placeholder);
+      }
     } catch (error) {
       const activeChannel = instructionChannelRef.current;
-      if (activeChannel) sendImageDelete(activeChannel, image.id);
+      if (activeChannel?.readyState === "open") {
+        sendImageDelete(activeChannel, image.id);
+      }
       updateRoomImage(image.id, { workspaceLocation: "library", transferStatus: "failed" }, true);
       throw error;
     }
@@ -1358,8 +1365,7 @@ export default function ShareRoomPage({
 
   const handleMoveToLibrary = async (image: RoomImage) => {
     const channel = instructionChannelRef.current;
-    if (connection !== "connected" || channel?.readyState !== "open") return;
-    sendImageDelete(channel, image.id);
+    if (channel?.readyState === "open") sendImageDelete(channel, image.id);
     updateRoomImage(
       image.id,
       {
@@ -1779,6 +1785,60 @@ export default function ShareRoomPage({
     void addFilesToGallery(fileList);
   };
 
+  const onlineShareRecipients = React.useMemo(() => {
+    const currentClientId = roomId ? getShareRoomClientId(roomId) : null;
+    return members.filter(
+      (member) =>
+        member.status === "online" && member.clientId !== currentClientId,
+    );
+  }, [members, roomId]);
+
+  const closeShareRecipientDialog = React.useCallback(() => {
+    setIsShareRecipientDialogOpen(false);
+    shareRecipientResolverRef.current?.(false);
+    shareRecipientResolverRef.current = null;
+  }, []);
+
+  const selectShareRecipient = React.useCallback(
+    (member: RoomMemberPresence) => {
+      setSelectedMessageTargetId(`room:${member.clientId}`);
+      setIsShareRecipientDialogOpen(false);
+      shareRecipientResolverRef.current?.(true);
+      shareRecipientResolverRef.current = null;
+    },
+    [],
+  );
+
+  const ensureShareRecipient = React.useCallback(() => {
+    if (onlineShareRecipients.length === 0) return Promise.resolve(false);
+    if (onlineShareRecipients.length === 1) {
+      setSelectedMessageTargetId(`room:${onlineShareRecipients[0].clientId}`);
+      return Promise.resolve(true);
+    }
+    const selectedClientId = selectedMessageTargetId?.startsWith("room:")
+      ? selectedMessageTargetId.slice("room:".length)
+      : null;
+    if (
+      selectedClientId &&
+      onlineShareRecipients.some((member) => member.clientId === selectedClientId)
+    ) {
+      return Promise.resolve(true);
+    }
+    shareRecipientResolverRef.current?.(false);
+    setIsShareRecipientDialogOpen(true);
+    return new Promise<boolean>((resolve) => {
+      shareRecipientResolverRef.current = resolve;
+    });
+  }, [onlineShareRecipients, selectedMessageTargetId]);
+
+  React.useEffect(
+    () => () => {
+      shareRecipientResolverRef.current?.(false);
+      shareRecipientResolverRef.current = null;
+    },
+    [],
+  );
+
   const goCompressImages = async (files: File[] = []) => {
     if (files.length) await queueFilesForCompression(files);
     if (role === "owner") await handleTemporaryLeave();
@@ -1786,6 +1846,7 @@ export default function ShareRoomPage({
   };
 
   const handleSendImage = async (image: RoomImage) => {
+    if (!(await ensureShareRecipient())) return;
     const controlChannel = instructionChannelRef.current;
     const fileChannel = outgoingChannelRef.current;
     if (
@@ -1942,6 +2003,7 @@ export default function ShareRoomPage({
     image: CachedRoomImage | RoomImage,
     deferUntilAccepted = false,
   ) => {
+    if (!(await ensureShareRecipient())) return false;
     const channel = instructionChannelRef.current;
     if (
       channel?.readyState !== "open" ||
@@ -2649,6 +2711,13 @@ export default function ShareRoomPage({
         thumbnail={incomingShareThumbnail}
         onPlaceholderMeasured={handlePlaceholderMeasured}
         onDecision={handleShareDecision}
+      />
+      <ShareRecipientDialog
+        open={isShareRecipientDialogOpen}
+        members={onlineShareRecipients}
+        labels={labels}
+        onSelect={selectShareRecipient}
+        onClose={closeShareRecipientDialog}
       />
       <MessagingServiceDialog
         open={isMessagingServiceOpen}

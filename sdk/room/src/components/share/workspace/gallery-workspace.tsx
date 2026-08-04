@@ -211,7 +211,7 @@ export default function GalleryWorkspace({
           void onFiles(event.dataTransfer.files);
         }}
       >
-        <LocalImageList images={localImages} labels={labels} outboxDisabled={connection !== "connected"} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} />
+        <LocalImageList images={localImages} labels={labels} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} />
         <section className="min-h-0 min-w-0 overflow-y-auto" aria-label={labels.outbox}>
           {versionGroups.length ? (
           <div

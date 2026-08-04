@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const workerDir = join(rootDir, "cloudflare-worker");
 const webDir = join(rootDir, "web");
+const messagingDir = join(rootDir, "messaging-service");
 const isWindows = process.platform === "win32";
 const packageManager = "pnpm";
 const children = new Map();
@@ -71,8 +72,33 @@ function ensureLocalWorkerVariables() {
   copyFileSync(example, target);
 }
 
-function start(name, cwd) {
-  const child = spawn(packageManager, ["dev"], {
+function ensureMessagingGateway() {
+  const binDir = join(messagingDir, "node_modules", ".bin");
+  const tscBin = join(binDir, isWindows ? "tsc.CMD" : "tsc");
+  if (!existsSync(tscBin)) {
+    console.log("Installing workspace dependencies for Messaging Gateway...");
+    const install = run(packageManager, ["install", "--frozen-lockfile"], {
+      cwd: webDir,
+      env: { ...process.env, CI: process.env.CI ?? "true" },
+    });
+    if (install.status !== 0 || !existsSync(tscBin)) {
+      console.error("Failed to install Messaging Gateway dependencies.");
+      process.exit(install.status ?? 1);
+    }
+  }
+
+  console.log("Building Messaging Gateway...");
+  const build = run(tscBin, ["-p", "tsconfig.gateway.json"], {
+    cwd: messagingDir,
+  });
+  if (build.status !== 0) {
+    console.error("Failed to build Messaging Gateway.");
+    process.exit(build.status ?? 1);
+  }
+}
+
+function start(name, cwd, command = packageManager, args = ["run", "dev"]) {
+  const child = spawn(command, args, {
     cwd,
     env: process.env,
     stdio: "inherit",
@@ -146,5 +172,10 @@ process.once("SIGTERM", () => void shutdown(143));
 ensurePnpm();
 ensureWorkerDependencies();
 ensureLocalWorkerVariables();
+ensureMessagingGateway();
 start("Local Worker", workerDir);
 start("Web app", webDir);
+start("Messaging Gateway", messagingDir, process.execPath, [
+  "--enable-source-maps",
+  join(messagingDir, "gateway-dist", "server.js"),
+]);
