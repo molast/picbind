@@ -1,6 +1,6 @@
 {
   "name": "picbind-local-api",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "private": true,
   "scripts": {
     "dev": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler dev --local --port 8787 --persist-to .wrangler/state",

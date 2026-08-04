@@ -154,6 +154,10 @@ function boundedSeconds(value: string | undefined, fallback: number, max: number
     : fallback;
 }
 
+function isSessionExpiredError(message?: string) {
+  return message?.toLowerCase().includes("session expired") ?? false;
+}
+
 function randomBase64Url(byteLength: number) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
   let binary = "";
@@ -225,8 +229,20 @@ export class WeixinMessagingObject {
       return this.pollLogin(decodeURIComponent(loginMatch[1]));
     }
     if (request.method === "POST" && pathname === "/connect") {
-      const account = await this.state.storage.get<StoredAccount>(ACCOUNT_KEY);
-      if (!account) return json({ error: "Weixin has not been configured" }, { status: 409 });
+      const [account, runtime] = await Promise.all([
+        this.state.storage.get<StoredAccount>(ACCOUNT_KEY),
+        this.runtime(),
+      ]);
+      if (!account) {
+        return json({ error: "Weixin has not been configured" }, { status: 409 });
+      }
+      if (isSessionExpiredError(runtime.error)) {
+        await this.state.storage.delete(ACCOUNT_KEY);
+        return json(
+          { error: "Weixin session expired; scan the QR code again" },
+          { status: 409 },
+        );
+      }
       await this.updateRuntime({
         enabled: true,
         status: "connecting",
@@ -329,8 +345,9 @@ export class WeixinMessagingObject {
       await this.scheduleNext(Date.now() + 100);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const expired = message.includes("session expired");
+      const expired = isSessionExpiredError(message);
       const failures = runtime.failures + 1;
+      if (expired) await this.state.storage.delete(ACCOUNT_KEY);
       await this.updateRuntime({
         enabled: !expired,
         status: "error",
@@ -401,11 +418,12 @@ export class WeixinMessagingObject {
       this.state.storage.get<StoredAccount>(ACCOUNT_KEY),
       this.runtime(),
     ]);
+    const configured = Boolean(account) && !isSessionExpiredError(runtime.error);
     return {
-      configured: Boolean(account),
+      configured,
       status: runtime.status,
-      accountId: account?.accountId,
-      userId: account?.userId,
+      accountId: configured ? account?.accountId : undefined,
+      userId: configured ? account?.userId : undefined,
       lastPollSuccessAt: runtime.lastPollSuccessAt,
       error: runtime.error,
     };

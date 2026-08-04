@@ -37,6 +37,7 @@ export default function MessagingServiceDialog({
   const [login, setLogin] = React.useState<IlinkLoginSession | null>(null);
 
   const weixinProvider = service?.getProvider("weixin-ilink") as WeixinIlinkProvider | undefined;
+  const weixinSnapshot = providers.find((provider) => provider.id === "weixin-ilink");
 
   React.useEffect(() => {
     if (!open) {
@@ -55,7 +56,12 @@ export default function MessagingServiceDialog({
       if (active) setError(reason instanceof Error ? reason.message : String(reason));
     });
     return () => { active = false; };
-  }, [open, weixinProvider]);
+  }, [
+    open,
+    weixinProvider,
+    weixinSnapshot?.error,
+    weixinSnapshot?.status,
+  ]);
 
   React.useEffect(() => {
     if (!open || !weixinProvider || !login || !new Set(["qr_pending", "scanned"]).has(login.state)) return;
