@@ -111,14 +111,29 @@ through the Worker. Set `FILE_TRANSFER_MODE="r2"` to force R2 during testing,
 `"p2p"` to force DataChannel transfer, or `"auto"` to select R2 when the RTT
 reported at Send time exceeds `R2_RTT_THRESHOLD_MS`.
 
-The R2 bucket must allow browser uploads and downloads. Configure bucket CORS
-for the deployed site origin, including preview origins when needed:
+The R2 bucket must allow browser uploads and downloads. The checked-in
+`r2-cors.json` includes the production, standalone Room, and local development
+origins. Apply it to the remote bucket after changing any allowed origin:
+
+```bash
+pnpm run r2:cors:apply
+```
+
+The active policy is equivalent to:
 
 ```json
 [
   {
-    "AllowedOrigins": ["https://picbind.com"],
-    "AllowedMethods": ["GET", "PUT"],
+    "AllowedOrigins": [
+      "https://picbind.com",
+      "https://www.picbind.com",
+      "https://room.picbind.com",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:4174",
+      "http://127.0.0.1:4174"
+    ],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
     "AllowedHeaders": ["Content-Type"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3600
