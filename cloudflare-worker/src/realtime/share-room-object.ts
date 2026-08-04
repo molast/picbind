@@ -912,15 +912,14 @@ export class ShareRoomObject {
 
   async webSocketClose(
     socket: WebSocket,
-    code: number,
-    reason: string,
-    wasClean: boolean,
+    _code: number,
+    _reason: string,
+    _wasClean: boolean,
   ) {
     const sessionId = (
       socket.deserializeAttachment() as { sessionId?: string } | null
     )?.sessionId;
     if (sessionId) this.socketPresencePersistedAt.delete(sessionId);
-    socket.close(code, reason);
     this.broadcastSocketState();
   }
 

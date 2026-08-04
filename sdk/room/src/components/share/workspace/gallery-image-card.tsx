@@ -13,7 +13,7 @@ import {
   FiTrash2,
   FiXCircle,
 } from "react-icons/fi";
-import { TbBookmarkFilled, TbBookmarkPlus, TbDevicesShare, TbHeartFilled, TbPinned, TbPinnedFilled, TbWorldShare } from "react-icons/tb";
+import { TbBookmarkFilled, TbBookmarkPlus, TbHeartFilled, TbPinned, TbPinnedFilled } from "react-icons/tb";
 import RoomImageMedia from "../room-image-media";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { ConnectionState, ImageReactionSignal, RoomImage } from "../share-room-types";
@@ -144,26 +144,6 @@ export default function GalleryImageCard({
     image.transferStatus ||
     (image.direction === "sent" ? "sent" : "received");
   const progress = Math.round((image.progress || 0) * 100);
-  const statusLabel =
-    status === "waiting"
-      ? image.direction === "sent"
-        ? image.placeholder
-          ? labels.waitingToSend
-          : labels.preparingPreview
-        : labels.waitingForSender
-      : status === "sending"
-        ? `${labels.sending} ${progress}%`
-        : status === "receiving"
-          ? `${labels.receiving} ${progress}%`
-          : status === "awaiting-receipt"
-            ? labels.awaitingReceipt
-            : status === "failed"
-              ? labels.transferFailed
-              : status === "cancelled"
-                ? labels.transferCancelled
-              : status === "sent"
-                ? labels.sent
-                : labels.received;
   const showProgress =
     status === "sending" ||
     status === "receiving" ||
@@ -171,14 +151,15 @@ export default function GalleryImageCard({
   const canReview = canReviewRoomImage(image);
   const isLocalImage = image.direction === "sent";
   const canLike = image.direction === "received";
+  const transferActive =
+    status === "sending" ||
+    status === "receiving" ||
+    status === "awaiting-receipt" ||
+    image.shareStatus === "transferring";
   const sendReady =
-    isLocalImage &&
-    Boolean(image.placeholder) &&
-    image.shareStatus !== "awaiting-response" &&
-    image.shareStatus !== "accepted" &&
-    image.shareStatus !== "transferring" &&
-    (status === "waiting" || status === "failed" || status === "cancelled");
-  const sendComplete = isLocalImage && status === "sent";
+    !image.previewOnly &&
+    !image.placeholderOnly &&
+    image.blob.size > 0;
   const enteredFromLibrary = image.outboxOrigin === "library";
   const canRemove = enteredFromLibrary
     ? isLocalImage &&
@@ -436,28 +417,6 @@ export default function GalleryImageCard({
           <span className="flex min-w-0 flex-1 flex-col justify-center gap-1">
             <span className="flex items-center gap-1.5">
               <span>{formatBytes(image.size)}</span>
-              {image.transferMode ? (
-                <span
-                  className={`inline-flex h-5 w-5 items-center justify-center rounded ${
-                    image.transferMode === "r2"
-                      ? "bg-amber-50 text-amber-700"
-                      : "bg-emerald-50 text-emerald-700"
-                  }`}
-                  title={
-                    image.transferMode === "r2" ? labels.r2Mode : labels.p2pMode
-                  }
-                  role="img"
-                  aria-label={
-                    image.transferMode === "r2" ? labels.r2Mode : labels.p2pMode
-                  }
-                >
-                  {image.transferMode === "r2" ? (
-                    <TbWorldShare className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : (
-                    <TbDevicesShare className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                </span>
-              ) : null}
             </span>
             <span
               className={`flex h-3 w-full max-w-40 items-center gap-1.5 transition-opacity ${showProgress ? "opacity-100" : "pointer-events-none opacity-0"}`}
@@ -473,7 +432,7 @@ export default function GalleryImageCard({
             </span>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
-            {isLocalImage && status === "sending" ? (
+            {transferActive ? (
               <button
                 type="button"
                 onClick={() => onCancelTransfer(image)}
@@ -483,29 +442,17 @@ export default function GalleryImageCard({
               >
                 <FiXCircle className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-            ) : isLocalImage && sendReady ? (
+            ) : (
               <button
                 type="button"
                 onClick={() => void onSend(image)}
-                disabled={isSending || !canSend}
+                disabled={!sendReady || isSending || !canSend}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#2f65cf] text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={labels.send}
                 title={labels.send}
               >
                 <FiSend className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-            ) : (
-              <span className={`${sendComplete ? "font-semibold text-emerald-600" : ""}`}>
-                {sendComplete
-                  ? labels.sent
-                  : isLocalImage && image.shareStatus === "awaiting-response"
-                    ? labels.waitingPeerConfirmation
-                    : isLocalImage && image.shareStatus === "accepted"
-                      ? labels.peerAccepted
-                      : isLocalImage && image.shareStatus === "rejected"
-                        ? labels.peerRejected
-                        : statusLabel}
-              </span>
             )}
             {downloadReady ? (
               <a

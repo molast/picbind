@@ -88,6 +88,7 @@ import {
 } from "../../utils/image-workspace-messages";
 import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
 import ShareRecipientDialog, {
+  getShareRecipientLabel,
   type ShareRecipient,
 } from "./workspace/share-recipient-dialog";
 import { useRoomTabNotifications } from "./use-room-tab-notifications";
@@ -105,6 +106,13 @@ import {
   listOperationLogs,
   upsertOperationLog,
 } from "../../database/repositories/operation-log-repository";
+import {
+  deleteImageDeliveries,
+  listImageDeliveries,
+  upsertImageDelivery,
+  type ImageDelivery,
+  type ImageDeliveryStatus,
+} from "../../database/repositories/image-delivery-repository";
 import {
   listMessagingImages,
   storeMessagingImage,
@@ -180,6 +188,8 @@ export default function ShareRoomPage({
     new Map<string, AbortController>(),
   );
   const outgoingShareRequestsRef = React.useRef(new Map<string, string>());
+  const outgoingShareRecipientsRef = React.useRef(new Map<string, ShareRecipient>());
+  const outgoingShareDeliveryIdsRef = React.useRef(new Map<string, string>());
   const pendingShareImagesRef = React.useRef(new Map<string, CachedRoomImage>());
   const seenShareRequestsRef = React.useRef(new Set<string>());
   const imageLikeQueueRef = React.useRef(new Map<string, number>());
@@ -210,6 +220,13 @@ export default function ShareRoomPage({
   const [members, setMembers] = React.useState<RoomMemberPresence[]>([]);
   const [activities, setActivities] = React.useState<ActivityItem[]>([]);
   const [operationLogs, setOperationLogs] = React.useState<ActivityItem[]>([]);
+  const [imageDeliveries, setImageDeliveries] = React.useState<ImageDelivery[]>([]);
+  const imageDeliveriesRef = React.useRef<ImageDelivery[]>([]);
+  imageDeliveriesRef.current = imageDeliveries;
+  const [recipientDialogImageId, setRecipientDialogImageId] = React.useState<string | null>(null);
+  const activeDeliveryIdsRef = React.useRef(new Map<string, string>());
+  const [successTip, setSuccessTip] = React.useState<string | null>(null);
+  const successTipTimerRef = React.useRef<number | null>(null);
   const [images, setImages] = React.useState<RoomImage[]>([]);
   const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const [reviewImageId, setReviewImageId] = React.useState<string | null>(null);
@@ -247,7 +264,7 @@ export default function ShareRoomPage({
   const incomingShareRequestRef = React.useRef<ImageShareRequest | null>(null);
   const [incomingShareThumbnail, setIncomingShareThumbnail] = React.useState<Blob | null>(null);
   const [acceptedShareImage, setAcceptedShareImage] =
-    React.useState<RoomImage | null>(null);
+    React.useState<{ image: RoomImage; recipient: ShareRecipient } | null>(null);
   const [imageReactionSignals, setImageReactionSignals] = React.useState<
     Record<string, ImageReactionSignal>
   >({});
@@ -524,6 +541,141 @@ export default function ShareRoomPage({
       });
     }
   }, []);
+
+  const saveImageDelivery = React.useCallback((delivery: ImageDelivery) => {
+    const current = imageDeliveriesRef.current;
+    const index = current.findIndex((item) => item.id === delivery.id);
+    const next = index === -1 ? [...current, delivery] : [...current];
+    if (index !== -1) {
+      next[index] = delivery;
+    }
+    imageDeliveriesRef.current = next;
+    setImageDeliveries(next);
+    void upsertImageDelivery(delivery).catch((error) => {
+      console.warn("Failed to persist image delivery", error);
+    });
+  }, []);
+
+  const patchImageDelivery = React.useCallback((
+    deliveryId: string,
+    patch: Partial<Pick<ImageDelivery, "status" | "transport" | "error" | "updatedAt" | "deliveredAt">>,
+  ) => {
+    const delivery = imageDeliveriesRef.current.find((item) => item.id === deliveryId);
+    if (!delivery) return;
+    const nextDelivery = { ...delivery, ...patch, updatedAt: patch.updatedAt || Date.now() };
+    const next = imageDeliveriesRef.current.map((item) => item.id === deliveryId ? nextDelivery : item);
+    imageDeliveriesRef.current = next;
+    setImageDeliveries(next);
+    void upsertImageDelivery(nextDelivery).catch((error) => {
+      console.warn("Failed to update image delivery", error);
+    });
+  }, []);
+
+  const clearImageDeliveries = React.useCallback((targetRoomId: string, imageId: string) => {
+    const remaining = imageDeliveriesRef.current.filter(
+      (delivery) => delivery.imageId !== imageId,
+    );
+    imageDeliveriesRef.current = remaining;
+    setImageDeliveries(remaining);
+    return deleteImageDeliveries(targetRoomId, imageId);
+  }, []);
+
+  const latestImageDelivery = React.useCallback(
+    (imageId: string, recipientId: string) => imageDeliveriesRef.current
+      .filter((delivery) => delivery.imageId === imageId && delivery.recipientId === recipientId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0],
+    [],
+  );
+
+  const beginImageDelivery = React.useCallback((
+    image: RoomImage | CachedRoomImage,
+    recipient: ShareRecipient,
+    status: Extract<ImageDeliveryStatus, "pending" | "sending"> = "sending",
+  ) => {
+    if (!roomId) return null;
+    const previous = latestImageDelivery(image.id, recipient.id);
+    if (previous?.status === "sending") return null;
+    if (previous?.status === "pending") {
+      if (status === "pending") return null;
+      const promoted = { ...previous, status: "sending" as const, updatedAt: Date.now() };
+      saveImageDelivery(promoted);
+      return promoted;
+    }
+    const createdAt = Date.now();
+    const delivery: ImageDelivery = {
+      id: crypto.randomUUID().replace(/-/g, ""),
+      roomId,
+      imageId: image.id,
+      recipientId: recipient.id,
+      recipientType: recipient.kind,
+      recipientLabel: getShareRecipientLabel(recipient, labels),
+      status,
+      transport: recipient.kind === "messaging" ? "messaging" : undefined,
+      retryCount: previous ? previous.retryCount + 1 : 0,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    saveImageDelivery(delivery);
+    return delivery;
+  }, [labels, latestImageDelivery, roomId, saveImageDelivery]);
+
+  const showSuccessTip = React.useCallback((message: string) => {
+    setSuccessTip(message);
+    if (successTipTimerRef.current !== null) {
+      window.clearTimeout(successTipTimerRef.current);
+    }
+    successTipTimerRef.current = window.setTimeout(() => {
+      successTipTimerRef.current = null;
+      setSuccessTip(null);
+    }, 3000);
+  }, []);
+
+  React.useEffect(() => () => {
+    if (successTipTimerRef.current !== null) {
+      window.clearTimeout(successTipTimerRef.current);
+    }
+  }, []);
+
+  const handleTransferSuccess = React.useCallback(
+    (
+      direction: "sent" | "received",
+      name: string,
+      imageId: string,
+      receiptDeliveryId?: string,
+    ) => {
+      if (direction === "sent") {
+        const deliveryId = receiptDeliveryId || activeDeliveryIdsRef.current.get(imageId);
+        const delivery = deliveryId
+          ? imageDeliveriesRef.current.find((item) => item.id === deliveryId)
+          : undefined;
+        if (deliveryId) {
+          patchImageDelivery(deliveryId, {
+            status: "delivered",
+            deliveredAt: Date.now(),
+          });
+          activeDeliveryIdsRef.current.delete(imageId);
+        }
+        if (delivery) {
+          const image = imagesRef.current.find((item) => item.id === imageId);
+          const transport = image?.transferMode === "r2" ? labels.r2Mode : labels.p2pMode;
+          upsertActivity({
+            id: `transfer-${imageId}`,
+            kind: "complete",
+            title: name,
+            detail: `${labels.complete} · ${delivery.recipientLabel} · ${transport}`,
+            progress: 1,
+            createdAt: Date.now(),
+          });
+        }
+      }
+      showSuccessTip(
+        direction === "sent"
+          ? labels.imageSentTip(name)
+          : labels.imageReceivedTip(name),
+      );
+    },
+    [labels, patchImageDelivery, showSuccessTip, upsertActivity],
+  );
 
   React.useEffect(() => {
     const previous = messagingStatusRef.current;
@@ -962,6 +1114,40 @@ export default function ShareRoomPage({
   }, [roomId]);
 
   React.useEffect(() => {
+    if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
+      imageDeliveriesRef.current = [];
+      setImageDeliveries([]);
+      return;
+    }
+    let disposed = false;
+    imageDeliveriesRef.current = [];
+    setImageDeliveries([]);
+    void listImageDeliveries(roomId)
+      .then((stored) => {
+        if (!disposed) {
+          const restored = stored.map((delivery) =>
+            delivery.status === "sending" || delivery.status === "pending"
+              ? { ...delivery, status: "failed" as const, error: labels.transferInterrupted, updatedAt: Date.now() }
+              : delivery,
+          );
+          imageDeliveriesRef.current = restored;
+          setImageDeliveries(restored);
+          restored.forEach((delivery, index) => {
+            if (delivery !== stored[index]) {
+              void upsertImageDelivery(delivery).catch(() => undefined);
+            }
+          });
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to load image deliveries", error);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [labels.transferInterrupted, roomId]);
+
+  React.useEffect(() => {
     if (!roomId || !isPageStateLoaded) return;
     saveRoomPageState(roomId, {
       activities,
@@ -1047,8 +1233,12 @@ export default function ShareRoomPage({
   const handleImageShareResponse = React.useCallback(
     (message: ImageShareResponse) => {
       const imageId = outgoingShareRequestsRef.current.get(message.payload.requestId);
+      const recipient = outgoingShareRecipientsRef.current.get(message.payload.requestId);
+      const deliveryId = outgoingShareDeliveryIdsRef.current.get(message.payload.requestId);
       if (!imageId || imageId !== message.payload.imageId) return;
       outgoingShareRequestsRef.current.delete(message.payload.requestId);
+      outgoingShareRecipientsRef.current.delete(message.payload.requestId);
+      outgoingShareDeliveryIdsRef.current.delete(message.payload.requestId);
       const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
       const pendingImage = pendingShareImagesRef.current.get(imageId);
       const image = visibleImage || pendingImage;
@@ -1066,8 +1256,16 @@ export default function ShareRoomPage({
         const acceptedVisibleImage = imagesRef.current.find(
           (candidate) => candidate.id === imageId,
         );
-        if (acceptedVisibleImage) setAcceptedShareImage(acceptedVisibleImage);
+        if (acceptedVisibleImage && recipient) {
+          setAcceptedShareImage({ image: acceptedVisibleImage, recipient });
+        }
       } else {
+        if (deliveryId) {
+          patchImageDelivery(deliveryId, {
+            status: "cancelled",
+            error: labels.peerRejectedReceive,
+          });
+        }
         if (pendingImage) {
           pendingShareImagesRef.current.set(imageId, {
             ...pendingImage,
@@ -1085,7 +1283,7 @@ export default function ShareRoomPage({
         });
       }
     },
-    [addRoomImage, updateRoomImage, upsertActivity],
+    [addRoomImage, labels.peerRejectedReceive, patchImageDelivery, updateRoomImage, upsertActivity],
   );
 
   const handleImageReactionBatch = React.useCallback(
@@ -1124,6 +1322,7 @@ export default function ShareRoomPage({
   React.useEffect(() => {
     if (connection === "connected") return;
     for (const [requestId, imageId] of outgoingShareRequestsRef.current) {
+      const deliveryId = outgoingShareDeliveryIdsRef.current.get(requestId);
       const visibleImage = imagesRef.current.find((candidate) => candidate.id === imageId);
       const pendingImage = pendingShareImagesRef.current.get(imageId);
       const image = visibleImage || pendingImage;
@@ -1142,10 +1341,18 @@ export default function ShareRoomPage({
         detail: labels.peerOfflineShareCancelled,
         createdAt: Date.now(),
       });
+      if (deliveryId) {
+        patchImageDelivery(deliveryId, {
+          status: "failed",
+          error: labels.peerOfflineShareCancelled,
+        });
+      }
     }
     outgoingShareRequestsRef.current.clear();
+    outgoingShareRecipientsRef.current.clear();
+    outgoingShareDeliveryIdsRef.current.clear();
     setIncomingShareRequest(null);
-  }, [connection, updateRoomImage, upsertActivity]);
+  }, [connection, labels.peerOfflineShareCancelled, patchImageDelivery, updateRoomImage, upsertActivity]);
 
   useShareRoomConnection({
     roomId,
@@ -1164,6 +1371,7 @@ export default function ShareRoomPage({
     updateRoomImage,
     removeRoomImage,
     upsertActivity,
+    onTransferSuccess: handleTransferSuccess,
     showFloatingEmoji,
     onIncomingNotification: handleIncomingNotification,
     onForcedNavigation: handleForcedNavigation,
@@ -1299,8 +1507,14 @@ export default function ShareRoomPage({
       }
       placeholderAckDimensionsRef.current.set(imageId, key);
     },
-    [],
+    [connection],
   );
+
+  React.useEffect(() => {
+    if (connection !== "connected") {
+      placeholderAckDimensionsRef.current.clear();
+    }
+  }, [connection]);
 
   const addFilesToGallery = async (fileList: FileList | File[]) => {
     const files = Array.from(fileList);
@@ -1533,7 +1747,10 @@ export default function ShareRoomPage({
     await deleteRoomImage(image.roomId, image.id).catch((error) => {
       console.warn("Failed to remove received image after archiving", error);
     });
-    await deleteReviewHistory(image.roomId, image.id);
+    await Promise.all([
+      deleteReviewHistory(image.roomId, image.id),
+      clearImageDeliveries(image.roomId, image.id),
+    ]);
   };
 
   const handleDeleteLocalImage = async (image: RoomImage) => {
@@ -1543,6 +1760,7 @@ export default function ShareRoomPage({
     await Promise.all([
       deleteRoomImage(image.roomId, image.id),
       deleteReviewHistory(image.roomId, image.id),
+      clearImageDeliveries(image.roomId, image.id),
     ]);
   };
 
@@ -1903,6 +2121,7 @@ export default function ShareRoomPage({
 
   const closeShareRecipientDialog = React.useCallback(() => {
     setIsShareRecipientDialogOpen(false);
+    setRecipientDialogImageId(null);
     shareRecipientResolverRef.current?.(null);
     shareRecipientResolverRef.current = null;
   }, []);
@@ -1911,24 +2130,30 @@ export default function ShareRoomPage({
     (recipient: ShareRecipient) => {
       setSelectedMessageTargetId(recipient.id);
       setIsShareRecipientDialogOpen(false);
+      setRecipientDialogImageId(null);
       shareRecipientResolverRef.current?.(recipient);
       shareRecipientResolverRef.current = null;
     },
     [],
   );
 
-  const ensureShareRecipient = React.useCallback(() => {
+  const ensureShareRecipient = React.useCallback((image: RoomImage | CachedRoomImage) => {
     if (shareRecipients.length === 0) return Promise.resolve(null);
     if (shareRecipients.length === 1) {
-      setSelectedMessageTargetId(shareRecipients[0].id);
-      return Promise.resolve(shareRecipients[0]);
+      const recipient = shareRecipients[0];
+      const delivery = latestImageDelivery(image.id, recipient.id);
+      if (delivery?.status !== "delivered" && delivery?.status !== "sending" && delivery?.status !== "pending") {
+        setSelectedMessageTargetId(recipient.id);
+        return Promise.resolve(recipient);
+      }
     }
     shareRecipientResolverRef.current?.(null);
+    setRecipientDialogImageId(image.id);
     setIsShareRecipientDialogOpen(true);
     return new Promise<ShareRecipient | null>((resolve) => {
       shareRecipientResolverRef.current = resolve;
     });
-  }, [shareRecipients]);
+  }, [latestImageDelivery, shareRecipients]);
 
   React.useEffect(
     () => () => {
@@ -1951,6 +2176,8 @@ export default function ShareRoomPage({
     if (!messagingService || !recipient.provider.recipientId || isSending) {
       return false;
     }
+    const delivery = beginImageDelivery(image, recipient);
+    if (!delivery) return false;
     setIsSending(true);
     updateRoomImage(image.id, {
       transferStatus: "sending",
@@ -2028,13 +2255,19 @@ export default function ShareRoomPage({
         });
       });
       upsertActivity({
-        id: `messaging-image-${image.id}`,
+        id: `messaging-image-${delivery.id}`,
         kind: "complete",
         title: image.name,
         detail: `${labels.messageSent} · ${recipient.provider.displayName}`,
         progress: 1,
         createdAt: Date.now(),
       });
+      patchImageDelivery(delivery.id, {
+        status: "delivered",
+        transport: "messaging",
+        deliveredAt: Date.now(),
+      });
+      showSuccessTip(labels.imageSentTip(image.name));
       return true;
     } catch (error) {
       updateRoomImage(image.id, {
@@ -2043,12 +2276,17 @@ export default function ShareRoomPage({
         shareStatus: "failed",
       }, true);
       upsertActivity({
-        id: `messaging-image-${image.id}`,
+        id: `messaging-image-${delivery.id}`,
         kind: "error",
         title: image.name,
         detail: error instanceof Error ? error.message : labels.transferFailed,
         progress: 0,
         createdAt: Date.now(),
+      });
+      patchImageDelivery(delivery.id, {
+        status: "failed",
+        transport: "messaging",
+        error: error instanceof Error ? error.message : labels.transferFailed,
       });
       throw error;
     } finally {
@@ -2056,8 +2294,8 @@ export default function ShareRoomPage({
     }
   };
 
-  const handleSendImage = async (image: RoomImage) => {
-    const recipient = await ensureShareRecipient();
+  const handleSendImage = async (image: RoomImage, requestedRecipient?: ShareRecipient) => {
+    const recipient = requestedRecipient || await ensureShareRecipient(image);
     if (!recipient) return;
     if (recipient.kind === "messaging") {
       await sendImageToMessaging(image, recipient).catch(() => undefined);
@@ -2066,10 +2304,8 @@ export default function ShareRoomPage({
     const controlChannel = instructionChannelRef.current;
     const fileChannel = outgoingChannelRef.current;
     if (
-      image.direction !== "sent" ||
       image.previewOnly ||
       image.placeholderOnly ||
-      !image.placeholder ||
       image.transferStatus === "sending" ||
       isSending ||
       connection !== "connected" ||
@@ -2077,6 +2313,28 @@ export default function ShareRoomPage({
     ) {
       return;
     }
+
+    let preparedImage = image;
+    if (!preparedImage.placeholder) {
+      try {
+        const placeholder = await generateSharePlaceholder(preparedImage.blob);
+        preparedImage = { ...preparedImage, placeholder };
+        updateRoomImage(preparedImage.id, { placeholder }, true);
+      } catch (error) {
+        upsertActivity({
+          id: `transfer-${preparedImage.id}`,
+          kind: "error",
+          title: preparedImage.name,
+          detail: error instanceof Error ? error.message : labels.previewFailed,
+          createdAt: Date.now(),
+        });
+        return;
+      }
+    }
+
+    const delivery = beginImageDelivery(preparedImage, recipient);
+    if (!delivery) return;
+    activeDeliveryIdsRef.current.set(preparedImage.id, delivery.id);
 
     const abortController = new AbortController();
     transferAbortControllersRef.current.set(image.id, abortController);
@@ -2092,16 +2350,17 @@ export default function ShareRoomPage({
     );
     try {
       const file = new File([image.blob], image.name, { type: image.type });
-      if (image.operation !== "original" && image.placeholder) {
+      if (preparedImage.operation !== "original" && preparedImage.placeholder) {
         sendImagePlaceholder(
           controlChannel,
           createImageTransferMeta(
             file,
             image.id,
             transferChunkSizeRef.current,
-            { ...image, shareStatus: "accepted" },
+            { ...preparedImage, shareStatus: "accepted" },
+            delivery.id,
           ),
-          image.placeholder,
+          preparedImage.placeholder,
         );
       }
       const transferImage = {
@@ -2118,6 +2377,7 @@ export default function ShareRoomPage({
         weakNetworkTransferRef.current,
       );
       updateRoomImage(image.id, { transferMode: preparation.mode }, true);
+      patchImageDelivery(delivery.id, { transport: preparation.mode });
       abortController.signal.throwIfAborted();
       let meta: ReturnType<typeof createImageTransferMeta>;
       if (preparation.mode === "r2") {
@@ -2125,7 +2385,8 @@ export default function ShareRoomPage({
           file,
           image.id,
           transferChunkSizeRef.current,
-          image,
+          preparedImage,
+          delivery.id,
         );
         await uploadFileToR2(
           preparation.uploadUrl,
@@ -2193,7 +2454,8 @@ export default function ShareRoomPage({
           transferChunkSizeRef.current,
           waitUntilImageReady,
           abortController.signal,
-          image,
+          preparedImage,
+          delivery.id,
         );
       }
       updateRoomImage(
@@ -2230,6 +2492,15 @@ export default function ShareRoomPage({
         progress: 0,
         createdAt: Date.now(),
       });
+      patchImageDelivery(delivery.id, {
+        status: cancelled ? "cancelled" : "failed",
+        error: cancelled
+          ? labels.transferCancelled
+          : error instanceof Error
+            ? error.message
+            : labels.transferFailed,
+      });
+      activeDeliveryIdsRef.current.delete(image.id);
     } finally {
       transferAbortControllersRef.current.delete(image.id);
       setIsSending(false);
@@ -2241,7 +2512,7 @@ export default function ShareRoomPage({
     deferUntilAccepted = false,
     requestedRecipient?: ShareRecipient,
   ) => {
-    const recipient = requestedRecipient || await ensureShareRecipient();
+    const recipient = requestedRecipient || await ensureShareRecipient(image);
     if (!recipient) return false;
     if (recipient.kind === "messaging") {
       return await sendImageToMessaging(image, recipient) ? "messaging" : false;
@@ -2258,8 +2529,12 @@ export default function ShareRoomPage({
     }
     const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
     if (!image.placeholder) updateRoomImage(image.id, { placeholder }, true);
+    const delivery = beginImageDelivery(image, recipient, "pending");
+    if (!delivery) return false;
     const requestId = crypto.randomUUID().replace(/-/g, "");
     outgoingShareRequestsRef.current.set(requestId, image.id);
+    outgoingShareRecipientsRef.current.set(requestId, recipient);
+    outgoingShareDeliveryIdsRef.current.set(requestId, delivery.id);
     const sent = sendImageWorkspaceMessage(channel, {
       type: "IMAGE_SHARE_REQUEST",
       payload: {
@@ -2290,6 +2565,12 @@ export default function ShareRoomPage({
     });
     if (!sent) {
       outgoingShareRequestsRef.current.delete(requestId);
+      outgoingShareRecipientsRef.current.delete(requestId);
+      outgoingShareDeliveryIdsRef.current.delete(requestId);
+      patchImageDelivery(delivery.id, {
+        status: "failed",
+        error: labels.receiveRequestFailed,
+      });
       if (deferUntilAccepted) pendingShareImagesRef.current.delete(image.id);
       return false;
     }
@@ -2315,9 +2596,9 @@ export default function ShareRoomPage({
 
   React.useEffect(() => {
     if (!acceptedShareImage || isSending) return;
-    const image = acceptedShareImage;
+    const { image, recipient } = acceptedShareImage;
     setAcceptedShareImage(null);
-    void handleSendImage(image);
+    void handleSendImage(image, recipient);
   }, [acceptedShareImage, isSending]);
 
   const handleShareDecision = React.useCallback(
@@ -2378,6 +2659,14 @@ export default function ShareRoomPage({
 
   const handleCancelTransfer = (image: RoomImage) => {
     transferAbortControllersRef.current.get(image.id)?.abort();
+    const deliveryId = activeDeliveryIdsRef.current.get(image.id);
+    if (deliveryId) {
+      patchImageDelivery(deliveryId, {
+        status: "cancelled",
+        error: labels.transferCancelled,
+      });
+      activeDeliveryIdsRef.current.delete(image.id);
+    }
     const channel = instructionChannelRef.current;
     if (channel?.readyState === "open") sendImageCancel(channel, image.id);
   };
@@ -2396,7 +2685,18 @@ export default function ShareRoomPage({
       return;
     }
     for (const [requestId, imageId] of outgoingShareRequestsRef.current) {
-      if (imageId === image.id) outgoingShareRequestsRef.current.delete(requestId);
+      if (imageId === image.id) {
+        outgoingShareRequestsRef.current.delete(requestId);
+        outgoingShareRecipientsRef.current.delete(requestId);
+        const deliveryId = outgoingShareDeliveryIdsRef.current.get(requestId);
+        if (deliveryId) {
+          patchImageDelivery(deliveryId, {
+            status: "cancelled",
+            error: labels.transferCancelled,
+          });
+        }
+        outgoingShareDeliveryIdsRef.current.delete(requestId);
+      }
     }
     deletedImageIdsRef.current.add(image.id);
     removeRoomImage(image.id);
@@ -2404,6 +2704,7 @@ export default function ShareRoomPage({
       await Promise.all([
         deleteRoomImage(image.roomId, image.id),
         deleteReviewHistory(image.roomId, image.id),
+        clearImageDeliveries(image.roomId, image.id),
       ]);
     } catch (error) {
       console.warn("Failed to delete local pending image", error);
@@ -2772,6 +3073,16 @@ export default function ShareRoomPage({
   return (
     <>
       <WorkerVersionWarning />
+      {successTip ? (
+        <div
+          className="pointer-events-none fixed left-1/2 top-4 z-[200] flex max-w-[min(90vw,420px)] -translate-x-1/2 items-center gap-2 rounded-md border border-emerald-200 bg-white px-4 py-2.5 text-sm font-medium text-emerald-700 shadow-lg"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+          <span className="truncate">{successTip}</span>
+        </div>
+      ) : null}
       {!embedded && isMinimized ? (
         <div className="min-h-screen bg-[#eef2f7]" aria-hidden="true" />
       ) : null}
@@ -2961,6 +3272,8 @@ export default function ShareRoomPage({
         open={isShareRecipientDialogOpen}
         recipients={shareRecipients}
         labels={labels}
+        imageId={recipientDialogImageId}
+        deliveries={imageDeliveries}
         onSelect={selectShareRecipient}
         onClose={closeShareRecipientDialog}
       />

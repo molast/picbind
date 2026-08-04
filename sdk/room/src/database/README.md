@@ -10,6 +10,8 @@ UI -> repository -> Dexie -> IndexedDB
 Responsibilities:
 
 - `database.ts` owns the typed Dexie schema and database connection.
+- Image delivery attempts are metadata-only records keyed by room and delivery ID;
+  they track per-recipient status without storing image bytes.
 - `repositories/` is the only business-data access layer.
 - `file-storage.ts` owns OPFS file operations.
 - IndexedDB stores metadata, review history, and operation logs.

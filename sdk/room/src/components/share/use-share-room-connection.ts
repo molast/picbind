@@ -139,6 +139,12 @@ type UseShareRoomConnectionOptions = {
   ): void;
   removeRoomImage(id: string): void;
   upsertActivity(activity: ActivityItem): void;
+  onTransferSuccess(
+    direction: "sent" | "received",
+    name: string,
+    imageId: string,
+    deliveryId?: string,
+  ): void;
   showFloatingEmoji(id: string, emoji: string): void;
   onIncomingNotification?(notification: RoomDockNotification): void;
   onForcedNavigation(): boolean;
@@ -177,6 +183,7 @@ export function useShareRoomConnection({
   updateRoomImage,
   removeRoomImage,
   upsertActivity,
+  onTransferSuccess,
   showFloatingEmoji,
   onIncomingNotification,
   onForcedNavigation,
@@ -197,6 +204,11 @@ export function useShareRoomConnection({
   setMaxImageTransferSize,
   setRole,
 }: UseShareRoomConnectionOptions) {
+  const onTransferSuccessRef = React.useRef(onTransferSuccess);
+  React.useEffect(() => {
+    onTransferSuccessRef.current = onTransferSuccess;
+  }, [onTransferSuccess]);
+
   React.useEffect(() => {
     if (!roomId || !ROOM_ID_PATTERN.test(roomId)) {
       return;
@@ -260,17 +272,21 @@ export function useShareRoomConnection({
       return false;
     };
 
-    const confirmReceipt = (id: string, attempt = 0) => {
+    const confirmReceipt = (
+      id: string,
+      deliveryId?: string,
+      attempt = 0,
+    ) => {
       if (disposed) {
         return;
       }
       const channel = instructionChannelRef.current;
       if (channel?.readyState === "open") {
-        sendImageReceipt(channel, id);
+        sendImageReceipt(channel, id, deliveryId);
         return;
       }
       if (attempt < 100) {
-        window.setTimeout(() => confirmReceipt(id, attempt + 1), 100);
+        window.setTimeout(() => confirmReceipt(id, deliveryId, attempt + 1), 100);
       }
     };
 
@@ -419,7 +435,7 @@ export function useShareRoomConnection({
         }
       },
       onPlaceholderAck(id, width, height) {
-        const requestKey = `${width}x${height}`;
+        const requestKey = `${currentPeerSessionId || "peer"}:${width}x${height}`;
         if (thumbnailRequests.get(id) === requestKey) return;
         thumbnailRequests.set(id, requestKey);
         void (async () => {
@@ -430,8 +446,8 @@ export function useShareRoomConnection({
             const image = visibleImage || pendingShareImagesRef.current.get(id);
             if (
               !image ||
-              image.direction !== "sent" ||
-              image.placeholderOnly
+              image.placeholderOnly ||
+              image.blob.size === 0
             ) {
               return;
             }
@@ -531,11 +547,12 @@ export function useShareRoomConnection({
               id: `transfer-${meta.id}`,
               kind: "complete",
               title: meta.name,
-              detail: `${labels.complete} · ${formatBytes(meta.size)}`,
+              detail: `${labels.complete} · ${image.transferMode === "r2" ? labels.r2Mode : labels.p2pMode} · ${formatBytes(meta.size)}`,
               progress: 1,
               createdAt: Date.now(),
             });
-            confirmReceipt(meta.id);
+            onTransferSuccessRef.current("received", meta.name, meta.id);
+            confirmReceipt(meta.id, meta.deliveryId);
           }
         } catch (error) {
           if (!disposed) {
@@ -565,7 +582,7 @@ export function useShareRoomConnection({
           createdAt: Date.now(),
         });
       },
-      onReceipt(id) {
+      onReceipt(id, deliveryId) {
         updateRoomImage(
           id,
           { transferStatus: "sent", progress: 1, shareStatus: "available" },
@@ -576,10 +593,11 @@ export function useShareRoomConnection({
           id: `transfer-${id}`,
           kind: "complete",
           title: image?.name || labels.complete,
-          detail: labels.complete,
+          detail: `${labels.complete} · ${image?.transferMode === "r2" ? labels.r2Mode : labels.p2pMode}`,
           progress: 1,
           createdAt: Date.now(),
         });
+        onTransferSuccessRef.current("sent", image?.name || labels.complete, id, deliveryId);
       },
       onReady(id) {
         imageReadyWaiters.get(id)?.resolve();
@@ -681,11 +699,12 @@ export function useShareRoomConnection({
             id: `transfer-${meta.id}`,
             kind: "complete",
             title: meta.name,
-            detail: `${labels.complete} · ${formatBytes(meta.size)}`,
+            detail: `${labels.complete} · ${labels.r2Mode} · ${formatBytes(meta.size)}`,
             progress: 1,
             createdAt: Date.now(),
           });
-          confirmReceipt(meta.id);
+          onTransferSuccessRef.current("received", meta.name, meta.id);
+          confirmReceipt(meta.id, meta.deliveryId);
           void (async () => {
             let lastError: unknown;
             for (const delayMs of [0, 500, 1_500]) {
@@ -754,16 +773,10 @@ export function useShareRoomConnection({
       placeholdersPublished = true;
       for (const image of imagesRef.current) {
         if (
-          image.direction !== "sent" ||
           image.workspaceLocation !== "outbox" ||
           image.previewOnly ||
           image.placeholderOnly ||
-          (image.operation !== "original" &&
-            image.shareStatus !== "accepted" &&
-            image.shareStatus !== "transferring") ||
-          (image.transferStatus !== "waiting" &&
-            image.transferStatus !== "failed" &&
-            image.transferStatus !== "cancelled")
+          image.blob.size === 0
         ) {
           continue;
         }
@@ -1119,6 +1132,7 @@ export function useShareRoomConnection({
         probeTimer = undefined;
       }
       resetProbeStats();
+      thumbnailRequests.clear();
       if (connection) {
         connection.ondatachannel = null;
         connection.onconnectionstatechange = null;

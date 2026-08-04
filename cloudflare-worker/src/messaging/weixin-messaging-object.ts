@@ -384,11 +384,12 @@ export class WeixinMessagingObject {
   }
 
   webSocketClose(
-    socket: WebSocket,
-    code: number,
-    reason: string,
+    _socket: WebSocket,
+    _code: number,
+    _reason: string,
   ) {
-    socket.close(code, reason);
+    // Hibernation invokes this after the socket has closed. Closing it again
+    // would forward receive-only sentinel codes such as 1005 and throw.
   }
 
   webSocketError(socket: WebSocket) {

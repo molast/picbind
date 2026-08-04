@@ -21,6 +21,7 @@ const BUFFER_DRAIN_TIMEOUT_MS = 60_000;
 
 export type ImageTransferMeta = {
   id: string;
+  deliveryId?: string;
   name: string;
   type: string;
   size: number;
@@ -60,7 +61,7 @@ type TransferInstruction =
   | { type: "IMAGE_START"; payload: ImageTransferMeta }
   | { type: "IMAGE_READY"; payload: { id: string } }
   | { type: "IMAGE_COMPLETE"; payload: { id: string } }
-  | { type: "IMAGE_RECEIVED"; payload: { id: string } }
+  | { type: "IMAGE_RECEIVED"; payload: { id: string; deliveryId?: string } }
   | { type: "IMAGE_DELETE"; payload: { id: string } }
   | { type: "IMAGE_CANCEL"; payload: { id: string } }
   | {
@@ -105,7 +106,7 @@ export type ImageReceiverCallbacks = {
   onProgress(progress: TransferProgress): void;
   onComplete(meta: ImageTransferMeta, blob: Blob): void | Promise<void>;
   onError(meta: ImageTransferMeta | null, reason: string): void;
-  onReceipt?(id: string): void;
+  onReceipt?(id: string, deliveryId?: string): void;
   onReady?(id: string): void;
   onDelete?(id: string): void | Promise<void>;
   onCancel?(id: string): void | Promise<void>;
@@ -125,9 +126,11 @@ export function createImageTransferMeta(
   id = createTransferId(),
   chunkSize = IMAGE_CHUNK_SIZE,
   workspace?: ImageObjectMetadata,
+  deliveryId?: string,
 ) {
   return {
     id,
+    ...(deliveryId ? { deliveryId } : {}),
     name: file.name || "shared-image",
     type: file.type,
     size: file.size,
@@ -240,6 +243,7 @@ function isValidMeta(
   return (
     typeof meta.id === "string" &&
     /^[a-f0-9]{32}$/.test(meta.id) &&
+    (meta.deliveryId === undefined || /^[a-f0-9]{32}$/.test(meta.deliveryId)) &&
     typeof meta.name === "string" &&
     meta.name.length > 0 &&
     meta.name.length <= 255 &&
@@ -277,9 +281,16 @@ function isValidPlaceholder(value: unknown): value is ImagePlaceholderMetadata {
   );
 }
 
-export function sendImageReceipt(channel: RealtimeMessageChannel, id: string) {
+export function sendImageReceipt(
+  channel: RealtimeMessageChannel,
+  id: string,
+  deliveryId?: string,
+) {
   if (channel.readyState === "open") {
-    sendInstruction(channel, { type: "IMAGE_RECEIVED", payload: { id } });
+    sendInstruction(channel, {
+      type: "IMAGE_RECEIVED",
+      payload: { id, ...(deliveryId ? { deliveryId } : {}) },
+    });
   }
 }
 
@@ -482,6 +493,7 @@ export async function sendImageFile(
   waitUntilReady?: (id: string) => Promise<void>,
   signal?: AbortSignal,
   workspace?: ImageObjectMetadata,
+  deliveryId?: string,
 ) {
   if (
     instructionChannel.readyState !== "open" ||
@@ -490,7 +502,13 @@ export async function sendImageFile(
     throw new Error("DataChannels are not open");
   }
 
-  const meta = createImageTransferMeta(file, transferId, chunkSize, workspace);
+  const meta = createImageTransferMeta(
+    file,
+    transferId,
+    chunkSize,
+    workspace,
+    deliveryId,
+  );
   sendInstruction(instructionChannel, { type: "IMAGE_START", payload: meta });
   await waitUntilReady?.(meta.id);
   if (signal?.aborted) throw new DOMException("Transfer cancelled", "AbortError");
@@ -738,7 +756,10 @@ export class RealtimeImageReceiver {
 
     if (message.type === "IMAGE_RECEIVED") {
       if (typeof message.payload?.id === "string") {
-        this.callbacks.onReceipt?.(message.payload.id);
+        const deliveryId = typeof message.payload.deliveryId === "string"
+          ? message.payload.deliveryId
+          : undefined;
+        this.callbacks.onReceipt?.(message.payload.id, deliveryId);
       }
       return;
     }

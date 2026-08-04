@@ -48,6 +48,29 @@ export type MessagingImageRecord = {
   filePath: string;
 };
 
+export type ImageDeliveryStatus =
+  | "pending"
+  | "sending"
+  | "delivered"
+  | "failed"
+  | "cancelled";
+
+export type ImageDeliveryRecord = {
+  id: string;
+  roomId: string;
+  imageId: string;
+  recipientId: string;
+  recipientType: "room" | "messaging";
+  recipientLabel: string;
+  status: ImageDeliveryStatus;
+  transport?: "p2p" | "r2" | "messaging";
+  retryCount: number;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+  deliveredAt?: number;
+};
+
 class PicbindDatabase extends Dexie {
   compressedImages!: Table<CompressedImageRecord, string>;
   queuedFiles!: Table<QueuedFileRecord, string>;
@@ -55,6 +78,7 @@ class PicbindDatabase extends Dexie {
   reviewHistories!: Table<ReviewHistoryRecord, [string, string]>;
   operationLogs!: Table<OperationLogRecord, [string, string]>;
   messagingImages!: Table<MessagingImageRecord, [string, string]>;
+  imageDeliveries!: Table<ImageDeliveryRecord, [string, string]>;
 
   constructor() {
     super("picbind-local");
@@ -73,6 +97,17 @@ class PicbindDatabase extends Dexie {
       operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
       messagingImages:
         "[providerId+messageId], providerId, messageId, createdAt",
+    });
+    this.version(3).stores({
+      compressedImages: "id, sourceId, createdAt",
+      queuedFiles: "id, createdAt",
+      roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
+      reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
+      operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+      messagingImages:
+        "[providerId+messageId], providerId, messageId, createdAt",
+      imageDeliveries:
+        "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
     });
   }
 }
