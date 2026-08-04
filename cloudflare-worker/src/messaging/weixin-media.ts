@@ -34,7 +34,8 @@ function decrypt(ciphertext: Uint8Array, key: Uint8Array) {
   if (ciphertext.byteLength % 16 !== 0) {
     throw new Error("Encrypted media is not AES block aligned");
   }
-  const decipher = createDecipheriv("aes-128-ecb", key, null);
+  // Workers' Node compatibility layer cannot normalize a null ECB IV.
+  const decipher = createDecipheriv("aes-128-ecb", key, Buffer.alloc(0));
   decipher.setAutoPadding(false);
   const padded = Buffer.concat([
     decipher.update(ciphertext),
