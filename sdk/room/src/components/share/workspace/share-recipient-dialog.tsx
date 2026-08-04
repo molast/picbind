@@ -1,20 +1,25 @@
 "use client";
 
-import { FiSend, FiUser, FiX } from "react-icons/fi";
+import { FiMessageCircle, FiSend, FiUser, FiX } from "react-icons/fi";
 import type { RoomMemberPresence } from "../../../utils/realtime-room";
+import type { MessagingProviderSnapshot } from "../../../messaging";
 import type { ShareRoomLabels } from "../share-room-labels";
+
+export type ShareRecipient =
+  | { kind: "room"; id: string; member: RoomMemberPresence }
+  | { kind: "messaging"; id: string; provider: MessagingProviderSnapshot };
 
 type ShareRecipientDialogProps = {
   open: boolean;
-  members: RoomMemberPresence[];
+  recipients: ShareRecipient[];
   labels: ShareRoomLabels;
-  onSelect(member: RoomMemberPresence): void;
+  onSelect(recipient: ShareRecipient): void;
   onClose(): void;
 };
 
 export default function ShareRecipientDialog({
   open,
-  members,
+  recipients,
   labels,
   onSelect,
   onClose,
@@ -49,18 +54,26 @@ export default function ShareRecipientDialog({
           </button>
         </header>
         <div className="max-h-72 space-y-1 overflow-y-auto p-2">
-          {members.map((member, index) => (
+          {recipients.map((recipient, index) => (
             <button
-              key={member.clientId}
+              key={recipient.id}
               type="button"
-              onClick={() => onSelect(member)}
+              onClick={() => onSelect(recipient)}
               className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-blue-50"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                <FiUser className="h-4 w-4" aria-hidden="true" />
+                {recipient.kind === "room" ? (
+                  <FiUser className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <FiMessageCircle className="h-4 w-4" aria-hidden="true" />
+                )}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
-                {member.role === "owner" ? labels.owner : `${labels.guest} ${index + 1}`}
+                {recipient.kind === "room"
+                  ? recipient.member.role === "owner"
+                    ? labels.owner
+                    : `${labels.guest} ${index + 1}`
+                  : `${labels.messagingBot} · ${recipient.provider.displayName}`}
               </span>
               <FiSend className="h-4 w-4 shrink-0 text-[#2f65cf]" aria-hidden="true" />
             </button>

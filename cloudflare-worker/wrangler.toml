@@ -44,7 +44,6 @@ tag = "v3"
 new_sqlite_classes = ["WeixinMessagingObject"]
 
 [vars]
-WORKER_VERSION = "3.0.2"
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
 # Options: "p2p" forces WebRTC DataChannel, "r2" forces R2 transfer,
@@ -53,7 +52,7 @@ FILE_TRANSFER_MODE = "auto"
 MAX_IMAGE_TRANSFER_SIZE_MB = "10"
 R2_RTT_THRESHOLD_MS = "200"
 R2_FILE_TTL_SECONDS = "1800"
-MESSAGING_MEDIA_TTL_SECONDS = "1800"
+MESSAGING_MEDIA_TTL_SECONDS = "900"
 MESSAGING_MEDIA_URL_TTL_SECONDS = "900"
 MESSAGING_MAX_MEDIA_SIZE_MB = "20"
 MESSAGING_PUBLIC_URL = "https://api.picbind.com"

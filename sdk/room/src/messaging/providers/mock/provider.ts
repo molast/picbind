@@ -42,7 +42,7 @@ export class MockMessageProvider implements MessageProvider {
     this.sentMessages.push(message);
   }
 
-  async upload(file: Blob) {
+  async upload(file: Blob, _options: import("../../core/provider").MessageImageUploadOptions) {
     this.assertConnected();
     const id = crypto.randomUUID().replace(/-/g, "");
     this.files.set(id, file);

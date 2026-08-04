@@ -1,4 +1,6 @@
-export const EXPECTED_WORKER_VERSION = "3.0.2";
+import { GENERATED_WORKER_VERSION } from "./generated-worker-version";
+
+export const EXPECTED_WORKER_VERSION = GENERATED_WORKER_VERSION;
 export const WORKER_VERSION_HEADER = "x-picbind-worker-version";
 
 export type WorkerVersionMismatch = {

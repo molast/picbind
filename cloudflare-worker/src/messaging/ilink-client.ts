@@ -137,3 +137,60 @@ export function sendTextMessage(
   if (contextToken) message.context_token = contextToken;
   return post(baseUrl, "ilink/bot/sendmessage", { msg: message }, token);
 }
+
+export type IlinkImageUploadRequest = {
+  fileKey: string;
+  rawSize: number;
+  rawMd5: string;
+  encryptedSize: number;
+  aesKeyHex: string;
+};
+
+export function requestImageUpload(
+  baseUrl: string,
+  token: string,
+  toUserId: string,
+  image: IlinkImageUploadRequest,
+) {
+  return post(baseUrl, "ilink/bot/getuploadurl", {
+    filekey: image.fileKey,
+    media_type: 1,
+    to_user_id: toUserId,
+    rawsize: image.rawSize,
+    rawfilemd5: image.rawMd5,
+    filesize: image.encryptedSize,
+    no_need_thumb: true,
+    aeskey: image.aesKeyHex,
+  }, token);
+}
+
+export function sendImageMessage(
+  baseUrl: string,
+  token: string,
+  toUserId: string,
+  encryptedQueryParam: string,
+  aesKeyForApi: string,
+  encryptedSize: number,
+  contextToken?: string,
+) {
+  const message: JsonRecord = {
+    from_user_id: "",
+    to_user_id: toUserId,
+    client_id: `picbind-${crypto.randomUUID()}`,
+    message_type: 2,
+    message_state: 2,
+    item_list: [{
+      type: 2,
+      image_item: {
+        media: {
+          encrypt_query_param: encryptedQueryParam,
+          aes_key: aesKeyForApi,
+          encrypt_type: 1,
+        },
+        mid_size: encryptedSize,
+      },
+    }],
+  };
+  if (contextToken) message.context_token = contextToken;
+  return post(baseUrl, "ilink/bot/sendmessage", { msg: message }, token);
+}

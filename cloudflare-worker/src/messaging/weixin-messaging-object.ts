@@ -5,11 +5,16 @@ import {
 import {
   getUpdates,
   ILINK_BASE_URL,
+  ILINK_CDN_BASE_URL,
   requestQrCode,
   requestQrStatus,
+  requestImageUpload,
+  sendImageMessage,
   sendTextMessage,
 } from "./ilink-client";
 import { receiveWeixinImage } from "./weixin-media";
+import { Buffer } from "node:buffer";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -51,6 +56,20 @@ type MediaObject = {
   expiresAt: number;
 };
 
+type PendingImageUpload = {
+  objectKey: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  expiresAt: number;
+};
+
+type SocketRequest = {
+  type?: string;
+  requestId?: string;
+  payload?: unknown;
+};
+
 type GatewayMessage = {
   id: string;
   channel: "wechat";
@@ -81,11 +100,21 @@ const ACCOUNT_KEY = "account";
 const CLIENT_ID_KEY = "client-id";
 const RUNTIME_KEY = "runtime";
 const MEDIA_KEY = "media-objects";
+const PENDING_UPLOADS_KEY = "pending-image-uploads";
 const SEEN_KEY = "seen-messages";
-const DEFAULT_MEDIA_TTL_SECONDS = 1800;
+const DEFAULT_MEDIA_TTL_SECONDS = 900;
 const DEFAULT_URL_TTL_SECONDS = 900;
 const DEFAULT_MAX_MEDIA_SIZE = 20 * 1024 * 1024;
 const DEDUP_TTL_MS = 5 * 60 * 1000;
+const OUTBOUND_UPLOAD_TTL_SECONDS = 15 * 60;
+const MAX_PENDING_IMAGE_UPLOADS = 8;
+const IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+]);
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data), {
@@ -133,6 +162,32 @@ function randomBase64Url(byteLength: number) {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+}
+
+function detectImageMime(data: Uint8Array) {
+  const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  if (bytes.length >= 3 && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    )
+  ) {
+    return "image/png";
+  }
+  const prefix = bytes.subarray(0, 16).toString("ascii");
+  if (prefix.startsWith("GIF87a") || prefix.startsWith("GIF89a")) {
+    return "image/gif";
+  }
+  if (prefix.startsWith("RIFF") && prefix.slice(8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (prefix.slice(4, 8) === "ftyp" && /avi[fs]/.test(prefix.slice(8))) {
+    return "image/avif";
+  }
+  return null;
 }
 
 async function shortHash(value: string) {
@@ -210,7 +265,7 @@ export class WeixinMessagingObject {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.state.acceptWebSocket(server, ["weixin-client"]);
-      server.serializeAttachment({ connectedAt: Date.now() });
+      server.serializeAttachment({ connectedAt: Date.now(), clientId });
       server.send(JSON.stringify({
         type: "GATEWAY_STATUS",
         payload: await this.snapshot(),
@@ -290,7 +345,43 @@ export class WeixinMessagingObject {
     }
   }
 
-  webSocketMessage(_socket: WebSocket, _message: string | ArrayBuffer) {}
+  async webSocketMessage(socket: WebSocket, rawMessage: string | ArrayBuffer) {
+    let request: SocketRequest;
+    try {
+      const text = typeof rawMessage === "string"
+        ? rawMessage
+        : new TextDecoder().decode(rawMessage);
+      request = JSON.parse(text) as SocketRequest;
+    } catch {
+      this.sendSocketResult(socket, "", false, undefined, "Invalid WebSocket request");
+      return;
+    }
+    const requestId = String(request.requestId || "");
+    if (!requestId || !/^[a-f0-9]{32}$/i.test(requestId)) {
+      this.sendSocketResult(socket, requestId, false, undefined, "Invalid request ID");
+      return;
+    }
+    try {
+      const payload = record(request.payload);
+      let result: unknown;
+      if (request.type === "PREPARE_IMAGE_UPLOAD") {
+        result = await this.prepareImageUpload(payload);
+      } else if (request.type === "SEND_IMAGE") {
+        result = await this.sendUploadedImage(payload);
+      } else {
+        throw new Error("Unsupported WebSocket request");
+      }
+      this.sendSocketResult(socket, requestId, true, result);
+    } catch (error) {
+      this.sendSocketResult(
+        socket,
+        requestId,
+        false,
+        undefined,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
 
   webSocketClose(
     socket: WebSocket,
@@ -417,6 +508,187 @@ export class WeixinMessagingObject {
       return json({ error: `iLink sendmessage failed: ${String(response.errmsg || ret)}` }, { status: 502 });
     }
     return json({ id: String(response.message_id || crypto.randomUUID()) }, { status: 202 });
+  }
+
+  private sendSocketResult(
+    socket: WebSocket,
+    requestId: string,
+    ok: boolean,
+    payload?: unknown,
+    error?: string,
+  ) {
+    socket.send(JSON.stringify({
+      type: "REQUEST_RESULT",
+      requestId,
+      ok,
+      ...(ok ? { payload } : { error: error || "Messaging request failed" }),
+    }));
+  }
+
+  private maxMediaSize() {
+    const configured = Number(this.env.MESSAGING_MAX_MEDIA_SIZE_MB || 20);
+    return Number.isFinite(configured) && configured > 0
+      ? Math.floor(configured * 1024 * 1024)
+      : DEFAULT_MAX_MEDIA_SIZE;
+  }
+
+  private validateImageMetadata(payload: JsonRecord) {
+    const fileName = String(payload.name || "image").trim().slice(0, 255);
+    const mimeType = String(payload.mimeType || "").trim().toLowerCase();
+    const size = Number(payload.size || 0);
+    if (!fileName || !IMAGE_MIME_TYPES.has(mimeType)) {
+      throw new Error("Unsupported image type");
+    }
+    if (!Number.isSafeInteger(size) || size <= 0 || size > this.maxMediaSize()) {
+      throw new Error("Image exceeds the messaging size limit");
+    }
+    return { fileName, mimeType, size };
+  }
+
+  private async prepareImageUpload(payload: JsonRecord) {
+    const account = await this.state.storage.get<StoredAccount>(ACCOUNT_KEY);
+    if (!account) throw new Error("Weixin has not been configured");
+    const metadata = this.validateImageMetadata(payload);
+    const clientId = await this.state.storage.get<string>(CLIENT_ID_KEY);
+    if (!clientId) throw new Error("Messaging client ID is unavailable");
+    const clientHash = await shortHash(clientId);
+    const objectKey = `messaging/outbound/${clientHash}/${crypto.randomUUID()}`;
+    const expiresAt = Date.now() + OUTBOUND_UPLOAD_TTL_SECONDS * 1000;
+    const existing = await this.pendingUploads();
+    const expired = existing.filter((item) => item.expiresAt <= Date.now());
+    if (expired.length) {
+      await this.env.MESSAGING_MEDIA_R2.delete(
+        expired.map((item) => item.objectKey),
+      );
+    }
+    const pending = existing.filter((item) => item.expiresAt > Date.now());
+    if (pending.length >= MAX_PENDING_IMAGE_UPLOADS) {
+      throw new Error("Too many pending image uploads");
+    }
+    await this.state.storage.put(PENDING_UPLOADS_KEY, [
+      ...pending,
+      { objectKey, ...metadata, expiresAt },
+    ]);
+    await this.scheduleNextAlarm(expiresAt);
+    return {
+      objectKey,
+      uploadUrl: await createR2PresignedUrl(
+        this.env,
+        "PUT",
+        objectKey,
+        OUTBOUND_UPLOAD_TTL_SECONDS,
+      ),
+      expiresAt,
+    };
+  }
+
+  private async sendUploadedImage(payload: JsonRecord) {
+    const objectKey = String(payload.objectKey || "").trim();
+    const recipientId = String(payload.recipientId || "").trim();
+    if (!objectKey || !recipientId) {
+      throw new Error("Image object and recipient are required");
+    }
+    const pending = await this.pendingUploads();
+    const upload = pending.find((item) => item.objectKey === objectKey);
+    if (!upload || upload.expiresAt <= Date.now()) {
+      throw new Error("Image upload is missing or expired");
+    }
+    try {
+      const supplied = this.validateImageMetadata(payload);
+      if (
+        supplied.fileName !== upload.fileName ||
+        supplied.mimeType !== upload.mimeType ||
+        supplied.size !== upload.size
+      ) {
+        throw new Error("Image metadata does not match the prepared upload");
+      }
+      const object = await this.env.MESSAGING_MEDIA_R2.get(objectKey);
+      if (!object) throw new Error("Uploaded image was not found");
+      if (object.size !== upload.size) {
+        throw new Error("Uploaded image size does not match the prepared upload");
+      }
+      const account = await this.state.storage.get<StoredAccount>(ACCOUNT_KEY);
+      if (!account) throw new Error("Weixin has not been configured");
+      const data = Buffer.from(await object.arrayBuffer());
+      if (detectImageMime(data) !== upload.mimeType) {
+        throw new Error("Uploaded data does not match the declared image type");
+      }
+      const response = await this.deliverImageToWeixin(
+        account,
+        recipientId,
+        data,
+      );
+      return { id: String(response.message_id || crypto.randomUUID()) };
+    } finally {
+      await Promise.allSettled([
+        this.env.MESSAGING_MEDIA_R2.delete(objectKey),
+        this.removePendingUpload(objectKey),
+      ]);
+    }
+  }
+
+  private async deliverImageToWeixin(
+    account: StoredAccount,
+    recipientId: string,
+    plaintext: Buffer,
+  ) {
+    const fileKey = randomBytes(16).toString("hex");
+    const aesKey = randomBytes(16);
+    const aesKeyHex = aesKey.toString("hex");
+    const cipher = createCipheriv("aes-128-ecb", aesKey, Buffer.alloc(0));
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const uploadResponse = await requestImageUpload(
+      account.baseUrl,
+      account.token,
+      recipientId,
+      {
+        fileKey,
+        rawSize: plaintext.byteLength,
+        rawMd5: createHash("md5").update(plaintext).digest("hex"),
+        encryptedSize: ciphertext.byteLength,
+        aesKeyHex,
+      },
+    );
+    const fullUrl = String(uploadResponse.upload_full_url || "").trim();
+    const uploadParam = String(uploadResponse.upload_param || "").trim();
+    const uploadUrl = fullUrl || (uploadParam
+      ? `${ILINK_CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(fileKey)}`
+      : "");
+    if (!uploadUrl) throw new Error("iLink did not return an image upload URL");
+    const parsedUploadUrl = new URL(uploadUrl);
+    if (
+      parsedUploadUrl.protocol !== "https:" ||
+      !new Set(["novac2c.cdn.weixin.qq.com", "ilinkai.weixin.qq.com"]).has(parsedUploadUrl.hostname)
+    ) {
+      throw new Error("iLink returned an untrusted image upload URL");
+    }
+    const uploaded = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: ciphertext,
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!uploaded.ok) {
+      throw new Error(`Weixin CDN upload failed (${uploaded.status})`);
+    }
+    const encryptedQueryParam = uploaded.headers.get("x-encrypted-param") || "";
+    if (!encryptedQueryParam) {
+      throw new Error("Weixin CDN response is missing x-encrypted-param");
+    }
+    const response = await sendImageMessage(
+      account.baseUrl,
+      account.token,
+      recipientId,
+      encryptedQueryParam,
+      Buffer.from(aesKeyHex, "ascii").toString("base64"),
+      ciphertext.byteLength,
+      account.contextTokens[recipientId],
+    );
+    const ret = Number(response.ret || response.errcode || 0);
+    if (ret !== 0) {
+      throw new Error(`iLink sendmessage failed: ${String(response.errmsg || ret)}`);
+    }
+    return response;
   }
 
   private async acceptMessage(message: JsonRecord, account: StoredAccount) {
@@ -635,11 +907,36 @@ export class WeixinMessagingObject {
         mediaObjects.filter((item) => item.expiresAt > now),
       );
     }
+    const pending = await this.pendingUploads();
+    const expiredUploads = pending.filter((item) => item.expiresAt <= now);
+    if (expiredUploads.length) {
+      await this.env.MESSAGING_MEDIA_R2.delete(
+        expiredUploads.map((item) => item.objectKey),
+      );
+      await this.state.storage.put(
+        PENDING_UPLOADS_KEY,
+        pending.filter((item) => item.expiresAt > now),
+      );
+    }
   }
 
   private mediaObjects() {
     return this.state.storage.get<MediaObject[]>(MEDIA_KEY).then(
       (items) => items || [],
+    );
+  }
+
+  private pendingUploads() {
+    return this.state.storage.get<PendingImageUpload[]>(PENDING_UPLOADS_KEY).then(
+      (items) => items || [],
+    );
+  }
+
+  private async removePendingUpload(objectKey: string) {
+    const pending = await this.pendingUploads();
+    await this.state.storage.put(
+      PENDING_UPLOADS_KEY,
+      pending.filter((item) => item.objectKey !== objectKey),
     );
   }
 
@@ -665,11 +962,23 @@ export class WeixinMessagingObject {
     return this.state.storage.setAlarm(timestamp);
   }
 
+  private async scheduleNextAlarm(timestamp: number) {
+    const current = await this.state.storage.getAlarm();
+    if (current === null || timestamp < current) await this.scheduleNext(timestamp);
+  }
+
   private async scheduleMediaCleanupOnly() {
-    const media = await this.mediaObjects();
-    if (media.length) {
+    const [media, pending] = await Promise.all([
+      this.mediaObjects(),
+      this.pendingUploads(),
+    ]);
+    const expirations = [
+      ...media.map((item) => item.expiresAt),
+      ...pending.map((item) => item.expiresAt),
+    ];
+    if (expirations.length) {
       await this.scheduleNext(
-        Math.min(...media.map((item) => item.expiresAt)),
+        Math.min(...expirations),
       );
     } else {
       await this.state.storage.deleteAlarm();

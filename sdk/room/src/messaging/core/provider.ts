@@ -21,6 +21,12 @@ export type ProviderStatusHandler = (
   snapshot: MessagingProviderSnapshot,
 ) => void;
 
+export type MessageImageUploadOptions = {
+  recipientId: string;
+  fileName?: string;
+  onProgress?: (progress: number) => void;
+};
+
 export interface MessageProvider {
   readonly id: string;
   readonly channel: MessagingChannel;
@@ -30,7 +36,7 @@ export interface MessageProvider {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(message: NormalizedMessage): Promise<void>;
-  upload(file: Blob): Promise<string>;
+  upload(file: Blob, options: MessageImageUploadOptions): Promise<string>;
   download(fileReference: string, fallbackFileId?: string): Promise<Blob>;
   subscribe(handler: MessageHandler): Unsubscribe;
   subscribeStatus(handler: ProviderStatusHandler): Unsubscribe;

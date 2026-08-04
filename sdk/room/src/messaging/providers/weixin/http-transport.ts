@@ -1,5 +1,6 @@
 import type { MessageHandler } from "../../core/event";
 import type { NormalizedMessage } from "../../core/message";
+import type { MessageImageUploadOptions } from "../../core/provider";
 import QRCode from "qrcode";
 import type {
   IlinkGatewaySnapshot,
@@ -7,6 +8,21 @@ import type {
   IlinkLoginSession,
 } from "./provider";
 import { checkWorkerVersion } from "../../../worker-version";
+import { uploadFileToR2 } from "../../../utils/realtime-r2-transfer";
+
+type SocketResult = {
+  type: "REQUEST_RESULT";
+  requestId: string;
+  ok: boolean;
+  payload?: unknown;
+  error?: string;
+};
+
+type PendingSocketRequest = {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+  timeout: number;
+};
 
 async function responseJson<T>(response: Response): Promise<T> {
   const body = await response.json() as T & { error?: string };
@@ -21,6 +37,7 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
   private stopped = true;
   private messageHandler: MessageHandler | null = null;
   private statusHandler: ((snapshot: IlinkGatewaySnapshot) => void) | null = null;
+  private readonly pendingRequests = new Map<string, PendingSocketRequest>();
   private readonly clientId = messagingClientId();
 
   constructor(private readonly gatewayUrl: string) {}
@@ -76,8 +93,33 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
     });
   }
 
-  async upload(_file: Blob): Promise<string> {
-    throw new Error("Weixin iLink media upload is not implemented yet");
+  async upload(file: Blob, options: MessageImageUploadOptions): Promise<string> {
+    const fileName = options.fileName || (file instanceof File ? file.name : "image");
+    const image = file instanceof File
+      ? file
+      : new File([file], fileName, { type: file.type });
+    const preparation = await this.socketRequest<{
+      objectKey: string;
+      uploadUrl: string;
+      expiresAt: number;
+    }>("PREPARE_IMAGE_UPLOAD", {
+      name: fileName,
+      mimeType: image.type,
+      size: image.size,
+    });
+    await uploadFileToR2(
+      preparation.uploadUrl,
+      image,
+      ({ progress }) => options.onProgress?.(progress),
+    );
+    const sent = await this.socketRequest<{ id: string }>("SEND_IMAGE", {
+      objectKey: preparation.objectKey,
+      recipientId: options.recipientId,
+      name: fileName,
+      mimeType: image.type,
+      size: image.size,
+    }, 180_000);
+    return sent.id;
   }
 
   async download(reference: string, fallbackFileId?: string): Promise<Blob> {
@@ -151,9 +193,12 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
         try {
           const value = JSON.parse(String(event.data)) as
             | NormalizedMessage
-            | { type: "GATEWAY_STATUS"; payload: IlinkGatewaySnapshot };
+            | { type: "GATEWAY_STATUS"; payload: IlinkGatewaySnapshot }
+            | SocketResult;
           if (value.type === "GATEWAY_STATUS") {
             this.statusHandler?.(value.payload);
+          } else if (value.type === "REQUEST_RESULT") {
+            this.settleSocketRequest(value);
           } else {
             this.messageHandler?.(value);
           }
@@ -166,6 +211,7 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
       };
       socket.onclose = () => {
         if (this.socket === socket) this.socket = null;
+        this.rejectPendingRequests("Messaging WebSocket connection closed");
         if (!settled) {
           reject(new Error("Messaging WebSocket connection closed"));
         } else if (!this.stopped) {
@@ -190,6 +236,53 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+  }
+
+  private socketRequest<T>(
+    type: string,
+    payload: Record<string, unknown>,
+    timeoutMs = 30_000,
+  ) {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return Promise.reject<T>(new Error("Messaging WebSocket is not connected"));
+    }
+    const requestId = crypto.randomUUID().replace(/-/g, "");
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error("Messaging request timed out"));
+      }, timeoutMs);
+      this.pendingRequests.set(requestId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timeout,
+      });
+      try {
+        socket.send(JSON.stringify({ type, requestId, payload }));
+      } catch (error) {
+        window.clearTimeout(timeout);
+        this.pendingRequests.delete(requestId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private settleSocketRequest(result: SocketResult) {
+    const pending = this.pendingRequests.get(result.requestId);
+    if (!pending) return;
+    window.clearTimeout(pending.timeout);
+    this.pendingRequests.delete(result.requestId);
+    if (result.ok) pending.resolve(result.payload);
+    else pending.reject(new Error(result.error || "Messaging request failed"));
+  }
+
+  private rejectPendingRequests(message: string) {
+    for (const pending of this.pendingRequests.values()) {
+      window.clearTimeout(pending.timeout);
+      pending.reject(new Error(message));
+    }
+    this.pendingRequests.clear();
   }
 }
 

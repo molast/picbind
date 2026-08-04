@@ -87,7 +87,9 @@ import {
   type ImageWanted,
 } from "../../utils/image-workspace-messages";
 import ImageShareRequestDialog from "./workspace/image-share-request-dialog";
-import ShareRecipientDialog from "./workspace/share-recipient-dialog";
+import ShareRecipientDialog, {
+  type ShareRecipient,
+} from "./workspace/share-recipient-dialog";
 import { useRoomTabNotifications } from "./use-room-tab-notifications";
 import type {
   MessagingProviderSnapshot,
@@ -103,6 +105,10 @@ import {
   listOperationLogs,
   upsertOperationLog,
 } from "../../database/repositories/operation-log-repository";
+import {
+  listMessagingImages,
+  storeMessagingImage,
+} from "../../database/repositories/messaging-image-repository";
 import { uploadFileToR2 } from "../../utils/realtime-r2-transfer";
 import {
   type RealtimeMessageChannel,
@@ -223,7 +229,7 @@ export default function ShareRoomPage({
   const [isShareRecipientDialogOpen, setIsShareRecipientDialogOpen] =
     React.useState(false);
   const shareRecipientResolverRef = React.useRef<
-    ((selected: boolean) => void) | null
+    ((recipient: ShareRecipient | null) => void) | null
   >(null);
   const [floatingEmojis, setFloatingEmojis] = React.useState<FloatingEmoji[]>([]);
   const [isRoomActionPending, setIsRoomActionPending] = React.useState(false);
@@ -269,6 +275,53 @@ export default function ShareRoomPage({
       });
       return all.slice(-300);
     });
+  }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void listMessagingImages()
+      .then((images) => {
+        if (cancelled) return;
+        const cachedItems = images.map((image): WeixinChatItem => {
+          const url = URL.createObjectURL(image.blob);
+          objectUrlsRef.current.add(url);
+          return {
+            id: image.messageId,
+            providerId: image.providerId,
+            direction: "incoming",
+            type: "image",
+            fileName: image.fileName,
+            mimeType: image.mimeType,
+            size: image.size,
+            blob: image.blob,
+            url,
+            createdAt: image.createdAt,
+            status: "sent",
+          };
+        });
+        setMessagingChatMessages((current) => {
+          const existing = new Set(
+            current.map((item) => `${item.providerId}:${item.id}`),
+          );
+          const restored = cachedItems.filter((item) => {
+            if (!existing.has(`${item.providerId}:${item.id}`)) return true;
+            if (item.url) {
+              URL.revokeObjectURL(item.url);
+              objectUrlsRef.current.delete(item.url);
+            }
+            return false;
+          });
+          return [...restored, ...current]
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .slice(-300);
+        });
+      })
+      .catch((error) => {
+        console.warn("Failed to restore cached Weixin images", error);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   roomIdRef.current = roomId;
   const reviewMessageSequenceRef = React.useRef(0);
@@ -543,7 +596,18 @@ export default function ShareRoomPage({
           provider.id,
           downloadReference,
           message.payload.fileId,
-        ).then((blob) => {
+        ).then(async (blob) => {
+          await storeMessagingImage({
+            providerId,
+            messageId: message.id,
+            fileName: message.payload.fileName || labels.messagingImage,
+            mimeType: blob.type || message.payload.mimeType || "image/jpeg",
+            size: blob.size,
+            createdAt: message.timestamp || Date.now(),
+            blob,
+          }).catch((error) => {
+            console.warn("Failed to cache Weixin image", error);
+          });
           const url = URL.createObjectURL(blob);
           objectUrlsRef.current.add(url);
           setMessagingChatMessages((current) => current.map((item) =>
@@ -1799,47 +1863,59 @@ export default function ShareRoomPage({
     );
   }, [members, roomId]);
 
+  const shareRecipients = React.useMemo<ShareRecipient[]>(() => [
+    ...onlineShareRecipients.map((member) => ({
+      kind: "room" as const,
+      id: `room:${member.clientId}`,
+      member,
+    })),
+    ...messagingProviders
+      .filter((provider) =>
+        provider.status === "connected" && Boolean(provider.recipientId),
+      )
+      .map((provider) => ({
+        kind: "messaging" as const,
+        id: `messaging:${provider.id}`,
+        provider,
+      })),
+  ], [messagingProviders, onlineShareRecipients]);
+
   const closeShareRecipientDialog = React.useCallback(() => {
     setIsShareRecipientDialogOpen(false);
-    shareRecipientResolverRef.current?.(false);
+    shareRecipientResolverRef.current?.(null);
     shareRecipientResolverRef.current = null;
   }, []);
 
   const selectShareRecipient = React.useCallback(
-    (member: RoomMemberPresence) => {
-      setSelectedMessageTargetId(`room:${member.clientId}`);
+    (recipient: ShareRecipient) => {
+      setSelectedMessageTargetId(recipient.id);
       setIsShareRecipientDialogOpen(false);
-      shareRecipientResolverRef.current?.(true);
+      shareRecipientResolverRef.current?.(recipient);
       shareRecipientResolverRef.current = null;
     },
     [],
   );
 
   const ensureShareRecipient = React.useCallback(() => {
-    if (onlineShareRecipients.length === 0) return Promise.resolve(false);
-    if (onlineShareRecipients.length === 1) {
-      setSelectedMessageTargetId(`room:${onlineShareRecipients[0].clientId}`);
-      return Promise.resolve(true);
+    if (shareRecipients.length === 0) return Promise.resolve(null);
+    if (shareRecipients.length === 1) {
+      setSelectedMessageTargetId(shareRecipients[0].id);
+      return Promise.resolve(shareRecipients[0]);
     }
-    const selectedClientId = selectedMessageTargetId?.startsWith("room:")
-      ? selectedMessageTargetId.slice("room:".length)
-      : null;
-    if (
-      selectedClientId &&
-      onlineShareRecipients.some((member) => member.clientId === selectedClientId)
-    ) {
-      return Promise.resolve(true);
-    }
-    shareRecipientResolverRef.current?.(false);
+    const selected = shareRecipients.find(
+      (recipient) => recipient.id === selectedMessageTargetId,
+    );
+    if (selected) return Promise.resolve(selected);
+    shareRecipientResolverRef.current?.(null);
     setIsShareRecipientDialogOpen(true);
-    return new Promise<boolean>((resolve) => {
+    return new Promise<ShareRecipient | null>((resolve) => {
       shareRecipientResolverRef.current = resolve;
     });
-  }, [onlineShareRecipients, selectedMessageTargetId]);
+  }, [shareRecipients, selectedMessageTargetId]);
 
   React.useEffect(
     () => () => {
-      shareRecipientResolverRef.current?.(false);
+      shareRecipientResolverRef.current?.(null);
       shareRecipientResolverRef.current = null;
     },
     [],
@@ -1851,8 +1927,91 @@ export default function ShareRoomPage({
     else requestExitRoom();
   };
 
+  const sendImageToMessaging = async (
+    image: CachedRoomImage | RoomImage,
+    recipient: Extract<ShareRecipient, { kind: "messaging" }>,
+    insertWhenComplete = false,
+  ) => {
+    if (!messagingService || !recipient.provider.recipientId || isSending) {
+      return false;
+    }
+    setIsSending(true);
+    const pending = {
+      ...image,
+      transferStatus: "sending" as const,
+      progress: 0,
+      shareStatus: "transferring" as const,
+    };
+    if (insertWhenComplete) pendingShareImagesRef.current.set(image.id, pending);
+    else updateRoomImage(image.id, pending, true);
+    try {
+      const file = new File([image.blob], image.name, { type: image.type });
+      await messagingService.upload(recipient.provider.id, file, {
+        recipientId: recipient.provider.recipientId,
+        fileName: image.name,
+        onProgress: (progress) => {
+          if (insertWhenComplete) {
+            const current = pendingShareImagesRef.current.get(image.id);
+            if (current) pendingShareImagesRef.current.set(image.id, {
+              ...current,
+              progress,
+            });
+          } else {
+            updateRoomImage(image.id, { progress }, true);
+          }
+        },
+      });
+      const completed = {
+        ...pending,
+        transferStatus: "sent" as const,
+        progress: 1,
+        shareStatus: "available" as const,
+        updatedAt: Date.now(),
+      };
+      if (insertWhenComplete) {
+        pendingShareImagesRef.current.delete(image.id);
+        await storeRoomImage(completed);
+        addRoomImage(completed);
+      } else {
+        updateRoomImage(image.id, completed, true);
+      }
+      upsertActivity({
+        id: `messaging-image-${image.id}`,
+        kind: "complete",
+        title: image.name,
+        detail: `${labels.messageSent} · ${recipient.provider.displayName}`,
+        progress: 1,
+        createdAt: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      if (insertWhenComplete) pendingShareImagesRef.current.delete(image.id);
+      else updateRoomImage(image.id, {
+        transferStatus: "failed",
+        progress: 0,
+        shareStatus: "failed",
+      }, true);
+      upsertActivity({
+        id: `messaging-image-${image.id}`,
+        kind: "error",
+        title: image.name,
+        detail: error instanceof Error ? error.message : labels.transferFailed,
+        progress: 0,
+        createdAt: Date.now(),
+      });
+      throw error;
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const handleSendImage = async (image: RoomImage) => {
-    if (!(await ensureShareRecipient())) return;
+    const recipient = await ensureShareRecipient();
+    if (!recipient) return;
+    if (recipient.kind === "messaging") {
+      await sendImageToMessaging(image, recipient).catch(() => undefined);
+      return;
+    }
     const controlChannel = instructionChannelRef.current;
     const fileChannel = outgoingChannelRef.current;
     if (
@@ -2009,7 +2168,11 @@ export default function ShareRoomPage({
     image: CachedRoomImage | RoomImage,
     deferUntilAccepted = false,
   ) => {
-    if (!(await ensureShareRecipient())) return false;
+    const recipient = await ensureShareRecipient();
+    if (!recipient) return false;
+    if (recipient.kind === "messaging") {
+      return sendImageToMessaging(image, recipient, deferUntilAccepted);
+    }
     const channel = instructionChannelRef.current;
     if (
       channel?.readyState !== "open" ||
@@ -2721,7 +2884,7 @@ export default function ShareRoomPage({
       />
       <ShareRecipientDialog
         open={isShareRecipientDialogOpen}
-        members={onlineShareRecipients}
+        recipients={shareRecipients}
         labels={labels}
         onSelect={selectShareRecipient}
         onClose={closeShareRecipientDialog}

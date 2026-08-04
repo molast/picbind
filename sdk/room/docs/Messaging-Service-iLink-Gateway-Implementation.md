@@ -5,7 +5,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 版本 | 2.0 |
+| 版本 | 2.1 |
 | 状态 | 已实现 |
 | Worker 入口 | `cloudflare-worker/src/index.ts` |
 | Durable Object | `WeixinMessagingObject` |
@@ -117,11 +117,14 @@ DO 通过 `state.acceptWebSocket(server, ["weixin-client"])` 接入 Hibernation
 WebSocket。Browser 不发送应用层 `PING/PONG`，也不使用 WebSocket 测量网络状态；
 连接状态由原生 `open`、`close`、`error` 事件和断线重连维护。
 
-Browser Transport 包含指数退避重连。DO 会推送两类数据：
+Browser Transport 包含指数退避重连。DO 会推送消息和状态，并处理带 `requestId`
+的图片发送 RPC：
 
 ```text
 NormalizedMessage
 GATEWAY_STATUS
+PREPARE_IMAGE_UPLOAD -> REQUEST_RESULT
+SEND_IMAGE           -> REQUEST_RESULT
 ```
 
 `GATEWAY_STATUS` 区分浏览器 WebSocket 已连接和 iLink 长轮询已连接，避免仅凭
@@ -150,7 +153,7 @@ iLink image_item
 | 参数 | 默认值 |
 | --- | ---: |
 | 图片大小上限 | 20 MB |
-| R2 对象 TTL | 1800 秒 |
+| R2 对象 TTL | 900 秒 |
 | 签名 URL TTL | 900 秒 |
 
 签名 URL 过期但对象仍存在时，Browser 使用 `fileId` 调用 `/files/:fileId`
@@ -160,6 +163,30 @@ iLink image_item
 
 生产环境配置 R2 S3 签名凭证后返回直接 R2 URL。本地没有签名凭证时返回
 Worker 受控下载 URL，由 Worker 从本地 R2 binding 读取，行为与生产一致。
+
+### 7.1 发送图片到微信
+
+浏览器不会通过 HTTP 或 WebSocket 把图片二进制发送给 Worker。发送流程为：
+
+```text
+Room 图片
+  -> WebSocket PREPARE_IMAGE_UPLOAD
+  -> Worker 创建当前 clientId 专属 objectKey 和预签名 PUT URL
+  -> Browser 使用 PUT 将 Blob 直接上传 R2
+  -> WebSocket SEND_IMAGE（只包含 objectKey、接收者和图片元数据）
+  -> Worker 校验待上传记录、过期时间、大小、MIME 和真实文件签名
+  -> Worker 从 R2 binding 读取图片
+  -> AES-128-ECB + PKCS#7 加密
+  -> iLink getuploadurl
+  -> POST 密文到微信 CDN
+  -> iLink sendmessage 发送 image_item
+  -> 删除 R2 临时对象和待上传记录
+```
+
+`objectKey` 必须由当前 Durable Object 生成并存在于待上传记录中，Browser 不能让
+Worker 读取任意 R2 key。未完成的上传默认 15 分钟过期，由 Alarm 删除。发送成功或
+失败后都会清理临时对象。iLink 要求的 `aes_key` 使用
+`base64(hex(aesKey))`，不是原始 AES 字节的 Base64。
 
 ## 8. R2 对象规范
 
@@ -186,13 +213,14 @@ SHARE_IMAGES_R2
 
 ## 9. 状态与去重
 
-DO 保存五类状态：
+DO 保存六类状态：
 
 - 微信账户凭证
 - 运行状态与最近轮询成功时间
 - 登录 Session
 - 五分钟消息去重记录
 - R2 临时对象索引
+- 待发送图片上传记录
 
 Provider 状态：
 
@@ -228,7 +256,7 @@ new_sqlite_classes = ["WeixinMessagingObject"]
 环境变量：
 
 ```env
-MESSAGING_MEDIA_TTL_SECONDS=1800
+MESSAGING_MEDIA_TTL_SECONDS=900
 MESSAGING_MEDIA_URL_TTL_SECONDS=900
 MESSAGING_MAX_MEDIA_SIZE_MB=20
 MESSAGING_PUBLIC_URL=https://api.picbind.com
@@ -265,6 +293,7 @@ Deployed Worker   https://api.picbind.com
 ## 12. 关键兼容规则
 
 - Browser 只接收规范化消息，不接收 iLink token 或 AES Key。
+- Browser 发送图片时只直传 R2，WebSocket 不承载图片二进制。
 - 图片 Blob 不写入 Durable Object Storage。
 - R2 到期清理由 Alarm 执行。
 - WebSocket 不使用应用层心跳检测网络状态。

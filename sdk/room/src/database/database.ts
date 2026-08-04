@@ -37,12 +37,23 @@ export type OperationLogRecord = RoomEventItem & {
   roomId: string;
 };
 
+export type MessagingImageRecord = {
+  providerId: string;
+  messageId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+  filePath: string;
+};
+
 class PicbindDatabase extends Dexie {
   compressedImages!: Table<CompressedImageRecord, string>;
   queuedFiles!: Table<QueuedFileRecord, string>;
   roomImages!: Table<RoomImageRecord, [string, string]>;
   reviewHistories!: Table<ReviewHistoryRecord, [string, string]>;
   operationLogs!: Table<OperationLogRecord, [string, string]>;
+  messagingImages!: Table<MessagingImageRecord, [string, string]>;
 
   constructor() {
     super("picbind-local");
@@ -52,6 +63,15 @@ class PicbindDatabase extends Dexie {
       roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
       reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
       operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+    });
+    this.version(2).stores({
+      compressedImages: "id, sourceId, createdAt",
+      queuedFiles: "id, createdAt",
+      roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
+      reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
+      operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+      messagingImages:
+        "[providerId+messageId], providerId, messageId, createdAt",
     });
   }
 }

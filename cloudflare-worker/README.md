@@ -18,9 +18,9 @@ Notes:
 - `POST /api/metrics` and `POST /api/site/view` require an allowed `Origin` header.
 - Admin endpoints require `ADMIN_KEY` via query `key` or request header `x-admin-key`.
 - Every non-WebSocket API response exposes the deployed Worker version through
-  `x-picbind-worker-version`. When bumping the Worker version, keep
-  `package.json`, `wrangler.toml` (`WORKER_VERSION`), and
-  `sdk/room/src/worker-version.ts` (`EXPECTED_WORKER_VERSION`) in sync.
+  `x-picbind-worker-version`. `cloudflare-worker/package.json` is the single
+  version source. Worker builds import it directly; Room and Web development or
+  build commands generate the SDK-side expected version automatically.
 
 ## Required binding
 

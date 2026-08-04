@@ -398,7 +398,6 @@ export default function GalleryImageCard({
               }
               void onDelete(image);
             }}
-            disabled={enteredFromLibrary && connection !== "connected"}
             className={`absolute top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm backdrop-blur transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-45 ${
               canReview ? "right-20" : "right-11"
             }`}

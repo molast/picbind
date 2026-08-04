@@ -1,6 +1,6 @@
 {
   "name": "@picbind/room",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Embeddable PicBind realtime image room SDK with a standalone browser demo.",
   "type": "module",
   "files": [
@@ -23,10 +23,11 @@
     "./source/types": "./src/public-types.ts"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4174",
-    "check": "tsc --noEmit",
-    "build:sdk": "vite build --mode library && tsc -p tsconfig.build.json",
-    "build:preview": "vite build --outDir preview-dist",
+    "sync:worker-version": "node scripts/sync-worker-version.mjs",
+    "dev": "node scripts/sync-worker-version.mjs && vite --host 127.0.0.1 --port 4174",
+    "check": "node scripts/sync-worker-version.mjs && tsc --noEmit",
+    "build:sdk": "node scripts/sync-worker-version.mjs && vite build --mode library && tsc -p tsconfig.build.json",
+    "build:preview": "node scripts/sync-worker-version.mjs && vite build --outDir preview-dist",
     "build": "pnpm run build:sdk && pnpm run build:preview"
   },
   "peerDependencies": {

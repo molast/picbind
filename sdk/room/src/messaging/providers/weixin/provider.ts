@@ -1,6 +1,7 @@
 import type { MessageHandler, Unsubscribe } from "../../core/event";
 import type { NormalizedMessage } from "../../core/message";
 import type {
+  MessageImageUploadOptions,
   MessageProvider,
   MessageProviderStatus,
   MessagingProviderSnapshot,
@@ -41,7 +42,7 @@ export type IlinkGatewayTransport = {
   ): Promise<void>;
   disconnect(): Promise<void>;
   send(message: NormalizedMessage): Promise<void>;
-  upload(file: Blob): Promise<string>;
+  upload(file: Blob, options: MessageImageUploadOptions): Promise<string>;
   download(fileReference: string, fallbackFileId?: string): Promise<Blob>;
 };
 
@@ -80,7 +81,7 @@ export class WeixinIlinkProvider implements MessageProvider {
       channel: this.channel,
       displayName: this.displayName,
       status: this.status,
-      textOnly: true,
+      textOnly: false,
       ...(this.recipientId ? { recipientId: this.recipientId } : {}),
       ...(this.error ? { error: this.error } : {}),
     };
@@ -125,9 +126,9 @@ export class WeixinIlinkProvider implements MessageProvider {
     await this.transport.send({ ...message, channel: this.channel });
   }
 
-  async upload(file: Blob) {
+  async upload(file: Blob, options: MessageImageUploadOptions) {
     this.assertConnected();
-    return this.transport.upload(file);
+    return this.transport.upload(file, options);
   }
 
   async download(fileId: string, fallbackFileId?: string) {

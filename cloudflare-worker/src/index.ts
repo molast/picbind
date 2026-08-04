@@ -16,6 +16,7 @@ import {
   type MessagingWorkerEnv,
 } from "./messaging/weixin-messaging";
 import { WeixinMessagingObject } from "./messaging/weixin-messaging-object";
+import workerPackage from "../package.json";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -30,7 +31,6 @@ type MetricsConfig = {
 };
 
 type Env = RuntimeLogEnv & QiniuStorageEnv & MessagingWorkerEnv & {
-  WORKER_VERSION?: string;
   LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
@@ -284,7 +284,7 @@ function withCors(response: Response, env: Env, request: Request) {
   }
   const headers = new Headers(response.headers);
   headers.set("x-picbind-dev-mode", isDevMode(env) ? "1" : "0");
-  headers.set("x-picbind-worker-version", env.WORKER_VERSION?.trim() || "unknown");
+  headers.set("x-picbind-worker-version", workerPackage.version);
   for (const [key, value] of Object.entries(corsHeaders(env, request))) {
     headers.set(key, value);
   }

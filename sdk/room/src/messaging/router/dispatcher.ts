@@ -2,6 +2,7 @@ import { MessageEventDispatcher } from "../core/event";
 import type { MessageHandler, Unsubscribe } from "../core/event";
 import type { NormalizedMessage } from "../core/message";
 import type {
+  MessageImageUploadOptions,
   MessageProvider,
   MessagingProviderSnapshot,
   ProviderStatusHandler,
@@ -64,8 +65,12 @@ export class MessagingService {
     await this.requireProvider(providerId).send(message);
   }
 
-  async upload(providerId: string, file: Blob) {
-    return this.requireProvider(providerId).upload(file);
+  async upload(
+    providerId: string,
+    file: Blob,
+    options: MessageImageUploadOptions,
+  ) {
+    return this.requireProvider(providerId).upload(file, options);
   }
 
   async download(
