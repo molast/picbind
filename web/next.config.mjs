@@ -54,6 +54,13 @@ const nextConfig = {
       }
     : {}),
   webpack(config, { isServer }) {
+    // @jsquash/avif's threaded encoder creates a worker/main-module chunk
+    // cycle. Webpack's second content-hash pass can retain references to
+    // removed child assets on Cloudflare's Linux builder.
+    if (process.env.NODE_ENV === "production" && !isServer) {
+      config.optimization.realContentHash = false
+    }
+
     // Cloudflare Pages installs dependencies from `web`, while the Room SDK is
     // transpiled directly from the sibling `sdk/room/src` directory. Make the
     // app dependency boundary explicit so imports inside linked SDK sources do
