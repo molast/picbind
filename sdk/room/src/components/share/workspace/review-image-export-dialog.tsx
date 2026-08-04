@@ -6,7 +6,9 @@ import {
   FiCheckCircle,
   FiHardDrive,
   FiLoader,
+  FiMessageCircle,
   FiSend,
+  FiUser,
   FiX,
 } from "react-icons/fi";
 import { formatBytes } from "../share-room-formatters";
@@ -16,14 +18,17 @@ import type {
   ReviewImageExportStage,
 } from "../../../utils/review-image-export";
 import type { ShareRoomLabels } from "../share-room-labels";
+import type { ShareRecipient } from "./share-recipient-dialog";
 
 type ReviewImageExportDialogProps = {
   result: ReviewImageExport | null;
   labels: ShareRoomLabels;
+  shareRecipients: ShareRecipient[];
   onClose(): void;
   onSave(
     share: boolean,
     report: (stage: ReviewImageExportStage) => void,
+    recipient?: ShareRecipient,
   ): Promise<ReviewImageExportOutcome>;
   onResolveRejected(imageId: string, save: boolean): Promise<void>;
 };
@@ -31,6 +36,7 @@ type ReviewImageExportDialogProps = {
 export default function ReviewImageExportDialog({
   result,
   labels,
+  shareRecipients,
   onClose,
   onSave,
   onResolveRejected,
@@ -40,6 +46,7 @@ export default function ReviewImageExportDialog({
   const [error, setError] = React.useState<string | null>(null);
   const [rejectedImageId, setRejectedImageId] = React.useState<string | null>(null);
   const [rejectionAction, setRejectionAction] = React.useState<"save" | "discard" | null>(null);
+  const [selectedRecipientId, setSelectedRecipientId] = React.useState<string | null>(null);
   const stageLabels: Record<ReviewImageExportStage, string> = {
     preparing: labels.sharePreparing,
     waiting: labels.shareWaiting,
@@ -63,8 +70,12 @@ export default function ReviewImageExportDialog({
     setError(null);
     setRejectedImageId(null);
     setRejectionAction(null);
+    setSelectedRecipientId(null);
   }, [result]);
   const busy = Boolean(action || rejectionAction);
+  const selectedRecipient = shareRecipients.length === 1
+    ? shareRecipients[0]
+    : shareRecipients.find((recipient) => recipient.id === selectedRecipientId);
   React.useEffect(() => {
     if (!result) return;
     const close = (event: KeyboardEvent) => {
@@ -80,7 +91,11 @@ export default function ReviewImageExportDialog({
     setStage("preparing");
     setError(null);
     try {
-      const outcome = await onSave(share, setStage);
+      const outcome = await onSave(
+        share,
+        setStage,
+        share ? selectedRecipient : undefined,
+      );
       if (outcome.status === "rejected") {
         setRejectedImageId(outcome.imageId);
         setStage(null);
@@ -121,6 +136,59 @@ export default function ReviewImageExportDialog({
         <div className="max-h-[54vh] bg-slate-100 p-4">
           <img src={previewUrl} alt={labels.generatedImagePreview} className="mx-auto max-h-[46vh] max-w-full object-contain" />
         </div>
+        {!stage && !error && !rejectedImageId ? (
+          <div className="space-y-2 border-t border-slate-200 px-5 py-3">
+            <div>
+              <div className="text-xs font-semibold text-slate-800">{labels.selectShareRecipient}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">{labels.selectShareRecipientHint}</div>
+            </div>
+            {shareRecipients.length === 1 ? (
+              <div className="flex h-10 min-w-0 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-700">
+                {shareRecipients[0].kind === "room"
+                  ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                <span className="truncate font-medium">
+                  {shareRecipients[0].kind === "room"
+                    ? shareRecipients[0].member.role === "owner"
+                      ? labels.owner
+                      : labels.guest
+                    : `${labels.messagingBot} · ${shareRecipients[0].provider.displayName}`}
+                </span>
+              </div>
+            ) : (
+              <div className="grid max-h-32 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                {shareRecipients.map((recipient, index) => {
+                  const selected = selectedRecipient?.id === recipient.id;
+                  return (
+                    <button
+                      key={recipient.id}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setSelectedRecipientId(recipient.id)}
+                      className={`flex h-10 min-w-0 items-center gap-2 rounded-md border px-2.5 text-left text-xs transition-colors ${selected ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      {recipient.kind === "room"
+                        ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                      <span className="truncate">
+                        {recipient.kind === "room"
+                          ? recipient.member.role === "owner"
+                            ? labels.owner
+                            : `${labels.guest} ${index + 1}`
+                          : `${labels.messagingBot} · ${recipient.provider.displayName}`}
+                      </span>
+                    </button>
+                  );
+                })}
+                {!shareRecipients.length ? (
+                  <div className="col-span-full rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+                    {labels.waiting}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        ) : null}
         {stage || error || rejectedImageId ? (
           <div className={`flex items-start gap-2.5 border-t px-5 py-3 text-xs ${error ? "border-red-100 bg-red-50 text-red-700" : rejectedImageId ? "border-amber-100 bg-amber-50 text-amber-800" : stage === "complete" ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-blue-100 bg-blue-50 text-[#2f65cf]"}`}>
             {error ? <FiAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : rejectedImageId ? <FiAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : stage === "complete" ? <FiCheckCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <FiLoader className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />}
@@ -146,7 +214,7 @@ export default function ReviewImageExportDialog({
                 {action === "store" ? <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FiHardDrive className="h-3.5 w-3.5" aria-hidden="true" />}
                 {action === "store" ? labels.saving : labels.save}
               </button>
-              <button type="button" disabled={busy} onClick={() => void run(true)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+              <button type="button" disabled={busy || !selectedRecipient} onClick={() => void run(true)} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
                 {action === "share" ? <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FiSend className="h-3.5 w-3.5" aria-hidden="true" />}
                 {action === "share" ? labels.sharing : labels.share}
               </button>

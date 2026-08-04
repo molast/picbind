@@ -288,7 +288,7 @@ export default function ShareRoomPage({
           return {
             id: image.messageId,
             providerId: image.providerId,
-            direction: "incoming",
+            direction: image.direction,
             type: "image",
             fileName: image.fileName,
             mimeType: image.mimeType,
@@ -570,13 +570,23 @@ export default function ShareRoomPage({
         .find((candidate) => candidate.channel === message.channel);
       const providerId = provider?.id || message.channel;
       const title = message.payload.text || message.payload.fileName || labels.messagingImage;
-      upsertActivity({
-        id: `message-${provider?.id || message.channel}-${message.id}`,
-        kind: "message",
-        title,
-        detail: `${labels.messageReceived} · ${provider?.displayName || message.channel}`,
-        createdAt: message.timestamp || Date.now(),
-      });
+      if (message.type === "text") {
+        upsertActivity({
+          id: `message-${provider?.id || message.channel}-${message.id}`,
+          kind: "message",
+          title,
+          detail: `${labels.messageReceived} · ${provider?.displayName || message.channel}`,
+          createdAt: message.timestamp || Date.now(),
+        });
+      } else {
+        upsertActivity({
+          id: `messaging-received-${provider?.id || message.channel}-${message.id}`,
+          kind: "receiving",
+          title,
+          detail: provider?.displayName || message.channel,
+          createdAt: message.timestamp || Date.now(),
+        });
+      }
       const chatItem: WeixinChatItem = {
         id: message.id,
         providerId,
@@ -604,6 +614,7 @@ export default function ShareRoomPage({
             mimeType: blob.type || message.payload.mimeType || "image/jpeg",
             size: blob.size,
             createdAt: message.timestamp || Date.now(),
+            direction: "incoming",
             blob,
           }).catch((error) => {
             console.warn("Failed to cache Weixin image", error);
@@ -1617,6 +1628,7 @@ export default function ShareRoomPage({
     result: ProcessedImageResult,
     action: ProcessedImageAction,
     report: (stage: ProcessedImageActionStage) => void,
+    recipient?: ShareRecipient,
   ): Promise<ProcessedImageActionOutcome> => {
     report("preparing");
     const shouldSuggestCompression =
@@ -1648,9 +1660,13 @@ export default function ShareRoomPage({
     }
     report("waiting");
     try {
-      const requested = await handleRequestImageShare(image, true);
+      const requested = await handleRequestImageShare(image, true, recipient);
       if (!requested) throw new Error(labels.receiveRequestFailed);
-      await waitForProcessedImageShare(image.id, report);
+      if (requested === "room") {
+        await waitForProcessedImageShare(image.id, report);
+      } else {
+        report("complete");
+      }
       return { status: "shared", imageId: image.id };
     } catch (error) {
       const current = imagesRef.current.find((candidate) => candidate.id === image.id)
@@ -1722,6 +1738,7 @@ export default function ShareRoomPage({
     result: ReviewImageExport,
     share: boolean,
     report: (stage: ReviewImageExportStage) => void,
+    recipient?: ShareRecipient,
   ): Promise<ReviewImageExportOutcome> => {
     if (!(result.blob instanceof Blob)) {
       throw new Error(labels.invalidGeneratedImage);
@@ -1781,9 +1798,13 @@ export default function ShareRoomPage({
 
     report("waiting");
     try {
-      const requested = await handleRequestImageShare(stored, true);
+      const requested = await handleRequestImageShare(stored, true, recipient);
       if (!requested) throw new Error(labels.receiveRequestFailed);
-      await waitForProcessedImageShare(stored.id, report);
+      if (requested === "room") {
+        await waitForProcessedImageShare(stored.id, report);
+      } else {
+        report("complete");
+      }
       setReviewWorkspaceFullscreen(false);
       setReviewImageId(null);
       return { status: "shared", imageId: stored.id };
@@ -1902,16 +1923,12 @@ export default function ShareRoomPage({
       setSelectedMessageTargetId(shareRecipients[0].id);
       return Promise.resolve(shareRecipients[0]);
     }
-    const selected = shareRecipients.find(
-      (recipient) => recipient.id === selectedMessageTargetId,
-    );
-    if (selected) return Promise.resolve(selected);
     shareRecipientResolverRef.current?.(null);
     setIsShareRecipientDialogOpen(true);
     return new Promise<ShareRecipient | null>((resolve) => {
       shareRecipientResolverRef.current = resolve;
     });
-  }, [shareRecipients, selectedMessageTargetId]);
+  }, [shareRecipients]);
 
   React.useEffect(
     () => () => {
@@ -1930,51 +1947,86 @@ export default function ShareRoomPage({
   const sendImageToMessaging = async (
     image: CachedRoomImage | RoomImage,
     recipient: Extract<ShareRecipient, { kind: "messaging" }>,
-    insertWhenComplete = false,
   ) => {
     if (!messagingService || !recipient.provider.recipientId || isSending) {
       return false;
     }
     setIsSending(true);
-    const pending = {
-      ...image,
-      transferStatus: "sending" as const,
+    updateRoomImage(image.id, {
+      transferStatus: "sending",
       progress: 0,
-      shareStatus: "transferring" as const,
-    };
-    if (insertWhenComplete) pendingShareImagesRef.current.set(image.id, pending);
-    else updateRoomImage(image.id, pending, true);
+      shareStatus: "transferring",
+    }, true);
     try {
       const file = new File([image.blob], image.name, { type: image.type });
-      await messagingService.upload(recipient.provider.id, file, {
+      const messageId = await messagingService.upload(recipient.provider.id, file, {
         recipientId: recipient.provider.recipientId,
         fileName: image.name,
-        onProgress: (progress) => {
-          if (insertWhenComplete) {
-            const current = pendingShareImagesRef.current.get(image.id);
-            if (current) pendingShareImagesRef.current.set(image.id, {
-              ...current,
-              progress,
-            });
-          } else {
-            updateRoomImage(image.id, { progress }, true);
-          }
+        onProgress: (progress) => updateRoomImage(image.id, { progress }, true),
+        onRetry: (retry) => {
+          const createdAt = Date.now();
+          upsertActivity({
+            id: `r2-upload-failed-${image.id}-${retry.failedAttempt}-${createdAt}`,
+            kind: "error",
+            title: image.name,
+            detail: labels.r2UploadAttemptFailed(
+              retry.failedAttempt,
+              retry.maxAttempts,
+              retry.error.message,
+            ),
+            createdAt,
+          });
+          upsertActivity({
+            id: `r2-upload-retry-${image.id}-${retry.nextAttempt}-${createdAt}`,
+            kind: "sending",
+            title: image.name,
+            detail: labels.r2UploadRetrying(retry.nextAttempt, retry.maxAttempts),
+            createdAt: createdAt + 1,
+          });
         },
       });
-      const completed = {
-        ...pending,
+      updateRoomImage(image.id, {
         transferStatus: "sent" as const,
         progress: 1,
         shareStatus: "available" as const,
         updatedAt: Date.now(),
-      };
-      if (insertWhenComplete) {
-        pendingShareImagesRef.current.delete(image.id);
-        await storeRoomImage(completed);
-        addRoomImage(completed);
-      } else {
-        updateRoomImage(image.id, completed, true);
-      }
+      }, true);
+      const createdAt = Date.now();
+      const cachedImage = {
+        providerId: recipient.provider.id,
+        messageId,
+        fileName: image.name,
+        mimeType: image.type,
+        size: image.blob.size,
+        createdAt,
+        direction: "outgoing",
+        blob: image.blob,
+      } as const;
+      const url = URL.createObjectURL(image.blob);
+      objectUrlsRef.current.add(url);
+      appendMessagingChatMessage({
+        id: messageId,
+        providerId: recipient.provider.id,
+        direction: "outgoing",
+        type: "image",
+        fileName: image.name,
+        mimeType: image.type,
+        size: image.blob.size,
+        blob: image.blob,
+        url,
+        createdAt,
+        status: "sent",
+      });
+      await storeMessagingImage(cachedImage).catch((error) => {
+        console.warn("Failed to cache sent Weixin image", error);
+        upsertActivity({
+          id: `messaging-image-cache-${messageId}`,
+          kind: "error",
+          title: image.name,
+          detail: labels.cacheFailed,
+          createdAt: Date.now(),
+        });
+      });
       upsertActivity({
         id: `messaging-image-${image.id}`,
         kind: "complete",
@@ -1985,8 +2037,7 @@ export default function ShareRoomPage({
       });
       return true;
     } catch (error) {
-      if (insertWhenComplete) pendingShareImagesRef.current.delete(image.id);
-      else updateRoomImage(image.id, {
+      updateRoomImage(image.id, {
         transferStatus: "failed",
         progress: 0,
         shareStatus: "failed",
@@ -2087,6 +2138,27 @@ export default function ShareRoomPage({
             });
           },
           abortController.signal,
+          (retry) => {
+            const createdAt = Date.now();
+            upsertActivity({
+              id: `r2-upload-failed-${image.id}-${retry.failedAttempt}-${createdAt}`,
+              kind: "error",
+              title: image.name,
+              detail: labels.r2UploadAttemptFailed(
+                retry.failedAttempt,
+                retry.maxAttempts,
+                retry.error.message,
+              ),
+              createdAt,
+            });
+            upsertActivity({
+              id: `r2-upload-retry-${image.id}-${retry.nextAttempt}-${createdAt}`,
+              kind: "sending",
+              title: image.name,
+              detail: labels.r2UploadRetrying(retry.nextAttempt, retry.maxAttempts),
+              createdAt: createdAt + 1,
+            });
+          },
         );
         abortController.signal.throwIfAborted();
         const uploaded = await confirmRealtimeR2Upload(
@@ -2167,11 +2239,12 @@ export default function ShareRoomPage({
   const handleRequestImageShare = async (
     image: CachedRoomImage | RoomImage,
     deferUntilAccepted = false,
+    requestedRecipient?: ShareRecipient,
   ) => {
-    const recipient = await ensureShareRecipient();
+    const recipient = requestedRecipient || await ensureShareRecipient();
     if (!recipient) return false;
     if (recipient.kind === "messaging") {
-      return sendImageToMessaging(image, recipient, deferUntilAccepted);
+      return await sendImageToMessaging(image, recipient) ? "messaging" : false;
     }
     const channel = instructionChannelRef.current;
     if (
@@ -2237,7 +2310,7 @@ export default function ShareRoomPage({
       detail: labels.waitingPeerAcceptance,
       createdAt: Date.now(),
     });
-    return true;
+    return "room";
   };
 
   React.useEffect(() => {
@@ -2730,6 +2803,7 @@ export default function ShareRoomPage({
                 actorId={roomId ? getShareRoomClientId(roomId) : "unknown"}
                 role={role}
                 fullscreen={reviewFullscreenActive}
+                shareRecipients={shareRecipients}
                 subscribeMessages={subscribeReviewMessages}
                 onSendMessage={sendReviewMessage}
                 onReviewStatusChange={handleReviewStatusChange}
@@ -2750,6 +2824,7 @@ export default function ShareRoomPage({
                 isSending={isSending}
                 isDragging={isDragging}
                 labels={imageWorkspaceLabels}
+                shareRecipients={shareRecipients}
                 onChooseImages={() => setIsSourceDialogOpen(true)}
                 onFiles={handleLocalFiles}
                 onDraggingChange={setIsDragging}

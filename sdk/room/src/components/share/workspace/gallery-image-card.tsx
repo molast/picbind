@@ -24,6 +24,7 @@ import ImageVersionMenu from "./image-version-menu";
 type GalleryImageCardProps = {
   image: RoomImage;
   connection: ConnectionState;
+  canSend: boolean;
   isSending: boolean;
   labels: ShareRoomLabels;
   onPreview(imageId: string): void;
@@ -60,6 +61,7 @@ export function canReviewRoomImage(image: RoomImage) {
 export default function GalleryImageCard({
   image,
   connection,
+  canSend,
   isSending,
   labels,
   onPreview,
@@ -485,7 +487,7 @@ export default function GalleryImageCard({
               <button
                 type="button"
                 onClick={() => void onSend(image)}
-                disabled={isSending || connection !== "connected"}
+                disabled={isSending || !canSend}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[#2f65cf] text-white transition hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={labels.send}
                 title={labels.send}

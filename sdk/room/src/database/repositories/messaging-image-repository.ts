@@ -12,6 +12,7 @@ export type CachedMessagingImage = {
   mimeType: string;
   size: number;
   createdAt: number;
+  direction: "incoming" | "outgoing";
   blob: Blob;
 };
 
@@ -30,6 +31,7 @@ export async function storeMessagingImage(image: CachedMessagingImage) {
     mimeType: image.mimeType,
     size: image.blob.size,
     createdAt: image.createdAt,
+    direction: image.direction,
     filePath,
   });
 
@@ -67,6 +69,7 @@ export async function listMessagingImages() {
           mimeType: record.mimeType,
           size: stored.size,
           createdAt: record.createdAt,
+          direction: record.direction || "incoming",
           blob: new Blob([stored], { type: record.mimeType }),
         };
       } catch (error) {

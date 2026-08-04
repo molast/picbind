@@ -13,6 +13,7 @@ import {
 import type { MessagingProviderSnapshot } from "../../messaging";
 import type { ShareRoomLabels } from "./share-room-labels";
 import { formatBytes, formatTime } from "./share-room-formatters";
+import RoomImagePreviewDialog from "./room-image-preview-dialog";
 
 export type WeixinChatItem = {
   id: string;
@@ -53,7 +54,10 @@ export default function WeixinChatDialog({
 }: WeixinChatDialogProps) {
   const [draft, setDraft] = React.useState("");
   const [movingImageId, setMovingImageId] = React.useState<string | null>(null);
+  const [selectedImageId, setSelectedImageId] = React.useState<string | null>(null);
+  const [previewImageId, setPreviewImageId] = React.useState<string | null>(null);
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
+  const imageItemRefs = React.useRef(new Map<string, HTMLElement>());
 
   React.useEffect(() => {
     if (!open) setDraft("");
@@ -74,6 +78,13 @@ export default function WeixinChatDialog({
   if (!open || !provider) return null;
   const providerMessages = messages.filter((message) => message.providerId === provider.id);
   const images = providerMessages.filter((message) => message.type === "image");
+  const previewImages = images
+    .filter((image): image is WeixinChatItem & { url: string } => Boolean(image.url))
+    .map((image) => ({
+      id: image.id,
+      src: image.url,
+      name: image.fileName || labels.messagingImage,
+    }));
   const connected = provider.status === "connected";
   const submit = async () => {
     const text = draft.trim().slice(0, 2000);
@@ -89,8 +100,20 @@ export default function WeixinChatDialog({
       setMovingImageId(null);
     }
   };
+  const focusImage = (imageId: string) => {
+    setSelectedImageId(imageId);
+    imageItemRefs.current.get(imageId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  };
+  const previewImage = (image: WeixinChatItem) => {
+    focusImage(image.id);
+    if (image.url) setPreviewImageId(image.id);
+  };
 
   return (
+    <>
     <div className="fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/50 p-4">
       <section
         className="flex h-[min(76vh,680px)] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
@@ -125,8 +148,18 @@ export default function WeixinChatDialog({
                       ? "bg-[#2f65cf] text-white"
                       : "border border-slate-200 bg-white text-slate-800"
                   }`}>
-                    {message.type === "image" && message.url ? (
-                      <img src={message.url} alt={message.fileName || labels.messagingImage} className="mb-1 max-h-44 w-auto rounded object-contain" />
+                    {message.type === "image" ? (
+                      <button
+                        type="button"
+                        onClick={() => focusImage(message.id)}
+                        className={`flex min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left ${message.direction === "outgoing" ? "hover:bg-white/10" : "hover:bg-slate-50"}`}
+                        aria-label={message.fileName || labels.messagingImage}
+                      >
+                        <FiImage className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        <span className="truncate text-xs font-medium">
+                          {message.fileName || labels.messagingImage}
+                        </span>
+                      </button>
                     ) : null}
                     {message.text ? <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.text}</p> : null}
                     <div className={`mt-1 flex items-center justify-end gap-1 text-[9px] ${message.direction === "outgoing" ? "text-blue-100" : "text-slate-400"}`}>
@@ -164,34 +197,45 @@ export default function WeixinChatDialog({
           <aside className="flex min-h-0 flex-col bg-white">
             <div className="flex h-11 shrink-0 items-center gap-2 border-b border-slate-200 px-3 text-xs font-semibold text-slate-600">
               <FiImage className="h-4 w-4" aria-hidden="true" />
-              <span>{labels.messagingReceivedImages}</span>
+              <span>{labels.messagingImages}</span>
               <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{images.length}</span>
             </div>
             <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
               {images.length ? images.map((image) => (
                 <article
                   key={`image-${image.id}`}
-                  className="flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white p-1.5"
+                  ref={(node) => {
+                    if (node) imageItemRefs.current.set(image.id, node);
+                    else imageItemRefs.current.delete(image.id);
+                  }}
+                  className={`flex min-w-0 items-center gap-1 rounded-md border bg-white p-1.5 transition-colors ${selectedImageId === image.id ? "border-blue-400 bg-blue-50" : "border-slate-200"}`}
                 >
-                  {image.url ? <img
-                    src={image.url}
-                    alt={image.fileName || labels.messagingImage}
-                    className="h-11 w-11 shrink-0 rounded bg-slate-50 object-cover"
-                  /> : (
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-slate-50 text-slate-300">
-                      <FiImage className="h-5 w-5" aria-hidden="true" />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className="truncate text-[11px] font-medium text-slate-700"
-                      title={image.fileName || labels.messagingImage}
-                    >
-                      {image.fileName || labels.messagingImage}
-                    </div>
-                    <div className="text-[9px] text-slate-400">{typeof image.size === "number" ? formatBytes(image.size) : ""}</div>
-                  </div>
                   <button
+                    type="button"
+                    onClick={() => previewImage(image)}
+                    disabled={!image.url}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded text-left disabled:cursor-wait"
+                  >
+                    {image.url ? <img
+                      src={image.url}
+                      alt={image.fileName || labels.messagingImage}
+                      className="h-11 w-11 shrink-0 rounded bg-slate-50 object-cover"
+                    /> : (
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-slate-50 text-slate-300">
+                        <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate text-[11px] font-medium text-slate-700"
+                        title={image.fileName || labels.messagingImage}
+                      >
+                        {image.fileName || labels.messagingImage}
+                      </div>
+                      <div className="text-[9px] text-slate-400">{typeof image.size === "number" ? formatBytes(image.size) : ""}</div>
+                    </div>
+                  </button>
+                  {image.direction === "incoming" ? <button
                     type="button"
                     disabled={!image.blob || image.movedToLibrary || Boolean(movingImageId)}
                     onClick={() => void moveImage(image)}
@@ -204,7 +248,7 @@ export default function WeixinChatDialog({
                       : image.movedToLibrary
                         ? <FiCheck className="h-3.5 w-3.5" aria-hidden="true" />
                         : <FiPlusSquare className="h-3.5 w-3.5" aria-hidden="true" />}
-                  </button>
+                  </button> : null}
                 </article>
               )) : <div className="flex h-full min-h-28 items-center justify-center text-center text-xs text-slate-400">{labels.messagingNoImages}</div>}
             </div>
@@ -212,5 +256,22 @@ export default function WeixinChatDialog({
         </div>
       </section>
     </div>
+    {previewImageId && previewImages.some((image) => image.id === previewImageId) ? (
+      <RoomImagePreviewDialog
+        open
+        foreground
+        labels={labels}
+        images={previewImages}
+        activeId={previewImageId}
+        onActiveChange={(id) => {
+          setPreviewImageId(id);
+          focusImage(id);
+        }}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPreviewImageId(null);
+        }}
+      />
+    ) : null}
+    </>
   );
 }

@@ -111,6 +111,8 @@ export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
       preparation.uploadUrl,
       image,
       ({ progress }) => options.onProgress?.(progress),
+      undefined,
+      options.onRetry,
     );
     const sent = await this.socketRequest<{ id: string }>("SEND_IMAGE", {
       objectKey: preparation.objectKey,

@@ -17,6 +17,7 @@ import ImageResultDialog, {
   type ProcessedImageActionStage,
   type ProcessedImageResult,
 } from "./image-result-dialog";
+import type { ShareRecipient } from "./share-recipient-dialog";
 import ImageDeleteConfirmDialog from "./image-delete-confirm-dialog";
 import OperationLogDialog from "./operation-log-dialog";
 
@@ -44,7 +45,8 @@ type GalleryWorkspaceProps = {
   onLike(image: RoomImage): void;
   onWant(image: RoomImage): void;
   reactionSignals: Record<string, ImageReactionSignal>;
-  onProcessResult(source: RoomImage, result: ProcessedImageResult, action: ProcessedImageAction, report: (stage: ProcessedImageActionStage) => void): Promise<ProcessedImageActionOutcome>;
+  onProcessResult(source: RoomImage, result: ProcessedImageResult, action: ProcessedImageAction, report: (stage: ProcessedImageActionStage) => void, recipient?: ShareRecipient): Promise<ProcessedImageActionOutcome>;
+  shareRecipients: ShareRecipient[];
   onCompressionToOutbox(source: RoomImage, result: ProcessedImageResult): void | Promise<void>;
   onResolveRejectedImage(imageId: string, save: boolean): Promise<void>;
   compressionRequest: RoomImage | null;
@@ -78,6 +80,7 @@ export default function GalleryWorkspace({
   onWant,
   reactionSignals,
   onProcessResult,
+  shareRecipients,
   onCompressionToOutbox,
   onResolveRejectedImage,
   compressionRequest,
@@ -225,6 +228,7 @@ export default function GalleryWorkspace({
               <GalleryImageCard
                 key={rootId}
                 image={image}
+                canSend={shareRecipients.length > 0}
                 connection={connection}
                 isSending={isSending}
                 labels={labels}
@@ -296,7 +300,7 @@ export default function GalleryWorkspace({
         onClose={() => setAdjustmentImage(null)}
         onSave={finishProcessing}
       />
-      <ImageResultDialog source={processedResult?.source || null} result={processedResult?.result || null} labels={labels} onClose={() => setProcessedResult(null)} onAction={onProcessResult} onResolveRejected={onResolveRejectedImage} />
+      <ImageResultDialog source={processedResult?.source || null} result={processedResult?.result || null} labels={labels} shareRecipients={shareRecipients} onClose={() => setProcessedResult(null)} onAction={onProcessResult} onResolveRejected={onResolveRejectedImage} />
       <ImageDeleteConfirmDialog
         image={deleteCandidate}
         labels={labels}

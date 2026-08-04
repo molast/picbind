@@ -6,7 +6,28 @@ export type HttpTransferProgress = {
   progress: number;
 };
 
-export function uploadFileToR2(
+export type R2UploadRetry = {
+  failedAttempt: number;
+  nextAttempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  error: Error;
+};
+
+const R2_UPLOAD_MAX_ATTEMPTS = 5;
+const R2_UPLOAD_RETRY_BASE_DELAY_MS = 400;
+
+class R2UploadError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "R2UploadError";
+  }
+}
+
+function uploadFileToR2Once(
   uploadUrl: string,
   file: File,
   onProgress: (progress: HttpTransferProgress) => void,
@@ -33,7 +54,7 @@ export function uploadFileToR2(
     };
     request.onerror = () => {
       cleanUp();
-      reject(new Error("R2 upload failed"));
+      reject(new R2UploadError("R2 upload failed"));
     };
     request.onabort = () => {
       cleanUp();
@@ -45,11 +66,70 @@ export function uploadFileToR2(
         onProgress({ transferredBytes: file.size, size: file.size, progress: 1 });
         resolve();
       } else {
-        reject(new Error(`R2 upload failed (${request.status})`));
+        reject(new R2UploadError(`R2 upload failed (${request.status})`, request.status));
       }
     };
     request.send(file);
   });
+}
+
+function isRetryableR2UploadError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return false;
+  if (!(error instanceof R2UploadError) || error.status === undefined) return true;
+  return error.status === 408
+    || error.status === 425
+    || error.status === 429
+    || error.status >= 500;
+}
+
+function waitForR2UploadRetry(delayMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("R2 upload was cancelled", "AbortError"));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("R2 upload was cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export async function uploadFileToR2(
+  uploadUrl: string,
+  file: File,
+  onProgress: (progress: HttpTransferProgress) => void,
+  signal?: AbortSignal,
+  onRetry?: (retry: R2UploadRetry) => void,
+) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= R2_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await uploadFileToR2Once(uploadUrl, file, onProgress, signal);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === R2_UPLOAD_MAX_ATTEMPTS || !isRetryableR2UploadError(error)) {
+        throw error;
+      }
+      onProgress({ transferredBytes: 0, size: file.size, progress: 0 });
+      const delay = R2_UPLOAD_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      onRetry?.({
+        failedAttempt: attempt,
+        nextAttempt: attempt + 1,
+        maxAttempts: R2_UPLOAD_MAX_ATTEMPTS,
+        delayMs: delay,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      await waitForR2UploadRetry(delay, signal);
+    }
+  }
+  throw lastError;
 }
 
 export async function downloadFileFromR2(

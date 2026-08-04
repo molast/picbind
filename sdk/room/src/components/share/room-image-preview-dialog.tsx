@@ -26,6 +26,7 @@ type RoomImagePreviewDialogProps = {
   images: PreviewImage[];
   activeId: string;
   onActiveChange(id: string): void;
+  foreground?: boolean;
 };
 
 export default function RoomImagePreviewDialog({
@@ -35,6 +36,7 @@ export default function RoomImagePreviewDialog({
   images,
   activeId,
   onActiveChange,
+  foreground = false,
 }: RoomImagePreviewDialogProps) {
   const activeIndex = Math.max(
     0,
@@ -67,8 +69,8 @@ export default function RoomImagePreviewDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[110] bg-slate-950/80" />
-        <Dialog.Content className="fixed inset-4 z-[111] grid grid-rows-[minmax(0,1fr)_76px] overflow-hidden rounded-md bg-slate-950 shadow-2xl outline-none sm:inset-8">
+        <Dialog.Overlay className={`fixed inset-0 bg-slate-950/80 ${foreground ? "z-[140]" : "z-[110]"}`} />
+        <Dialog.Content className={`fixed inset-4 grid grid-rows-[minmax(0,1fr)_76px] overflow-hidden rounded-md bg-slate-950 shadow-2xl outline-none sm:inset-8 ${foreground ? "z-[141]" : "z-[111]"}`}>
           <Dialog.Title className="sr-only">{active.name}</Dialog.Title>
           <div className="relative min-h-0">
             <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-240px)] rounded-md bg-slate-900/85 px-3 py-2 text-xs text-white shadow-lg">

@@ -1,12 +1,13 @@
 "use client";
 
 import React from "react";
-import { FiCheckCircle, FiHardDrive, FiLoader, FiSend, FiX, FiXCircle } from "react-icons/fi";
+import { FiCheckCircle, FiHardDrive, FiLoader, FiMessageCircle, FiSend, FiUser, FiX, FiXCircle } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
 import { formatBytes } from "../share-room-formatters";
 import type { RoomCompressionResult } from "../../../utils/room-image-compression";
 import type { RoomImageEditResult } from "../../../utils/room-image-editing";
 import type { ShareRoomLabels } from "../share-room-labels";
+import type { ShareRecipient } from "./share-recipient-dialog";
 
 export type ProcessedImageResult = RoomCompressionResult | RoomImageEditResult;
 export type ProcessedImageAction = "store" | "share";
@@ -20,22 +21,25 @@ type ImageResultDialogProps = {
   source: RoomImage | null;
   labels: ShareRoomLabels;
   result: ProcessedImageResult | null;
+  shareRecipients: ShareRecipient[];
   onClose(): void;
   onAction(
     source: RoomImage,
     result: ProcessedImageResult,
     action: ProcessedImageAction,
     report: (stage: ProcessedImageActionStage) => void,
+    recipient?: ShareRecipient,
   ): Promise<ProcessedImageActionOutcome>;
   onResolveRejected(imageId: string, save: boolean): Promise<void>;
 };
 
-export default function ImageResultDialog({ source, result, labels, onClose, onAction, onResolveRejected }: ImageResultDialogProps) {
+export default function ImageResultDialog({ source, result, labels, shareRecipients, onClose, onAction, onResolveRejected }: ImageResultDialogProps) {
   const [stage, setStage] = React.useState<ProcessedImageActionStage | null>(null);
   const [action, setAction] = React.useState<ProcessedImageAction | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [rejectedImageId, setRejectedImageId] = React.useState<string | null>(null);
   const [rejectionAction, setRejectionAction] = React.useState<"save" | "discard" | null>(null);
+  const [selectedRecipientId, setSelectedRecipientId] = React.useState<string | null>(null);
   const previewUrl = React.useMemo(() => result ? URL.createObjectURL(result.blob) : null, [result]);
 
   React.useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
@@ -45,6 +49,7 @@ export default function ImageResultDialog({ source, result, labels, onClose, onA
     setError(null);
     setRejectedImageId(null);
     setRejectionAction(null);
+    setSelectedRecipientId(null);
   }, [result]);
   React.useEffect(() => {
     if (!source || !result) return;
@@ -63,13 +68,22 @@ export default function ImageResultDialog({ source, result, labels, onClose, onA
     complete: labels.imageProcessed,
   };
   const running = Boolean(action || rejectionAction);
+  const selectedRecipient = shareRecipients.length === 1
+    ? shareRecipients[0]
+    : shareRecipients.find((recipient) => recipient.id === selectedRecipientId);
   const start = async (nextAction: ProcessedImageAction) => {
     if (running) return;
     setAction(nextAction);
     setStage("preparing");
     setError(null);
     try {
-      const outcome = await onAction(source, result, nextAction, setStage);
+      const outcome = await onAction(
+        source,
+        result,
+        nextAction,
+        setStage,
+        nextAction === "share" ? selectedRecipient : undefined,
+      );
       if (outcome.status === "rejected") {
         setRejectedImageId(outcome.imageId);
         setStage(null);
@@ -103,6 +117,59 @@ export default function ImageResultDialog({ source, result, labels, onClose, onA
         <div className="space-y-4 p-5">
           <div className="aspect-video overflow-hidden rounded-md bg-slate-100"><img src={previewUrl} alt={labels.imageResultPreview} className="h-full w-full object-contain" /></div>
           <div className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500"><span>{result.width} × {result.height}</span><span>{formatBytes(result.blob.size)}</span></div>
+          {!stage && !error && !rejectedImageId ? (
+            <div className="space-y-2">
+              <div>
+                <div className="text-xs font-semibold text-slate-800">{labels.selectShareRecipient}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">{labels.selectShareRecipientHint}</div>
+              </div>
+              {shareRecipients.length === 1 ? (
+                <div className="flex h-10 min-w-0 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-700">
+                  {shareRecipients[0].kind === "room"
+                    ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                  <span className="truncate font-medium">
+                    {shareRecipients[0].kind === "room"
+                      ? shareRecipients[0].member.role === "owner"
+                        ? labels.owner
+                        : labels.guest
+                      : `${labels.messagingBot} · ${shareRecipients[0].provider.displayName}`}
+                  </span>
+                </div>
+              ) : (
+              <div className="grid max-h-32 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                {shareRecipients.map((recipient, index) => {
+                  const selected = selectedRecipient?.id === recipient.id;
+                  return (
+                    <button
+                      key={recipient.id}
+                      type="button"
+                      disabled={running}
+                      onClick={() => setSelectedRecipientId(recipient.id)}
+                      className={`flex h-10 min-w-0 items-center gap-2 rounded-md border px-2.5 text-left text-xs transition-colors ${selected ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      {recipient.kind === "room"
+                        ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                      <span className="truncate">
+                        {recipient.kind === "room"
+                          ? recipient.member.role === "owner"
+                            ? labels.owner
+                            : `${labels.guest} ${index + 1}`
+                          : `${labels.messagingBot} · ${recipient.provider.displayName}`}
+                      </span>
+                    </button>
+                  );
+                })}
+                {!shareRecipients.length ? (
+                  <div className="col-span-full rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">
+                    {labels.waiting}
+                  </div>
+                ) : null}
+              </div>
+              )}
+            </div>
+          ) : null}
           {stage || error || rejectedImageId ? (
             <div className={`flex items-start gap-3 rounded-md px-3 py-3 text-xs ${error ? "bg-red-50 text-red-700" : rejectedImageId ? "bg-amber-50 text-amber-800" : stage === "complete" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#2f65cf]"}`}>
               {error || rejectedImageId ? <FiXCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : stage === "complete" ? <FiCheckCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <FiLoader className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />}
@@ -130,7 +197,7 @@ export default function ImageResultDialog({ source, result, labels, onClose, onA
                 {running && action === "store" ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FiHardDrive className="h-4 w-4" aria-hidden="true" />}
                 {running && action === "store" ? labels.storing : labels.storeLocally}
               </button>
-              <button type="button" disabled={running} onClick={() => void start("share")} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-40">
+              <button type="button" disabled={running || !selectedRecipient} onClick={() => void start("share")} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40">
                 {running && action === "share" ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FiSend className="h-4 w-4" aria-hidden="true" />}
                 {running && action === "share" ? (stage === "waiting" ? labels.waitingForAcceptance : stage === "transferring" ? labels.sending : labels.preparing) : labels.shareWithPeer}
               </button>

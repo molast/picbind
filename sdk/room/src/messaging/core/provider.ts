@@ -25,6 +25,13 @@ export type MessageImageUploadOptions = {
   recipientId: string;
   fileName?: string;
   onProgress?: (progress: number) => void;
+  onRetry?: (retry: {
+    failedAttempt: number;
+    nextAttempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    error: Error;
+  }) => void;
 };
 
 export interface MessageProvider {

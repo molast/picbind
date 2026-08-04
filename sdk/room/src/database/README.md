@@ -14,9 +14,10 @@ Responsibilities:
 - `file-storage.ts` owns OPFS file operations.
 - IndexedDB stores metadata, review history, and operation logs.
 - Image and thumbnail bytes are stored as OPFS files, never as Dexie records.
-- Received Weixin image metadata is stored in `messagingImages`; its downloaded
-  bytes are cached in OPFS immediately so expiring remote URLs are not required
-  after the first successful download. The cache keeps the latest 100 images.
+- Incoming and outgoing Weixin image metadata is stored in `messagingImages`;
+  image bytes are cached in OPFS immediately. The UI creates local Blob URLs
+  from this cache and never persists expiring remote URLs. The cache keeps the
+  latest 100 images.
 
 The Room SDK and Web app use the same `picbind-local` database name and schema
 version so compressed-image metadata remains available when Room is embedded in

@@ -24,6 +24,7 @@ import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
 import ReviewClearCommentsDialog from "./review-clear-comments-dialog";
 import ReviewImageExportDialog from "./review-image-export-dialog";
+import type { ShareRecipient } from "./share-recipient-dialog";
 import { useReviewHistory } from "./use-review-history";
 import {
   loadReviewHistory,
@@ -43,6 +44,7 @@ type ReviewWorkspaceProps = {
   actorId: string;
   role: RoomRole | null;
   fullscreen: boolean;
+  shareRecipients: ShareRecipient[];
   subscribeMessages(
     listener: (event: {
       sequence: number;
@@ -62,6 +64,7 @@ type ReviewWorkspaceProps = {
     result: ReviewImageExport,
     share: boolean,
     report: (stage: ReviewImageExportStage) => void,
+    recipient?: ShareRecipient,
   ): Promise<ReviewImageExportOutcome>;
   onResolveRejectedImage(imageId: string, save: boolean): Promise<void>;
   onBack(): void;
@@ -103,6 +106,7 @@ export default function ReviewWorkspace({
   actorId,
   role,
   fullscreen,
+  shareRecipients,
   subscribeMessages,
   onSendMessage,
   onReviewStatusChange,
@@ -1015,10 +1019,11 @@ export default function ReviewWorkspace({
       <ReviewImageExportDialog
         result={generatedImage}
         labels={labels}
+        shareRecipients={shareRecipients}
         onClose={() => setGeneratedImage(null)}
-        onSave={async (share, report) => {
+        onSave={async (share, report, recipient) => {
           if (!generatedImage) throw new Error(labels.generatedImageMissing);
-          return onGenerateImage(image, generatedImage, share, report);
+          return onGenerateImage(image, generatedImage, share, report, recipient);
         }}
         onResolveRejected={onResolveRejectedImage}
       />

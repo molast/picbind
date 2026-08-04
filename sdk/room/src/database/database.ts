@@ -44,6 +44,7 @@ export type MessagingImageRecord = {
   mimeType: string;
   size: number;
   createdAt: number;
+  direction?: "incoming" | "outgoing";
   filePath: string;
 };
 
