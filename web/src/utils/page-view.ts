@@ -1,6 +1,7 @@
 "use client";
 
 import { getPageViewApiPath } from "@/utils/api-endpoints";
+import { checkWorkerVersion } from "@picbind/room/source/worker-version";
 
 const HAS_EXPLICIT_PAGE_VIEW_API = Boolean(
   process.env.NEXT_PUBLIC_PAGE_VIEW_API_PATH ||
@@ -33,6 +34,7 @@ export async function reportPageViewOnce() {
 
   try {
     const response = await fetch(PAGE_VIEW_API_PATH, { method: "POST" });
+    checkWorkerVersion(response);
     if (!response.ok) {
       throw new Error(`Page view write failed with status ${response.status}`);
     }

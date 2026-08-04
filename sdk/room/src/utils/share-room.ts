@@ -2,6 +2,7 @@
 
 import { getShareRoomApiPath } from "./api-endpoints";
 import { getLang, getShareRoomLabels } from "../locales";
+import { checkWorkerVersion } from "../worker-version";
 
 export type ShareRoom = {
   roomId: string;
@@ -29,6 +30,7 @@ export async function createShareRoom(): Promise<ShareRoom> {
     method: "POST",
     headers: { "content-type": "application/json" },
   });
+  checkWorkerVersion(response);
   const result = (await response.json().catch(() => null)) as
     | (Partial<CreateShareRoomResponse> & { error?: string })
     | null;

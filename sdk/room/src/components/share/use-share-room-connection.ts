@@ -1473,11 +1473,6 @@ export function useShareRoomConnection({
             forceRoomNavigation("kicked");
           },
           onWeakNetworkChange,
-          onSocketLatencyChange(latencyMs) {
-            if (!disposed && socketRelay?.canRelay) {
-              setNetworkLatencyMs(latencyMs);
-            }
-          },
           onPeerUnavailable() {
             if (disposed) return;
             closePeerConnection();
@@ -1572,7 +1567,7 @@ export function useShareRoomConnection({
           }
         };
         heartbeatNow = (refresh = false) => void sendHeartbeat(refresh);
-        heartbeatTimer = window.setInterval(() => heartbeatNow?.(), 15_000);
+        heartbeatTimer = window.setInterval(() => heartbeatNow?.(), 60_000);
 
         const credentials = await getRealtimeIceServers(
           roomId,

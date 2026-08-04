@@ -1,4 +1,4 @@
-import type { NormalizedMessage } from "./message.js";
+import type { NormalizedMessage } from "./message";
 
 export type MessageHandler = (message: NormalizedMessage) => void;
 export type Unsubscribe = () => void;

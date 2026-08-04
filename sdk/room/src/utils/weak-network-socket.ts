@@ -21,7 +21,6 @@ type WeakNetworkSocketOptions = {
   onRoomKicked(): void;
   onWeakNetworkChange(weakNetwork: boolean): void;
   onRelayReadyChange(ready: boolean): void;
-  onSocketLatencyChange(latencyMs: number | null): void;
   onPeerUnavailable(): void;
 };
 
@@ -31,10 +30,8 @@ export class WeakNetworkSocket {
   private relayReady = false;
   private reconnectTimer: number | null = null;
   private recoveryStartedAt: number | null = null;
-  private pingTimer: number | null = null;
   private peerDisconnectTimer: number | null = null;
   private peerUnavailable = false;
-  private readonly pendingPings = new Map<string, number>();
 
   constructor(private readonly options: WeakNetworkSocketOptions) {}
 
@@ -104,7 +101,6 @@ export class WeakNetworkSocket {
     this.clearPeerDisconnectTimer();
     const socket = this.socket;
     this.socket = null;
-    this.stopLatencyMonitor();
     if (socket && socket.readyState < WebSocket.CLOSING) {
       socket.close(1000, "Network recovered");
     }
@@ -155,14 +151,6 @@ export class WeakNetworkSocket {
         typeof message.payload === "string"
       ) {
         this.options.onMessage(message.channel, message.payload);
-      } else if (message.type === "PONG" && typeof message.id === "string") {
-        const sentAt = this.pendingPings.get(message.id);
-        if (sentAt !== undefined) {
-          this.pendingPings.delete(message.id);
-          this.options.onSocketLatencyChange(
-            Math.max(0, Math.round(performance.now() - sentAt)),
-          );
-        }
       } else if (message.type === "ROOM_CLOSED") {
         this.disconnect();
         this.options.onRoomClosed();
@@ -173,14 +161,10 @@ export class WeakNetworkSocket {
         this.markPeerUnavailable();
       }
     };
-    socket.onopen = () => {
-      this.startLatencyMonitor(socket);
-    };
     socket.onclose = () => {
       if (this.socket !== socket) return;
       this.socket = null;
       this.setRelayReady(false);
-      this.stopLatencyMonitor();
       if (this.desired) {
         this.reconnectTimer = window.setTimeout(() => {
           this.reconnectTimer = null;
@@ -219,29 +203,6 @@ export class WeakNetworkSocket {
     }
   }
 
-  private startLatencyMonitor(socket: WebSocket) {
-    this.stopLatencyMonitor();
-    const ping = () => {
-      if (this.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
-      const id = crypto.randomUUID().replace(/-/g, "");
-      this.pendingPings.set(id, performance.now());
-      for (const [pendingId, sentAt] of this.pendingPings) {
-        if (performance.now() - sentAt > 10_000) this.pendingPings.delete(pendingId);
-      }
-      socket.send(JSON.stringify({ type: "PING", id }));
-    };
-    ping();
-    this.pingTimer = window.setInterval(ping, 2000);
-  }
-
-  private stopLatencyMonitor() {
-    if (this.pingTimer !== null) {
-      window.clearInterval(this.pingTimer);
-      this.pingTimer = null;
-    }
-    this.pendingPings.clear();
-    this.options.onSocketLatencyChange(null);
-  }
 }
 
 export class AdaptiveMessageChannel implements RealtimeMessageChannel {

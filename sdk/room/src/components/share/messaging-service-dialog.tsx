@@ -9,7 +9,7 @@ import type {
   MessagingProviderSnapshot,
   MessagingService,
   WeixinIlinkProvider,
-} from "@picbind/messaging-service/source";
+} from "../../messaging";
 import type { ShareRoomLabels } from "./share-room-labels";
 
 type MessagingServiceDialogProps = {

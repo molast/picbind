@@ -1,6 +1,7 @@
 "use client";
 
 import { getMetricsApiPath } from "@/utils/api-endpoints";
+import { checkWorkerVersion } from "@picbind/room/source/worker-version";
 
 const METRICS_API_PATH = getMetricsApiPath();
 const HAS_EXPLICIT_METRICS_API = Boolean(
@@ -187,6 +188,7 @@ async function writeMetrics(
     },
     body: JSON.stringify(payload),
   });
+  checkWorkerVersion(response);
 
   if (!response.ok) {
     throw new Error(`Metrics write failed with status ${response.status}`);
@@ -204,6 +206,7 @@ async function readTotalCount() {
     };
   }
   const response = await fetch(METRICS_API_PATH, { method: "GET" });
+  checkWorkerVersion(response);
   if (!response.ok) {
     throw new Error(`Metrics read failed with status ${response.status}`);
   }

@@ -4,7 +4,14 @@ export { default as ShareRoomPage } from "./components/share/share-room-page";
 export { default as CreateRoomButton } from "./components/share/create-room-button";
 export { configureRoomSdk } from "./config";
 export { ROOM_VERSION } from "./version";
-export * from "@picbind/messaging-service/source";
+export { default as WorkerVersionWarning } from "./components/share/worker-version-warning";
+export {
+  EXPECTED_WORKER_VERSION,
+  WORKER_VERSION_HEADER,
+  checkWorkerVersion,
+  type WorkerVersionMismatch,
+} from "./worker-version";
+export * from "./messaging";
 export type { RoomSdkConfig } from "./config";
 export type { ShareRoom } from "./utils/share-room";
 export {

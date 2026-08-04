@@ -1,14 +1,11 @@
 "use client";
 
-const DEFAULT_API_BASE_BY_ENV =
-  process.env.NODE_ENV === "development"
-    ? "http://127.0.0.1:8787"
-    : "https://api.picbind.com";
+const DEFAULT_API_BASE_URL = "https://api.picbind.com";
 
 function normalizeBaseUrl(value?: string) {
   const raw = (value || "").trim();
   if (!raw) {
-    return DEFAULT_API_BASE_BY_ENV;
+    return DEFAULT_API_BASE_URL;
   }
   return raw.replace(/\/+$/, "");
 }

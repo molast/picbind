@@ -3,6 +3,7 @@
 import React from "react";
 import { getAdminStateApiPath } from "@/utils/api-endpoints";
 import { EMPTY_ADMIN_STATE, type AdminDashboardState } from "./admin-types";
+import { checkWorkerVersion } from "@picbind/room/source/worker-version";
 
 export function useAdminDashboard() {
   const stateUrl = getAdminStateApiPath();
@@ -47,6 +48,7 @@ export function useAdminDashboard() {
       const response = await fetch(buildStateUrl(true), {
         headers: { "x-admin-key": adminKey },
       });
+      checkWorkerVersion(response);
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("Admin Key 错误，或 Worker 未配置 ADMIN_KEY");
@@ -81,6 +83,7 @@ export function useAdminDashboard() {
         },
         body: JSON.stringify({ showCompressedCount }),
       });
+      checkWorkerVersion(response);
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("Admin Key 错误，或 Worker 未配置 ADMIN_KEY");

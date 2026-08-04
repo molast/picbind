@@ -4,6 +4,7 @@ import React from "react";
 import { FiAlertCircle, FiLoader, FiShare2, FiX } from "react-icons/fi";
 import { createShareRoom, type ShareRoom } from "../../utils/share-room";
 import { getShareRoomLabels, type Lang } from "../../locales";
+import WorkerVersionWarning from "./worker-version-warning";
 
 type CreateRoomButtonProps = {
   lang: Lang;
@@ -80,6 +81,7 @@ export default function CreateRoomButton({
 
   return (
     <>
+      <WorkerVersionWarning />
       <button
         type="button"
         onClick={() => void handleCreate()}

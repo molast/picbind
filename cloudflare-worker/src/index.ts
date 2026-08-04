@@ -11,6 +11,11 @@ import {
 import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 import type { QiniuStorageEnv } from "./qiniu-storage";
+import {
+  handleWeixinMessaging,
+  type MessagingWorkerEnv,
+} from "./messaging/weixin-messaging";
+import { WeixinMessagingObject } from "./messaging/weixin-messaging-object";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -24,7 +29,8 @@ type MetricsConfig = {
   updatedAt: string;
 };
 
-type Env = RuntimeLogEnv & QiniuStorageEnv & {
+type Env = RuntimeLogEnv & QiniuStorageEnv & MessagingWorkerEnv & {
+  WORKER_VERSION?: string;
   LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
@@ -251,7 +257,8 @@ function corsHeaders(env: Env, request: Request) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
       "access-control-allow-headers": "content-type,x-admin-key",
-      "access-control-expose-headers": "x-picbind-dev-mode",
+      "access-control-expose-headers":
+        "x-picbind-dev-mode,x-picbind-worker-version",
       "access-control-max-age": "86400",
     };
   }
@@ -260,7 +267,8 @@ function corsHeaders(env: Env, request: Request) {
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type,x-admin-key",
-    "access-control-expose-headers": "x-picbind-dev-mode",
+    "access-control-expose-headers":
+      "x-picbind-dev-mode,x-picbind-worker-version",
     "access-control-max-age": "86400",
   };
   if (origin && allowedOrigins(env, request).has(origin)) {
@@ -276,6 +284,7 @@ function withCors(response: Response, env: Env, request: Request) {
   }
   const headers = new Headers(response.headers);
   headers.set("x-picbind-dev-mode", isDevMode(env) ? "1" : "0");
+  headers.set("x-picbind-worker-version", env.WORKER_VERSION?.trim() || "unknown");
   for (const [key, value] of Object.entries(corsHeaders(env, request))) {
     headers.set(key, value);
   }
@@ -529,10 +538,7 @@ async function handleBaiduPush(request: Request, env: Env) {
 const worker = {
   async fetch(request: Request, env: Env) {
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(env, request),
-      });
+      return withCors(new Response(null, { status: 204 }), env, request);
     }
 
     const { pathname } = new URL(request.url);
@@ -579,6 +585,10 @@ const worker = {
           : pathname === "/api/realtime/room/socket"
             ? await handleShareRoomSocket(request, env)
             : await handleShareRoomRealtime(request, env);
+      } else if (pathname.startsWith("/api/messaging/weixin")) {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? json({ error: "Invalid origin" }, { status: 403 })
+          : await handleWeixinMessaging(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }
@@ -596,4 +606,4 @@ const worker = {
 };
 
 export default worker;
-export { MetricsCounter, ShareRoomObject };
+export { MetricsCounter, ShareRoomObject, WeixinMessagingObject };

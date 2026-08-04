@@ -1,928 +1,271 @@
-# PicBind Messaging Service - iLink Gateway Implementation
-
-> PicBind 微信 iLink Gateway 实现设计  
-> 负责 iLink 扫码登录、凭证管理、消息长轮询、事件转发
-
-版本：1.0  
-状态：开发设计
-
-
----
-
-# 1. 背景
-
-PicBind Messaging Service 需要接入微信 iLink Bot。
-
-
-iLink Gateway 的职责：
-
-- 创建扫码登录流程
-- 获取二维码
-- 等待微信扫码确认
-- 保存 Bot 登录凭证
-- 自动恢复 Session
-- 长轮询获取消息
-- 转换消息事件
-- 推送到 Messaging Core
-
-
-整体：
-
-```
-微信 iLink
-
-      |
-
-      |
-
-iLink Gateway
-
-      |
-
-      |
-
-Messaging Core
-
-      |
-
-      |
-
-Room / Image Workflow
-
-```
-
-
----
-
-# 2. Gateway 在整体架构中的位置
-
-
-```
-                  微信用户
-
-
-                     |
-
-                     |
-
-
-              微信 iLink 平台
-
-
-                     |
-
-                     |
-
-
-          +--------------------+
-
-          |  iLink Gateway     |
-
-          +--------------------+
-
-             |          |
-
-             |          |
-
-        Session      Polling
-
-
-             |
-
-             |
-
-    +---------------------+
-
-    | Messaging Core      |
-
-    +---------------------+
-
-             |
-
-             |
-
-          PicBind Core
-
-```
-
-
----
-
-# 3. 服务目录设计
-
-
-```
-messaging-service/
-
-
-├── cmd
-
-│   └── gateway
-
-│       └── main.go
-
-
-├── gateway
-
-
-│   └── wechat
-
-
-│       ├── client.go
-
-│       ├── login.go
-
-│       ├── qrcode.go
-
-│       ├── session.go
-
-│       ├── polling.go
-
-│       ├── sender.go
-
-│       └── parser.go
-
-
-├── core
-
-
-│   ├── message.go
-
-│   ├── event.go
-
-│   └── dispatcher.go
-
-
-├── storage
-
-
-│   └── credential_store.go
-
-
-└── config
-
-    └── config.go
-
-```
-
-
----
-
-# 4. Gateway 生命周期
-
-
-启动：
-
-```
-Service Start
-
-      |
-
-检查 Session
-
-      |
-
-是否存在有效凭证？
-
-      |
-
- +----+----+
-
- |         |
-
-有         无
-
- |         |
-
-恢复      创建二维码
-
- |         |
-
-启动      等待扫码
-
-Polling   |
-
-          保存凭证
-
-              |
-
-          启动 Polling
-
-```
-
-
----
-
-# 5. 登录流程设计
-
-
-## 5.1 创建二维码
-
-
-流程：
-
-```
-PicBind
-
-      |
-
-请求二维码
-
-      |
-
-iLink API
-
-      |
-
-返回二维码数据
-
-      |
-
-展示给管理员
-
-```
-
-
-返回：
-
-```json
-{
-    "qr_code":"xxx",
-
-    "expire":300
-}
-```
-
-
-保存：
-
-```
-login_session_id
-```
-
-
----
-
-# 5.2 用户扫码
-
-
-管理员：
-
-```
-手机微信
-
-      |
-
-扫描二维码
-
-      |
-
-确认登录
-
-```
-
-
-状态变化：
-
-```
-WAIT_SCAN
-
-      ↓
-
-SCANNED
-
-      ↓
-
-CONFIRMED
-
-```
-
-
----
-
-# 5.3 获取凭证
-
-
-扫码成功：
-
-iLink 返回：
-
-```json
-{
-    "account_id":"xxx",
-
-    "token":"xxx",
-
-    "base_url":"xxx"
-}
-```
-
-
-保存。
-
-
----
-
-# 6. Credential 存储设计
-
-
-不要把 Token 写死配置文件。
-
-
-使用数据库。
-
-
-## wechat_bot_credentials
-
-
-```sql
-CREATE TABLE wechat_bot_credentials
-(
-
-id bigint primary key,
-
-
-account_id varchar(128),
-
-
-token text,
-
-
-base_url varchar(255),
-
-
-status varchar(32),
-
-
-created_at timestamp,
-
-
-updated_at timestamp
-
-);
-
-```
-
-
----
-
-数据：
-
-```json
-{
-    "account_id":"bot_xxx",
-
-    "token":"xxxx",
-
-    "base_url":"https://xxx",
-
-    "status":"active"
-}
-
-```
-
-
----
-
-# 7. Session 管理
-
-
-内存：
-
-```
-WechatSession
-```
-
-
-结构：
-
-```go
-type Session struct {
-
-
-    AccountID string
-
-
-    Token string
-
-
-    BaseURL string
-
-
-    LastMessageID string
-
-
-    Status string
-
-
-}
-
-```
-
-
-状态：
-
-```
-CREATED
-
-LOGIN_PENDING
-
-ACTIVE
-
-EXPIRED
-
-DISCONNECTED
-
-```
-
-
----
-
-# 8. Polling 设计
-
-
-iLink Gateway 启动：
-
-```
-Start()
-
-   |
-
-Load Session
-
-   |
-
-Start Polling Loop
-
-```
-
-
-核心：
-
-```go
-func StartPolling(){
-
-
-    for {
-
-
-        messages := client.GetUpdates()
-
-
-        handle(messages)
-
-
-        sleep()
-
-    }
-
-}
-
-```
-
-
----
-
-# 9. 长轮询流程
-
-
-```
-Polling Worker
-
-
-       |
-
-       |
-
-请求消息
-
-
-       |
-
-       |
-
-iLink API
-
-
-       |
-
-       |
-
-等待消息
-
-
-       |
-
-       |
-
-返回 Event
-
-
-       |
-
-       |
-
-Message Parser
-
-
-       |
-
-       |
-
-Messaging Core
-
-```
-
-
----
-
-# 10. Polling 注意事项
-
-
-## 心跳
-
-
-定期：
-
-```
-heartbeat
-```
-
-
-防止：
-
-- Session 失效
-- 网络断开
-
-
----
-
-## 重连
-
-
-异常：
-
-```
-Connection Lost
-```
-
-
-处理：
-
-```
-wait
-
-retry
-
-restore session
-
-restart polling
-
-```
-
-
----
-
-## 消息去重
-
-
-因为网络异常可能重复获取。
-
-
-保存：
-
-```
-last_message_id
-```
-
-
-数据库：
-
-```sql
-wechat_message_cursor
-
-
-account_id
-
-
-last_message_id
-
-
-updated_at
-
-```
-
-
----
-
-# 11. Message Parser
-
-
-iLink 原始消息：
-
-```json
-{
-    "msg_id":"xxx",
-
-    "sender":"xxx",
-
-    "type":"image",
-
-    "content":{}
-}
-
-```
-
-
-转换：
-
-PicBind Message:
-
-
-```json
-{
-    "id":"xxx",
-
-    "channel":"wechat",
-
-    "sender_id":"xxx",
-
-    "conversation_id":"xxx",
-
-    "type":"image",
-
-    "payload":{}
-
-}
-
-```
-
-
----
-
-# 12. Sender 设计
-
-
-发送：
-
-```
-PicBind
-
-    |
-
-Messaging Core
-
-    |
-
-Wechat Gateway
-
-    |
-
-iLink API
-
-    |
-
+# PicBind Messaging Service - iLink Worker 实现
+
+> 本文描述仓库中已经实现的腾讯 iLink Bot 消息服务。当前生产运行时为
+> Cloudflare Worker + Durable Object，不再依赖独立 Node 常驻 Gateway。
+
+| 项目 | 内容 |
+| --- | --- |
+| 版本 | 2.0 |
+| 状态 | 已实现 |
+| Worker 入口 | `cloudflare-worker/src/index.ts` |
+| Durable Object | `WeixinMessagingObject` |
+| 浏览器 Transport | Hibernation WebSocket |
+| 图片存储 | R2 临时对象 |
+
+## 1. 当前架构
+
+```text
 微信用户
-
+   |
+腾讯 iLink Bot API
+   |
+WeixinMessagingObject
+   |-- Durable Object Storage
+   |-- Alarm getupdates
+   |-- WebSocket Hibernation
+   `-- R2 临时图片
+             |
+             v
+      Room Messaging Service
 ```
 
+浏览器不持有 iLink token、同步游标、上下文 token 或图片 AES Key。
+
+每个浏览器生成独立的随机 `messaging client ID`。Worker 使用该 ID 选择
+Durable Object，因此不同浏览器的微信凭证和消息状态不会共享。
+
+## 2. 代码目录
+
+```text
+cloudflare-worker/src/messaging/
+|-- ilink-client.ts
+|-- weixin-media.ts
+|-- weixin-messaging.ts
+`-- weixin-messaging-object.ts
+
+sdk/room/src/messaging/providers/weixin/
+|-- provider.ts
+`-- http-transport.ts
+```
+
+浏览器 Messaging Core 和 Provider 已内聚到 Room SDK。旧 Node Gateway 和独立
+`messaging-service` 包已删除，`dev-local.sh` 只启动 Web 与 Worker。
+
+## 3. HTTP 与 WebSocket 接口
+
+公开前缀：
+
+```text
+/api/messaging/weixin
+```
 
 接口：
 
-```go
-func SendMessage(
-    msg Message
-) error
-
+```text
+GET  /status
+POST /login
+GET  /login/:sessionId
+POST /connect
+POST /disconnect
+POST /messages
+GET  /files/:fileId
+GET  /socket             WebSocket Upgrade
 ```
 
+所有请求都携带浏览器本地生成的 32 位随机 `clientId`。该值用于 Durable
+Object 分区，不包含微信凭证。
 
-支持：
+## 4. 扫码登录
 
-- text
-- image
-- file
+1. Browser 调用 `POST /login`。
+2. Worker 调用 iLink `get_bot_qrcode`。
+3. Worker 返回 `qrData`，Browser 使用 `qrcode` 生成 Data URL。
+4. Browser 定时调用 `GET /login/:sessionId`。
+5. 微信确认后，DO 保存以下数据：
+   - `accountId`
+   - `bot token`
+   - `baseUrl`
+   - `userId`
+   - `syncBuffer`
+   - `contextTokens`
+6. DO 设置 Alarm 并开始拉取消息。
 
+原始 token 永远不会通过 HTTP 或 WebSocket 返回给 Browser。
 
----
+## 5. Alarm 轮询
 
-# 13. Gateway 与 Messaging Core 通信
+DO 不运行常驻 `while` 循环。每次 Alarm 只执行一次 `getupdates`：
 
-
-不要直接调用 Room。
-
-
-错误：
-
-```
-Gateway
-
- |
-
-Room
-
-```
-
-
-正确：
-
-```
-Gateway
-
- |
-
-Event Dispatcher
-
- |
-
-Messaging Core
-
- |
-
-Room
-
+```text
+alarm
+  -> 清理过期 R2 图片
+  -> getupdates
+  -> 更新 syncBuffer/contextTokens
+  -> 解析并去重消息
+  -> WebSocket 推送
+  -> 安排下一次 alarm
 ```
 
+成功后快速安排下一次调用。失败时先使用 2 秒退避；连续失败后使用 30 秒退避。
+检测到 iLink Session 失效后停止轮询，状态变为 `error`，等待重新扫码。
 
-事件：
+DO 单线程串行执行，因此不再需要本地文件锁或进程锁。
 
-```json
-{
-"type":"message.received",
+## 6. WebSocket Hibernation
 
-"channel":"wechat",
+DO 通过 `state.acceptWebSocket(server, ["weixin-client"])` 接入 Hibernation
+WebSocket。Browser 不发送应用层 `PING/PONG`，也不使用 WebSocket 测量网络状态；
+连接状态由原生 `open`、`close`、`error` 事件和断线重连维护。
 
-"data":{}
+Browser Transport 包含指数退避重连。DO 会推送两类数据：
 
-}
-
+```text
+NormalizedMessage
+GATEWAY_STATUS
 ```
 
+`GATEWAY_STATUS` 区分浏览器 WebSocket 已连接和 iLink 长轮询已连接，避免仅凭
+WebSocket open 错误显示微信在线。
 
----
+## 7. 微信图片
 
-# 14. 多 Bot 支持设计
+iLink 图片消息提供 CDN 参数和 AES Key，不直接包含完整图片。
 
+当前流程：
 
-未来：
-
-```
-PicBind AI
-
-        |
-
-wechat bot 1
-
-
-PicBind Enterprise
-
-        |
-
-wechat bot 2
-
+```text
+iLink image_item
+  -> Worker 构造微信 CDN URL
+  -> 校验 HTTPS 和 CDN 域名白名单
+  -> 最多下载 20 MB
+  -> AES-128-ECB 解密
+  -> 检测 JPEG/PNG/GIF/WebP/AVIF
+  -> 写入 MESSAGING_MEDIA_R2
+  -> 创建短期下载 URL
+  -> WebSocket 推送 URL 和元数据
 ```
 
+默认配置：
 
-数据库：
+| 参数 | 默认值 |
+| --- | ---: |
+| 图片大小上限 | 20 MB |
+| R2 对象 TTL | 1800 秒 |
+| 签名 URL TTL | 900 秒 |
 
+签名 URL 过期但对象仍存在时，Browser 使用 `fileId` 调用 `/files/:fileId`
+刷新链接。Alarm 删除到期对象；链接到期本身不会删除 R2 数据。
+
+生产环境配置 R2 S3 签名凭证后返回直接 R2 URL。本地没有签名凭证时返回
+Worker 受控下载 URL，由 Worker 从本地 R2 binding 读取，行为与生产一致。
+
+## 8. R2 对象规范
+
+对象路径：
+
+```text
+messaging/weixin/{accountIdHash}/{messageIdHash}/{randomId}
 ```
-wechat_bot_credentials
 
-      |
+对象 metadata 包含：
 
-      |
+- `Content-Type`
+- `Content-Disposition`
+- `expiresAt`
 
-account_id
+聊天图片和 Room 图片使用独立 binding：
 
+```text
+MESSAGING_MEDIA_R2
+SHARE_IMAGES_R2
 ```
 
+两个 binding 当前可以指向同一 bucket，但代码路径和生命周期互相隔离。
 
-每个 Bot：
+## 9. 状态与去重
 
-独立：
+DO 保存五类状态：
 
-- Session
-- Polling
-- Message Cursor
+- 微信账户凭证
+- 运行状态与最近轮询成功时间
+- 登录 Session
+- 五分钟消息去重记录
+- R2 临时对象索引
 
+Provider 状态：
 
----
+```text
+disconnected  未启用
+connecting    已启用，等待首次成功轮询
+connected     最近一次 getupdates 成功
+error         iLink 请求或 Session 异常
+```
 
-# 15. 配置
+## 10. 配置
 
+Wrangler bindings：
+
+```toml
+[[durable_objects.bindings]]
+name = "WEIXIN_MESSAGING"
+class_name = "WeixinMessagingObject"
+
+[[r2_buckets]]
+binding = "MESSAGING_MEDIA_R2"
+bucket_name = "picbind-bucket"
+```
+
+Migration：
+
+```toml
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["WeixinMessagingObject"]
+```
 
 环境变量：
 
-```
-DATABASE_URL=
-
-LOG_LEVEL=info
-
-
-WECHAT_ENABLE=true
-
+```env
+MESSAGING_MEDIA_TTL_SECONDS=1800
+MESSAGING_MEDIA_URL_TTL_SECONDS=900
+MESSAGING_MAX_MEDIA_SIZE_MB=20
+MESSAGING_PUBLIC_URL=https://api.picbind.com
+NEXT_PUBLIC_MESSAGING_GATEWAY_URL=https://api.picbind.com
 ```
 
+R2 S3 签名使用现有 Worker secrets：
 
----
-
-# 17. 第一阶段实现范围
-
-
-必须完成：
-
-## Login
-
-- [ ] 请求二维码
-- [ ] 展示二维码
-- [ ] 扫码确认
-- [ ] 保存 Token
-
-
-## Session
-
-- [ ] 加载凭证
-- [ ] 自动恢复
-
-
-## Polling
-
-- [ ] 长轮询
-- [ ] 消息获取
-- [ ] 自动重连
-
-
-## Messaging
-
-- [ ] 转换 Message
-- [ ] 发送事件
-
-
----
-
-# 18. 第二阶段
-
-
-增加：
-
-- 图片消息
-- 文件消息
-- 图片上传
-- Room 自动绑定
-- 消息历史
-
-
----
-
-# 19. 最终目标
-
-
-完成后：
-
-```
-微信
-
-
-  |
-
-iLink Gateway
-
-
-  |
-
-Messaging Service
-
-
-  |
-
-PicBind Room
-
-
-  |
-
-Image Processing
-
-
-  |
-
-微信回复
-
+```text
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
 ```
 
+这些值不能放入 `NEXT_PUBLIC_*`。
 
-PicBind 将拥有：
+## 11. 本地开发
 
+在仓库根目录执行：
+
+```bash
+./dev-local.sh
 ```
-统一 Messaging Gateway
 
-支持:
+启动：
 
-WeChat
-
-Telegram
-
-Discord
-
-Slack
-
+```text
+Web               http://localhost:3000
+Deployed Worker   https://api.picbind.com
 ```
+
+`dev-local.sh` 不启动本地 Worker。Messaging Service 统一使用远端 Worker，也不再
+单独监听 `4390`。
+
+## 12. 关键兼容规则
+
+- Browser 只接收规范化消息，不接收 iLink token 或 AES Key。
+- 图片 Blob 不写入 Durable Object Storage。
+- R2 到期清理由 Alarm 执行。
+- WebSocket 不使用应用层心跳检测网络状态。
+- 单个图片失败不能终止后续消息处理。
+- iLink Session 失效后必须重新扫码，不进行无限快速重试。
+- 不同 Messaging Client ID 不得共享凭证或同步游标。

@@ -1,11 +1,11 @@
-import { MessageEventDispatcher } from "../core/event.js";
-import type { MessageHandler, Unsubscribe } from "../core/event.js";
-import type { NormalizedMessage } from "../core/message.js";
+import { MessageEventDispatcher } from "../core/event";
+import type { MessageHandler, Unsubscribe } from "../core/event";
+import type { NormalizedMessage } from "../core/message";
 import type {
   MessageProvider,
   MessagingProviderSnapshot,
   ProviderStatusHandler,
-} from "../core/provider.js";
+} from "../core/provider";
 
 export class MessagingService {
   private readonly providers = new Map<string, MessageProvider>();
@@ -68,8 +68,15 @@ export class MessagingService {
     return this.requireProvider(providerId).upload(file);
   }
 
-  async download(providerId: string, fileId: string) {
-    return this.requireProvider(providerId).download(fileId);
+  async download(
+    providerId: string,
+    fileReference: string,
+    fallbackFileId?: string,
+  ) {
+    return this.requireProvider(providerId).download(
+      fileReference,
+      fallbackFileId,
+    );
   }
 
   subscribe(handler: MessageHandler) {

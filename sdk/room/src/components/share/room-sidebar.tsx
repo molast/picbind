@@ -17,7 +17,7 @@ import {
 } from "react-icons/fi";
 import { TbDevicesShare, TbWorldShare } from "react-icons/tb";
 import { RiRobot2Line } from "react-icons/ri";
-import type { MessagingProviderSnapshot } from "@picbind/messaging-service/source";
+import type { MessagingProviderSnapshot } from "../../messaging";
 import { getShareRoomClientId } from "../../utils/share-room";
 import { TEST_EMOJIS } from "../../utils/realtime-peer-messages";
 import type { RoomMemberPresence, RoomRole } from "../../utils/realtime-room";

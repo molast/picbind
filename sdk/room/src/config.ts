@@ -1,4 +1,4 @@
-import type { MessagingService } from "@picbind/messaging-service/source";
+import type { MessagingService } from "./messaging";
 
 export type RoomSdkConfig = {
   apiBaseUrl?: string;

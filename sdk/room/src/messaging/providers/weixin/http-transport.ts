@@ -1,0 +1,207 @@
+import type { MessageHandler } from "../../core/event";
+import type { NormalizedMessage } from "../../core/message";
+import QRCode from "qrcode";
+import type {
+  IlinkGatewaySnapshot,
+  IlinkGatewayTransport,
+  IlinkLoginSession,
+} from "./provider";
+import { checkWorkerVersion } from "../../../worker-version";
+
+async function responseJson<T>(response: Response): Promise<T> {
+  const body = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(body.error || `Messaging Gateway HTTP ${response.status}`);
+  return body;
+}
+
+export class IlinkHttpGatewayTransport implements IlinkGatewayTransport {
+  private socket: WebSocket | null = null;
+  private reconnectTimer: number | null = null;
+  private reconnectAttempts = 0;
+  private stopped = true;
+  private messageHandler: MessageHandler | null = null;
+  private statusHandler: ((snapshot: IlinkGatewaySnapshot) => void) | null = null;
+  private readonly clientId = messagingClientId();
+
+  constructor(private readonly gatewayUrl: string) {}
+
+  getStatus() {
+    return this.request<IlinkGatewaySnapshot>("/status");
+  }
+
+  async startLogin() {
+    const session = await this.request<IlinkLoginSession>("/login", {
+      method: "POST",
+    });
+    if (!session.qrDataUrl && session.qrData) {
+      session.qrDataUrl = await QRCode.toDataURL(session.qrData, {
+        width: 280,
+        margin: 1,
+        errorCorrectionLevel: "M",
+      });
+    }
+    return session;
+  }
+
+  getLoginStatus(sessionId: string) {
+    return this.request<IlinkLoginSession>(`/login/${encodeURIComponent(sessionId)}`);
+  }
+
+  async connect(
+    onMessage: MessageHandler,
+    onStatus?: (snapshot: IlinkGatewaySnapshot) => void,
+  ) {
+    await this.request<IlinkGatewaySnapshot>("/connect", { method: "POST" });
+    this.stopped = false;
+    this.messageHandler = onMessage;
+    this.statusHandler = onStatus || null;
+    await this.openSocket();
+  }
+
+  async disconnect() {
+    this.stopped = true;
+    this.messageHandler = null;
+    this.statusHandler = null;
+    this.clearTimers();
+    this.socket?.close(1000, "Messaging provider disconnected");
+    this.socket = null;
+    await this.request<IlinkGatewaySnapshot>("/disconnect", { method: "POST" });
+  }
+
+  async send(message: NormalizedMessage) {
+    await this.request<{ id: string }>("/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(message),
+    });
+  }
+
+  async upload(_file: Blob): Promise<string> {
+    throw new Error("Weixin iLink media upload is not implemented yet");
+  }
+
+  async download(reference: string, fallbackFileId?: string): Promise<Blob> {
+    let downloadUrl = reference;
+    if (!/^https:\/\//i.test(downloadUrl)) {
+      const refreshed = await this.request<{ url: string }>(
+        `/files/${encodeURIComponent(reference)}`,
+      );
+      downloadUrl = refreshed.url;
+    }
+    let response: Response;
+    try {
+      response = await fetch(downloadUrl);
+    } catch (error) {
+      if (!fallbackFileId || reference === fallbackFileId) throw error;
+      const refreshed = await this.request<{ url: string }>(
+        `/files/${encodeURIComponent(fallbackFileId)}`,
+      );
+      response = await fetch(refreshed.url);
+    }
+    if (!response.ok && fallbackFileId && reference !== fallbackFileId) {
+      const refreshed = await this.request<{ url: string }>(
+        `/files/${encodeURIComponent(fallbackFileId)}`,
+      );
+      response = await fetch(refreshed.url);
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: `Messaging Gateway HTTP ${response.status}` })) as { error?: string };
+      throw new Error(body.error || `Messaging Gateway HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  private async request<T>(path: string, init?: RequestInit) {
+    const response = await fetch(this.url(path), init);
+    checkWorkerVersion(response);
+    return responseJson<T>(response);
+  }
+
+  private url(path: string) {
+    const base = this.gatewayUrl.replace(/\/$/, "");
+    const messagingBase = base.endsWith("/api/messaging/weixin")
+      ? base
+      : `${base}/api/messaging/weixin`;
+    const url = new URL(`${messagingBase}${path}`);
+    url.searchParams.set("clientId", this.clientId);
+    return url.toString();
+  }
+
+  private socketUrl() {
+    const url = new URL(this.url("/socket"));
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  }
+
+  private openSocket() {
+    this.socket?.close();
+    return new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(this.socketUrl());
+      this.socket = socket;
+      let settled = false;
+      socket.onopen = () => {
+        settled = true;
+        this.reconnectAttempts = 0;
+        resolve();
+      };
+      socket.onmessage = (event) => {
+        try {
+          const value = JSON.parse(String(event.data)) as
+            | NormalizedMessage
+            | { type: "GATEWAY_STATUS"; payload: IlinkGatewaySnapshot };
+          if (value.type === "GATEWAY_STATUS") {
+            this.statusHandler?.(value.payload);
+          } else {
+            this.messageHandler?.(value);
+          }
+        } catch (error) {
+          console.error("Invalid message from PicBind Messaging Worker", error);
+        }
+      };
+      socket.onerror = () => {
+        if (!settled) reject(new Error("Messaging WebSocket connection failed"));
+      };
+      socket.onclose = () => {
+        if (this.socket === socket) this.socket = null;
+        if (!settled) {
+          reject(new Error("Messaging WebSocket connection closed"));
+        } else if (!this.stopped) {
+          this.scheduleReconnect();
+        }
+      };
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer !== null || this.stopped) return;
+    const delay = Math.min(30_000, 1000 * 2 ** this.reconnectAttempts);
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.openSocket().catch(() => this.scheduleReconnect());
+    }, delay);
+  }
+
+  private clearTimers() {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+}
+
+function messagingClientId() {
+  const storageKey = "picbind:messaging-client-id";
+  if (typeof window !== "undefined") {
+    try {
+      const current = window.localStorage.getItem(storageKey);
+      if (current && /^[a-f0-9]{32}$/.test(current)) return current;
+      const created = crypto.randomUUID().replace(/-/g, "");
+      window.localStorage.setItem(storageKey, created);
+      return created;
+    } catch {
+      return crypto.randomUUID().replace(/-/g, "");
+    }
+  }
+  return crypto.randomUUID().replace(/-/g, "");
+}

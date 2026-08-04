@@ -17,9 +17,11 @@ export type NormalizedMessage = {
   payload: {
     text?: string;
     fileId?: string;
+    downloadUrl?: string;
     fileName?: string;
     mimeType?: string;
     size?: number;
+    expiresAt?: number;
   };
   timestamp: number;
 };

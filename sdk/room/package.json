@@ -1,6 +1,6 @@
 {
   "name": "@picbind/room",
-  "version": "0.1.0",
+  "version": "2.1.0",
   "description": "Embeddable PicBind realtime image room SDK with a standalone browser demo.",
   "type": "module",
   "files": [
@@ -9,7 +9,7 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./dist/types/src/index.d.ts",
       "import": "./dist/index.js"
     },
     "./styles.css": "./dist/room.css",
@@ -18,6 +18,8 @@
     "./source/config": "./src/config.ts",
     "./source/locales": "./src/locales/index.ts",
     "./source/create-room-button": "./src/components/share/create-room-button.tsx",
+    "./source/worker-version": "./src/worker-version.ts",
+    "./source/worker-version-warning": "./src/components/share/worker-version-warning.tsx",
     "./source/types": "./src/public-types.ts"
   },
   "scripts": {
@@ -32,18 +34,19 @@
     "react-dom": "^18.3.1"
   },
   "dependencies": {
-    "@picbind/messaging-service": "link:../../messaging-service",
     "@picbind/image-codecs": "link:../wasm/image-codecs",
     "@picbind/image-wasm": "link:../wasm/image-wasm",
     "@radix-ui/react-dialog": "^1.1.15",
     "dexie": "^4.4.4",
     "konva": "^9.3.22",
     "pixi.js": "^8.19.0",
+    "qrcode": "^1.5.4",
     "react-icons": "^5.5.0",
     "react-zoom-pan-pinch": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.12.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",

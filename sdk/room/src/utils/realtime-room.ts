@@ -1,4 +1,5 @@
 import { getShareRoomRealtimeApiPath } from "./api-endpoints";
+import { checkWorkerVersion } from "../worker-version";
 
 export type RoomRole = "owner" | "guest";
 
@@ -63,6 +64,7 @@ async function roomRequest<T>(
     body: JSON.stringify(body),
     keepalive,
   });
+  checkWorkerVersion(response);
   const raw = await response.text();
   const debug = response.headers.get("x-picbind-dev-mode") === "1";
   if (debug) {

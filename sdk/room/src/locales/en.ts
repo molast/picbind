@@ -9,6 +9,11 @@ const en: typeof zh = {
   shareLink: "Share link",
   expires: "This room expires after 30 minutes of inactivity",
   closeDialog: "Close",
+  workerVersionMismatchTitle: "Worker version mismatch",
+  workerVersionMismatchDetail: (actual: string, expected: string) =>
+    `The remote Worker is ${actual}, but this client requires ${expected}. Deploy the latest Worker and try again.`,
+  workerVersionMissingDetail: (expected: string) =>
+    `The remote Worker did not provide version information. This client requires ${expected}, so the latest Worker may not be deployed.`,
   invalid: "Invalid share link",
   workspace: "Image workspace",
   gallery: "Gallery",

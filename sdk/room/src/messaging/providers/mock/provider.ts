@@ -1,11 +1,11 @@
-import type { MessageHandler, Unsubscribe } from "../../core/event.js";
-import type { MessagingChannel, NormalizedMessage } from "../../core/message.js";
+import type { MessageHandler, Unsubscribe } from "../../core/event";
+import type { MessagingChannel, NormalizedMessage } from "../../core/message";
 import type {
   MessageProvider,
   MessageProviderStatus,
   MessagingProviderSnapshot,
   ProviderStatusHandler,
-} from "../../core/provider.js";
+} from "../../core/provider";
 
 export class MockMessageProvider implements MessageProvider {
   private status: MessageProviderStatus = "disconnected";

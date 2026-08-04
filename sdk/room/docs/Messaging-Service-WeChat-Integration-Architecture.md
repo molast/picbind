@@ -7,8 +7,9 @@
 状态：已由 iLink 专项设计取代
 
 > 本文档保留为早期设计记录。微信接入的当前依据是
-> `Messaging-Service-WeChat-iLink-Integration.md`。旧文档中的 Webhook、WebSocket、
-> App ID/Secret 和 Cloudflare Worker 接入方案不适用于腾讯 iLink Bot API。
+> `Messaging-Service-WeChat-iLink-Integration.md`。旧文档中的微信公众号 Webhook、
+> App ID/Secret 方案不适用于腾讯 iLink Bot API。当前实现使用 Cloudflare Worker、
+> Durable Object Alarm 和 Hibernation WebSocket。
 
 ---
 
@@ -487,7 +488,7 @@ Normalized Message
 目录：
 
 ```
-messaging-service/
+sdk/room/src/messaging/
 
 
 ├── core
@@ -914,7 +915,7 @@ picbind/
 ├── cloudflare-worker
 
 │
-├── messaging-service
+├── sdk/room/src/messaging
 
 │
 ├── room-service

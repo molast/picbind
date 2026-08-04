@@ -52,13 +52,10 @@ npm run build
 
 构建输出会生成到 `web/out/`，可作为 Cloudflare Pages 的静态产物目录。
 
-## 完全本地开发
+## 本地 Web 开发
 
-本地开发不会请求已部署的 `api.picbind.com`，房间 API、Durable Object、
-KV 和 WebSocket 信令都由本机运行时模拟，房间文件默认通过 P2P 传输。
-
-启动脚本会检查本地 API 依赖，缺少依赖命令时会自动执行
-`pnpm install --frozen-lockfile`。从仓库根目录运行：
+本地只运行 Web 前端。Room、Messaging、Durable Object、R2、KV 和其他 Worker API
+统一请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
 
 ```bash
 # macOS / Linux / Git Bash / WSL
@@ -71,9 +68,8 @@ dev-local.cmd
 .\dev-local.cmd
 ```
 
-前端地址为 `http://localhost:3000`，本地 API 地址为
-`http://127.0.0.1:8787`。按 `Ctrl+C` 会同时停止两个进程，不会残留 API
-端口。本地房间和状态保存在 `cloudflare-worker/.wrangler/state`。
+前端地址为 `http://localhost:3000`。按 `Ctrl+C` 停止 Web 进程。修改 Worker 后必须
+部署到 Cloudflare，Web 才会使用到新实现。
 
 ## WASM 构建
 

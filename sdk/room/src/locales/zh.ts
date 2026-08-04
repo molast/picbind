@@ -7,6 +7,11 @@ const zh = {
   shareLink: "分享链接",
   expires: "房间将在无活动 30 分钟后过期",
   closeDialog: "关闭",
+  workerVersionMismatchTitle: "Worker 版本不一致",
+  workerVersionMismatchDetail: (actual: string, expected: string) =>
+    `当前远端 Worker 版本为 ${actual}，本地需要 ${expected}。请部署最新 Worker 后重试。`,
+  workerVersionMissingDetail: (expected: string) =>
+    `远端 Worker 未提供版本信息，本地需要 ${expected}。远端可能尚未部署最新版本。`,
   invalid: "分享链接无效",
   workspace: "图片工作区",
   gallery: "图片库",

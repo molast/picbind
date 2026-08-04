@@ -22,6 +22,7 @@ import RoomImagePreviewDialog from "./room-image-preview-dialog";
 import RoomHeader from "./room-header";
 import MessagingServiceDialog from "./messaging-service-dialog";
 import WeixinChatDialog, { type WeixinChatItem } from "./weixin-chat-dialog";
+import WorkerVersionWarning from "./worker-version-warning";
 import RoomSidebar from "./room-sidebar";
 import TemporaryRoomDock from "./temporary-room-dock";
 import { formatBytes } from "./share-room-formatters";
@@ -91,7 +92,7 @@ import { useRoomTabNotifications } from "./use-room-tab-notifications";
 import type {
   MessagingProviderSnapshot,
   WeixinIlinkProvider,
-} from "@picbind/messaging-service/source";
+} from "../../messaging";
 import type {
   ReviewImageExport,
   ReviewImageExportOutcome,
@@ -536,8 +537,13 @@ export default function ShareRoomPage({
         status: "sent",
       };
       appendMessagingChatMessage(chatItem);
-      if (message.type === "image" && message.payload.fileId && provider) {
-        void messagingService.download(provider.id, message.payload.fileId).then((blob) => {
+      const downloadReference = message.payload.downloadUrl || message.payload.fileId;
+      if (message.type === "image" && downloadReference && provider) {
+        void messagingService.download(
+          provider.id,
+          downloadReference,
+          message.payload.fileId,
+        ).then((blob) => {
           const url = URL.createObjectURL(blob);
           objectUrlsRef.current.add(url);
           setMessagingChatMessages((current) => current.map((item) =>
@@ -2529,6 +2535,7 @@ export default function ShareRoomPage({
 
   return (
     <>
+      <WorkerVersionWarning />
       {!embedded && isMinimized ? (
         <div className="min-h-screen bg-[#eef2f7]" aria-hidden="true" />
       ) : null}

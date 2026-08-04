@@ -2,6 +2,7 @@ import "./globals.css";
 import "@picbind/room/source.css";
 import type { Metadata } from "next";
 import Script from "next/script";
+import WorkerVersionWarning from "@picbind/room/source/worker-version-warning";
 import { getSiteUrl } from "@/server/site-config";
 
 const siteUrl = getSiteUrl();
@@ -110,6 +111,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
+        <WorkerVersionWarning />
         <Script id="lang-title-bootstrap" strategy="beforeInteractive">
           {`(() => {
   try {

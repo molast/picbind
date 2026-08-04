@@ -17,6 +17,10 @@ Notes:
 - `GET /api/metrics` is public read.
 - `POST /api/metrics` and `POST /api/site/view` require an allowed `Origin` header.
 - Admin endpoints require `ADMIN_KEY` via query `key` or request header `x-admin-key`.
+- Every non-WebSocket API response exposes the deployed Worker version through
+  `x-picbind-worker-version`. When bumping the Worker version, keep
+  `package.json`, `wrangler.toml` (`WORKER_VERSION`), and
+  `sdk/room/src/worker-version.ts` (`EXPECTED_WORKER_VERSION`) in sync.
 
 ## Required binding
 
@@ -74,15 +78,11 @@ dev-local.cmd
 .\dev-local.cmd
 ```
 
-Open `http://localhost:3000`. The frontend development default is
-`http://127.0.0.1:8787`; no frontend request is sent to `api.picbind.com`.
-Use two browser profiles or an incognito window to test owner and guest. Stop
-the command with `Ctrl+C`; the script also stops the local API process.
-
-`.dev.vars` sets `LOCAL_RUNTIME=1`, selects P2P transfer, and makes TURN/R2
-credentials optional. To
-reset all local rooms and metrics, stop the process and delete
-`cloudflare-worker/.wrangler/state`.
+Open `http://localhost:3000`. The frontend always requests the deployed Worker
+at `https://api.picbind.com`, including during local Web development. Use two
+browser profiles or an incognito window to test owner and guest. Worker changes
+must be deployed before the frontend can use them. Wrangler may still be run
+manually for isolated Worker development, but `dev-local.sh` does not start it.
 
 For production, store the API tokens as Worker secrets:
 

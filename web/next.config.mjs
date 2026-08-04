@@ -34,7 +34,6 @@ const nextConfig = {
   output: "export",
   transpilePackages: [
     "@picbind/image-codecs",
-    "@picbind/messaging-service",
     "@picbind/image-wasm",
     "@picbind/perceptual-wasm",
     "@picbind/room",

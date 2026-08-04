@@ -11,17 +11,19 @@ import {
 } from "../src";
 import "../src/styles.css";
 
+const apiBaseUrl =
+  import.meta.env.VITE_ROOM_API_URL || "https://api.picbind.com";
+const messagingGatewayUrl =
+  import.meta.env.VITE_MESSAGING_GATEWAY_URL || apiBaseUrl;
+
 configureRoomSdk({
-  apiBaseUrl:
-    import.meta.env.VITE_ROOM_API_URL || "https://api.picbind.com",
+  apiBaseUrl,
   roomUrl: import.meta.env.VITE_ROOM_APP_URL || window.location.origin,
-  messagingService: import.meta.env.VITE_MESSAGING_GATEWAY_URL
-    ? new MessagingService([
-        new WeixinIlinkProvider(
-          new IlinkHttpGatewayTransport(import.meta.env.VITE_MESSAGING_GATEWAY_URL),
-        ),
-      ])
-    : undefined,
+  messagingService: new MessagingService([
+    new WeixinIlinkProvider(
+      new IlinkHttpGatewayTransport(messagingGatewayUrl),
+    ),
+  ]),
 });
 
 function PreviewApp() {

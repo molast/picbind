@@ -1,5 +1,5 @@
-import type { MessageHandler, Unsubscribe } from "./event.js";
-import type { MessagingChannel, NormalizedMessage } from "./message.js";
+import type { MessageHandler, Unsubscribe } from "./event";
+import type { MessagingChannel, NormalizedMessage } from "./message";
 
 export type MessageProviderStatus =
   | "disconnected"
@@ -31,7 +31,7 @@ export interface MessageProvider {
   stop(): Promise<void>;
   send(message: NormalizedMessage): Promise<void>;
   upload(file: Blob): Promise<string>;
-  download(fileId: string): Promise<Blob>;
+  download(fileReference: string, fallbackFileId?: string): Promise<Blob>;
   subscribe(handler: MessageHandler): Unsubscribe;
   subscribeStatus(handler: ProviderStatusHandler): Unsubscribe;
 }

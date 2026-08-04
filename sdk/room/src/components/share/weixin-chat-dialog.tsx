@@ -10,7 +10,7 @@ import {
   FiSend,
   FiX,
 } from "react-icons/fi";
-import type { MessagingProviderSnapshot } from "@picbind/messaging-service/source";
+import type { MessagingProviderSnapshot } from "../../messaging";
 import type { ShareRoomLabels } from "./share-room-labels";
 import { formatBytes, formatTime } from "./share-room-formatters";
 

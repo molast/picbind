@@ -1,5 +1,5 @@
 export const SHARE_ROOM_TTL_MS = 30 * 60 * 1000;
-export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 90 * 1000;
+export const SHARE_ROOM_PRESENCE_TIMEOUT_MS = 120 * 1000;
 export const SHARE_ROOM_RECOVERY_GRACE_MS = 10 * 60 * 1000;
 const MAX_ACTIVE_R2_OBJECTS_PER_ROOM = 100;
 const MAX_RELAY_MESSAGE_BYTES = 16 * 1024;
@@ -855,17 +855,6 @@ export class ShareRoomObject {
     try {
       relay = JSON.parse(message) as typeof relay;
     } catch {
-      return;
-    }
-    if (
-      relay.type === "PING" &&
-      typeof (relay as { id?: unknown }).id === "string" &&
-      /^[a-f0-9]{32}$/.test((relay as { id: string }).id)
-    ) {
-      socket.send(
-        JSON.stringify({ type: "PONG", id: (relay as { id: string }).id }),
-      );
-      await this.touchSocketPresence(socket);
       return;
     }
     if (

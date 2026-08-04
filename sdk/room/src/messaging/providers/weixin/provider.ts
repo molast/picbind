@@ -1,11 +1,11 @@
-import type { MessageHandler, Unsubscribe } from "../../core/event.js";
-import type { NormalizedMessage } from "../../core/message.js";
+import type { MessageHandler, Unsubscribe } from "../../core/event";
+import type { NormalizedMessage } from "../../core/message";
 import type {
   MessageProvider,
   MessageProviderStatus,
   MessagingProviderSnapshot,
   ProviderStatusHandler,
-} from "../../core/provider.js";
+} from "../../core/provider";
 
 export type IlinkAccountCredentials = {
   accountId: string;
@@ -26,6 +26,7 @@ export type IlinkLoginSession = {
   sessionId: string;
   state: "qr_pending" | "scanned" | "expired" | "confirmed" | "error";
   qrDataUrl?: string;
+  qrData?: string;
   expiresAt: number;
   error?: string;
 };
@@ -34,11 +35,14 @@ export type IlinkGatewayTransport = {
   getStatus(): Promise<IlinkGatewaySnapshot>;
   startLogin(): Promise<IlinkLoginSession>;
   getLoginStatus(sessionId: string): Promise<IlinkLoginSession>;
-  connect(onMessage: MessageHandler): Promise<void>;
+  connect(
+    onMessage: MessageHandler,
+    onStatus?: (snapshot: IlinkGatewaySnapshot) => void,
+  ): Promise<void>;
   disconnect(): Promise<void>;
   send(message: NormalizedMessage): Promise<void>;
   upload(file: Blob): Promise<string>;
-  download(fileId: string): Promise<Blob>;
+  download(fileReference: string, fallbackFileId?: string): Promise<Blob>;
 };
 
 /**
@@ -95,8 +99,10 @@ export class WeixinIlinkProvider implements MessageProvider {
           this.notifySnapshot();
         }
         for (const handler of this.messageHandlers) handler(normalized);
+      }, (snapshot) => {
+        this.applyGatewaySnapshot(snapshot);
       });
-      this.setStatus("connected");
+      this.applyGatewaySnapshot(await this.transport.getStatus());
     } catch (error) {
       this.setStatus(
         "error",
@@ -124,9 +130,9 @@ export class WeixinIlinkProvider implements MessageProvider {
     return this.transport.upload(file);
   }
 
-  async download(fileId: string) {
+  async download(fileId: string, fallbackFileId?: string) {
     this.assertConnected();
-    return this.transport.download(fileId);
+    return this.transport.download(fileId, fallbackFileId);
   }
 
   subscribe(handler: MessageHandler): Unsubscribe {
@@ -143,6 +149,11 @@ export class WeixinIlinkProvider implements MessageProvider {
     if (this.status !== "connected") {
       throw new Error("Weixin iLink provider is not connected");
     }
+  }
+
+  private applyGatewaySnapshot(snapshot: IlinkGatewaySnapshot) {
+    this.recipientId = snapshot.userId || this.recipientId;
+    this.setStatus(snapshot.status, snapshot.error);
   }
 
   private setStatus(status: MessageProviderStatus, error?: string) {
