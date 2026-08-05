@@ -1,74 +1,61 @@
 "use client";
 
-import { getDatabase, type CompressedImageRecord } from "../database";
-import { fileStorage } from "../file-storage";
 import type { CachedCompressedImage } from "../types/storage";
+import { mapWithConcurrency } from "../async-utils";
+import { getImageStorageRepository } from "./image-storage-repository-selector";
 
-function imagePath(id: string) {
-  return `files/compressed/${fileStorage.segment(id)}`;
-}
+export type CompressedImageSummary = Omit<CachedCompressedImage, "blob">;
+type CompressedMetadata = CompressedImageSummary;
 
 export async function storeCompressed(image: CachedCompressedImage) {
-  const path = imagePath(image.id);
-  await fileStorage.write(path, image.blob);
-  await getDatabase().compressedImages.put({
+  const { blob, ...metadata } = image;
+  await getImageStorageRepository().put({
+    scope: "compressed",
     id: image.id,
-    sourceId: image.sourceId,
-    sourceName: image.sourceName,
-    sourceSize: image.sourceSize,
-    name: image.name,
-    type: image.type,
-    format: image.format,
-    size: image.size,
+    metadata,
+    mimeType: image.type,
+    data: blob,
     createdAt: image.createdAt,
-    filePath: path,
   });
 }
 
-export async function listCompressed() {
-  const database = getDatabase();
-  const records = await database.compressedImages
-    .orderBy("createdAt")
-    .reverse()
-    .toArray();
-  const images = await Promise.all(
-    records.map(async (record): Promise<CachedCompressedImage | null> => {
-      try {
-        const blob = await fileStorage.read(record.filePath);
-        return {
-          id: record.id,
-          sourceId: record.sourceId,
-          sourceName: record.sourceName,
-          sourceSize: record.sourceSize,
-          name: record.name,
-          type: record.type,
-          format: record.format,
-          size: record.size,
-          blob: new Blob([blob], { type: record.type }),
-          createdAt: record.createdAt,
-        };
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "NotFoundError") {
-          await database.compressedImages.delete(record.id);
-          return null;
-        }
-        throw error;
-      }
-    }),
+export async function listCompressedMetadata(limit = 100, offset = 0) {
+  const records = await getImageStorageRepository().list<CompressedMetadata>(
+    "compressed",
+    "",
+    limit,
+    offset,
   );
+  return records.map((record) => record.metadata);
+}
+
+export async function readCompressedImage(id: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const repository = getImageStorageRepository();
+  const record = await repository.get<CompressedMetadata>("compressed", "", id);
+  if (!record) return null;
+  const blob = await repository.read(
+    "compressed",
+    "",
+    id,
+    "output",
+    record.mimeType,
+    signal,
+  );
+  return blob ? { ...record.metadata, blob } : null;
+}
+
+export async function listCompressed() {
+  const summaries = await listCompressedMetadata(1_000, 0);
+  const images = await mapWithConcurrency(summaries, 4, (summary) =>
+    readCompressedImage(summary.id));
   return images.filter((image): image is CachedCompressedImage => image !== null);
 }
 
-export async function deleteCompressed(id: string) {
-  const database = getDatabase();
-  const record = await database.compressedImages.get(id);
-  await database.compressedImages.delete(id);
-  await fileStorage.remove(record?.filePath ?? imagePath(id));
+export function deleteCompressed(id: string) {
+  return getImageStorageRepository().delete("compressed", "", id);
 }
 
-export async function clearCompressed() {
-  const database = getDatabase();
-  const records: CompressedImageRecord[] = await database.compressedImages.toArray();
-  await database.compressedImages.clear();
-  await Promise.all(records.map((record) => fileStorage.remove(record.filePath)));
+export function clearCompressed() {
+  return getImageStorageRepository().clear("compressed");
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 import { FiArrowRight, FiChevronLeft, FiChevronRight, FiImage, FiTrash2 } from "react-icons/fi";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { RoomImage } from "../share-room-types";
@@ -13,9 +15,10 @@ type LocalImageListProps = {
   onChoose(): void;
   onAdd(image: RoomImage): void | Promise<void>;
   onDelete(image: RoomImage): void | Promise<void>;
+  onHydrate(image: RoomImage): void;
 };
 
-export default function LocalImageList({ images, labels, collapsed, onCollapsedChange, onChoose, onAdd, onDelete }: LocalImageListProps) {
+export default function LocalImageList({ images, labels, collapsed, onCollapsedChange, onChoose, onAdd, onDelete, onHydrate }: LocalImageListProps) {
   if (collapsed) {
     return (
       <aside className="flex min-h-12 items-center justify-center border-b border-slate-200 bg-slate-50/80 lg:min-h-[260px] lg:flex-col lg:border-b-0 lg:border-r">
@@ -37,7 +40,7 @@ export default function LocalImageList({ images, labels, collapsed, onCollapsedC
         {images.length ? images.map((image) => (
           <article key={image.id} className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-slate-200 bg-white p-1.5">
             <div className="h-11 w-[52px] overflow-hidden rounded bg-slate-100">
-              <img src={image.url} alt="" className="h-full w-full object-cover" />
+              <LazyLocalImage image={image} onHydrate={onHydrate} />
             </div>
             <div className="min-w-0">
               <div className="truncate text-[11px] font-semibold text-slate-700" title={image.name}>{middleEllipsisFileName(image.name)}</div>
@@ -58,4 +61,19 @@ export default function LocalImageList({ images, labels, collapsed, onCollapsedC
       </div>
     </aside>
   );
+}
+
+function LazyLocalImage({ image, onHydrate }: { image: RoomImage; onHydrate(image: RoomImage): void }) {
+  const ref = React.useRef<HTMLImageElement>(null);
+  React.useEffect(() => {
+    if (!image.previewOnly || !ref.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      onHydrate(image);
+    }, { rootMargin: "120px" });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [image, onHydrate]);
+  return <img ref={ref} src={image.url} alt="" className="h-full w-full object-cover" />;
 }

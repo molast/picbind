@@ -17,6 +17,7 @@ import {
   type OutputVariant,
 } from "./home-compression-types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
+import SystemManager from "@/utils/System";
 
 type HomeResultsProps = {
   copy: HomeCompressLandingCopy;
@@ -268,18 +269,19 @@ export default function HomeResults({
                                         }
                                       >
                                         <div className="flex items-center gap-1">
-                                          <a
-                                            href={variant.outputUrl}
-                                            download={
-                                              variant.outputName || item.fileName
-                                            }
+                                          <button
+                                            type="button"
+                                            onClick={() => void SystemManager.downloadImage(
+                                              variant.outputUrl!,
+                                              variant.outputName || item.fileName,
+                                            )}
                                             className={`inline-flex items-center gap-1.5 rounded-[14px] bg-[#dde9ff] px-2.5 py-1 text-[11px] font-semibold ${accentClass}`}
                                           >
                                             <span className="text-[11px]">⬇</span>
                                             <span>
                                               {extToBadge(variant.outputExt)}
                                             </span>
-                                          </a>
+                                          </button>
                                           {allowCompareSelection && (
                                             <button
                                               type="button"

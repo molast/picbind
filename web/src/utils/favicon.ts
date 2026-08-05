@@ -1,6 +1,7 @@
 "use client";
 
 import { initWasm } from "@/utils/wasm-runtime";
+import { saveDownloadedBlob } from "@picbind/room/source/download";
 
 type FaviconSet = {
   favicon16: Uint8Array;
@@ -44,15 +45,6 @@ function buildManifestBytes() {
   return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
-function triggerDownload(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 export async function generateFaviconFromImage(file: File): Promise<FaviconSet> {
   const mod = await initWasm();
   if (!mod || typeof mod.generate_favicon !== "function") {
@@ -90,7 +82,7 @@ export async function downloadFaviconZip(files: FaviconSet) {
 
   const zipBytes = mod.create_zip_from_items(zipEntries) as Uint8Array;
   const blob = new Blob([new Uint8Array(zipBytes)], { type: "application/zip" });
-  triggerDownload(blob, "favicon_package.zip");
+  await saveDownloadedBlob(blob, "favicon_package.zip");
 }
 
 export function getFaviconHtmlSnippet() {

@@ -5,7 +5,7 @@
   "identifier": "com.picbind.desktop",
   "build": {
     "beforeDevCommand": "pnpm --dir ../web dev",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:3000/tauri-dev.html",
     "beforeBuildCommand": "pnpm --dir ../web build",
     "frontendDist": "../../web/out"
   },

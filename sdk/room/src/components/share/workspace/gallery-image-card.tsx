@@ -18,6 +18,7 @@ import RoomImageMedia from "../room-image-media";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { ConnectionState, ImageReactionSignal, RoomImage } from "../share-room-types";
 import { formatBytes, middleEllipsisFileName } from "../share-room-formatters";
+import { downloadUrl } from "../../../download";
 import ImageOperationMenu from "./image-operation-menu";
 import ImageVersionMenu from "./image-version-menu";
 
@@ -28,6 +29,7 @@ type GalleryImageCardProps = {
   isSending: boolean;
   labels: ShareRoomLabels;
   onPreview(imageId: string): void;
+  onHydrate(image: RoomImage): void;
   onPlaceholderMeasured(imageId: string, width: number, height: number): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
@@ -65,6 +67,7 @@ export default function GalleryImageCard({
   isSending,
   labels,
   onPreview,
+  onHydrate,
   onPlaceholderMeasured,
   onReview,
   onSend,
@@ -139,6 +142,17 @@ export default function GalleryImageCard({
     observer.observe(media);
     return () => observer.disconnect();
   }, [image.direction, image.id, image.placeholder, onPlaceholderMeasured]);
+  React.useEffect(() => {
+    const media = mediaRef.current;
+    if (!media || !image.previewOnly) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      onHydrate(image);
+    }, { rootMargin: "160px" });
+    observer.observe(media);
+    return () => observer.disconnect();
+  }, [image, onHydrate]);
 
   const status =
     image.transferStatus ||
@@ -455,15 +469,15 @@ export default function GalleryImageCard({
               </button>
             )}
             {downloadReady ? (
-              <a
-                href={image.url}
-                download={image.name}
+              <button
+                type="button"
+                onClick={() => void downloadUrl(image.url, image.name)}
                 className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
                 aria-label={labels.download}
                 title={labels.download}
               >
                 <FiDownload className="h-3.5 w-3.5" aria-hidden="true" />
-              </a>
+              </button>
             ) : (
               <button
                 type="button"

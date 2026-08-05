@@ -22,6 +22,7 @@ export type AvifAssetLocator = (path: string, prefix: string) => string;
 
 export type LibavifCodecConfig = {
   locateFile?: AvifAssetLocator;
+  allowThreadedEncoder?: boolean;
 };
 
 type RawLibavifModule = {
@@ -130,7 +131,8 @@ export async function encodeWithLibavif(
     image.data.byteLength,
   );
   const initialOptions = optionsForImageSize(image.width, image.height, options);
-  const threaded = canUseThreadedEncoder();
+  const threaded =
+    config.allowThreadedEncoder !== false && canUseThreadedEncoder();
   let encoded: Uint8Array | null = null;
   let initialError: unknown;
 

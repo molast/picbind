@@ -1,3 +1,5 @@
+import { saveDownloadedBlob } from "@picbind/room/source/download";
+
 type ZipItem = {
   name: string;
   url: string;
@@ -157,22 +159,7 @@ export default class SystemManager {
     const currentTime = SystemManager.getNowformatTime();
     const metaType = file?.type.split("/")[1] || url.split(".")[1];
     const resultName = name || `result-${currentTime}.${metaType.split("+")[0]}`;
-    const localUrl = URL.createObjectURL(file);
-    const link = document.createElement("a");
-    link.href = localUrl;
-    link.download = resultName;
-    link.dispatchEvent(
-      new MouseEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-      }),
-    );
-
-    setTimeout(() => {
-      link.remove();
-      URL.revokeObjectURL(localUrl);
-    }, 300);
+    return saveDownloadedBlob(file, resultName);
   };
 
   static downloadZip = async (items: Array<{ name: string; url: string }>, zipName?: string) => {
@@ -181,15 +168,10 @@ export default class SystemManager {
 
     try {
       const zipBlob = await SystemManager.createZipBlob(validItems);
-      const link = document.createElement("a");
-      const objectUrl = URL.createObjectURL(zipBlob);
-      link.href = objectUrl;
-      link.download = zipName || `picbind-${SystemManager.getNowformatTime()}.zip`;
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 300);
+      await saveDownloadedBlob(
+        zipBlob,
+        zipName || `picbind-${SystemManager.getNowformatTime()}.zip`,
+      );
     } catch (error) {
       console.error("ZIP download failed:", error);
     }

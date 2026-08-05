@@ -32,6 +32,7 @@ type GalleryWorkspaceProps = {
   onFiles(files: FileList | File[]): void | Promise<void>;
   onDraggingChange(dragging: boolean): void;
   onPreview(imageId: string): void;
+  onHydrate(image: RoomImage): void;
   onPlaceholderMeasured(imageId: string, width: number, height: number): void;
   onReview(imageId: string): void;
   onSend(image: RoomImage): void | Promise<void>;
@@ -66,6 +67,7 @@ export default function GalleryWorkspace({
   onFiles,
   onDraggingChange,
   onPreview,
+  onHydrate,
   onPlaceholderMeasured,
   onReview,
   onSend,
@@ -214,7 +216,7 @@ export default function GalleryWorkspace({
           void onFiles(event.dataTransfer.files);
         }}
       >
-        <LocalImageList images={localImages} labels={labels} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} />
+        <LocalImageList images={localImages} labels={labels} collapsed={localPanelCollapsed} onCollapsedChange={setLocalPanelCollapsed} onChoose={onChooseImages} onAdd={onMoveToOutbox} onDelete={onDeleteLocal} onHydrate={onHydrate} />
         <section className="min-h-0 min-w-0 overflow-y-auto" aria-label={labels.outbox}>
           {versionGroups.length ? (
           <div
@@ -233,6 +235,7 @@ export default function GalleryWorkspace({
                 isSending={isSending}
                 labels={labels}
                 onPreview={onPreview}
+                onHydrate={onHydrate}
                 onPlaceholderMeasured={onPlaceholderMeasured}
                 onReview={onReview}
                 onSend={onSend}

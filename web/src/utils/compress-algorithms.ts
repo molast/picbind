@@ -71,6 +71,10 @@ type AvifEncodingPlan = {
   maxP99AlphaError: number;
 };
 
+type CompressionRuntimeOptions = {
+  allowThreadedAvif?: boolean;
+};
+
 function toBlobPart(bytes: Uint8Array) {
   return new Uint8Array(bytes);
 }
@@ -208,6 +212,7 @@ async function compressPerceptualAvif(
   file: File,
   quality: number,
   compressionGain: number,
+  runtimeOptions: CompressionRuntimeOptions,
 ): Promise<CompressResult> {
   const mod = await initWasm();
   if (
@@ -250,21 +255,25 @@ async function compressPerceptualAvif(
       width: source.width,
       height: source.height,
     } as ImageData;
-    const encoded = await encodeWithLibavif(imageData, {
-      quality: candidateQuality,
-      qualityAlpha: alphaQuality,
-      denoiseLevel: 0,
-      tileColsLog2: plan.tileColsLog2,
-      tileRowsLog2: plan.tileRowsLog2,
-      speed: plan.speed,
-      subsample: plan.subsample,
-      chromaDeltaQ: plan.chromaDeltaQ,
-      sharpness: plan.sharpness,
-      tune: plan.tune,
-      enableSharpYUV: plan.enableSharpYuv,
-      bitDepth: plan.bitDepth,
-      lossless: candidateQuality === 100,
-    });
+    const encoded = await encodeWithLibavif(
+      imageData,
+      {
+        quality: candidateQuality,
+        qualityAlpha: alphaQuality,
+        denoiseLevel: 0,
+        tileColsLog2: plan.tileColsLog2,
+        tileRowsLog2: plan.tileRowsLog2,
+        speed: plan.speed,
+        subsample: plan.subsample,
+        chromaDeltaQ: plan.chromaDeltaQ,
+        sharpness: plan.sharpness,
+        tune: plan.tune,
+        enableSharpYUV: plan.enableSharpYuv,
+        bitDepth: plan.bitDepth,
+        lossless: candidateQuality === 100,
+      },
+      { allowThreadedEncoder: runtimeOptions.allowThreadedAvif },
+    );
 
     if (sourceFormat === "avif" && encoded.byteLength >= file.size) {
       continue;
@@ -675,6 +684,7 @@ export async function compressImageWithAlgorithms(
   quality = 80,
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
+  runtimeOptions: CompressionRuntimeOptions = {},
 ): Promise<CompressResult> {
   const features = extractCompressionFeatures(
     file,
@@ -706,6 +716,7 @@ export async function compressImageWithAlgorithms(
           file,
           candidateQuality,
           plan.compressionGain,
+          runtimeOptions,
         );
       } catch (error) {
         if (plan.sameFormat) return originalFileResult(file, "avif");
@@ -741,7 +752,14 @@ export async function compressImageWithAlgorithms(
 export async function compressImageAutomatically(
   file: File,
   quality = 80,
+  runtimeOptions: CompressionRuntimeOptions = {},
 ): Promise<CompressResult> {
   const recommendedFormat = await predictRecommendedFormat(file);
-  return compressImageWithAlgorithms(file, quality, recommendedFormat, false);
+  return compressImageWithAlgorithms(
+    file,
+    quality,
+    recommendedFormat,
+    false,
+    runtimeOptions,
+  );
 }

@@ -1,47 +1,38 @@
 "use client";
 
-import { getDatabase } from "../database";
-import { fileStorage } from "../file-storage";
+import { getImageStorageRepository } from "./image-storage-repository-selector";
 
-function filePath(id: string) {
-  return `temp/compression/${fileStorage.segment(id)}`;
-}
+type QueuedFileMetadata = {
+  name: string;
+  type: string;
+  size: number;
+  createdAt: number;
+};
 
 export async function storeQueuedFile(id: string, file: File) {
-  const path = filePath(id);
-  await fileStorage.write(path, file);
-  await getDatabase().queuedFiles.put({
+  const createdAt = file.lastModified || Date.now();
+  await getImageStorageRepository().put({
+    scope: "queued",
     id,
-    name: file.name,
-    type: file.type,
-    size: file.size,
-    filePath: path,
-    createdAt: file.lastModified || Date.now(),
+    metadata: { name: file.name, type: file.type, size: file.size, createdAt },
+    mimeType: file.type,
+    data: file,
+    createdAt,
   });
 }
 
 export async function getQueuedFile(id: string) {
-  const database = getDatabase();
-  const record = await database.queuedFiles.get(id);
+  const repository = getImageStorageRepository();
+  const record = await repository.get<QueuedFileMetadata>("queued", "", id);
   if (!record) return null;
-  try {
-    const blob = await fileStorage.read(record.filePath);
-    return new File([blob], record.name, {
-      type: record.type,
-      lastModified: record.createdAt,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "NotFoundError") {
-      await database.queuedFiles.delete(id);
-      return null;
-    }
-    throw error;
-  }
+  const blob = await repository.read("queued", "", id, "original", record.mimeType);
+  if (!blob) return null;
+  return new File([blob], record.metadata.name, {
+    type: record.metadata.type,
+    lastModified: record.metadata.createdAt,
+  });
 }
 
-export async function deleteQueuedFile(id: string) {
-  const database = getDatabase();
-  const record = await database.queuedFiles.get(id);
-  await database.queuedFiles.delete(id);
-  await fileStorage.remove(record?.filePath ?? filePath(id));
+export function deleteQueuedFile(id: string) {
+  return getImageStorageRepository().delete("queued", "", id);
 }

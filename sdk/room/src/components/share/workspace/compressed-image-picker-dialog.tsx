@@ -5,8 +5,10 @@ import { FiCheck, FiImage, FiLoader, FiTrash2, FiX, FiZap } from "react-icons/fi
 import {
   clearCompressedImages,
   deleteCompressedImage,
-  listCompressedImages,
+  listCompressedImageMetadata,
+  loadCompressedImage,
   type CachedCompressedImage,
+  type CompressedImageSummary,
 } from "../../../utils/compressed-image-store";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes, middleEllipsisFileName } from "../share-room-formatters";
@@ -27,7 +29,8 @@ export default function CompressedImagePickerDialog({
   onCompress,
   onSelect,
 }: CompressedImagePickerDialogProps) {
-  const [items, setItems] = React.useState<CachedCompressedImage[]>([]);
+  const [items, setItems] = React.useState<CompressedImageSummary[]>([]);
+  const [loaded, setLoaded] = React.useState<Record<string, CachedCompressedImage>>({});
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState(false);
   const [urls, setUrls] = React.useState<Record<string, string>>({});
@@ -38,7 +41,8 @@ export default function CompressedImagePickerDialog({
     let disposed = false;
     setLoading(true);
     setSelected(new Set());
-    void listCompressedImages()
+    setLoaded({});
+    void listCompressedImageMetadata(100, 0)
       .then((next) => {
         if (!disposed) setItems(next);
       })
@@ -55,30 +59,38 @@ export default function CompressedImagePickerDialog({
 
   React.useEffect(() => {
     const next = Object.fromEntries(
-      items.map((item) => [item.id, URL.createObjectURL(item.blob)]),
+      Object.values(loaded).map((item) => [item.id, URL.createObjectURL(item.blob)]),
     );
     setUrls(next);
     return () => Object.values(next).forEach((url) => URL.revokeObjectURL(url));
-  }, [items]);
+  }, [loaded]);
 
   if (!open) return null;
+  const loadItem = React.useCallback(async (id: string) => {
+    if (loaded[id]) return loaded[id];
+    const image = await loadCompressedImage(id);
+    if (!image) return null;
+    setLoaded((current) => ({ ...current, [id]: image }));
+    return image;
+  }, [loaded]);
   const toggle = (id: string) => {
+    if (!selected.has(id)) void loadItem(id);
     setSelected((current) => {
       const next = new Set(current);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
-  const addSelected = () => {
-    const files = items
-      .filter((item) => selected.has(item.id))
-      .map(
-        (item) =>
-          new File([item.blob], item.name, {
-            type: item.type,
-            lastModified: item.createdAt,
-          }),
-      );
+  const addSelected = async () => {
+    const files: File[] = [];
+    for (const item of items.filter((candidate) => selected.has(candidate.id))) {
+      const image = await loadItem(item.id);
+      if (!image) continue;
+      files.push(new File([image.blob], image.name, {
+        type: image.type,
+        lastModified: image.createdAt,
+      }));
+    }
     if (files.length) void onSelect(files);
   };
   const removeItem = async (id: string) => {
@@ -126,7 +138,11 @@ export default function CompressedImagePickerDialog({
                   <button type="button" onClick={() => toggle(item.id)} className="flex min-w-0 flex-1 items-center gap-3 p-1.5 text-left">
                     <span className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-slate-100">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={urls[item.id]} alt={item.name} className="h-full w-full object-cover" />
+                      <LazyCompressedPreview
+                        src={urls[item.id]}
+                        alt={item.name}
+                        onVisible={() => void loadItem(item.id)}
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-slate-800" title={item.name}>
@@ -163,12 +179,39 @@ export default function CompressedImagePickerDialog({
         {items.length ? (
           <div className="flex h-16 shrink-0 items-center justify-end gap-2 border-t border-slate-200 px-5">
             <button type="button" onClick={onClose} className="h-9 rounded-md px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100">{labels.cancel}</button>
-            <button type="button" onClick={addSelected} disabled={!selected.size} className="h-9 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="button" onClick={() => void addSelected()} disabled={!selected.size} className="h-9 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white hover:bg-[#2457bd] disabled:cursor-not-allowed disabled:opacity-40">
               {labels.addSelected}
             </button>
           </div>
         ) : null}
       </div>
     </div>
+  );
+}
+
+function LazyCompressedPreview({
+  src,
+  alt,
+  onVisible,
+}: {
+  src?: string;
+  alt: string;
+  onVisible(): void;
+}) {
+  const ref = React.useRef<HTMLSpanElement>(null);
+  React.useEffect(() => {
+    if (src || !ref.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      onVisible();
+    }, { rootMargin: "120px" });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [onVisible, src]);
+  return (
+    <span ref={ref} className="block h-full w-full">
+      {src ? <img src={src} alt={alt} className="h-full w-full object-cover" /> : null}
+    </span>
   );
 }

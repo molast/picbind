@@ -68,9 +68,11 @@ import {
 } from "../../utils/realtime-image-transfer";
 import {
   deleteRoomImage,
-  listRoomImages,
+  listRoomImageMetadata,
+  loadRoomImage,
   storeRoomImage,
   type CachedRoomImage,
+  type RoomImageSummary,
 } from "../../utils/realtime-image-store";
 import {
   createPeerMessageId,
@@ -111,7 +113,8 @@ import {
   type ImageDeliveryStatus,
 } from "../../database/repositories/image-delivery-repository";
 import {
-  listMessagingImages,
+  listMessagingImageMetadata,
+  readMessagingImage,
   storeMessagingImage,
 } from "../../database/repositories/messaging-image-repository";
 import { uploadFileToR2 } from "../../utils/realtime-r2-transfer";
@@ -177,6 +180,7 @@ export default function ShareRoomPage({
   );
   const placeholderAckDimensionsRef = React.useRef(new Map<string, string>());
   const imagesRef = React.useRef<RoomImage[]>([]);
+  const roomImageLoadsRef = React.useRef(new Set<string>());
   const roomIdRef = React.useRef<string | null>(null);
   const roomExitHandledRef = React.useRef(false);
   const minimizedRef = React.useRef(false);
@@ -285,6 +289,7 @@ export default function ShareRoomPage({
     Record<string, number>
   >({});
   const messagingChatProviderIdRef = React.useRef<string | null>(null);
+  const messagingImageLoadsRef = React.useRef(new Set<string>());
   const [isMessagingChatSending, setIsMessagingChatSending] = React.useState(false);
   const appendMessagingChatMessage = React.useCallback((message: WeixinChatItem) => {
     setMessagingChatMessages((current) => {
@@ -305,6 +310,7 @@ export default function ShareRoomPage({
 
   React.useEffect(() => {
     setMessagingUnreadCounts({});
+    messagingImageLoadsRef.current.clear();
     messagingChatProviderIdRef.current = null;
     setMessagingChatProviderId(null);
     setMessagingChatMessages((current) => {
@@ -317,12 +323,10 @@ export default function ShareRoomPage({
     });
     if (!roomId) return;
     let cancelled = false;
-    void listMessagingImages(roomId)
+    void listMessagingImageMetadata(roomId)
       .then((images) => {
         if (cancelled) return;
         const cachedItems = images.map((image): WeixinChatItem => {
-          const url = URL.createObjectURL(image.blob);
-          objectUrlsRef.current.add(url);
           return {
             id: image.messageId,
             providerId: image.providerId,
@@ -331,8 +335,6 @@ export default function ShareRoomPage({
             fileName: image.fileName,
             mimeType: image.mimeType,
             size: image.size,
-            blob: image.blob,
-            url,
             createdAt: image.createdAt,
             status: "sent",
           };
@@ -360,6 +362,30 @@ export default function ShareRoomPage({
     return () => {
       cancelled = true;
     };
+  }, [roomId]);
+  const loadMessagingImage = React.useCallback((item: WeixinChatItem) => {
+    if (!roomId || item.type !== "image" || item.blob) return;
+    const key = `${item.providerId}:${item.id}`;
+    if (messagingImageLoadsRef.current.has(key)) return;
+    messagingImageLoadsRef.current.add(key);
+    void readMessagingImage(roomId, item.providerId, item.id)
+      .then((image) => {
+        if (!image) return;
+        const url = URL.createObjectURL(image.blob);
+        objectUrlsRef.current.add(url);
+        setMessagingChatMessages((current) => current.map((message) => {
+          if (`${message.providerId}:${message.id}` !== key) return message;
+          if (message.url) {
+            URL.revokeObjectURL(message.url);
+            objectUrlsRef.current.delete(message.url);
+          }
+          return { ...message, blob: image.blob, url, size: image.size };
+        }));
+      })
+      .catch((error) => {
+        console.warn("Failed to load cached Weixin image", error);
+      })
+      .finally(() => messagingImageLoadsRef.current.delete(key));
   }, [roomId]);
   roomIdRef.current = roomId;
   const reviewMessageSequenceRef = React.useRef(0);
@@ -987,6 +1013,23 @@ export default function ShareRoomPage({
     },
     [],
   );
+  const hydrateRoomImage = React.useCallback((image: RoomImage) => {
+    if (!roomId || !image.previewOnly || roomImageLoadsRef.current.has(image.id)) return;
+    roomImageLoadsRef.current.add(image.id);
+    void loadRoomImage(roomId, image.id)
+      .then((loaded) => {
+        if (!loaded) return;
+        updateRoomImage(image.id, {
+          blob: loaded.blob,
+          thumbnail: loaded.thumbnail,
+          previewOnly: false,
+        }, true);
+      })
+      .catch((error) => {
+        console.warn("Failed to hydrate cached room image", error);
+      })
+      .finally(() => roomImageLoadsRef.current.delete(image.id));
+  }, [roomId, updateRoomImage]);
 
   const handleReviewStatusChange = React.useCallback(
     (
@@ -1202,7 +1245,18 @@ export default function ShareRoomPage({
       return;
     }
     let disposed = false;
-    void listRoomImages(roomId)
+    void (async () => {
+      const cachedImages: RoomImageSummary[] = [];
+      const pageSize = 100;
+      while (!disposed) {
+        const page = await listRoomImageMetadata(roomId, pageSize, cachedImages.length);
+        cachedImages.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return cachedImages.sort(
+        (a, b) => (a.updatedAt ?? a.createdAt) - (b.updatedAt ?? b.createdAt),
+      );
+    })()
       .then((cachedImages) => {
         if (!disposed) {
           cachedImages.forEach((cachedImage) => {
@@ -1210,13 +1264,19 @@ export default function ShareRoomPage({
               cachedImage.transferStatus === "sending" ||
               cachedImage.transferStatus === "receiving" ||
               cachedImage.transferStatus === "awaiting-receipt";
-            const restoredImage = interrupted
+            const restoredImage: CachedRoomImage = interrupted
               ? {
                   ...cachedImage,
+                  blob: new Blob([], { type: cachedImage.type }),
+                  previewOnly: cachedImage.byteSize > 0,
                   transferStatus: "failed" as const,
                   progress: 0,
                 }
-              : cachedImage;
+              : {
+                  ...cachedImage,
+                  blob: new Blob([], { type: cachedImage.type }),
+                  previewOnly: cachedImage.byteSize > 0,
+                };
             addRoomImage(restoredImage);
             if (
               restoredImage.direction === "sent" &&
@@ -3219,6 +3279,7 @@ export default function ShareRoomPage({
                 onFiles={handleLocalFiles}
                 onDraggingChange={setIsDragging}
                 onPreview={setPreviewImageId}
+                onHydrate={hydrateRoomImage}
                 onPlaceholderMeasured={handlePlaceholderMeasured}
                 onReview={handleReviewImage}
                 onSend={async (image) => {
@@ -3371,6 +3432,7 @@ export default function ShareRoomPage({
         sending={isMessagingChatSending}
         onSend={handleMessagingChatSend}
         onMoveImage={handleMoveWeixinImageToLibrary}
+        onLoadImage={loadMessagingImage}
         onClose={() => setMessagingChatProviderId(null)}
       />
       </main>

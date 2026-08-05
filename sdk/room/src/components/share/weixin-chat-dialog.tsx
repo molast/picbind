@@ -39,6 +39,7 @@ type WeixinChatDialogProps = {
   sending: boolean;
   onSend(text: string): Promise<boolean>;
   onMoveImage(item: WeixinChatItem): Promise<boolean>;
+  onLoadImage(item: WeixinChatItem): void;
   onClose(): void;
 };
 
@@ -50,6 +51,7 @@ export default function WeixinChatDialog({
   sending,
   onSend,
   onMoveImage,
+  onLoadImage,
   onClose,
 }: WeixinChatDialogProps) {
   const [draft, setDraft] = React.useState("");
@@ -216,15 +218,11 @@ export default function WeixinChatDialog({
                     disabled={!image.url}
                     className="flex min-w-0 flex-1 items-center gap-2 rounded text-left disabled:cursor-wait"
                   >
-                    {image.url ? <img
-                      src={image.url}
+                    <LazyMessagingPreview
+                      image={image}
                       alt={image.fileName || labels.messagingImage}
-                      className="h-11 w-11 shrink-0 rounded bg-slate-50 object-cover"
-                    /> : (
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-slate-50 text-slate-300">
-                        <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      </div>
-                    )}
+                      onVisible={onLoadImage}
+                    />
                     <div className="min-w-0 flex-1">
                       <div
                         className="truncate text-[11px] font-medium text-slate-700"
@@ -273,5 +271,38 @@ export default function WeixinChatDialog({
       />
     ) : null}
     </>
+  );
+}
+
+function LazyMessagingPreview({
+  image,
+  alt,
+  onVisible,
+}: {
+  image: WeixinChatItem;
+  alt: string;
+  onVisible(item: WeixinChatItem): void;
+}) {
+  const ref = React.useRef<HTMLSpanElement>(null);
+  React.useEffect(() => {
+    if (image.url || !ref.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      onVisible(image);
+    }, { rootMargin: "100px" });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [image, onVisible]);
+  return image.url ? (
+    <img
+      src={image.url}
+      alt={alt}
+      className="h-11 w-11 shrink-0 rounded bg-slate-50 object-cover"
+    />
+  ) : (
+    <span ref={ref} className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-slate-50 text-slate-300">
+      <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" />
+    </span>
   );
 }

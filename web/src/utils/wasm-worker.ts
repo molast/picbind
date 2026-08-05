@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { buildCompressedFileName, type OutputFormat } from "@/utils/compress-shared";
+import { isTauri } from "@tauri-apps/api/core";
 import { createUuid } from "@/utils/uuid";
 import { compressWithWasm } from "@/utils/wasm";
 
@@ -68,7 +69,13 @@ function createCompressionWorker() {
   };
 
   worker.onerror = (event) => {
-    const error = event.error || new Error(event.message || "Compression worker failed");
+    const location = event.filename
+      ? ` (${event.filename}:${event.lineno}:${event.colno})`
+      : "";
+    const error =
+      event.error instanceof Error
+        ? event.error
+        : new Error(`${event.message || "Compression worker failed"}${location}`);
     pendingTasks.forEach((task, id) => {
       if (task.worker === worker) {
         pendingTasks.delete(id);
@@ -118,6 +125,7 @@ export async function compressWithWasmWorker(
         targetFormat,
         allowAlphaLoss,
         automatic,
+        allowThreadedAvif: !isTauri(),
       });
     } catch (error) {
       pendingTasks.delete(id);
