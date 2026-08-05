@@ -94,12 +94,6 @@ export default function CreateRoomButton({
       >
         <FiShare2 className="h-4 w-4" aria-hidden="true" />
         <span>{labels.trigger}</span>
-        <span
-          className="pointer-events-none absolute -right-2 -top-2 rounded bg-[#2f65cf] px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
-          aria-hidden="true"
-        >
-          BETA
-        </span>
       </button>
 
       {isCreating ? (

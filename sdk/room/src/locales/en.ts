@@ -215,7 +215,7 @@ const en: typeof zh = {
   closeRoom: "Exit and close room",
   confirmLeaveRoom: "Leaving the room will disconnect the realtime session. Continue?",
   confirmClose: "Closing the room removes every member immediately. Continue?",
-  createRoom: "Share images",
+  createRoom: "Image workspace",
   createRoomFailed: "Could not create room",
   invalidRoomResponse: "The room service returned an invalid response",
   ownedRoomMetadataUnavailable: "Owned room metadata is unavailable",
