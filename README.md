@@ -18,6 +18,7 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 ```text
 .
 ├── cloudflare-worker/      # Cloudflare Worker API 服务骨架
+├── desktop/                # Tauri 桌面客户端（0.1.0）
 ├── sdk/                    # 可独立构建和复用的前端 SDK
 │   ├── wasm/               # 可复用的 WASM Web SDK
 │   │   ├── image-wasm/     # 图片处理 WASM Web 产物
@@ -51,6 +52,20 @@ npm run build
 ```
 
 构建输出会生成到 `web/out/`，可作为 Cloudflare Pages 的静态产物目录。
+
+## Tauri 桌面客户端
+
+Tauri 客户端位于 `desktop/`，当前版本为 `0.1.0`。第一阶段直接复用现有 Web
+前端，不包含桌面专属业务逻辑。从仓库根目录运行：
+
+```bash
+cd desktop
+pnpm install
+pnpm dev
+```
+
+该命令会启动现有 Web 开发服务并打开 PicBind 桌面窗口。详细环境和检查命令见
+`docs/tauri/development.md`。
 
 ## 本地 Web 开发
 
