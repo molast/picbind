@@ -24,22 +24,22 @@ function ensurePnpm() {
   process.exit(1);
 }
 
-function start(name, cwd) {
-  const child = spawn(packageManager, ["run", "dev"], {
+function start(name, cwd, args) {
+  const child = spawn(packageManager, args, {
     cwd,
     env: process.env,
     stdio: "inherit",
     shell: isWindows,
     detached: !isWindows,
   });
-  children.set(name, child);
+  const processRecord = { child, pid: child.pid };
+  children.set(name, processRecord);
 
   child.once("error", (error) => {
     console.error(`${name} failed to start:`, error.message);
     void shutdown(1);
   });
   child.once("exit", (code, signal) => {
-    children.delete(name);
     if (shuttingDown) return;
 
     const reason = signal ? `signal ${signal}` : `code ${code ?? 1}`;
@@ -48,8 +48,31 @@ function start(name, cwd) {
   });
 }
 
-function stopChild(child) {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+function processGroupExists(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function waitForProcessGroup(pid, timeoutMs) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (!processGroupExists(pid) || Date.now() - startedAt >= timeoutMs) {
+        resolve(!processGroupExists(pid));
+        return;
+      }
+      setTimeout(check, 50);
+    };
+    check();
+  });
+}
+
+async function stopChild({ child, pid }) {
+  if (!pid) {
     return Promise.resolve();
   }
 
@@ -57,7 +80,7 @@ function stopChild(child) {
     return new Promise((resolve) => {
       const killer = spawn(
         "taskkill",
-        ["/PID", String(child.pid), "/T", "/F"],
+        ["/PID", String(pid), "/T", "/F"],
         { stdio: "ignore", windowsHide: true },
       );
       killer.once("error", resolve);
@@ -65,25 +88,17 @@ function stopChild(child) {
     });
   }
 
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    return Promise.resolve();
-  }
+  if (!processGroupExists(pid)) return;
 
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {}
-      resolve();
-    }, 3000);
-    timer.unref();
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {}
+  if (await waitForProcessGroup(pid, 3000)) return;
+
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {}
+  await waitForProcessGroup(pid, 1000);
 }
 
 async function shutdown(exitCode) {
@@ -95,13 +110,15 @@ async function shutdown(exitCode) {
 
 process.once("SIGINT", () => void shutdown(130));
 process.once("SIGTERM", () => void shutdown(143));
+process.once("SIGHUP", () => void shutdown(129));
 
 ensurePnpm();
 const mode = process.argv[2] || "desktop";
 if (mode === "desktop") {
-  start("Desktop app", desktopDir);
+  start("Web app", webDir, ["run", "dev"]);
+  start("Desktop app", desktopDir, ["run", "dev:tauri"]);
 } else if (mode === "web") {
-  start("Web app", webDir);
+  start("Web app", webDir, ["run", "dev"]);
 } else {
   console.error(`Unknown local development mode: ${mode}`);
   process.exit(2);

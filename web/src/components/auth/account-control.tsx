@@ -59,7 +59,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
       <button type="button" aria-label={lang === "zh" ? "账户" : "Account"} aria-expanded={open} onClick={() => setOpen((value) => !value)} className="block h-10 w-10 rounded-full p-0.5 ring-2 ring-white/70 transition hover:ring-white">
         <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#2f65cf] text-[12px] font-bold text-white">
           <span aria-hidden="true">{label}</span>
-          {avatar ? <img src={avatar} crossOrigin={avatar.startsWith("data:") ? undefined : "anonymous"} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
+          {avatar ? <img src={avatar} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
         </span>
       </button>
       {open ? (
@@ -69,7 +69,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
             <div className="flex min-w-0 items-center gap-3 border-b border-slate-100 px-1 pb-3">
               <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#2f65cf] text-[13px] font-bold text-white">
                 <span aria-hidden="true">{label}</span>
-                {avatar ? <img src={avatar} crossOrigin={avatar.startsWith("data:") ? undefined : "anonymous"} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
+                {avatar ? <img src={avatar} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
               </span>
               <div className="min-w-0">
                 <strong className="block truncate text-[14px]">{user.name || user.email || (lang === "zh" ? "账户" : "Account")}</strong>

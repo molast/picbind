@@ -71,8 +71,9 @@ pnpm dev
 
 macOS、Linux、Git Bash 和 WSL 下的脚本会显示阻塞式菜单，可以选择启动 Tauri
 Desktop 开发环境、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
-模式下由 Tauri 的 `beforeDevCommand` 启动唯一的 Web 服务。Room、Durable Object、
-R2、KV 和其他 Worker API 统一请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
+模式下由根目录进程管理器同时启动并跟踪 Tauri 和唯一的 Web 服务；任何一方停止时，
+另一方及其子进程也会被回收。Room、Durable Object、R2、KV 和其他 Worker API 统一
+请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
 
 ```bash
 # macOS / Linux / Git Bash / WSL

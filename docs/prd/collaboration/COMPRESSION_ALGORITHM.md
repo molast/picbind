@@ -308,10 +308,14 @@ Oxipng 只做无损后处理：
 2. WASM Feature Extractor 和 Planner 基于 RGBA 生成 `AvifEncodingPlan`。
 3. Plan 包含质量候选、编码速度、位深、色度采样、Sharp YUV、分块、Alpha 质量下限和感知阈值。
 4. libavif 调用 libaom 编码各候选。
-   Web 环境在跨域隔离且支持 `SharedArrayBuffer` 时允许使用多线程编码器；Tauri
-   客户端固定使用单线程编码器，避免 macOS WKWebView 在压缩 Worker 内创建
-   pthread 子 Worker 时触发资源加载失败。两条路径使用相同的 Plan、质量候选和
-   感知质量护栏。
+   Web 环境通过 `Cross-Origin-Opener-Policy: same-origin` 和
+   `Cross-Origin-Embedder-Policy: credentialless` 建立跨域隔离，在浏览器同时支持
+   `crossOriginIsolated` 与 `SharedArrayBuffer` 时允许使用多线程编码器；不支持
+   `credentialless` 或共享内存时自动使用单线程编码器。`credentialless` 会让普通
+   跨域资源请求不携带凭据，因此头像等仅用于展示的第三方图片不需要提供 CORP
+   响应头。Tauri 客户端固定使用单线程编码器，避免 macOS WKWebView 在压缩 Worker
+   内创建 pthread 子 Worker 时触发资源加载失败。两条路径使用相同的 Plan、质量
+   候选和感知质量护栏。
 5. 无真实 Alpha 时设置 `qualityAlpha = -1`，不创建无意义的 Alpha 编码负担；存在真实 Alpha 时使用 `max(candidateQuality, alphaQualityFloor)`。
 6. 将候选 AVIF 再解码为 RGBA，使用 PCE 指标与原图比较。
 7. 第一个通过护栏的候选直接返回。
