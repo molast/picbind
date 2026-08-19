@@ -12,6 +12,33 @@ import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 import type { QiniuStorageEnv } from "./qiniu-storage";
 import workerPackage from "../package.json";
+import {
+  handleAuthExchange,
+  handleLogin,
+  handleLogout,
+  handleRegister,
+  handleSession,
+  purgeExpiredAuthSessions,
+  type AuthEnv,
+} from "./auth";
+import {
+  handleOAuthCallback,
+  handleOAuthStart,
+  type OAuthEnv,
+  type OAuthProvider,
+} from "./oauth";
+import {
+  handleWorkspaceDetail,
+  handleWorkspaceIceServers,
+  handleWorkspaceJoin,
+  handleWorkspaceLinkRealtimeTicket,
+  handleWorkspaceRealtime,
+  handleWorkspaceRealtimeTicket,
+  handleWorkspaceRealtimeV2,
+  handleWorkspaceShareLink,
+  handleWorkspaces,
+} from "./workspace-collaboration";
+import { WorkspaceRealtimeObject } from "./realtime/workspace-object";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
 
@@ -25,7 +52,7 @@ type MetricsConfig = {
   updatedAt: string;
 };
 
-type Env = RuntimeLogEnv & QiniuStorageEnv & {
+type Env = RuntimeLogEnv & QiniuStorageEnv & AuthEnv & OAuthEnv & {
   LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
@@ -33,11 +60,18 @@ type Env = RuntimeLogEnv & QiniuStorageEnv & {
   };
   METRICS_COUNTER: DurableObjectNamespace;
   REALTIME_ROOMS: DurableObjectNamespace;
+  WORKSPACE_REALTIME: DurableObjectNamespace;
   SHARE_IMAGES_R2: R2Bucket;
   GLOBAL_LIMITER?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
   ROUTE_LIMITER?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
+  AUTH_LIMITER?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
+  REALTIME_LIMITER?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
   ADMIN_KEY?: string;
@@ -70,6 +104,10 @@ function json(data: unknown, init?: ResponseInit) {
       ...(init?.headers || {}),
     },
   });
+}
+
+function apiError(code: string, message: string, status: number) {
+  return json({ error: { code, message }, requestId: crypto.randomUUID() }, { status });
 }
 
 function createInitialConfig(): MetricsConfig {
@@ -248,20 +286,24 @@ function allowedOrigins(env: Env, request: Request) {
 
 function corsHeaders(env: Env, request: Request) {
   if (isDevApiHost(request) || isLocalApiHost(request)) {
+    const origin = request.headers.get("origin") || new URL(request.url).origin;
     return {
-      "access-control-allow-origin": "*",
+      "access-control-allow-origin": origin,
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "content-type,x-admin-key",
+      "access-control-allow-headers": "authorization,content-type,x-admin-key",
+      "access-control-allow-credentials": "true",
       "access-control-expose-headers":
         "x-picbind-dev-mode,x-picbind-worker-version",
       "access-control-max-age": "86400",
+      vary: "Origin",
     };
   }
 
   const origin = request.headers.get("origin") || "";
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,x-admin-key",
+    "access-control-allow-headers": "authorization,content-type,x-admin-key",
+    "access-control-allow-credentials": "true",
     "access-control-expose-headers":
       "x-picbind-dev-mode,x-picbind-worker-version",
     "access-control-max-age": "86400",
@@ -559,11 +601,116 @@ const worker = {
       );
     }
 
+    if (
+      pathname === "/api/auth/register" ||
+      pathname === "/api/auth/login" ||
+      pathname === "/api/auth/exchange" ||
+      pathname.startsWith("/api/auth/oauth/")
+    ) {
+      const authAllowed = await checkLimiter(env, env.AUTH_LIMITER, `auth:${limiterIdentity}`);
+      if (!authAllowed) {
+        return withCors(
+          json({
+            error: { code: "rate_limited", message: "Too many authentication attempts" },
+            requestId: crypto.randomUUID(),
+          }, { status: 429 }),
+          env,
+          request,
+        );
+      }
+    }
+
+    if (
+      /^\/api\/workspaces\/[^/]+\/realtime-ticket$/.test(pathname)
+      || /^\/api\/workspace-links\/[^/]+\/realtime-ticket$/.test(pathname)
+    ) {
+      const realtimeAllowed = await checkLimiter(
+        env,
+        env.REALTIME_LIMITER,
+        `realtime-credential:${limiterIdentity}:${pathname}`,
+      );
+      if (!realtimeAllowed) {
+        return withCors(
+          json({
+            error: { code: "rate_limited", message: "Too many realtime credential requests" },
+            requestId: crypto.randomUUID(),
+          }, { status: 429 }),
+          env,
+          request,
+        );
+      }
+    }
+
     try {
       let response: Response;
 
       if (pathname === "/api/metrics") {
         response = await handleMetrics(request, env);
+      } else if (pathname === "/api/auth/register") {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleRegister(request, env);
+      } else if (pathname === "/api/auth/login") {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleLogin(request, env);
+      } else if (pathname === "/api/auth/exchange") {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("auth_origin_mismatch", "Authentication origin does not match", 403)
+          : await handleAuthExchange(request, env);
+      } else if (pathname === "/api/auth/logout") {
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleLogout(request, env);
+      } else if (pathname === "/api/auth/session") {
+        response = await handleSession(request, env);
+      } else if (/^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/.test(pathname)) {
+        const [, provider, action] = pathname.match(
+          /^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/,
+        ) as RegExpMatchArray;
+        response = action === "start"
+          ? await handleOAuthStart(request, env, provider as OAuthProvider)
+          : await handleOAuthCallback(request, env, provider as OAuthProvider);
+      } else if (pathname === "/api/workspaces") {
+        response = !hasMissingOrInvalidOrigin(env, request)
+          ? await handleWorkspaces(request, env)
+          : apiError("invalid_origin", "Invalid origin", 403);
+      } else if (/^\/api\/workspace-links\/[^/]+\/join$/.test(pathname)) {
+        const shareId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleWorkspaceJoin(request, env, shareId);
+      } else if (/^\/api\/workspace-links\/[^/]+\/realtime-ticket$/.test(pathname)) {
+        const shareId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("realtime_origin_mismatch", "Realtime origin does not match", 403)
+          : await handleWorkspaceLinkRealtimeTicket(request, env, shareId);
+      } else if (/^\/api\/workspaces\/[^/]+\/share-link$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleWorkspaceShareLink(request, env, workspaceId);
+      } else if (/^\/api\/workspaces\/[^/]+\/ice-servers$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = await handleWorkspaceIceServers(request, env, workspaceId);
+      } else if (/^\/api\/workspaces\/[^/]+\/realtime-ticket$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("realtime_origin_mismatch", "Realtime origin does not match", 403)
+          : await handleWorkspaceRealtimeTicket(request, env, workspaceId);
+      } else if (/^\/api\/workspaces\/[^/]+\/realtime$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("invalid_origin", "Invalid origin", 403)
+          : await handleWorkspaceRealtime(request, env, workspaceId);
+      } else if (/^\/api\/workspaces\/[^/]+\/realtime-v2$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = hasMissingOrInvalidOrigin(env, request)
+          ? apiError("realtime_origin_mismatch", "Realtime origin does not match", 403)
+          : await handleWorkspaceRealtimeV2(request, env, workspaceId);
+      } else if (/^\/api\/workspaces\/[^/]+$/.test(pathname)) {
+        const workspaceId = decodeURIComponent(pathname.split("/")[3]);
+        response = await handleWorkspaceDetail(request, env, workspaceId);
       } else if (pathname === "/api/site/view") {
         response = await handlePageView(request, env);
       } else if (pathname === "/api/admin/state") {
@@ -594,7 +741,10 @@ const worker = {
       );
     }
   },
+  async scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext) {
+    context.waitUntil(purgeExpiredAuthSessions(env));
+  },
 };
 
 export default worker;
-export { MetricsCounter, ShareRoomObject };
+export { MetricsCounter, ShareRoomObject, WorkspaceRealtimeObject };

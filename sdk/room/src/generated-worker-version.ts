@@ -1,2 +1,2 @@
 // Generated from cloudflare-worker/package.json. Do not edit manually.
-export const GENERATED_WORKER_VERSION = "3.1.4";
+export const GENERATED_WORKER_VERSION = "3.6.0";

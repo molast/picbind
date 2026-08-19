@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import WorkerVersionWarning from "@picbind/room/source/worker-version-warning";
 import { getSiteUrl } from "@/server/site-config";
+import AuthProvider from "@/components/auth/auth-provider";
 
 const siteUrl = getSiteUrl();
 const siteName = "PicBind";
@@ -152,7 +153,7 @@ export default function RootLayout({
   }
 })();`}
         </Script>
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

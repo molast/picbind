@@ -1,17 +1,24 @@
 {
   "name": "picbind-local-api",
-  "version": "3.1.4",
+  "version": "3.6.0",
   "private": true,
   "scripts": {
     "dev": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler dev --local --port 8787 --persist-to .wrangler/state",
     "check": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "test": "cross-env WRANGLER_SEND_METRICS=false vitest run",
+    "test:worker": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vitest run --config vitest.worker.config.mts",
+    "deploy": "pnpm run d1:migrate:remote && cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy",
+    "d1:migrate:local": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler d1 migrations apply USER_DB --local",
+    "d1:migrate:remote": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler d1 migrations apply USER_DB --remote",
     "r2:cors:apply": "wrangler r2 bucket cors set picbind-bucket --file r2-cors.json"
   },
   "dependencies": {
     "qiniu": "^7.15.2"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.3",
     "cross-env": "^7.0.3",
+    "vitest": "^4.1.10",
     "wrangler": "^4.24.3"
   }
 }

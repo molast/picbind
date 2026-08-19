@@ -15,6 +15,12 @@ id = "ffd6a9e2ce924cf2a4b93b782d525810"
 binding = "SHARE_IMAGES_R2"
 bucket_name = "picbind-bucket"
 
+[[d1_databases]]
+binding = "USER_DB"
+database_name = "picbind-users"
+database_id = "4cd774e5-14a5-43d6-a9da-167f04de7870"
+migrations_dir = "migrations"
+
 [[durable_objects.bindings]]
 name = "METRICS_COUNTER"
 class_name = "MetricsCounter"
@@ -22,6 +28,10 @@ class_name = "MetricsCounter"
 [[durable_objects.bindings]]
 name = "REALTIME_ROOMS"
 class_name = "ShareRoomObject"
+
+[[durable_objects.bindings]]
+name = "WORKSPACE_REALTIME"
+class_name = "WorkspaceRealtimeObject"
 
 [[migrations]]
 tag = "v1"
@@ -39,6 +49,10 @@ new_sqlite_classes = ["WeixinMessagingObject"]
 tag = "v4"
 deleted_classes = ["WeixinMessagingObject"]
 
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["WorkspaceRealtimeObject"]
+
 [vars]
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
@@ -53,7 +67,8 @@ R2_ACCOUNT_ID = "a3af9fe482ea605e4cc8b2496a45b806"
 # QINIU_ACCESS_KEY and QINIU_SECRET_KEY must be configured with Wrangler Secret.
 # QINIU_BUCKET and QINIU_UPLOAD_URL will be added when Qiniu room storage is enabled.
 SITE_URL = "https://picbind.com"
-# Optional standalone @picbind/room deployment origin. Defaults to SITE_URL.
+OAUTH_CALLBACK_ORIGIN = "https://api.picbind.com"
+# Optional standalone Room deployment origin. Defaults to SITE_URL.
 # ROOM_URL = "https://room.picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,https://room.picbind.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4174,http://127.0.0.1:4174"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
@@ -67,6 +82,19 @@ simple = { limit = 120, period = 60 }
 name = "ROUTE_LIMITER"
 namespace_id = "1002"
 simple = { limit = 60, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1003"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "REALTIME_LIMITER"
+namespace_id = "1004"
+simple = { limit = 30, period = 60 }
+
+[triggers]
+crons = ["17 3 * * *"]
 
 [observability]
 enabled = false

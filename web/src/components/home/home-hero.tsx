@@ -7,6 +7,7 @@ import CreateRoomButton from "@/components/room-create-button";
 import type { ShareRoom } from "@picbind/room/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
+import AccountControl from "@/components/auth/account-control";
 
 type HomeHeroProps = {
   copy: HomeCompressLandingCopy;
@@ -68,7 +69,7 @@ export default function HomeHero({
                     alt="Picbind"
                     width={178}
                     height={38}
-                    className="h-10 w-auto object-contain"
+                    className="h-8 w-auto object-contain sm:h-10"
                     priority
                   />
                 </Link>
@@ -93,7 +94,9 @@ export default function HomeHero({
                   />
                 </nav>
               </div>
-              <div ref={langMenuRef} className="relative">
+              <div className="flex items-center gap-3">
+                <AccountControl lang={lang} />
+                <div ref={langMenuRef} className="relative">
                 <button
                   type="button"
                   onClick={() => onLangMenuChange(!isLangMenuOpen)}
@@ -141,6 +144,7 @@ export default function HomeHero({
                       {lang === option ? <span className="text-[12px]">✓</span> : null}
                     </button>
                   ))}
+                </div>
                 </div>
               </div>
             </div>

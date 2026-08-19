@@ -1,3 +1,4 @@
+mod auth;
 mod download;
 mod messaging;
 mod storage;
@@ -37,6 +38,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auth::desktop_auth_login,
+            auth::desktop_auth_register,
+            auth::desktop_auth_oauth,
             download::commands::save_download,
             storage::commands::storage_put_image,
             storage::commands::storage_get_image,

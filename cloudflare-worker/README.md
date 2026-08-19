@@ -1,8 +1,8 @@
 # PicBind Cloudflare Worker
 
-This Worker provides metrics, Room signaling, WebSocket fallback, and R2
-transfer services. Weixin iLink messaging runs directly in the Tauri Desktop
-client and is not proxied by this Worker.
+This Worker provides the API, Room, signaling, WebSocket fallback, and R2
+transfer services used by the Dioxus Web/Desktop applications. Weixin messaging
+runs directly in the Desktop Rust client and is not proxied by this Worker.
 
 ## Routes
 
@@ -13,6 +13,74 @@ client and is not proxied by this Worker.
 - `POST /api/admin/state?key=...`
 - `POST /api/seo/baidu/push?key=...`
 - `POST /api/realtime/room/create`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/session`
+- `POST /api/auth/exchange`
+- `GET /api/auth/oauth/google/start`
+- `GET /api/auth/oauth/google/callback`
+- `GET /api/auth/oauth/github/start`
+- `GET /api/auth/oauth/github/callback`
+- `POST /api/workspaces`
+- `POST /api/workspace-links/:shareId/join`
+- `POST /api/workspace-links/:shareId/realtime-ticket`
+- `GET /api/workspaces/:workspaceId`
+- `GET /api/workspaces/:workspaceId/ice-servers`
+- `POST /api/workspaces/:workspaceId/share-link`
+- `POST /api/workspaces/:workspaceId/realtime-ticket`
+- `GET /api/workspaces/:workspaceId/realtime` (WebSocket upgrade)
+- `GET /api/workspaces/:workspaceId/realtime-v2` (one-time Ticket WebSocket upgrade)
+
+Registration creates only the user profile, password credential, and login
+Session. Login exists only to restore that profile. It does not create, list,
+own, authorize, or otherwise affect Workspaces.
+
+Anyone can join a Workspace by opening its unguessable `shareId` link; no login,
+Session Cookie, user membership, or account permission is involved. D1 stores
+only persistent Workspace identity and its replaceable share link. Image previews
+remain on the owner's device and are relayed only while peers are connected. The Workspace Durable Object
+uses WebSocket hibernation for connection fan-out and does not persist image
+messages in D1, R2, or Durable Object storage. Source-data requests, proposals,
+decisions, previews, and future Workspace features use the same generic relay
+and are never persisted by the Worker.
+
+Workspace realtime business messages use the versioned `workspaceRelay`
+transport envelope. The Worker validates only its `workspace`, `owner`, or
+`user` route; `ephemeral`, `reliable`, or `bulk` delivery; target; frame size;
+and reserved infrastructure message boundary. The nested `event.type` is
+opaque to the Worker, so adding a new Workspace feature does not require a
+Worker change. The Worker overwrites sender identity and transport metadata
+from the ephemeral socket attachment before forwarding. Reliable events
+receive a generic `eventAck` or `eventNack`; business interpretation and payload
+validation belong to the clients. The previous top-level business message
+handlers remain frozen only for cached V1/early-V2 clients.
+
+The Workspace WebSocket also carries WebRTC offer, answer, and ICE candidate
+signaling. Peers can fetch short-lived Cloudflare TURN credentials without a
+login. Preview and
+Source Data messages prefer an ordered WebRTC DataChannel and fall back to the
+deployed Worker WebSocket when peer connectivity is unavailable. Commit and
+other reliable metadata continue through the generic Worker relay. Neither path writes
+Workspace image bytes to D1, R2, KV, or Durable Object storage.
+
+Commit creation messages contain metadata and structured operations only. They
+are broadcast to currently connected workspace collaborators and are not stored
+by the Worker; version image data remains on the owner's device and still uses
+the approved Source Data flow when a collaborator chooses Update. Manual
+conflict decisions may include merge-parent commit IDs in that metadata; the
+Worker forwards them without storing Commit graphs or merge state.
+
+Workspace header styles use the versioned `styleSnapshot` and `styleUpdated`
+events. The receiving client requires a trusted Owner sender role and validates
+the supported fields and revision before applying them. The Worker treats Style
+as opaque relay data and does not persist Style JSON in D1, R2, or Durable
+Object storage. Connected clients keep their own workspace-scoped local cache.
+
+Sessions expire after 30 days. Login removes expired sessions for that user and
+keeps at most the 20 newest sessions. `last_seen_at` is written at most once per
+15 minutes per active session. The daily `03:17 UTC` cron removes all expired
+sessions from D1.
 
 Notes:
 
@@ -21,8 +89,8 @@ Notes:
 - Admin endpoints require `ADMIN_KEY` via query `key` or request header `x-admin-key`.
 - Every non-WebSocket API response exposes the deployed Worker version through
   `x-picbind-worker-version`. `cloudflare-worker/package.json` is the single
-  version source. Worker builds import it directly; Room and Web development or
-  build commands generate the SDK-side expected version automatically.
+  version source. Worker builds import it directly; Dioxus clients use the
+  response header for compatibility diagnostics.
 
 ## Required binding
 
@@ -31,14 +99,18 @@ Notes:
 - `GLOBAL_LIMITER`: Worker Rate Limiting binding (global limiter).
 - `ROUTE_LIMITER`: Worker Rate Limiting binding (route-level limiter).
 - `REALTIME_ROOMS`: Durable Object namespace for temporary share-room metadata.
+- `WORKSPACE_REALTIME`: Durable Object namespace for ephemeral Workspace WebSocket relay.
 - `SHARE_IMAGES_R2`: R2 bucket used for high-latency file-transfer fallback.
+- `USER_DB`: D1 database for independent user profiles/sessions and persistent Workspace link records.
+- `AUTH_LIMITER`: stricter per-IP limiter for registration and login attempts.
 
 ## Optional environment variables
 
 - `DEV_MODE`: set to `1` to enable Worker and browser Realtime logs; use `0` in production.
 - `ADMIN_KEY`: enables admin endpoints.
 - `SITE_URL`: canonical site URL.
-- `ROOM_URL`: optional standalone Room SDK entry URL used for generated invite links.
+- `OAUTH_CALLBACK_ORIGIN`: public Worker origin used to build OAuth callback URLs.
+- `ROOM_URL`: optional standalone Room entry URL used for generated invite links.
 - `ALLOWED_ORIGINS`: comma-separated allowed origins.
 - `BAIDU_PUSH_SITE`: Baidu site URL. Defaults to `SITE_URL`.
 - `BAIDU_PUSH_TOKEN`: Baidu push token.
@@ -65,26 +137,43 @@ Local development does not call the deployed Worker, Cloudflare TURN, or R2.
 Wrangler runs the Worker code, Durable Objects, KV, and WebSocket signaling on
 the local machine. Local state is persisted in `.wrangler/state`.
 
-The launcher checks the local API dependencies and automatically runs
-`pnpm install --frozen-lockfile` when required commands are missing. Start both the
-local API and Next.js app from the repository root:
+Run Wrangler locally only for isolated Worker and migration verification:
 
 ```bash
-# macOS / Linux / Git Bash / WSL
-./dev-local.sh
-
-# Windows CMD
-dev-local.cmd
-
-# Windows PowerShell
-.\dev-local.cmd
+cd cloudflare-worker
+pnpm install --frozen-lockfile
+pnpm run d1:migrate:local
+pnpm run dev
 ```
 
-Open `http://localhost:3000`. The frontend always requests the deployed Worker
-at `https://api.picbind.com`, including during local Web development. Use two
-browser profiles or an incognito window to test owner and guest. Worker changes
-must be deployed before the frontend can use them. Wrangler may still be run
-manually for isolated Worker development, but `dev-local.sh` does not start it.
+The Dioxus application always uses the deployed authentication Worker at
+`https://api.picbind.com/api`, including when the frontend runs locally. Do not
+set `PICBIND_API_URL` to a localhost Worker for application development.
+Production uses the `picbind-users` D1 database bound as `USER_DB` in
+`wrangler.toml`.
+
+The Web Session Cookie remains `HttpOnly; Secure; SameSite=None` only for user
+profile login state. OAuth callbacks also create a 60-second, one-time Handoff
+Code. Workspace creation, link resolution, link rotation, TURN configuration,
+and realtime connections do not read the login Cookie or Auth Session.
+
+Run every pending D1 migration before deploying a Worker version that uses the
+new schema. Migration `0007_decouple_users_from_workspaces.sql` removes the
+historical user ownership and membership relationship. Use the guarded
+production command so migrations complete before the Worker is uploaded:
+
+```bash
+pnpm run deploy
+```
+
+Cloudflare Workers Builds must also use `pnpm run deploy` as its deploy command,
+instead of invoking `wrangler deploy` directly. Its API token needs Workers
+Scripts edit and D1 edit permissions.
+
+The Dioxus Web application defaults to `http://127.0.0.1:3000`; Wrangler defaults
+to `http://127.0.0.1:8787`. Client endpoints are controlled by the Dioxus platform
+configuration. When they still point at `https://api.picbind.com`, local Worker
+changes are not used until deployment.
 
 For production, store the API tokens as Worker secrets:
 
@@ -94,12 +183,37 @@ npx wrangler secret put R2_ACCESS_KEY_ID
 npx wrangler secret put R2_SECRET_ACCESS_KEY
 npx wrangler secret put QINIU_ACCESS_KEY
 npx wrangler secret put QINIU_SECRET_KEY
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put GITHUB_CLIENT_ID
+npx wrangler secret put GITHUB_CLIENT_SECRET
 ```
+
+Configure the provider callback URLs exactly as follows:
+
+```text
+https://api.picbind.com/api/auth/oauth/google/callback
+https://api.picbind.com/api/auth/oauth/github/callback
+```
+
+OAuth state and PKCE verifiers are one-time records in D1. Google and GitHub
+identities are keyed only by the provider and its stable user ID. The Worker
+does not request, read, or store provider email addresses and never links
+accounts by email. Each provider identity creates an independent User profile
+only. `users.email` is populated only by email-and-password registration.
+Migration `0004_provider_isolated_users.sql` separates previously linked
+provider identities and invalidates existing Sessions before Worker `3.4.0` is
+deployed.
+
+Migration `0005_auth_handoff_codes.sql` must be applied before deploying OAuth
+handoff routes. Handoff rows contain only hashed one-time
+codes and authentication metadata; expired rows are removed by the existing
+scheduled cleanup.
 
 The Worker uses the Qiniu server SDK signing utilities to create short-lived
 upload tokens. The full SDK entrypoint is intentionally not bundled because its
 Node HTTP stack is incompatible with Cloudflare Workers. AK/SK must never be
-exposed through `NEXT_PUBLIC_*` variables or returned to the browser. The
+exposed through client build variables or returned to the browser. The
 browser will receive only an object key, upload endpoint, and short-lived upload
 token when Qiniu room storage is enabled.
 
@@ -146,17 +260,6 @@ The active policy is equivalent to:
 Configure an R2 lifecycle rule as a final cleanup fallback. The room Durable
 Object also tracks `uploaded -> shared -> downloading -> downloaded -> expired
 -> deleted` and deletes the object when its TTL alarm fires.
-
-The current Pages app has API calls disabled by default. When this Worker is deployed, set the Pages env vars to point to it, for example:
-
-```text
-NEXT_PUBLIC_METRICS_ENABLED=true
-NEXT_PUBLIC_METRICS_API_PATH=https://api.picbind.com/api/metrics
-NEXT_PUBLIC_PAGE_VIEW_ENABLED=true
-NEXT_PUBLIC_PAGE_VIEW_API_PATH=https://api.picbind.com/api/site/view
-NEXT_PUBLIC_ADMIN_STATE_API_PATH=https://api.picbind.com/api/admin/state
-NEXT_PUBLIC_SHARE_ROOM_API_PATH=https://api.picbind.com/api/realtime/room/create
-```
 
 Recommended Worker env values:
 

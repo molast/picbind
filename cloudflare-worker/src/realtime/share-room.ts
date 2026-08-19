@@ -91,7 +91,12 @@ async function roomState(env: RealtimeRoomEnv, roomId: string) {
   return readJson<ShareRoomState>(response, `Share room state (${response.status})`);
 }
 
-async function generateTurnIceServers(env: RealtimeRoomEnv) {
+export type TurnCredentialEnv = Pick<
+  RealtimeRoomEnv,
+  "LOCAL_RUNTIME" | "TURN_TOKEN_ID" | "TURN_API_TOKEN"
+>;
+
+export async function generateTurnIceServers(env: TurnCredentialEnv) {
   if (env.LOCAL_RUNTIME?.trim() === "1") {
     return [];
   }
