@@ -70,6 +70,12 @@ export interface ImageStorageRepository {
   ): Promise<Blob | null>;
 
   delete(scope: ImageStorageScope, scopeKey: string, id: string): Promise<void>;
+  deleteVariant(
+    scope: ImageStorageScope,
+    scopeKey: string,
+    id: string,
+    variant: ImageStorageVariant,
+  ): Promise<void>;
   clear(scope: ImageStorageScope, scopeKey?: string): Promise<void>;
   pruneCache(policy: ImageCachePolicy): Promise<ImageCachePruneResult>;
 }

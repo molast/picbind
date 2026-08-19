@@ -22,6 +22,8 @@ PicBind 3.0 将 `Image Workspace` 从辅助功能升级为产品核心。
 8. 每次 Owner 接受修改后形成新的 Commit。
 9. Workspace 外观通过 Style JSON 管理。
 10. Room 不再作为用户侧一级产品概念，退化为协作连接/会话层。
+11. 登录只用于保存用户资料，不作为 Workspace 创建、分享或协作的前置条件。
+12. Worker 只负责分享链接登记、连接协调和不透明消息转发，不理解业务载荷。
 
 ### 1.1 Workspace 入口与路由
 
@@ -29,6 +31,8 @@ PicBind 3.0 将 `Image Workspace` 从辅助功能升级为产品核心。
 - 进入 Workspace 不创建 Room，也不要求先建立协作会话。
 - Workspace 页面必须在没有 Room 的情况下独立完成图片添加、处理、审阅和下载。
 - 主 Workspace 页面不展示 Room ID、创建 Room、复制 Room 链接、最小化 Room 或离开 Room 等入口。
+- `/workspace` 始终进入当前设备自己的本地 Workspace。
+- `/workspace/{share_token}` 进入对应的共享 Workspace；未登录用户以访客身份加入。
 - `/share?roomId=...` 仅作为旧分享链接的兼容入口，不属于 3.0 主产品流程。
 
 ---
@@ -66,82 +70,104 @@ PicBind
         └── Style JSON
 ```
 
+### 2.1 数据所有权
+
+| 数据 | 保存位置 | Worker 职责 |
+| --- | --- | --- |
+| 登录用户资料 | D1 | 提供独立的用户资料接口，不参与 Workspace 准入 |
+| Workspace ID、Owner Capability | Owner 本地 | 不读取图片业务状态 |
+| Share Token 与路由元数据 | D1 / Durable Object 会话 | 创建、解析、失效和连接路由 |
+| 图片原数据、Preview、Source Data | 参与者本地 | 在线时不透明转发，不持久化 |
+| Operation、Proposal、Commit、Style | 参与者本地 | 在线时不透明转发，不持久化 |
+| Presence 与连接状态 | Durable Object 活跃会话 | 仅保留连接生命周期内状态 |
+
+`owner_capability` 是 Owner 操作凭证，不得出现在分享 URL、日志或协作者消息中。重新生成
+Share Link 必须验证该本地凭证；持有 Share Token 只获得 Collaborator 会话角色。
+
+### 2.2 实施依赖顺序
+
+章节按产品能力组织，但开发不能简单按章节编号串行。推荐顺序：
+
+```text
+阶段 1-3：Workspace、页面和图片基础
+    ↓
+阶段 13：先完成 WebSocket 双向通信、通用转发和 WebRTC 切换骨架
+    ↓
+阶段 4-12：逐项接入协作者、Preview、Source、Proposal、Commit、Style 和缓存
+    ↓
+阶段 14：收敛完整状态机和恢复行为
+```
+
+实时骨架首次验收只测试两个客户端双向通信，不依赖 Workspace UI。
+
 ## 3. 第一阶段：Workspace 基础模型
 
 ### 3.1 Workspace 生命周期
 
-实现以下生命周期：
+Workspace 生命周期与登录状态解耦：
 
 ```text
-未登录用户
+首次进入 /workspace
     ↓
-临时 Workspace
+创建或恢复本地 Workspace
     ↓
-登录
+按需创建 Share Link
     ↓
-绑定 Workspace
+Owner 分享固定链接
     ↓
-固定 Workspace
+访客通过链接加入协作会话
 ```
 
-#### 临时 Workspace
+#### 本地 Workspace
 
 - 可以正常使用图片功能。
 - 可以添加、处理图片。
-- 数据以本地 Workspace 为主。
-- 没有固定的公开分享身份。
-- 点击 Share Workspace 时提示登录。
-- 不要求为了创建 Workspace 而强制登录。
+- Workspace ID 是本地数据隔离标识，不作为公开分享地址。
+- Owner 的图片、Preview、Source Data、Commit 和 Style 以本地数据为准。
+- 登录与否不改变 Workspace 的业务能力。
 
-#### 固定 Workspace
+#### 共享 Workspace
 
-登录后：
+Owner 点击 Create Share Link 后：
 
 ```text
-User
- └── Workspace
-      ├── workspace_id
-      ├── owner_id
-      ├── images
-      ├── collaborators
-      ├── commits
-      └── style
+Workspace
+ ├── workspace_id       # 内部唯一标识
+ ├── owner_capability   # 仅保存在 Owner 本地
+ ├── share_token        # 对外固定链接标识
+ ├── images             # 本地数据
+ ├── collaborators      # 会话状态
+ ├── commits            # 本地数据
+ └── style              # 本地数据
 ```
 
-Workspace ID 作为固定分享地址的一部分。
+分享地址使用独立的 `share_token`：
 
 例如：
 
-`/workspace/{workspace_id}`
+`/workspace/share_2338ad6356a03fff2b45dcd88e189fd51a02b0fd0f293150`
+
+- Share Link 默认长期有效，不使用旧 Room 的 30 分钟过期规则。
+- Owner 可以主动重新生成链接；新链接生效后旧链接立即失效。
+- 重新生成 Share Link 不改变 Workspace ID，也不迁移或删除本地数据。
+- 访客无需登录，Worker 不通过 Cookie、用户 Session 或 Realtime Grant 决定能否加入。
+- Owner/Collaborator 角色由分享会话能力建立，与登录账号和邮箱无关。
 
 ### 3.2 任务
 
 - [x] 定义 Workspace 数据模型。
-- [x] 定义临时 Workspace 状态。
-- [x] 定义固定 Workspace 状态。
-- [x] 定义登录后 Workspace 绑定流程。
+- [x] 定义本地 Workspace 状态。
+- [x] 定义共享 Workspace 状态。
+- [x] 保证 Workspace 生命周期与登录状态解耦。
 - [x] 定义 Workspace ID。
 - [x] 定义 Workspace Owner。
 - [x] 定义 Workspace 本地缓存模型。
 - [x] 定义 Workspace 创建/恢复流程。
 - [x] 定义 Workspace 分享链接模型。
-
-当前实现已包含 Workspace 身份、Owner、生命周期、本地元数据缓存、不依赖 Room 的 `/workspace` 页面入口，以及按 Workspace 隔离的本地图片列表与原始图片数据持久化。Preview 已支持所有者本地缓存和在线实时同步；Source Data 已支持请求审批、实时分块传输和协作者本地缓存；Proposal Review、Commit 广播、New Version 提示及 Owner 会话内版本历史也已实现。
+- [x] 实现独立 Share Token 的创建、恢复和重新生成。
+- [x] 实现匿名访客加入和 Owner 本地能力恢复。
 
 ## 4. 第二阶段：Workspace 页面结构
-
-当前进度：
-
-- [x] 新增 `/workspace` 直接入口。
-- [x] 进入页面时不创建或加入 Room。
-- [x] 显示 Workspace 名称与临时状态。
-- [x] 支持本地图片添加、处理、审阅和下载。
-- [x] 显示 Workspace 概览、图片统计和本地存储说明。
-- [x] 实现图片选中上下文与 Quick Actions。
-- [x] 实现临时 Workspace 登录提示与固定 Workspace 链接。
-- [x] 增加 Workspace Settings 入口。
-- [x] 持久化 Workspace 图片列表与图片数据。
-- [x] 实现图片选择上下文、Workspace Share 与 Settings。
 
 Workspace 页面采用：
 
@@ -201,24 +227,27 @@ Workspace 页面采用：
 
 #### C. Workspace Share
 
-未登录：
+未创建链接：
 
-This is a temporary workspace.
-Sign in to create a permanent share link.
+Create Share Link
 
-已登录：
+已创建链接：
 
-Copy Workspace Link
+Copy Share Link
+Regenerate Share Link
 
 ### 4.3 任务
 
+- [x] 新增 `/workspace` 直接入口，且不创建或加入 Room。
+- [x] 支持本地图片添加、处理、审阅、下载和持久化恢复。
+- [x] 显示 Workspace 名称、本地/共享状态、概览和图片统计。
 - [x] 完成 Workspace 主布局。
 - [x] 完成 Header。
 - [x] 完成 Context Panel。
 - [x] 完成图片选中状态。
 - [x] 完成 Quick Actions。
-- [x] 完成临时 Workspace 分享提示。
-- [x] 完成固定 Workspace 分享链接。
+- [x] 完成 Share Link 创建和复制。
+- [x] 完成 Share Link 重新生成及旧链接失效提示。
 - [x] 完成 Workspace Settings 入口。
 
 ## 5. 第三阶段：图片模型与图片状态
@@ -248,7 +277,7 @@ Committed
 
 图片只属于 Owner：
 
-- 协作者可以知道 Workspace 中存在图片，但不接收 Preview。
+- 协作者看不到该图片的元数据、Placeholder 和 Preview。
 - 不进入协作同步。
 
 ### 5.2 Shared
@@ -286,8 +315,6 @@ Alice is working on this image
 - [x] 实现 Working 状态。
 - [x] 实现 Reviewing 状态。
 - [x] 实现图片状态 UI。
-
-当前实现会将图片协作状态和 `current_commit` 与本地图片记录一起按 Workspace 隔离持久化。Share Image / Unshare Image 负责切换图片是否进入协作；第五阶段已经接入 Preview 生成、本地缓存和 Workspace 实时连接，Preview 只从所有者本地发送给当前在线协作者。
 
 ## 6. 第四阶段：协作者系统
 
@@ -337,7 +364,6 @@ Activity 是结构化事件，不应该依赖聊天消息。
 👍
 ❤️
 👀
-✅
 ❗
 
 用于快速表达意见，不参与图片状态计算。
@@ -363,8 +389,6 @@ Activity 是结构化事件，不应该依赖聊天消息。
 - [x] 实现 Quick Reactions。
 - [x] 实现消息模块。
 - [x] 建立 Activity 与 Collaboration Event 的关系。
-
-当前实现已提供 Collaboration Panel、本机协作者在线状态与当前操作、结构化 Activity、快捷反应和消息界面。图片 Share/Unshare 会生成 Collaboration Event，Activity 从事件派生；Reaction 和 Message 不参与图片状态计算。跨设备 Presence、Event、Reaction 和 Message 传输仍由第十三阶段的数据同步层实现。
 
 ## 7. 第五阶段：图片 Preview 协作同步
 
@@ -435,9 +459,14 @@ Shared 图片标记：
 - [x] 禁止 Private 图片自动发送 Preview。
 - [x] 实现 Preview 更新机制。
 
-当前实现会在图片进入 Shared 状态后生成受限 WebP Preview，并将 Preview、占位信息和更新时间随 Workspace 图片记录缓存；重新进入 Workspace 时直接恢复。所有者和协作者通过独立的 Workspace WebSocket 建立实时连接，协作者上线时所有者从本地发送当前 Shared Preview，后续 Share、更新和 Unshare 继续实时同步。协作者收到但尚未请求 Source Data 的 Preview 也会独立缓存，并受第十二阶段的失效策略管理。
+### 7.4 数据边界
 
-Worker 只使用 D1 校验用户、Workspace 和成员关系，并使用 Workspace Durable Object 转发当前连接中的消息。Preview 和 Source Data 不写入 D1、R2 或 Durable Object Storage；所有者离线时，Worker 不提供历史图片数据。Private 图片不会生成、发送或持久化协作 Preview。该链路不复用旧 Room 协议，第十三阶段可继续将当前 Source Data WebSocket 分块转发升级为 WebRTC 直传。
+- Owner 首先发送轻量 Placeholder Hash 和 Shared 图片元数据。
+- 协作者在 Preview 到达前使用 Placeholder 渲染；长按图片时展示 Preview。
+- Preview 只在端到端实时连接中由 Owner 本地发送给当前协作者。
+- Preview 可以缓存在参与者本地，但不得写入 D1、R2、KV 或 Durable Object Storage。
+- Worker 将 Preview 当作不透明载荷转发，不解析图片消息类型或业务字段。
+- Owner 离线且协作者无本地缓存时，明确显示无可用 Workspace 数据。
 
 ## 8. 第六阶段：Source Data 请求
 
@@ -530,9 +559,9 @@ Latest workspace data is currently unavailable.
 - [x] 实现 Owner Offline。
 - [x] 实现 Workspace Available/Unavailable 状态。
 
-当前实现中，协作者只能针对仍处于 Shared 状态且本地尚无原图的 Preview 发起 Source Request。Worker 根据已认证的 Workspace 身份将请求定向发送给所有者；所有者可以接受，或填写可选原因后拒绝。接受后，所有者从本地读取原图，以 16 KiB 分块通过 Workspace WebSocket 仅发送给请求者，同时携带图片元信息、当前 Commit 和协作状态。Worker 仅实时转发分块，不保存图片数据。
-
-协作者会校验请求 ID、分块序号、总分块数和总字节数，只有完整传输成功后才组装 Source Data 并写入对应 Workspace 的本地缓存。缓存记录保留 `Received` 方向，重新进入 Workspace 不会误识别为所有者图片。所有者离线或实时连接中断时，界面显示 Workspace Unavailable 状态并禁止新请求；已经授权并缓存到协作者设备的 Source Data 仍可本地查看。
+Source Data 必须分块传输并校验请求 ID、分块序号、总分块数、总字节数和内容摘要。
+只有完整校验成功后才能写入协作者本地缓存。Worker 不保存 Source Data，也不需要理解
+Source Request 或图片分块的业务结构。
 
 ## 9. 第七阶段：Operation / Proposal 模型
 
@@ -565,7 +594,7 @@ Latest workspace data is currently unavailable.
 
 ### 9.1 Operation 类型
 
-第一阶段实现：
+MVP 首批支持：
 
 - Crop。
 - Resize。
@@ -612,9 +641,8 @@ Proposal 是协作者提交给 Owner 的完整修改请求。
 - [x] 实现 Proposal Preview。
 - [x] 实现 Proposal Submit。
 
-当前实现会在协作者处理已经获得 Source Data 的 `Received` 图片时生成本地 Proposal。Convert、Compression、Crop、Resize 和 Adjust 会转换为带有 `operation_id`、`image_id`、`author_id`、`base_commit_id`、`type`、`parameters` 和 `created_at` 的结构化 Operation；模型同时预留 Rotate 与 Other 类型。图片尚未产生正式 Commit 时，双方使用基于图片 ID 的稳定 Initial Commit 作为 `base_commit_id`。
-
-处理结果只用于协作者本地 Proposal Preview。提交时客户端仅通过 Workspace WebSocket 发送 Proposal 和 Operation 参数，不上传处理后的图片。Worker 将 Proposal 定向转发给当前在线 Owner，并向提交者返回确认或失败状态；Proposal、预览和处理结果均不写入 D1、R2 或 Durable Object Storage。Owner 端会校验 Workspace、提交者、图片、Commit 和 Operation 归属并按 `proposal_id` 去重，完整的 Apply、Reject 和 Defer 界面在第八阶段实现。
+Proposal 只发送结构化 Operation 和必要元数据，不上传处理后的图片。Worker 只按连接目标
+转发不透明载荷；Operation 校验、去重和 Preview 生成均由端侧完成。
 
 ## 10. 第八阶段：Owner Review
 
@@ -688,10 +716,6 @@ Owner 完成自己的操作后再处理。
 - [x] 实现 Proposal Preview。
 - [x] 实现协作者端反馈。
 
-Owner 收到 Proposal 后会自动打开 Review UI，也可以从 Collaboration Panel 的 Pending Review 列表重新进入。Preview 由 Owner 使用本地 Source Data 和 Proposal 中的结构化 Operation 顺序生成；临时中间结果只保存在内存中并及时释放。Proposal 的 `base_commit_id` 与 Owner 当前版本不一致、参数非法或包含尚未支持的操作时，Apply 会被禁止并显示明确错误。
-
-Apply 会再次校验基础版本，随后使用最终 Proposal Preview 替换 Owner 本地图片、更新图片状态和当前版本标识，并重新生成实时共享 Preview。Reject 会移除 Proposal，可附加拒绝原因；Defer 不修改图片，也不删除 Proposal，而是保留在 Pending Review。三种决策都通过 Workspace WebSocket 定向反馈给提交者，不写入 D1、R2 或 Durable Object Storage。Apply 产生的正式 Commit、父子关系、广播与会话内历史记录由第九阶段能力承接。
-
 ## 11. 第九阶段：Commit / 图片版本系统
 
 每次 Owner 接受修改都创建 Commit。
@@ -758,12 +782,6 @@ A new version of IMG_002 is available.
 - [x] 实现 Update。
 - [x] 实现历史版本查看。
 - [x] 实现 Rollback 基础能力。
-
-Owner Apply Proposal 时会创建正式 Commit，记录 `commit_id`、`image_id`、作者、`parent_commit_id`、Operation 和创建时间，并将图片的 Current Commit 指向新版本。首次 Apply 会在 Owner 本地版本历史中补充 Initial Version；后续 Apply 以当前 Commit 为父版本形成线性历史。每张图片最多保留最近 20 个本地版本快照，图片字节不会随 Commit 广播发送给 Worker。
-
-Worker 只实时广播 Commit 元数据。协作者收到后显示 New Version 提示，Review 可以对比当前本地版本与最新共享 Preview；Update 不会自动覆盖，而是重新发起 Source Data 请求，只有 Owner 同意后才替换协作者本地数据并更新 Current Commit。暂不更新的版本会保留在 Collaboration Panel 中。
-
-Owner 可以从图片上下文打开 Version History、查看历史预览并执行基础 Rollback。Rollback 会将选中版本的本地字节恢复为当前内容，但不会删除或改写旧 Commit，而是以当前 Commit 为父版本创建新的 Rollback Commit 并继续广播。版本快照会在 Owner 本地按 Workspace 跨会话缓存，并由第十二阶段的数量与 TTL 规则清理。Commit 元数据、历史图片和 Rollback 数据均不写入 D1、R2 或 Durable Object Storage。
 
 ## 12. 第十阶段：并发修改与 Merge
 
@@ -851,12 +869,6 @@ Proposal Version
 - [x] 暂不实现自动 Merge。
 - [x] 为后续自动 Merge 保留数据结构。
 
-Owner 收到 Proposal 时会比较 `Proposal.base_commit_id` 与图片的 Current Commit。两者不同即进入 Conflict 状态，不再把旧版本 Proposal 当作普通错误直接阻断。若 Owner 正在处理同一图片，新 Proposal 只进入 Pending Review，不会抢占当前处理界面。
-
-Merge Review 使用 Owner 当前图片与本地 Commit 快照中的 Proposal 基础版本生成左右对比。Owner 可以 Apply、Reject 或 Defer；基础快照已超出每图最近 20 个版本的缓存范围或已经过期时会明确提示无法生成 Proposal Version，且不会允许 Apply。第一版不执行自动 Merge。
-
-冲突 Apply 是一次明确的人工覆盖决策：新 Commit 的 `parent_commit_id` 指向 Apply 时的 Current Commit，`merge_parent_commit_ids` 记录 Proposal 的旧基础版本，原始 Operation 仍保留其 `base_commit_id`。`WorkspaceMergeContext` 同时预留 `common_ancestor_commit_id` 与可选 `auto_merge_operations`，但当前不会生成自动合并操作。Commit 与版本图片仍不写入 D1、R2 或 Durable Object Storage。
-
 ## 13. 第十一阶段：Workspace Style
 
 Owner 可以配置 Workspace 外观。
@@ -927,11 +939,8 @@ Style JSON：
 - [x] 实现 Style 本地缓存。
 - [x] 增加 Style version。
 
-当前 `WorkspaceStyle` 使用受限的 version 1 schema，包含 Header 背景与文字样式。背景支持纯色，以及向右、向下和右下三个方向的双色线性渐变；文字支持内容、颜色、Inter/系统/衬线/等宽字体、12-32 px 字号和 400/500/600/700 字重。颜色必须使用 `#RRGGBB`，客户端和 Worker 都会校验收到的 Style JSON，不允许注入任意 CSS。
-
-Workspace Settings 已升级为带实时 Preview 的 Style Editor。临时 Workspace Owner 和固定 Workspace Owner 可以编辑、重置、取消或保存，协作者只能查看当前样式。保存后 Header 立即应用样式，Style `revision` 单调推进，但不会创建图片 Operation 或 Commit，也不会改变任何图片 Current Commit。
-
-Style 保存在当前 Workspace 的本地缓存中，旧缓存没有 `style` 字段时会兼容恢复 version 1 默认值。固定 Workspace 在线协作时，Owner 通过 `styleSnapshot` 和 `styleUpdated` 实时同步完整 Style JSON；Owner 或协作者重连时由 Owner 补发 Snapshot，协作者只接受合法且 revision 更新的样式并写入自己的本地缓存。Worker 只校验和实时转发，不把 Style 写入 D1、R2 或 Durable Object Storage；跨设备服务端样式持久化不属于当前实现。
+Style JSON 必须使用受限 schema，不允许注入任意 CSS。Style 由端侧校验、缓存和应用，
+Worker 只转发不透明载荷，不承担 Style schema 校验。
 
 ## 14. 第十二阶段：本地缓存体系
 
@@ -955,7 +964,7 @@ Workspace Cache
 
 #### Preview
 
-可以长期缓存。
+使用可配置 TTL 和 LRU 策略缓存。
 
 #### Source Data
 
@@ -1000,11 +1009,9 @@ Unavailable
 - [x] 实现缓存失效策略。
 - [x] 实现 Offline UI。
 
-本地缓存 schema 已升级为 version 2，同时兼容读取 version 1。Workspace Identity、Style 和最近 Activity 保存在 Workspace 状态缓存；图片元数据、Preview、Source Data、Current Commit 以及带版本字节的 Commit Snapshot 保存在按 Workspace 隔离的图片仓库。Web 使用 IndexedDB 与本地文件缓存，Desktop 使用本地数据库与文件缓存。Preview-only 记录带有 `has_source_data = false`，恢复时不会被误认为已经获得原图。
-
-失效规则按最后一次本地访问时间执行：协作者 Preview-only 缓存保留 30 天，已收到的协作者 Source Data 保留 90 天，Commit Snapshot 保留 30 天且每张图片最多 20 个版本，Activity 保留 30 天且最多 50 条。Owner 自己的本地源图片不应用自动 TTL。恢复时会清理缺少二进制数据、结构无效或已经过期的记录；持久化时会删除已经不属于当前 Workspace 图片/版本集合的旧记录。
-
-Owner Offline 时，协作者继续显示仍然有效的本地缓存，并明确显示缓存图片数量；需要 Owner 最新数据的 Source Request、Proposal Update 等操作保持不可用。如果本地没有缓存，页面明确显示无缓存可用，不会把空白或旧状态伪装成在线最新结果。上述缓存始终位于用户设备，不写入 Worker、D1 或 R2。
+所有图片内容缓存都位于参与者设备。Web 使用 IndexedDB/OPFS，Desktop 使用本地数据库
+和文件存储；D1 只保存必要的 Worker 服务元数据，不保存 Preview、Source Data、Commit
+Snapshot 或 Activity 内容。
 
 ## 15. 第十三阶段：WebRTC / 数据同步层
 
@@ -1065,37 +1072,63 @@ Source Data / Version Data
 - Preview。
 - 导出的图片。
 
-根据实际大小选择：
+传输优先级：
 
-- WebRTC DataChannel
-- R2
+1. WebRTC DataChannel。
+2. WebRTC 未就绪或失效时回退 Worker WebSocket 不透明转发。
 
-### 15.4 任务
+本阶段不使用 R2 保存或转发 Workspace 图片数据。
+
+### 15.4 连接时序
+
+```text
+解析 Share Token
+    ↓
+立即连接线上 Worker WebSocket
+    ↓
+Presence 与业务消息可以开始传输
+    ↓
+通过 WebSocket 交换 WebRTC SDP / ICE
+    ↓
+DataChannel Open + Heartbeat + Test Message ACK
+    ↓
+排空 WebSocket 可靠消息队列
+    ↓
+切换到 WebRTC，关闭 WebSocket
+```
+
+- WebSocket 必须先连接，不能等待 WebRTC 才展示协作者在线状态。
+- RTC 达标必须同时满足 DataChannel 打开、心跳成功和双向测试消息确认。
+- RTC 断开、连续心跳失败或发送超时后，立即重连 WebSocket 并恢复消息传输。
+- 需要重新协商 RTC 时，通过已恢复的 WebSocket 交换信令，达标后再次切回 RTC。
+- 切换前后的可靠事件使用同一 Event ID，接收端去重，不能重复 Apply 或 Commit。
+- 浏览器端始终连接线上 `wss://api.picbind.com`，不依赖本地 Worker、跨站 Cookie 或登录 Session。
+- TURN 凭证接口允许持有有效 Share Token 的匿名参与者调用，并通过速率限制和短 TTL 防滥用。
+
+### 15.5 Worker 边界
+
+Worker 只处理稳定的传输信封，例如连接 ID、目标 ID、消息 ID 和二进制载荷；新增
+Preview、Source Data、Proposal 或后续业务消息时，不应修改 Worker 的业务分支。
+Worker 不持久化实时载荷，也不代理 OAuth 头像或 Workspace 图片。
+
+### 15.6 任务
 
 - [x] 定义 Presence。
 - [x] 定义 Collaboration Event。
 - [x] 定义 Event ID。
 - [x] 定义 Sequence。
 - [x] 定义数据可靠性等级。
+- [x] 实现匿名 WebSocket 握手，不依赖 Cookie、Session 或 Realtime Grant。
+- [x] 实现通用文本/二进制不透明转发协议。
 - [x] 接入 WebRTC。
+- [x] 实现 WebSocket 优先连接和 WebRTC 后台协商。
+- [x] 实现 RTC 达标检测和 WebSocket 安全切换。
+- [x] 实现 RTC 失败后的 WebSocket 自动回退与重新协商。
 - [x] 实现 Preview 传输。
 - [x] 实现 Source Data 传输。
 - [x] 实现 Commit/Event 同步。
 - [x] 实现断线重连。
 - [x] 实现状态恢复。
-
-当前实现说明：
-
-- Workspace 同步协议统一携带 `eventId`、发送端递增 `sequence`、`timestamp`、`dataClass`、`reliability` 和 `transport`。
-- Presence、Reaction 和 Typing 属于高频临时数据；Source Request、Proposal、Decision、Commit 等属于可靠事件；Preview 和 Source Data 属于大数据。
-- 可靠事件保存在发送页面的内存队列中，Worker 确认实际送达后返回 `eventAck`；断线重连使用相同 Event ID 补发，接收端按 Event ID 去重。
-- Sequence 出现缺口时，协作者发送 `stateRequest`；Owner 重新发送 Preview、当前 Commit 和 Workspace Style 快照。
-- WebSocket 负责认证连接、Presence、可靠事件、ACK 和 WebRTC 信令。
-- Preview 与 Source Data 在 WebRTC 可用时通过有序 DataChannel 直传；WebRTC 尚未连通或失败时自动回退线上 Worker WebSocket。
-- Workspace 成员通过受登录态与成员权限保护的接口获取短期 Cloudflare TURN ICE 凭证；获取失败时仅回退 Cloudflare STUN。
-- Commit 只同步元数据和 Operation，版本图片仍通过 Source Data 请求获取。
-- 浏览器固定 1.5 秒重连；重连后恢复可靠队列，并由 Owner 主动发送当前状态快照。
-- Worker 仅做临时转发和信令，不把 Preview、Source Data、Commit 图片、可靠事件队列或状态快照写入 D1、R2、KV 或 Durable Object Storage。
 
 ## 16. 第十四阶段：Workspace 状态机
 
@@ -1167,25 +1200,31 @@ Pending
 - [x] 统一前端状态管理。
 - [x] 统一同步层状态。
 
-当前实现说明：
-
-- Workspace 运行状态统一为 `Local`、`Connecting`、`Connected`、`Syncing`、`Available`、`OwnerOffline` 和 `Unavailable`，由显式事件校验合法转换。
-- 前端不再通过“实时连接”和“Owner 在线”两个独立布尔值拼装可用性；连接成功、Owner Presence、断线、Sequence Gap 和状态快照统一推进 Workspace State Machine。
-- 协作者连接或重连后必须完成 Owner 状态快照同步才进入 `Available`；Owner 离线与 WebSocket 断线分别表示为 `OwnerOffline` 和 `Unavailable`。
-- 图片状态统一为 `Private`、`Shared`、`Working`、`Reviewing` 和 `Committed`，分享、取消分享、开始处理、提交审阅、结束审阅、创建 Commit 和收到 Preview 均通过状态事件转换。
-- 旧本地缓存和旧同步消息中的 `updated` 图片状态仍可反序列化，并迁移为 `Committed`；新数据只写出 `committed`。
-- Proposal 状态统一为 `Draft`、`Submitted`、`Pending`、`Applied`、`Rejected`、`Deferred` 和 `Failed`，提交按钮和失败重试由状态机驱动。
-- Commit 状态统一为 `Available`、`Applying`、`Current`、`Superseded` 和 `Failed`，新版本应用、完成与失败由状态机驱动。
-- 状态机只管理前端和实时会话状态，不新增 D1、R2、KV 或 Durable Object Storage 数据；现有线上 Worker 协议结构保持不变。
-
 ## 17. 后续产品规范与测试
 
-权限边界、MVP 范围、数据关系和完整用户工作流已迁移至：
+产品边界、MVP 范围、数据关系和完整用户工作流已迁移至：
 
 - [`PicBind-3.0-image-workspace-product-spec.md`](./PicBind-3.0-image-workspace-product-spec.md)
+
+该产品规范中的旧登录绑定、成员权限或以 Workspace ID 作为分享地址的描述不再适用；
+如有冲突，以本文的匿名访问、独立 Share Token 和端侧数据所有权原则为准，后续应单独
+同步该规范。
 
 主实施方案第 1-14 阶段的 Workspace 功能测试案例见：
 
 - [`PicBind-3.0-image-workspace-plan-test-cases.md`](./PicBind-3.0-image-workspace-plan-test-cases.md)
 
 这些内容用于约束产品范围和验收，不作为新的代码实施阶段。
+
+## 18. 阶段完成标准
+
+每个阶段只有同时满足以下条件才可以勾选任务：
+
+1. 代码已进入对应的 `apps`、`packages`、`crates` 或 `services` 职责目录。
+2. 阶段相关单元测试、协议测试或本地存储测试通过。
+3. 实时阶段至少使用两个独立客户端完成双向通信测试，不要求 UI 参与协议测试。
+4. 匿名访客、Owner 离线、断线重连、重复事件和无缓存进入等失败路径已验证。
+5. Worker 新增业务数据类型时不需要新增消息解析分支。
+6. Preview、Source Data 和版本图片未写入 D1、R2、KV 或 Durable Object Storage。
+7. Web 与 Desktop 的本地存储实现遵守相同业务契约。
+8. 已按测试案例完成自测，并对本阶段改动执行一次代码 Review。

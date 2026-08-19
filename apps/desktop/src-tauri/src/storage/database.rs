@@ -520,6 +520,42 @@ impl NativeImageStore {
         Ok(())
     }
 
+    pub fn delete_variant(
+        &self,
+        scope: &str,
+        scope_key: &str,
+        id: &str,
+        variant: &str,
+    ) -> Result<(), String> {
+        validate_identity(scope, scope_key, id)?;
+        let column = match variant {
+            "original" | "output" => "file_path",
+            "thumbnail" => "thumbnail_path",
+            _ => return Err("unsupported image variant".to_string()),
+        };
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let query = format!(
+            "SELECT {column} FROM image_cache WHERE scope = ?1 AND scope_key = ?2 AND id = ?3"
+        );
+        let path = connection
+            .query_row(&query, params![scope, scope_key, id], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .optional()
+            .map_err(|error| error.to_string())?
+            .flatten();
+        let Some(path) = path else {
+            return Ok(());
+        };
+        let update = format!(
+            "UPDATE image_cache SET {column} = NULL WHERE scope = ?1 AND scope_key = ?2 AND id = ?3"
+        );
+        connection
+            .execute(&update, params![scope, scope_key, id])
+            .map_err(|error| error.to_string())?;
+        self.remove_if_unreferenced(&connection, &path, "")
+    }
+
     pub fn clear(&self, scope: &str, scope_key: Option<&str>) -> Result<(), String> {
         validate_identity(scope, scope_key.unwrap_or_default(), "clear")?;
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
@@ -992,6 +1028,39 @@ mod tests {
                 .byte_size,
             3
         );
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
+    fn room_variants_expire_independently() {
+        let root = test_root("room-variants");
+        let store = NativeImageStore::open(root.clone()).expect("open store");
+        let mut value = request("room", "workspace", "image", Some(vec![1, 2, 3]));
+        value.thumbnail = Some(vec![4, 5]);
+        value.thumbnail_length = 2;
+        store.put(value).expect("put room variants");
+
+        store
+            .delete_variant("room", "workspace", "image", "thumbnail")
+            .expect("delete thumbnail");
+        assert!(store
+            .read("room", "workspace", "image", "thumbnail")
+            .is_err());
+        assert_eq!(
+            store.read("room", "workspace", "image", "original"),
+            Ok(vec![1, 2, 3])
+        );
+
+        store
+            .delete_variant("room", "workspace", "image", "original")
+            .expect("delete source");
+        assert!(store
+            .read("room", "workspace", "image", "original")
+            .is_err());
+        assert!(store
+            .get("room", "workspace", "image")
+            .expect("get metadata")
+            .is_some());
         fs::remove_dir_all(root).expect("remove test storage");
     }
 

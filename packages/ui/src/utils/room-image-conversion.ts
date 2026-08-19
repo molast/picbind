@@ -29,5 +29,6 @@ export async function convertRoomImageTask(
     width: result.width,
     height: result.height,
     operation: "convert",
+    parameters: { format },
   };
 }

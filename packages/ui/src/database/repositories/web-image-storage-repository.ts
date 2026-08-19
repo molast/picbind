@@ -358,6 +358,31 @@ async function deleteRecord(scope: ImageStorageScope, scopeKey: string, id: stri
   await fileStorage.remove(record?.filePath);
 }
 
+async function deleteVariant(
+  scope: ImageStorageScope,
+  scopeKey: string,
+  id: string,
+  variant: ImageStorageVariant,
+) {
+  if (scope !== "room") {
+    await deleteRecord(scope, scopeKey, id);
+    return;
+  }
+  const database = getDatabase();
+  const record = await database.roomImages.get([scopeKey, id]);
+  if (!record) return;
+  const thumbnail = variant === "thumbnail";
+  const path = thumbnail ? record.thumbnailPath : record.filePath;
+  if (!path) return;
+  await database.roomImages.update([scopeKey, id], thumbnail
+    ? { thumbnailPath: null }
+    : { filePath: null });
+  const stillReferenced = await database.roomImages
+    .filter((candidate) => candidate.filePath === path || candidate.thumbnailPath === path)
+    .count();
+  if (stillReferenced === 0) await fileStorage.remove(path);
+}
+
 async function clearRecords(scope: ImageStorageScope, scopeKey?: string) {
   const database = getDatabase();
   if (scope === "compressed") {
@@ -402,6 +427,7 @@ export const webImageStorageRepository: ImageStorageRepository = {
   list: listRecords,
   read: readRecord,
   delete: deleteRecord,
+  deleteVariant,
   clear: clearRecords,
   async pruneCache() {
     return {

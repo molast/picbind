@@ -163,3 +163,26 @@ test("content reads honor an already-aborted signal", async () => {
     { name: "AbortError" },
   );
 });
+
+test("room variants can expire independently without deleting metadata", async () => {
+  await repository.put({
+    scope: "room",
+    scopeKey: "workspace",
+    id: "image",
+    metadata: { id: "image", roomId: "workspace", name: "image.png", type: "image/png",
+      size: 6, direction: "received", width: 1, height: 1, createdAt: 1, updatedAt: 1 },
+    mimeType: "image/png",
+    data: new Blob(["source"], { type: "image/png" }),
+    thumbnail: new Blob(["preview"], { type: "image/webp" }),
+    thumbnailMimeType: "image/webp",
+    createdAt: 1,
+  });
+
+  await repository.deleteVariant("room", "workspace", "image", "thumbnail");
+  assert.equal(await repository.read("room", "workspace", "image", "thumbnail", "image/webp"), null);
+  assert.equal(await (await repository.read("room", "workspace", "image", "original", "image/png"))?.text(), "source");
+
+  await repository.deleteVariant("room", "workspace", "image", "original");
+  assert.equal(await repository.read("room", "workspace", "image", "original", "image/png"), null);
+  assert.ok(await repository.get("room", "workspace", "image"));
+});

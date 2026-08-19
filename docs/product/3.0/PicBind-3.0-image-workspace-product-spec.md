@@ -4,15 +4,16 @@
 
 配套测试案例见 [`PicBind-3.0-image-workspace-plan-test-cases.md`](./PicBind-3.0-image-workspace-plan-test-cases.md)。
 
-## 1. 权限与 Owner 模型
+## 1. 角色与 Owner 模型
 
-3.0 第一版不实现复杂 RBAC，只保留 `Owner` 和 `Collaborator`。
+Workspace 不使用账号权限或 RBAC。实时会话只区分 `Owner` 和 `Collaborator`，登录仅保存用户资料。
 
 ### 1.1 Owner
 
 - 持有 Workspace 最新状态和 Source Data。
 - 处理 Proposal Review 和 Commit。
 - 管理 Workspace Style 和分享入口。
+- Owner 身份由当前设备保存的 `owner_capability` 建立；Workspace ID 本身不是 Owner 凭证。
 
 ### 1.2 Collaborator
 
@@ -20,6 +21,7 @@
 - 创建 Operation 和 Proposal。
 - 查看 Activity、发送消息和 Quick Reaction。
 - 不能直接覆盖 Owner 的最终图片状态。
+- Collaborator 通过独立 Share Token 匿名加入，不要求 Cookie、登录 Session、成员记录或 Realtime Grant。
 
 第一版不加入 Admin、Editor、Reviewer、Viewer 或 Permission Matrix。
 
@@ -27,7 +29,7 @@
 
 以下 Sprint 是已实施能力的组织方式，不是后续待办阶段：
 
-1. Workspace：数据模型、页面、Image List、Context Panel、分享和登录绑定。
+1. Workspace：数据模型、页面、Image List、Context Panel、匿名分享和本地 Owner Capability。
 2. Image Collaboration：Image Share、Preview 同步、Preview Cache 和协作者图片列表。
 3. Collaboration Panel：Collaborators、Presence、Activity、Quick Reactions 和 Messages。
 4. Source Data：请求、Owner 审批、Source Cache 和 Owner Offline。
@@ -61,17 +63,16 @@
 ## 4. 核心数据关系
 
 ```text
-User
- └── Workspace
-      ├── Image
-      │    ├── Preview
-      │    ├── Source
-      │    └── Commit
-      ├── Collaborator
-      ├── Activity
-      ├── Proposal
-      │    └── Operation
-      └── Style
+Workspace (Owner device)
+ ├── Image
+ │    ├── Preview
+ │    ├── Source
+ │    └── Commit
+ ├── Collaborator (active session)
+ ├── Activity
+ ├── Proposal
+ │    └── Operation
+ └── Style
 ```
 
 ```text
@@ -86,7 +87,7 @@ Owner Review
 Commit
 ```
 
-Preview、Source Data 和 Commit Snapshot 只保存在用户本地设备或在线端到端传输过程，不写入 D1、R2、KV 或 Durable Object Storage。D1 只保存用户、Workspace、成员关系等服务端业务数据。
+Preview、Source Data、Commit Snapshot、Style 和 Activity 只保存在参与者本地设备或在线端到端传输过程，不写入 D1、R2、KV 或 Durable Object Storage。D1 只保存独立的用户资料以及 Share Token 路由、Owner Capability 摘要等必要服务元数据，不保存 Workspace 成员关系。
 
 ## 5. 最终用户工作流
 

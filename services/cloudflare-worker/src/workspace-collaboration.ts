@@ -19,10 +19,20 @@ import {
 type WorkspaceRow = {
   id: string;
   share_id: string;
+  owner_capability_hash?: string;
   name: string;
   created_at: string;
   updated_at: string;
 };
+
+const OWNER_CAPABILITY_HEADER = "x-picbind-owner-capability";
+
+async function requireOwnerCapability(request: Request, row: WorkspaceRow) {
+  const capability = request.headers.get(OWNER_CAPABILITY_HEADER) || "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(capability)) return false;
+  return Boolean(row.owner_capability_hash)
+    && await sha256(capability) === row.owner_capability_hash;
+}
 
 function publicWorkspace(row: WorkspaceRow) {
   return {
@@ -59,10 +69,11 @@ export async function handleWorkspaces(request: Request, env: AuthEnv) {
   if (!name || name.length > 80) return failure("invalid_input", "Invalid workspace name", 400);
   const id = uuidV7();
   const shareId = `share_${randomToken(24)}`;
+  const ownerCapability = randomToken(32);
   const now = new Date().toISOString();
   await env.USER_DB.prepare(
-    "INSERT INTO workspaces (id, share_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-  ).bind(id, shareId, name, now, now).run();
+    "INSERT INTO workspaces (id, share_id, owner_capability_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).bind(id, shareId, await sha256(ownerCapability), name, now, now).run();
   return success({
     workspace: publicWorkspace({
       id,
@@ -71,6 +82,7 @@ export async function handleWorkspaces(request: Request, env: AuthEnv) {
       created_at: now,
       updated_at: now,
     }),
+    ownerCapability,
   }, { status: 201 });
 }
 
@@ -94,9 +106,12 @@ export async function handleWorkspaceShareLink(
 ) {
   if (request.method !== "POST") return failure("method_not_allowed", "Method not allowed", 405);
   const workspace = await env.USER_DB.prepare(
-    "SELECT id, share_id, name, created_at, updated_at FROM workspaces WHERE id = ?",
+    "SELECT id, share_id, owner_capability_hash, name, created_at, updated_at FROM workspaces WHERE id = ?",
   ).bind(workspaceId).first<WorkspaceRow>();
   if (!workspace) return failure("workspace_not_found", "Workspace not found", 404);
+  if (!await requireOwnerCapability(request, workspace)) {
+    return failure("owner_capability_invalid", "Owner capability is invalid", 403);
+  }
   const shareId = `share_${randomToken(24)}`;
   const updatedAt = new Date().toISOString();
   await env.USER_DB.prepare("UPDATE workspaces SET share_id = ?, updated_at = ? WHERE id = ?")
@@ -114,9 +129,12 @@ export async function handleWorkspaceDetail(
 ) {
   if (request.method !== "GET") return failure("method_not_allowed", "Method not allowed", 405);
   const workspace = await env.USER_DB.prepare(
-    "SELECT id, share_id, name, created_at, updated_at FROM workspaces WHERE id = ?",
+    "SELECT id, share_id, owner_capability_hash, name, created_at, updated_at FROM workspaces WHERE id = ?",
   ).bind(workspaceId).first<WorkspaceRow>();
   if (!workspace) return failure("workspace_not_found", "Workspace not found", 404);
+  if (!await requireOwnerCapability(request, workspace)) {
+    return failure("owner_capability_invalid", "Owner capability is invalid", 403);
+  }
   return success({ workspace: publicWorkspace(workspace) });
 }
 
@@ -209,10 +227,15 @@ export async function handleWorkspaceRealtimeTicket(
   if (!validGuestClientId(clientId)) {
     return failure("invalid_input", "A valid client ID is required", 400);
   }
-  const workspace = await env.USER_DB.prepare("SELECT id FROM workspaces WHERE id = ?")
+  const workspace = await env.USER_DB.prepare(
+    "SELECT id, share_id, owner_capability_hash, name, created_at, updated_at FROM workspaces WHERE id = ?",
+  )
     .bind(workspaceId)
-    .first();
+    .first<WorkspaceRow>();
   if (!workspace) return failure("workspace_not_found", "Workspace not found", 404);
+  if (!await requireOwnerCapability(request, workspace)) {
+    return failure("owner_capability_invalid", "Owner capability is invalid", 403);
+  }
   const origin = request.headers.get("origin") || "";
   const issuedAt = Date.now();
   const expiresAt = issuedAt + WORKSPACE_TICKET_TTL_SECONDS * 1000;
@@ -300,10 +323,15 @@ export async function handleWorkspaceIceServers(
   workspaceId: string,
 ) {
   if (request.method !== "GET") return failure("method_not_allowed", "Method not allowed", 405);
-  const workspace = await env.USER_DB.prepare("SELECT id FROM workspaces WHERE id = ?")
+  const workspace = await env.USER_DB.prepare(
+    "SELECT id, share_id, owner_capability_hash, name, created_at, updated_at FROM workspaces WHERE id = ?",
+  )
     .bind(workspaceId)
-    .first();
+    .first<WorkspaceRow>();
   if (!workspace) return failure("workspace_not_found", "Workspace not found", 404);
+  if (!await requireOwnerCapability(request, workspace)) {
+    return failure("owner_capability_invalid", "Owner capability is invalid", 403);
+  }
   return success({
     iceServers: await generateTurnIceServers(env),
   });
@@ -317,28 +345,7 @@ export async function handleWorkspaceRealtime(
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return failure("upgrade_required", "WebSocket upgrade required", 426);
   }
-  const workspace = await env.USER_DB.prepare("SELECT id FROM workspaces WHERE id = ?")
-    .bind(workspaceId)
-    .first();
-  if (!workspace) return failure("workspace_not_found", "Workspace not found", 404);
-  const object = env.WORKSPACE_REALTIME.get(
-    env.WORKSPACE_REALTIME.idFromName(workspaceId),
-  );
-  const headers = new Headers(request.headers);
-  headers.set("x-picbind-user-id", `legacy-${randomToken(16)}`);
-  headers.set("x-picbind-workspace-id", workspaceId);
-  headers.set(
-    "x-picbind-user-name",
-    encodeURIComponent("Guest"),
-  );
-  headers.set(
-    "x-picbind-workspace-role",
-    "collaborator",
-  );
-  return object.fetch(new Request("https://workspace-realtime/connect", {
-    method: request.method,
-    headers,
-  }));
+  return failure("workspace_realtime_v1_removed", "Use Workspace realtime v2", 410);
 }
 
 export async function handleWorkspaceRealtimeV2(

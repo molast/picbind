@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes workspace-reaction-float {
+  from { opacity: 0; transform: translate(-50%, 20px) scale(.7); }
+  20% { opacity: 1; }
+  to { opacity: 0; transform: translate(-50%, -180px) scale(1.35); }
+}
+
+.workspace-reaction-float {
+  animation: workspace-reaction-float 1.4s ease-out forwards;
+}
+
 
 
 @layer base {

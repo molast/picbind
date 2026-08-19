@@ -96,32 +96,40 @@ export type TurnCredentialEnv = Pick<
   "LOCAL_RUNTIME" | "TURN_TOKEN_ID" | "TURN_API_TOKEN"
 >;
 
+const FALLBACK_STUN_SERVERS: RTCIceServer[] = [{
+  urls: ["stun:stun.cloudflare.com:3478"],
+}];
+
 export async function generateTurnIceServers(env: TurnCredentialEnv) {
   if (env.LOCAL_RUNTIME?.trim() === "1") {
     return [];
   }
   if (!env.TURN_TOKEN_ID?.trim() || !env.TURN_API_TOKEN?.trim()) {
-    throw new Error("Cloudflare TURN is not configured");
+    return FALLBACK_STUN_SERVERS;
   }
-  const response = await fetch(
-    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_TOKEN_ID)}/credentials/generate-ice-servers`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${env.TURN_API_TOKEN}`,
-        "content-type": "application/json",
+  try {
+    const response = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_TOKEN_ID)}/credentials/generate-ice-servers`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.TURN_API_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ttl: 3600 }),
       },
-      body: JSON.stringify({ ttl: 3600 }),
-    },
-  );
-  const result = await readJson<{ iceServers?: RTCIceServer[]; error?: string }>(
-    response,
-    `Cloudflare TURN credentials (${response.status})`,
-  );
-  if (!response.ok || !Array.isArray(result.iceServers)) {
-    throw new Error(result.error || "Could not generate TURN credentials");
+    );
+    const result = await readJson<{ iceServers?: RTCIceServer[] }>(
+      response,
+      `Cloudflare TURN credentials (${response.status})`,
+    );
+    if (response.ok && Array.isArray(result.iceServers) && result.iceServers.length > 0) {
+      return result.iceServers;
+    }
+  } catch {
+    // STUN keeps direct peers available while temporary TURN issuance is unavailable.
   }
-  return result.iceServers;
+  return FALLBACK_STUN_SERVERS;
 }
 
 function validRoomId(value: unknown): value is string {

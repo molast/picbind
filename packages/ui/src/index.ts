@@ -5,6 +5,8 @@ export { default as CreateRoomButton } from "./components/share/create-room-butt
 export { configureRoomSdk } from "./config";
 export { ROOM_VERSION } from "./version";
 export { default as WorkerVersionWarning } from "./components/share/worker-version-warning";
+export { default as WorkspacePage } from "./workspace/workspace-page";
+export * from "./workspace/types";
 export {
   EXPECTED_WORKER_VERSION,
   WORKER_VERSION_HEADER,

@@ -29,6 +29,7 @@
     "dev": "node scripts/sync-worker-version.mjs && vite --host 127.0.0.1 --port 4174",
     "check": "node scripts/sync-worker-version.mjs && tsc --noEmit",
     "test:storage": "node --import tsx --test src/database/repositories/web-image-storage-repository.test.ts",
+    "test:workspace": "node --import tsx --test src/workspace/*.test.ts",
     "build:sdk": "node scripts/sync-worker-version.mjs && vite build --mode library && tsc -p tsconfig.build.json",
     "build:preview": "node scripts/sync-worker-version.mjs && vite build --outDir preview-dist",
     "build": "pnpm run build:sdk && pnpm run build:preview"

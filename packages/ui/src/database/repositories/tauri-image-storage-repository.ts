@@ -3,6 +3,7 @@
 import {
   clearNativeImages,
   deleteNativeImage,
+  deleteNativeImageVariant,
   getNativeImage,
   listNativeImages,
   pruneNativeImageCache,
@@ -56,6 +57,10 @@ export const tauriImageStorageRepository: ImageStorageRepository = {
 
   delete(scope: ImageStorageScope, scopeKey: string, id: string) {
     return deleteNativeImage(scope, scopeKey, id);
+  },
+
+  deleteVariant(scope, scopeKey, id, variant) {
+    return deleteNativeImageVariant(scope, scopeKey, id, variant);
   },
 
   clear(scope: ImageStorageScope, scopeKey?: string) {

@@ -2,6 +2,7 @@ import { applyD1Migrations, env, runInDurableObject, SELF } from "cloudflare:tes
 import { beforeAll, describe, expect, it } from "vitest";
 import { sha256 } from "../src/auth";
 import { WORKSPACE_REALTIME_PROTOCOL } from "../src/realtime/workspace-v2-protocol";
+import { generateTurnIceServers } from "../src/realtime/share-room";
 
 type TestEnv = {
   USER_DB: D1Database;
@@ -28,6 +29,7 @@ async function seedHandoff(options?: {
   const sessionId = `session-${suffix}`;
   const workspaceId = `workspace-${suffix}`;
   const shareId = `share-${suffix}`;
+  const ownerCapability = `owner_${suffix.replace(/-/g, "")}aaaaa`;
   const code = options?.code || `a${suffix.replace(/-/g, "")}aaaaaaaaaa`;
   const now = new Date();
   const nowIso = now.toISOString();
@@ -37,8 +39,8 @@ async function seedHandoff(options?: {
       "INSERT INTO users (id, email, name, avatar, created_at, updated_at) VALUES (?, NULL, ?, NULL, ?, ?)",
     ).bind(userId, "OAuth User", nowIso, nowIso),
     testEnv.USER_DB.prepare(
-      "INSERT INTO workspaces (id, share_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-    ).bind(workspaceId, shareId, "My Workspace", nowIso, nowIso),
+      "INSERT INTO workspaces (id, share_id, owner_capability_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(workspaceId, shareId, await sha256(ownerCapability), "My Workspace", nowIso, nowIso),
     testEnv.USER_DB.prepare(
       "INSERT INTO auth_sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).bind(sessionId, userId, await sha256(`session-token-${suffix}`), nowIso, new Date(now.getTime() + 3_600_000).toISOString(), nowIso),
@@ -54,7 +56,7 @@ async function seedHandoff(options?: {
       options?.consumedAt ?? null,
     ),
   ]);
-  return { code, sessionId, userId, workspaceId, shareId, sessionToken: `session-token-${suffix}` };
+  return { code, sessionId, userId, workspaceId, shareId, ownerCapability, sessionToken: `session-token-${suffix}` };
 }
 
 async function exchange(code: string, origin = ORIGIN) {
@@ -78,6 +80,7 @@ async function requestTicket(seeded: Awaited<ReturnType<typeof seedHandoff>>, or
       headers: {
         origin,
         "content-type": "application/json",
+        "x-picbind-owner-capability": seeded.ownerCapability,
         "cf-connecting-ip": crypto.randomUUID(),
       },
       body: JSON.stringify({ clientId }),
@@ -117,14 +120,40 @@ async function connectV2(workspaceId: string, ticket: string, origin = ORIGIN) {
   });
 }
 
-function nextSocketMessage(socket: WebSocket): Promise<Record<string, any>> {
+function nextSocketData(socket: WebSocket): Promise<string | ArrayBuffer | ArrayBufferView | Blob> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Timed out waiting for WebSocket message")), 2_000);
     socket.addEventListener("message", (event) => {
       clearTimeout(timeout);
-      resolve(JSON.parse(String(event.data)) as Record<string, any>);
+      resolve(event.data as string | ArrayBuffer | ArrayBufferView | Blob);
     }, { once: true });
   });
+}
+
+async function nextSocketMessage(socket: WebSocket): Promise<Record<string, any>> {
+  return JSON.parse(String(await nextSocketData(socket))) as Record<string, any>;
+}
+
+function binaryRelay(event: Record<string, unknown>, bytes: Uint8Array) {
+  const header = new TextEncoder().encode(JSON.stringify({ route: "workspace", delivery: "bulk", event }));
+  const frame = new Uint8Array(8 + header.length + bytes.length);
+  frame.set([0x50, 0x42, 0x57, 0x31]);
+  new DataView(frame.buffer).setUint32(4, header.length, false);
+  frame.set(header, 8);
+  frame.set(bytes, 8 + header.length);
+  return frame.buffer;
+}
+
+async function decodeBinaryRelay(frame: ArrayBuffer | ArrayBufferView | Blob) {
+  const normalized = frame instanceof Blob ? await frame.arrayBuffer() : frame;
+  const bytes = normalized instanceof ArrayBuffer
+    ? new Uint8Array(normalized)
+    : new Uint8Array(normalized.buffer, normalized.byteOffset, normalized.byteLength);
+  const headerLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(4, false);
+  return {
+    header: JSON.parse(new TextDecoder().decode(bytes.slice(8, 8 + headerLength))) as Record<string, any>,
+    bytes: [...bytes.slice(8 + headerLength)],
+  };
 }
 
 function workspaceRelay(
@@ -219,6 +248,12 @@ describe("email authentication communication", () => {
 });
 
 describe("Workspace Ticket communication", () => {
+  it("falls back to public STUN when short-lived TURN credentials are unavailable", async () => {
+    await expect(generateTurnIceServers({ LOCAL_RUNTIME: "0" })).resolves.toEqual([{
+      urls: ["stun:stun.cloudflare.com:3478"],
+    }]);
+  });
+
   it("issues an owner Ticket with fixed protocol and short-lived ICE data", async () => {
     const seeded = await seedHandoff();
     const { response } = await requestTicket(seeded);
@@ -332,6 +367,7 @@ describe("Workspace Ticket communication", () => {
         method: "POST",
         headers: {
           origin: ORIGIN,
+          "x-picbind-owner-capability": owner.ownerCapability,
           "cf-connecting-ip": crypto.randomUUID(),
         },
       },
@@ -355,6 +391,66 @@ describe("Workspace Ticket communication", () => {
     expect((await join(owner.shareId)).status).toBe(404);
     expect((await requestGuestTicket(owner)).response.status).toBe(404);
     expect((await join(newShareId)).status).toBe(200);
+  });
+
+  it("returns an Owner Capability once and requires it for Owner operations", async () => {
+    const created = await SELF.fetch("https://api.picbind.com/api/workspaces", {
+      method: "POST",
+      headers: {
+        origin: ORIGIN,
+        "content-type": "application/json",
+        "cf-connecting-ip": crypto.randomUUID(),
+      },
+      body: JSON.stringify({ name: "Capability Workspace" }),
+    });
+    expect(created.status).toBe(201);
+    const envelope = await created.json() as Record<string, any>;
+    const workspace = envelope.data.workspace as Record<string, string>;
+    const capability = envelope.data.ownerCapability as string;
+    expect(capability).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(workspace)).not.toContain(capability);
+
+    const detailUrl = `https://api.picbind.com/api/workspaces/${workspace.id}`;
+    expect((await SELF.fetch(detailUrl, { headers: { origin: ORIGIN } })).status).toBe(403);
+    expect((await SELF.fetch(detailUrl, {
+      headers: { origin: ORIGIN, "x-picbind-owner-capability": "x".repeat(43) },
+    })).status).toBe(403);
+    expect((await SELF.fetch(detailUrl, {
+      headers: { origin: ORIGIN, "x-picbind-owner-capability": capability },
+    })).status).toBe(200);
+
+    const ticketUrl = `${detailUrl}/realtime-ticket`;
+    const ticketBody = JSON.stringify({ clientId: `owner_${crypto.randomUUID()}` });
+    expect((await SELF.fetch(ticketUrl, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json" },
+      body: ticketBody,
+    })).status).toBe(403);
+    expect((await SELF.fetch(ticketUrl, {
+      method: "POST",
+      headers: {
+        origin: ORIGIN,
+        "content-type": "application/json",
+        "x-picbind-owner-capability": capability,
+      },
+      body: ticketBody,
+    })).status).toBe(200);
+  });
+
+  it("allows the Owner Capability header in CORS preflight without exposing it", async () => {
+    const response = await SELF.fetch("https://api.picbind.com/api/workspaces", {
+      method: "OPTIONS",
+      headers: {
+        origin: ORIGIN,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-picbind-owner-capability",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-headers"))
+      .toContain("x-picbind-owner-capability");
+    expect(response.headers.get("access-control-expose-headers") || "")
+      .not.toContain("x-picbind-owner-capability");
   });
 });
 
@@ -649,7 +745,71 @@ describe("Workspace WebSocket V2 communication", () => {
     socket.close(1000, "test-complete");
   });
 
-  it("keeps the anonymous V1 WebSocket route available during migration", async () => {
+  it("relays future binary events without interpreting the payload", async () => {
+    const owner = await seedHandoff();
+    const ownerTicketResponse = await requestTicket(owner);
+    const ownerTicket = (await ownerTicketResponse.response.json() as Record<string, any>).data.ticket;
+    const ownerUpgrade = await connectV2(owner.workspaceId, ownerTicket);
+    const ownerSocket = ownerUpgrade.webSocket!;
+    ownerSocket.accept();
+    await expect(nextSocketMessage(ownerSocket)).resolves.toMatchObject({
+      type: "connected",
+      role: "owner",
+    });
+
+    const collaboratorTicketResponse = await requestGuestTicket(owner);
+    const collaboratorTicket = (await collaboratorTicketResponse.response.json() as Record<string, any>).data.ticket;
+    const collaboratorJoined = nextSocketMessage(ownerSocket);
+    const collaboratorUpgrade = await connectV2(owner.workspaceId, collaboratorTicket);
+    const collaboratorSocket = collaboratorUpgrade.webSocket!;
+    collaboratorSocket.accept();
+    await expect(nextSocketMessage(collaboratorSocket)).resolves.toMatchObject({
+      type: "connected",
+      role: "collaborator",
+    });
+    await expect(collaboratorJoined).resolves.toMatchObject({
+      type: "memberJoined",
+      userId: `guest-${collaboratorTicketResponse.clientId}`,
+    });
+
+    const event = {
+      eventId: crypto.randomUUID(),
+      sequence: 7,
+      dataClass: "futureBinaryClass",
+      type: "futureBinaryFeature",
+      metadata: { codec: "opaque-test" },
+    };
+    const payload = new Uint8Array([0, 1, 2, 127, 128, 254, 255]);
+    const received = nextSocketData(collaboratorSocket);
+    ownerSocket.send(binaryRelay(event, payload));
+    const decoded = await decodeBinaryRelay(await received as ArrayBuffer | ArrayBufferView | Blob);
+
+    expect(decoded.header).toMatchObject({
+      type: "workspaceBinary",
+      version: 1,
+      event: {
+        ...event,
+        senderId: `owner-${ownerTicketResponse.clientId}`,
+        senderRole: "owner",
+      },
+    });
+    expect(decoded.bytes).toEqual([...payload]);
+
+    const object = testEnv.WORKSPACE_REALTIME.get(
+      testEnv.WORKSPACE_REALTIME.idFromName(owner.workspaceId),
+    );
+    await runInDurableObject(object, async (_instance, state) => {
+      const stored = await state.storage.list<unknown>();
+      expect([...stored.keys()].every((key) => key.startsWith("ticket:"))).toBe(true);
+      expect(JSON.stringify([...stored.values()])).not.toContain(event.eventId);
+      expect(JSON.stringify([...stored.values()])).not.toContain("futureBinaryFeature");
+    });
+
+    collaboratorSocket.close(1000, "test-complete");
+    ownerSocket.close(1000, "test-complete");
+  });
+
+  it("rejects the Workspace-ID-only V1 route", async () => {
     const seeded = await seedHandoff();
     const response = await SELF.fetch(
       `https://api.picbind.com/api/workspaces/${seeded.workspaceId}/realtime`,
@@ -661,11 +821,10 @@ describe("Workspace WebSocket V2 communication", () => {
         },
       },
     );
-    expect(response.status).toBe(101);
-    const socket = response.webSocket!;
-    socket.accept();
-    await expect(nextSocketMessage(socket)).resolves.toMatchObject({ type: "connected" });
-    socket.close(1000, "test-complete");
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "workspace_realtime_v1_removed" },
+    });
   });
 });
 

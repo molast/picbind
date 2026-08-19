@@ -147,6 +147,15 @@ export function deleteNativeImage(scope: NativeImageScope, scopeKey: string, id:
   return invoke<void>("storage_delete_image", { scope, scopeKey, id });
 }
 
+export function deleteNativeImageVariant(
+  scope: NativeImageScope,
+  scopeKey: string,
+  id: string,
+  variant: "original" | "output" | "thumbnail",
+) {
+  return invoke<void>("storage_delete_image_variant", { scope, scopeKey, id, variant });
+}
+
 export function clearNativeImages(scope: NativeImageScope, scopeKey?: string) {
   return invoke<void>("storage_clear_images", { scope, scopeKey });
 }

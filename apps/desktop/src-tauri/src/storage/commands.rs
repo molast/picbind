@@ -76,6 +76,22 @@ pub async fn storage_delete_image(
 }
 
 #[tauri::command]
+pub async fn storage_delete_image_variant(
+    state: State<'_, NativeImageStore>,
+    scope: String,
+    scope_key: String,
+    id: String,
+    variant: String,
+) -> Result<(), String> {
+    let store = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.delete_variant(&scope, &scope_key, &id, &variant)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn storage_clear_images(
     state: State<'_, NativeImageStore>,
     scope: String,

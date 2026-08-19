@@ -17,6 +17,7 @@ export type RoomImageEditResult = {
   width: number;
   height: number;
   operation: Extract<ImageObjectOperation, "adjust" | "convert" | "crop" | "resize">;
+  parameters?: Record<string, unknown>;
 };
 
 export type NormalizedCrop = {
@@ -172,6 +173,7 @@ export async function resizeRoomImage(
       width: targetWidth,
       height: targetHeight,
       operation: "resize",
+      parameters: { width: targetWidth, height: targetHeight },
     };
   } finally {
     bitmap.close();
@@ -199,6 +201,7 @@ export async function cropRoomImage(
       width,
       height,
       operation: "crop",
+      parameters: { ...crop },
     };
   } finally {
     bitmap.close();
@@ -220,5 +223,6 @@ export async function adjustRoomImage(
     width: adjusted.width,
     height: adjusted.height,
     operation: "adjust",
+    parameters: { ...adjustments },
   };
 }

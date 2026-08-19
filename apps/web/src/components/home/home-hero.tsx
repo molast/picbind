@@ -3,7 +3,6 @@
 import type React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import CreateRoomButton from "@/components/room-create-button";
 import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
@@ -86,12 +85,9 @@ export default function HomeHero({
                   >
                     {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
                   </Link>
-                  <CreateRoomButton
-                    lang={lang}
-                    hasActiveRoom={hasActiveRoom}
-                    onRoomCreated={onRoomCreated}
-                    onRestoreActiveRoom={onRestoreActiveRoom}
-                  />
+                  <Link href="/workspace" className="rounded-full px-3 py-1 transition hover:bg-white/35">
+                    {lang === "zh" ? "图片工作区" : "Image Workspace"}
+                  </Link>
                 </nav>
               </div>
               <div className="flex items-center gap-3">
@@ -159,13 +155,9 @@ export default function HomeHero({
             <Link href="/favicon-converter" className="rounded-full px-3 py-1">
               {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
             </Link>
-            <CreateRoomButton
-              lang={lang}
-              mobile
-              hasActiveRoom={hasActiveRoom}
-              onRoomCreated={onRoomCreated}
-              onRestoreActiveRoom={onRestoreActiveRoom}
-            />
+            <Link href="/workspace" className="rounded-full px-3 py-1">
+              {lang === "zh" ? "图片工作区" : "Image Workspace"}
+            </Link>
           </div>
         </header>
 

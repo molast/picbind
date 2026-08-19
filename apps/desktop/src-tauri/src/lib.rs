@@ -48,6 +48,7 @@ pub fn run() {
             storage::commands::storage_list_images,
             storage::commands::storage_read_image,
             storage::commands::storage_delete_image,
+            storage::commands::storage_delete_image_variant,
             storage::commands::storage_clear_images,
             storage::commands::storage_get_usage,
             storage::commands::storage_prune_cache,

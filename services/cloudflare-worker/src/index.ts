@@ -290,7 +290,7 @@ function corsHeaders(env: Env, request: Request) {
     return {
       "access-control-allow-origin": origin,
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "authorization,content-type,x-admin-key",
+      "access-control-allow-headers": "authorization,content-type,x-admin-key,x-picbind-owner-capability",
       "access-control-allow-credentials": "true",
       "access-control-expose-headers":
         "x-picbind-dev-mode,x-picbind-worker-version",
@@ -302,7 +302,7 @@ function corsHeaders(env: Env, request: Request) {
   const origin = request.headers.get("origin") || "";
   const headers: Record<string, string> = {
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,x-admin-key",
+    "access-control-allow-headers": "authorization,content-type,x-admin-key,x-picbind-owner-capability",
     "access-control-allow-credentials": "true",
     "access-control-expose-headers":
       "x-picbind-dev-mode,x-picbind-worker-version",

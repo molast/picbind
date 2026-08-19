@@ -2956,6 +2956,10 @@ dependencies = [
 [[package]]
 name = "picbind-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "picbind-desktop"
@@ -2982,10 +2986,18 @@ dependencies = [
 [[package]]
 name = "picbind-network"
 version = "0.1.0"
+dependencies = [
+ "picbind-protocol",
+ "serde_json",
+]
 
 [[package]]
 name = "picbind-protocol"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "picbind-storage"

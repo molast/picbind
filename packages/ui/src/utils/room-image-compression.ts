@@ -16,6 +16,7 @@ export type RoomCompressionResult = {
   width: number;
   height: number;
   operation: "compress";
+  parameters?: Record<string, unknown>;
 };
 
 export type RoomCompressionDimensions = {
@@ -266,6 +267,7 @@ export async function encodeRoomImageData(
     width: image.width,
     height: image.height,
     operation: "compress",
+    parameters: { format, width: image.width, height: image.height },
   };
 }
 
@@ -364,5 +366,6 @@ export async function compressRoomImage(
     width: targetWidth,
     height: targetHeight,
     operation: "compress",
+    parameters: { format, width: targetWidth, height: targetHeight },
   };
 }

@@ -23,6 +23,9 @@ type StoredWorkspaceTicket = {
 };
 
 const MAX_MESSAGE_BYTES = 96 * 1024;
+const MAX_BINARY_BYTES = 4 * 1024 * 1024;
+const MAX_BINARY_HEADER_BYTES = 32 * 1024;
+const BINARY_MAGIC = [0x50, 0x42, 0x57, 0x31] as const;
 const MAX_ACTIVE_TICKETS = 256;
 const TICKET_KEY_PREFIX = "ticket:";
 const RELAY_TYPE = "workspaceRelay";
@@ -44,65 +47,20 @@ const RESERVED_RELAY_EVENT_TYPES = new Set([
   "transportReady",
   "transportFallback",
 ]);
-// Frozen V1 compatibility lists. New Workspace business events use workspaceRelay.
-const OWNER_MESSAGE_TYPES = new Set([
-  "previewSnapshot",
-  "placeholderUpsert",
-  "previewUpsert",
-  "previewRemove",
-  "commitCreated",
-]);
-const OWNER_STYLE_MESSAGE_TYPES = new Set(["styleSnapshot", "styleUpdated"]);
-const OWNER_TARGETED_MESSAGE_TYPES = new Set([
-  "sourceResponse",
-  "sourceStart",
-  "sourceChunk",
-  "sourceComplete",
-  "proposalDecision",
-]);
-const COLLABORATOR_MESSAGE_TYPES = new Set(["sourceRequest", "proposalSubmit", "stateRequest"]);
 const WEBRTC_SIGNAL_TYPES = new Set([
   "webrtcOffer",
   "webrtcAnswer",
   "webrtcIceCandidate",
 ]);
 const TRANSPORT_SIGNAL_TYPES = new Set(["transportReady", "transportFallback"]);
-const OPERATION_TYPES = new Set([
-  "convert",
-  "compression",
-  "crop",
-  "resize",
-  "rotate",
-  "adjust",
-  "other",
-]);
 
 function nonEmptyString(value: unknown, maxLength = 256): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength;
 }
 
-function dataClassFor(type: string) {
-  if (["presence", "reaction", "typing"].includes(type)) return "presence";
-  if (["previewSnapshot", "placeholderUpsert", "previewUpsert", "previewRemove"].includes(type)) {
-    return "preview";
-  }
-  if (["sourceStart", "sourceChunk", "sourceComplete", "commitCreated"].includes(type)) {
-    return "sourceOrCommit";
-  }
-  return "collaborationEvent";
-}
-
-function reliabilityFor(type: string) {
-  if (["presence", "reaction", "typing", "previewSnapshot"].includes(type)) return "ephemeral";
-  if (["previewUpsert", "sourceStart", "sourceChunk", "sourceComplete"].includes(type)) {
-    return "bulk";
-  }
-  return "reliable";
-}
-
 function trustedRelayPayload(
   payload: Record<string, unknown>,
-  type: string,
+  _type: string,
   attachment: WorkspaceSocketAttachment,
 ) {
   const eventId = nonEmptyString(payload.eventId, 128) ? payload.eventId : crypto.randomUUID();
@@ -119,8 +77,6 @@ function trustedRelayPayload(
     eventId,
     sequence,
     timestamp: Date.now(),
-    dataClass: dataClassFor(type),
-    reliability: reliabilityFor(type),
     transport,
     senderId: attachment.userId,
     senderName: attachment.userName,
@@ -150,80 +106,6 @@ function trustedGenericRelayEvent(
     senderId: attachment.userId,
     senderName: attachment.userName,
     senderRole: attachment.role,
-  };
-}
-
-function trustedWorkspaceStyle(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const style = value as Record<string, unknown>;
-  const header = style.header as Record<string, unknown> | null;
-  const background = header?.background as Record<string, unknown> | null;
-  const text = header?.text as Record<string, unknown> | null;
-  const color = (value: unknown) => typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
-  const backgroundValid = background?.type === "solid"
-    ? color(background.color)
-    : background?.type === "gradient"
-      && color(background.from)
-      && color(background.to)
-      && ["right", "down", "downRight"].includes(String(background.direction));
-  if (
-    style.version !== 1
-    || typeof style.revision !== "number"
-    || !Number.isSafeInteger(style.revision)
-    || Number(style.revision) < 0
-    || !backgroundValid
-    || !nonEmptyString(text?.content, 160)
-    || !color(text?.color)
-    || !["inter", "system", "serif", "monospace"].includes(String(text?.fontFamily))
-    || typeof text?.fontSize !== "number"
-    || !Number.isInteger(text.fontSize)
-    || Number(text?.fontSize) < 12
-    || Number(text?.fontSize) > 32
-    || typeof text?.fontWeight !== "number"
-    || ![400, 500, 600, 700].includes(text.fontWeight)
-  ) return null;
-  return style;
-}
-
-function trustedProposal(
-  value: unknown,
-  attachment: WorkspaceSocketAttachment,
-): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const proposal = value as Record<string, unknown>;
-  if (
-    !nonEmptyString(proposal.proposalId) ||
-    proposal.workspaceId !== attachment.workspaceId ||
-    !nonEmptyString(proposal.imageId) ||
-    !nonEmptyString(proposal.baseCommitId) ||
-    !Array.isArray(proposal.operations) ||
-    proposal.operations.length === 0 ||
-    proposal.operations.length > 64 ||
-    typeof proposal.createdAt !== "number" ||
-    !Number.isFinite(proposal.createdAt)
-  ) return null;
-  const operations = proposal.operations.map((value) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const operation = value as Record<string, unknown>;
-    if (
-      !nonEmptyString(operation.operationId) ||
-      operation.imageId !== proposal.imageId ||
-      operation.baseCommitId !== proposal.baseCommitId ||
-      !OPERATION_TYPES.has(typeof operation.type === "string" ? operation.type : "") ||
-      !operation.parameters ||
-      typeof operation.parameters !== "object" ||
-      Array.isArray(operation.parameters) ||
-      typeof operation.createdAt !== "number" ||
-      !Number.isFinite(operation.createdAt)
-    ) return null;
-    return { ...operation, authorId: attachment.userId };
-  });
-  if (operations.some((operation) => operation === null)) return null;
-  return {
-    ...proposal,
-    authorId: attachment.userId,
-    authorName: attachment.userName,
-    operations,
   };
 }
 
@@ -396,7 +278,11 @@ export class WorkspaceRealtimeObject {
 
   webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
     const attachment = socket.deserializeAttachment() as WorkspaceSocketAttachment | null;
-    if (!attachment || typeof message !== "string") return;
+    if (!attachment) return;
+    if (message instanceof ArrayBuffer) {
+      this.relayBinaryEvent(socket, message, attachment);
+      return;
+    }
     if (new TextEncoder().encode(message).byteLength > MAX_MESSAGE_BYTES) {
       socket.close(1009, "Workspace message is too large");
       return;
@@ -433,79 +319,6 @@ export class WorkspaceRealtimeObject {
         this.sendToUser(payload.targetUserId, relay);
       }
       return;
-    }
-    if (type === "presence") {
-      const operation = payload.operation;
-      if (!operation || typeof operation !== "object" || Array.isArray(operation)) return;
-      this.broadcast(trustedRelayPayload({
-        ...payload,
-        userId: attachment.userId,
-        userName: attachment.userName,
-        role: attachment.role,
-        online: true,
-        operation,
-      }, type, attachment), socket);
-      return;
-    }
-    if (attachment.role === "owner" && OWNER_STYLE_MESSAGE_TYPES.has(type)) {
-      const style = trustedWorkspaceStyle(payload.style);
-      if (style) {
-        const delivered = this.broadcast(
-          trustedRelayPayload({ ...payload, type, style }, type, attachment),
-          socket,
-        );
-        this.ackReliable(socket, payload, type, delivered);
-      }
-      return;
-    }
-    if (attachment.role === "owner" && OWNER_MESSAGE_TYPES.has(type)) {
-      const delivered = this.broadcast(trustedRelayPayload(payload, type, attachment), socket);
-      this.ackReliable(socket, payload, type, delivered);
-      return;
-    }
-    if (attachment.role === "owner" && OWNER_TARGETED_MESSAGE_TYPES.has(type)) {
-      const targetUserId = typeof payload.targetUserId === "string"
-        ? payload.targetUserId
-        : "";
-      if (!targetUserId) return;
-      const delivered = this.sendToUser(
-        targetUserId,
-        trustedRelayPayload(payload, type, attachment),
-      );
-      this.ackReliable(socket, payload, type, delivered);
-      return;
-    }
-    if (attachment.role === "collaborator" && COLLABORATOR_MESSAGE_TYPES.has(type)) {
-      if (type === "proposalSubmit") {
-        const proposal = trustedProposal(payload.proposal, attachment);
-        const proposalId = proposal?.proposalId as string || "";
-        if (!proposal || this.state.getWebSockets("role:owner").length === 0) {
-          socket.send(JSON.stringify({ type: "proposalSubmitFailed", proposalId }));
-          return;
-        }
-        const delivered = this.sendToRole(
-          "owner",
-          trustedRelayPayload({
-            ...payload,
-            type,
-            proposal,
-            submitterId: attachment.userId,
-            submitterName: attachment.userName,
-          }, type, attachment),
-        );
-        this.ackReliable(socket, payload, type, delivered);
-        socket.send(JSON.stringify({ type: "proposalSubmitted", proposalId }));
-        return;
-      }
-      const delivered = this.sendToRole(
-        "owner",
-        trustedRelayPayload({
-          ...payload,
-          requesterId: attachment.userId,
-          requesterName: attachment.userName,
-        }, type, attachment),
-      );
-      this.ackReliable(socket, payload, type, delivered);
     }
   }
 
@@ -579,6 +392,55 @@ export class WorkspaceRealtimeObject {
     this.ackDelivery(socket, eventRecord, delivery, delivered);
   }
 
+  private relayBinaryEvent(
+    socket: WebSocket,
+    frame: ArrayBuffer,
+    attachment: WorkspaceSocketAttachment,
+  ) {
+    if (frame.byteLength < 9 || frame.byteLength > MAX_BINARY_BYTES) return;
+    const bytes = new Uint8Array(frame);
+    if (BINARY_MAGIC.some((value, index) => bytes[index] !== value)) return;
+    const headerLength = new DataView(frame).getUint32(4, false);
+    if (headerLength < 2 || headerLength > MAX_BINARY_HEADER_BYTES || 8 + headerLength >= frame.byteLength) return;
+    let header: Record<string, unknown>;
+    try {
+      header = JSON.parse(new TextDecoder().decode(bytes.slice(8, 8 + headerLength))) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const route = typeof header.route === "string" ? header.route : "";
+    const delivery = typeof header.delivery === "string" ? header.delivery : "";
+    const event = header.event;
+    if (!RELAY_ROUTES.has(route) || !RELAY_DELIVERIES.has(delivery) || !event || typeof event !== "object" || Array.isArray(event)) return;
+    const eventRecord = event as Record<string, unknown>;
+    const eventType = typeof eventRecord.type === "string" ? eventRecord.type : "";
+    if (!nonEmptyString(eventType, 128) || RESERVED_RELAY_EVENT_TYPES.has(eventType)) return;
+    const trustedHeader = new TextEncoder().encode(JSON.stringify({
+      type: "workspaceBinary",
+      version: RELAY_VERSION,
+      event: trustedGenericRelayEvent(eventRecord, delivery, attachment),
+    }));
+    if (trustedHeader.byteLength > MAX_BINARY_HEADER_BYTES) return;
+    const relayed = new Uint8Array(8 + trustedHeader.byteLength + frame.byteLength - 8 - headerLength);
+    relayed.set(BINARY_MAGIC, 0);
+    new DataView(relayed.buffer).setUint32(4, trustedHeader.byteLength, false);
+    relayed.set(trustedHeader, 8);
+    relayed.set(bytes.slice(8 + headerLength), 8 + trustedHeader.byteLength);
+    let delivered = 0;
+    if (route === "workspace") delivered = this.sendBinary(this.state.getWebSockets().filter((candidate) => candidate !== socket), relayed.buffer);
+    else if (route === "owner") delivered = this.sendBinary(this.state.getWebSockets("role:owner"), relayed.buffer);
+    else if (route === "user" && nonEmptyString(header.targetUserId, 128)) delivered = this.sendBinary(this.state.getWebSockets(`user:${header.targetUserId}`), relayed.buffer);
+    this.ackDelivery(socket, eventRecord, delivery, delivered);
+  }
+
+  private sendBinary(sockets: WebSocket[], frame: ArrayBuffer) {
+    let delivered = 0;
+    for (const socket of sockets) {
+      try { socket.send(frame); delivered += 1; } catch { /* Closing sockets are ignored. */ }
+    }
+    return delivered;
+  }
+
   private ackDelivery(
     socket: WebSocket,
     event: Record<string, unknown>,
@@ -590,22 +452,6 @@ export class WorkspaceRealtimeObject {
     if (!eventId) return;
     try {
       socket.send(JSON.stringify({ type: delivered > 0 ? "eventAck" : "eventNack", eventId }));
-    } catch {
-      // The sender will retain and retry the event after reconnecting.
-    }
-  }
-
-  private ackReliable(
-    socket: WebSocket,
-    payload: Record<string, unknown>,
-    type: string,
-    delivered: number,
-  ) {
-    if (delivered <= 0 || reliabilityFor(type) !== "reliable") return;
-    const eventId = nonEmptyString(payload.eventId, 128) ? payload.eventId : "";
-    if (!eventId) return;
-    try {
-      socket.send(JSON.stringify({ type: "eventAck", eventId }));
     } catch {
       // The sender will retain and retry the event after reconnecting.
     }

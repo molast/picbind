@@ -9,10 +9,10 @@
 ### 1.1 测试环境
 
 - Web 端连接已部署的线上 Worker，不启动本地 Worker。
-- 准备两个不同 Provider 的账号，分别作为 Owner 和 Collaborator。
+- 准备两个独立浏览器上下文，分别作为匿名 Owner 和匿名 Collaborator；登录状态不影响测试结果。
 - 准备 PNG、JPEG、WebP、AVIF 图片，其中至少一张包含 Alpha 透明通道。
 - 浏览器支持 IndexedDB、WebSocket 和 WebRTC DataChannel。
-- 测试 Worker 仅用于认证、权限校验、实时转发和 WebRTC 信令。
+- 测试 Worker 仅用于 Share Token 路由、Owner Capability 校验、实时转发和 WebRTC 信令。
 
 ### 1.2 优先级
 
@@ -32,7 +32,7 @@
 
 | 主文档阶段 | 测试范围 | 对应案例 |
 | --- | --- | --- |
-| 第一阶段：Workspace 基础模型 | 临时/固定 Workspace、登录绑定、分享 ID、本地隔离 | `WS-001` - `WS-006` |
+| 第一阶段：Workspace 基础模型 | 本地/共享 Workspace、Owner Capability、独立 Share Token、本地隔离 | `WS-001` - `WS-006` |
 | 第二阶段：Workspace 页面结构 | Header、Image List、Context Panel、Quick Actions | `WS-007` - `WS-008` |
 | 第三阶段：图片模型与状态 | Private、Shared、Working、Reviewing、Committed | `IMG-001` - `IMG-004`、`IMG-007`、`SYN-011` |
 | 第四阶段：协作者系统 | Collaborators、Presence、Activity、Reaction、Message | `COL-001` - `COL-006` |
@@ -51,11 +51,11 @@
 
 | ID | 优先级 | 测试场景 | 操作步骤 | 预期结果 |
 | --- | --- | --- | --- | --- |
-| WS-001 | P0 | 未登录进入 Workspace | 清除登录态后打开 `/workspace` | 直接进入临时 Workspace，不创建 Room，不要求登录 |
-| WS-002 | P0 | 临时 Workspace 添加图片 | 上传合法图片并刷新页面 | 图片可处理且从当前 Workspace 本地缓存恢复 |
-| WS-003 | P0 | 登录绑定 Workspace | 临时 Workspace 有图片时完成登录 | Workspace 绑定默认固定 Workspace，已有本地内容保留 |
-| WS-004 | P1 | 退出登录隔离 | 固定 Workspace 中添加图片后退出登录 | 创建新的临时 Workspace，不显示原固定 Workspace 私有内容 |
-| WS-005 | P0 | 固定分享链接 | Owner 点击 Copy Workspace Link | 链接包含固定 `workspace_id`，其他成员可通过链接进入 |
+| WS-001 | P0 | 未登录进入 Workspace | 清除登录态后打开 `/workspace` | 直接创建或恢复当前设备的本地 Workspace，不创建 Room，不要求登录 |
+| WS-002 | P0 | 本地 Workspace 添加图片 | 上传合法图片并刷新页面 | 图片可处理且从当前 Workspace 本地缓存恢复 |
+| WS-003 | P0 | 登录状态解耦 | 本地 Workspace 有图片时登录、退出并重新进入 | Workspace ID、图片和业务能力均不因登录状态改变 |
+| WS-004 | P0 | Owner Capability 隔离 | 创建分享链接后只复制 Share URL 到另一个浏览器 | Share URL 不包含 Capability；访客不能读取 Owner 详情、重建链接或签发 Owner Ticket |
+| WS-005 | P0 | 固定分享链接 | Owner 创建 Share Link，再由另一浏览器打开 | 链接包含独立 `share_token` 而非 `workspace_id`，未登录访客可加入 |
 | WS-006 | P1 | Workspace 切换隔离 | 在两个 Workspace 分别添加不同图片并来回切换 | 每个 Workspace 只恢复自己的图片、Style、Activity 和 Commit |
 | WS-007 | P1 | 页面结构 | 分别在无选中图片和选中图片时检查页面 | Header、Image List、Context Panel、Quick Actions 和 Share 区域状态正确 |
 | WS-008 | P2 | 图片上下文 | 选择不同格式和尺寸的图片 | 名称、尺寸、格式、大小、协作状态和 Current Commit 正确更新 |
@@ -102,7 +102,7 @@
 | --- | --- | --- | --- | --- |
 | PRP-001 | P0 | 生成 Proposal | Collaborator 对 Received 图片执行 Crop/Adjust | 生成本地 Preview 和结构化 Operation，携带稳定 `base_commit_id` |
 | PRP-002 | P0 | Proposal 不上传结果图 | 提交 Proposal 并检查实时载荷 | 只发送 Proposal 和 Operation 参数，不发送处理后图片字节 |
-| PRP-003 | P0 | Proposal 身份校验 | 篡改 workspace、author、image 或 operation 归属 | Owner 拒绝非法 Proposal，不进入 Pending Review |
+| PRP-003 | P0 | Proposal 归属校验 | 篡改 workspace、author、image 或 operation 归属 | Owner 端拒绝非法 Proposal，不进入 Pending Review；Worker 不解析业务内容 |
 | PRP-004 | P1 | 重复 Proposal | 使用相同 `proposal_id` 重复提交 | Owner 只保留一条 Pending Proposal |
 | PRP-005 | P1 | 提交失败重试 | 提交时断开连接，再恢复并重试 | 状态为 Failed 后可重试，成功后进入 Pending |
 | PRP-006 | P0 | Owner Apply | Owner 查看 Preview 并 Apply 合法 Proposal | Owner 图片更新，Proposal 变为 Applied，并生成 Commit |
@@ -134,19 +134,19 @@
 | STY-002 | P1 | Style 取消与重置 | 修改后 Cancel，再执行 Reset | Cancel 恢复已保存值；Reset 恢复合法默认 Style |
 | STY-003 | P0 | Style 输入校验 | 输入非法颜色、字号、字重或空标题 | 禁止保存，不注入任意 CSS |
 | STY-004 | P1 | Style 实时同步 | Owner 保存 Style，Collaborator 在线 | Collaborator 接收更高 revision 并更新本地缓存 |
-| STY-005 | P1 | Style 权限 | Collaborator 打开 Workspace Settings | 只能查看，不能提交 Owner Style 修改 |
+| STY-005 | P1 | Style 所有权 | Collaborator 打开 Workspace Settings | 只能查看；Owner 端忽略协作者伪造的 Style 修改，Worker 不解析 Style |
 | STY-006 | P1 | Style 不创建 Commit | Owner 连续保存 Style | 图片 Current Commit 和版本历史不改变 |
 
 ## 9. 缓存、同步与状态机测试（第十二至十四阶段）
 
 | ID | 优先级 | 测试场景 | 操作步骤 | 预期结果 |
 | --- | --- | --- | --- | --- |
-| SYN-001 | P0 | 首次实时连接 | Collaborator 打开固定 Workspace | 状态按 Connecting、Connected、Syncing、Available 推进 |
+| SYN-001 | P0 | 首次实时连接 | Collaborator 打开固定 Share Token 链接 | WebSocket 先连接，状态按 Connecting、Connected、Syncing、Available 推进，同时后台协商 WebRTC |
 | SYN-002 | P0 | Owner 离线与恢复 | Owner 断开后重新上线 | Collaborator 进入 OwnerOffline；上线后先 Syncing，收到快照后 Available |
-| SYN-003 | P0 | WebSocket 断线重连 | 中断网络后恢复 | 状态进入 Unavailable，约 1.5 秒重连，可靠队列和状态快照恢复 |
+| SYN-003 | P0 | 连接断线重连 | 中断当前传输后恢复 | RTC 失效时立即恢复 WebSocket；可靠队列和状态快照恢复，并重新协商 RTC |
 | SYN-004 | P0 | 可靠事件去重 | 重发相同 `eventId` 的 Proposal/Commit | 接收端只处理一次并正常 ACK |
 | SYN-005 | P1 | Sequence Gap | 跳过一个发送端 sequence | Collaborator 进入 Syncing 并发送 `stateRequest`，快照后恢复 Available |
-| SYN-006 | P1 | WebRTC 优先 | DataChannel 可用时发送 Preview/Source | 大数据走有序 DataChannel，控制与可靠事件仍走 WebSocket |
+| SYN-006 | P1 | WebRTC 安全切换 | DataChannel 打开并完成心跳和双向测试 ACK | 排空 WebSocket 可靠队列后切换至 DataChannel，并关闭 WebSocket |
 | SYN-007 | P0 | WebRTC 回退 | 阻止 DataChannel 建立后发送 Preview/Source | 自动回退线上 Worker WebSocket，业务结果一致 |
 | SYN-008 | P1 | TURN 获取失败 | 模拟 TURN 凭证接口失败 | 回退 Cloudflare STUN，不泄露长期凭证 |
 | SYN-009 | P0 | 缓存 TTL | 构造过期 Preview、Source、Commit 和 Activity | 按 30/90/30/30 天规则清理；Owner 本地 Source 不自动过期 |
@@ -154,7 +154,27 @@
 | SYN-011 | P1 | 非法状态转换 | 对 Private 图片直接 Commit，或对终态 Proposal 再 Reject | 状态机拒绝转换，原状态和数据保持不变 |
 | SYN-012 | P1 | 资源释放 | 重复更新 Preview、关闭 Preview、完成 Source 和离开页面 | 旧 ImageBitmap、Blob URL、DataChannel/Worker 相关临时资源被释放 |
 
-## 10. 发布验收标准
+## 10. 自动化验收记录
+
+执行日期：2026-08-19。
+
+| 验证范围 | 结果 | 覆盖阶段 |
+| --- | --- | --- |
+| Workspace 策略、协议、仓储、Source 分块与状态机测试 | 18/18 通过 | 第一、三、五至十、十二至十四阶段 |
+| Web 图片存储契约测试 | 4/4 通过 | 第一、五、六、九、十二阶段 |
+| Desktop 原生存储测试 | 8/8 通过 | 第一、五、六、九、十二阶段 |
+| Core、Network、Protocol、Storage Rust 测试 | 17/17 通过 | 第一、三、四、七至十、十二至十四阶段 |
+| Worker 双客户端、匿名 Ticket、固定 Share Token、不透明文本/二进制转发测试 | 24/24 通过 | 第一、四至六、十三阶段 |
+| UI 与 Web TypeScript 检查 | 通过 | 第二至十四阶段 |
+| Worker dry-run | 通过，Workspace 实时载荷不写入 D1、R2、KV 或 DO Storage | 第一、五、六、九、十三阶段 |
+| Next 生产构建与静态导出 | 通过，`/workspace` 路由已生成 | 第二至十四阶段 |
+| Rust 格式与 Git diff 检查 | 通过 | 全部阶段 |
+
+Worker 集成测试使用两个独立 WebSocket 客户端完成双向文本、二进制和 WebRTC
+信令通信，并检查 Durable Object Storage 只包含短期 Ticket 元数据。浏览器 UI 的跨浏览器
+交互仍按本文件案例作为部署前人工验收，不要求启动本地 Worker。
+
+## 11. 发布验收标准
 
 发布前必须满足：
 
@@ -164,4 +184,5 @@
 - Owner 与 Collaborator 至少完成一次跨浏览器完整闭环。
 - WebRTC 正常路径和 WebSocket 回退路径各完成一次 Source Data 传输。
 - 确认 Worker、D1、R2、KV 和 Durable Object Storage 未持久化图片协作数据。
+- 确认整个 Workspace 流程不依赖 Cookie、登录 Session、成员记录或 Realtime Grant。
 - 未通过的 `P2` 案例需要记录影响范围和后续处理计划。
