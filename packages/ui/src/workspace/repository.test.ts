@@ -2,9 +2,10 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
-  WorkspaceDatabase, listActivities, listCommits, listProposals, listWorkspaceImages,
+  WorkspaceDatabase, deleteWorkspaceImage, listActivities, listCommits, listProposals, listWorkspaceImages,
   promoteLocalWorkspace, purgeExpiredCache, restoreLocalWorkspace, saveActivity, saveCommit,
-  saveProposal, saveWorkspace, saveWorkspaceImage, setWorkspaceDatabaseForTests,
+  readWorkspaceImagePreview, readWorkspaceImageSource, saveProposal, saveWorkspace, saveWorkspaceImage,
+  setWorkspaceDatabaseForTests,
 } from "./repository";
 import { defaultWorkspaceStyle, type WorkspaceIdentity, type WorkspaceImage } from "./types";
 
@@ -34,7 +35,7 @@ function workspace(workspaceId: string, role: "owner" | "collaborator" = "owner"
 
 function image(imageId: string, workspaceId: string): WorkspaceImage {
   return { imageId, workspaceId, name: `${imageId}.png`, mimeType: "image/png", size: 1,
-    width: 1, height: 1, state: "private", shared: false, currentCommitId: null, previewRevision: 0,
+    width: 1, height: 1, workspaceLocation: "library", state: "private", shared: false, currentCommitId: null, previewRevision: 0,
     createdAt: 1, updatedAt: 1,
     source: new Blob([new Uint8Array([1]).buffer as ArrayBuffer], { type: "image/png" }) };
 }
@@ -80,8 +81,44 @@ test("expires collaborator Source and Preview while retaining Owner Source", asy
   await database.cache.where("workspaceId").equals("owner").modify({ expiresAt: 5 });
   await purgeExpiredCache(10);
   const [local] = await listWorkspaceImages("owner");
-  assert.ok(local.source);
-  assert.equal(local.preview, undefined);
+  assert.equal(local.source, undefined);
+  assert.equal(local.sourceCached, true);
+  assert.equal(local.previewCached, false);
+});
+
+test("deleting a collaborator image removes its source and thumbnail cache entries", async () => {
+  await saveWorkspace(workspace("collaborator", "collaborator"));
+  await saveWorkspaceImage({
+    ...image("remote", "collaborator"),
+    preview: new Blob(["preview"], { type: "image/webp" }),
+  });
+  assert.equal(await database.cache.where("workspaceId").equals("collaborator").count(), 2);
+
+  await deleteWorkspaceImage("remote");
+
+  assert.equal(await database.images.get("remote"), undefined);
+  assert.equal(await database.cache.where("workspaceId").equals("collaborator").count(), 0);
+});
+
+test("metadata-only image updates preserve stored source and thumbnail blobs", async () => {
+  await saveWorkspace(workspace("owner"));
+  const original = {
+    ...image("image", "owner"),
+    preview: new Blob(["preview"], { type: "image/webp" }),
+  };
+  await saveWorkspaceImage(original);
+  await saveWorkspaceImage({ ...original, state: "working", workspaceLocation: "working" }, {
+    writeBlobs: false,
+  });
+
+  const [restored] = await listWorkspaceImages("owner");
+  assert.equal(restored.state, "working");
+  assert.equal(restored.source, undefined);
+  assert.equal(restored.preview, undefined);
+  assert.equal(restored.sourceCached, true);
+  assert.equal(restored.previewCached, true);
+  assert.equal(await (await readWorkspaceImageSource(restored))?.text(), String.fromCharCode(1));
+  assert.equal(await (await readWorkspaceImagePreview(restored))?.text(), "preview");
 });
 
 test("keeps only the latest 20 Commit snapshots for each image", async () => {

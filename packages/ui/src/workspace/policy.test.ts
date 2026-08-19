@@ -4,7 +4,7 @@ import { isInboundEventAllowed, validateOperation, validateProposal } from "./po
 import type { WorkspaceImage, WorkspaceOperation, WorkspaceProposal } from "./types";
 
 const image: WorkspaceImage = { imageId: "image", workspaceId: "workspace", name: "image.png",
-  mimeType: "image/png", size: 1, width: 1, height: 1, state: "shared", currentCommitId: "commit",
+  mimeType: "image/png", size: 1, width: 1, height: 1, workspaceLocation: "working", state: "shared", currentCommitId: "commit",
   shared: true, previewRevision: 1, createdAt: 1, updatedAt: 1 };
 const operation: WorkspaceOperation = { operationId: "operation", imageId: "image", authorId: "guest",
   baseCommitId: "commit", type: "resize", parameters: { width: 100, height: 100 }, createdAt: 1 };

@@ -4,6 +4,7 @@ export type WorkspaceRuntimeState =
   | "ownerOffline" | "unavailable";
 export type ImageCollaborationState =
   | "private" | "shared" | "working" | "reviewing" | "committed";
+export type WorkspaceImageLocation = "library" | "working";
 export type ProposalState =
   | "draft" | "submitted" | "pending" | "applied" | "rejected"
   | "deferred" | "failed" | "conflict";
@@ -53,12 +54,17 @@ export type WorkspaceImage = {
   size: number;
   width: number;
   height: number;
+  workspaceLocation: WorkspaceImageLocation;
   state: ImageCollaborationState;
   shared: boolean;
   currentCommitId: string | null;
   previewRevision: number;
+  pinnedAt?: number;
   createdAt: number;
   updatedAt: number;
+  sourceCached?: boolean;
+  previewCached?: boolean;
+  // Blob values are transient and must only exist while an image is being processed.
   source?: Blob;
   preview?: Blob;
   placeholder?: { width: number; height: number; dominantColor: string; blurHash: string };

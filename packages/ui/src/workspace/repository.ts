@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
 import { defaultWorkspaceStyle, type WorkspaceActivity, type WorkspaceCommit, type WorkspaceIdentity, type WorkspaceImage, type WorkspaceProposal } from "./types";
+import { normalizeWorkspaceImageLocation } from "./image-flow";
 import { getImageStorageRepository } from "../database/repositories/image-storage-repository-selector";
 
 type StoredImage = Omit<WorkspaceImage, "source" | "preview"> & { source?: Blob; preview?: Blob };
@@ -98,53 +99,124 @@ export async function listWorkspaceImages(workspaceId: string) {
   const cacheKeys = new Set(cacheEntries.map((entry) => entry.key));
   const repository = getImageStorageRepository();
   return Promise.all(values.map(async (image) => {
-    const normalized = { ...image, shared: image.shared ?? image.state !== "private" };
-    const sourceAvailable = workspace?.role === "owner"
-      || cacheKeys.has(`source:${workspaceId}:${image.imageId}`);
-    const previewAvailable = cacheKeys.has(`preview:${workspaceId}:${image.imageId}`);
-    try {
-      const [source, preview] = await Promise.all([
-        sourceAvailable
-          ? repository.read("room", workspaceId, image.imageId, "original", image.mimeType)
-          : Promise.resolve(null),
-        previewAvailable
-          ? repository.read("room", workspaceId, image.imageId, "thumbnail", image.preview?.type || "image/webp")
-          : Promise.resolve(null),
-      ]);
-      return {
-        ...normalized,
-        source: sourceAvailable ? source || normalized.source : undefined,
-        preview: previewAvailable ? preview || normalized.preview : undefined,
-      };
-    } catch {
-      return {
-        ...normalized,
-        source: sourceAvailable ? normalized.source : undefined,
-        preview: previewAvailable ? normalized.preview : undefined,
-      };
-    }
+    const storageRecord = await repository.get<Record<string, unknown>>(
+      "room", workspaceId, image.imageId,
+    ).catch(() => null);
+    const storedMetadata = storageRecord?.metadata || {};
+    const merged = {
+      ...image,
+      ...storedMetadata,
+    } as StoredImage;
+    const shared = merged.shared ?? merged.state !== "private";
+    const normalized = {
+      ...merged,
+      shared,
+      workspaceLocation: normalizeWorkspaceImageLocation({ ...merged, shared }, workspace?.role || "owner"),
+    };
+    const sourceCached = Boolean(
+      image.sourceCached
+      || image.source
+      || (workspace?.role === "owner" && storageRecord && storageRecord.byteSize > 0)
+      || cacheKeys.has(`source:${workspaceId}:${image.imageId}`),
+    );
+    const previewCached = Boolean(
+      image.previewCached
+      || image.preview
+      || storageRecord?.thumbnailAvailable
+      || cacheKeys.has(`preview:${workspaceId}:${image.imageId}`),
+    );
+    return {
+      ...normalized,
+      sourceCached,
+      previewCached,
+      source: undefined,
+      preview: undefined,
+    };
   }));
 }
-export async function saveWorkspaceImage(image: WorkspaceImage) {
-  const { source, preview, ...metadata } = image;
+
+export async function readWorkspaceImageSource(image: WorkspaceImage) {
+  try {
+    const source = await getImageStorageRepository().read(
+      "room", image.workspaceId, image.imageId, "original", image.mimeType,
+    );
+    if (source) return source;
+  } catch {
+    // IndexedDB is the compatibility fallback when file-backed storage is unavailable.
+  }
+  return (await getWorkspaceDatabase().images.get(image.imageId))?.source ?? null;
+}
+
+export async function readWorkspaceImagePreview(image: WorkspaceImage) {
+  try {
+    const preview = await getImageStorageRepository().read(
+      "room", image.workspaceId, image.imageId, "thumbnail", "image/webp",
+    );
+    if (preview) return preview;
+  } catch {
+    // IndexedDB is the compatibility fallback when file-backed storage is unavailable.
+  }
+  return (await getWorkspaceDatabase().images.get(image.imageId))?.preview ?? null;
+}
+export async function saveWorkspaceImage(
+  image: WorkspaceImage,
+  options: { writeBlobs?: boolean } = {},
+) {
+  const { source, preview, ...rawMetadata } = image;
+  const writeBlobs = options.writeBlobs ?? true;
+  const db = getWorkspaceDatabase();
+  const existing = await db.images.get(image.imageId);
+  const metadata = {
+    ...rawMetadata,
+    sourceCached: rawMetadata.sourceCached || Boolean(source) || existing?.sourceCached || Boolean(existing?.source),
+    previewCached: rawMetadata.previewCached || Boolean(preview) || existing?.previewCached || Boolean(existing?.preview),
+  };
+  if (!writeBlobs) {
+    try {
+      await getImageStorageRepository().put({
+        scope: "room",
+        scopeKey: image.workspaceId,
+        id: image.imageId,
+        metadata: metadata as unknown as Record<string, unknown>,
+        mimeType: image.mimeType,
+        createdAt: image.createdAt,
+      });
+    } catch {
+      // The metadata table below remains the fallback when native/OPFS storage is unavailable.
+    }
+    await db.images.put({ ...existing, ...metadata });
+    return;
+  }
   try {
     await getImageStorageRepository().put({ scope: "room", scopeKey: image.workspaceId, id: image.imageId,
-      metadata: metadata as unknown as Record<string, unknown>, mimeType: image.mimeType, data: source,
-      thumbnail: preview, thumbnailMimeType: preview?.type, createdAt: image.createdAt });
-    await getWorkspaceDatabase().images.put(metadata);
+      metadata: metadata as unknown as Record<string, unknown>, mimeType: image.mimeType,
+      data: writeBlobs ? source : undefined, thumbnail: writeBlobs ? preview : undefined,
+      thumbnailMimeType: writeBlobs ? preview?.type : undefined, createdAt: image.createdAt });
+    await db.images.put(metadata);
   } catch {
     // IndexedDB Blob fallback is used only where OPFS/native storage is unavailable.
-    await getWorkspaceDatabase().images.put(image);
+    await db.images.put(image);
   }
-  const now=Date.now(),workspace=await getWorkspaceDatabase().workspaces.get(image.workspaceId),entries:CacheEntry[]=[];
+  const now=Date.now(),workspace=await db.workspaces.get(image.workspaceId),entries:CacheEntry[]=[];
   if(preview)entries.push({key:`preview:${image.workspaceId}:${image.imageId}`,workspaceId:image.workspaceId,kind:"preview",accessedAt:now,expiresAt:now+30*DAY});
   if(source&&workspace?.role==="collaborator")entries.push({key:`source:${image.workspaceId}:${image.imageId}`,workspaceId:image.workspaceId,kind:"source",accessedAt:now,expiresAt:now+90*DAY});
-  if(entries.length)await getWorkspaceDatabase().cache.bulkPut(entries);
+  if(entries.length)await db.cache.bulkPut(entries);
 }
 export async function deleteWorkspaceImage(imageId: string) {
-  const image = await getWorkspaceDatabase().images.get(imageId);
+  const db = getWorkspaceDatabase();
+  const image = await db.images.get(imageId);
   if (image) await getImageStorageRepository().delete("room", image.workspaceId, imageId).catch(() => undefined);
-  await getWorkspaceDatabase().images.delete(imageId);
+  const cacheKeys = image
+    ? (await db.cache.where("workspaceId").equals(image.workspaceId)
+      .filter((entry) => (entry.kind === "preview" || entry.kind === "source")
+        && entry.key.endsWith(`:${imageId}`))
+      .toArray())
+      .map((entry) => entry.key)
+    : [];
+  await db.transaction("rw", db.images, db.cache, async () => {
+    await db.images.delete(imageId);
+    if (cacheKeys.length) await db.cache.bulkDelete(cacheKeys);
+  });
 }
 export async function saveProposal(value: WorkspaceProposal) { await getWorkspaceDatabase().proposals.put(value); }
 export async function listProposals(workspaceId: string) { return getWorkspaceDatabase().proposals.where("workspaceId").equals(workspaceId).sortBy("createdAt"); }
@@ -174,7 +246,7 @@ export async function purgeExpiredCache(now = Date.now()) {
   const db=getWorkspaceDatabase(),table = db.cache;
   const expired = await table.filter((item) => item.expiresAt !== null && item.expiresAt <= now).toArray();
   const repository = getImageStorageRepository();
-  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined});await repository.deleteVariant("room",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit?.snapshot)await db.commits.put({...commit,snapshot:undefined});}else if(entry.kind==="activity")await db.activities.delete(recordId);}
+  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined,[entry.kind==="preview"?"previewCached":"sourceCached"]:false});await repository.deleteVariant("room",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit?.snapshot)await db.commits.put({...commit,snapshot:undefined});}else if(entry.kind==="activity")await db.activities.delete(recordId);}
   await table.bulkDelete(expired.map((item) => item.key));
   await repository.pruneCache({maxBytes:512*1024*1024,maxAgeMillis:90*DAY}).catch(()=>undefined);
   return expired.length;

@@ -112,6 +112,7 @@ export class WorkspaceRealtimeClient {
   async connect() {
     this.disposed = false;
     const ticket = await realtimeTicket(this.workspace, this.localClientId);
+    if (this.disposed) return;
     this.iceServers = ticket.iceServers;
     if (this.workspace.role === "collaborator" && ticket.workspaceId) {
       this.workspace.workspaceId = ticket.workspaceId;
