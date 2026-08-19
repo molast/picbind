@@ -67,10 +67,12 @@ pnpm dev
 该命令会启动现有 Web 开发服务并打开 PicBind 桌面窗口。详细环境和检查命令见
 `docs/tauri/development.md`。
 
-## 本地 Web 开发
+## 本地 Desktop 开发
 
-本地只运行 Web 前端。Room、Durable Object、R2、KV 和其他 Worker API 统一请求
-已部署的 `https://api.picbind.com`；Web 不提供微信 Bot。从仓库根目录运行：
+macOS、Linux、Git Bash 和 WSL 下的脚本会显示阻塞式菜单，可以选择启动 Tauri
+Desktop 开发环境、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
+模式下由 Tauri 的 `beforeDevCommand` 启动唯一的 Web 服务。Room、Durable Object、
+R2、KV 和其他 Worker API 统一请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
 
 ```bash
 # macOS / Linux / Git Bash / WSL
@@ -83,8 +85,10 @@ dev-local.cmd
 .\dev-local.cmd
 ```
 
-前端地址为 `http://localhost:3000`。按 `Ctrl+C` 停止 Web 进程。修改 Worker 后必须
-部署到 Cloudflare，Web 才会使用到新实现。
+选择 Desktop development 后，Desktop 会加载
+`http://localhost:3000/tauri-dev.html`。所选任务会一直占用当前终端；按 `Ctrl+C` 会
+同时停止 Tauri 和 Web 进程，不会遗留 `3000` 端口。修改 Worker 后必须部署到
+Cloudflare，应用才会使用到新实现。
 
 ## WASM 构建
 

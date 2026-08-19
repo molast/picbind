@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const webDir = join(rootDir, "web");
+const desktopDir = join(rootDir, "desktop");
 const isWindows = process.platform === "win32";
 const packageManager = "pnpm";
 const children = new Map();
@@ -96,4 +97,12 @@ process.once("SIGINT", () => void shutdown(130));
 process.once("SIGTERM", () => void shutdown(143));
 
 ensurePnpm();
-start("Web app", webDir);
+const mode = process.argv[2] || "desktop";
+if (mode === "desktop") {
+  start("Desktop app", desktopDir);
+} else if (mode === "web") {
+  start("Web app", webDir);
+} else {
+  console.error(`Unknown local development mode: ${mode}`);
+  process.exit(2);
+}

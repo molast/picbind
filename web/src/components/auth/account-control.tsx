@@ -7,6 +7,7 @@ import React from "react";
 import { FiLoader, FiLogIn, FiLogOut } from "react-icons/fi";
 import { useAuth } from "./auth-provider";
 import type { Lang } from "@/locales";
+import { resolveAuthAvatar } from "@/utils/auth-service";
 
 function initials(name: string | null | undefined, email: string | null | undefined) {
   const label = name?.trim() || email?.split("@")[0] || "PB";
@@ -22,14 +23,27 @@ export default function AccountControl({ lang }: { lang: Lang }) {
   const [open, setOpen] = React.useState(false);
   const [avatarLoaded, setAvatarLoaded] = React.useState(false);
   const [avatarFailed, setAvatarFailed] = React.useState(false);
+  const [avatarSource, setAvatarSource] = React.useState<string | null>(null);
   const user = auth.state.user;
-  const avatar = user?.avatar && !avatarFailed ? user.avatar : null;
+  const avatar = !avatarFailed ? avatarSource : null;
   const label = initials(user?.name, user?.email);
 
   React.useEffect(() => {
+    let active = true;
     setAvatarLoaded(false);
     setAvatarFailed(false);
-  }, [user?.avatar]);
+    setAvatarSource(null);
+    void resolveAuthAvatar(user?.avatar || null)
+      .then((source) => {
+        if (active) setAvatarSource(source);
+      })
+      .catch(() => {
+        if (active) setAvatarFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.avatar, user?.updatedAt]);
 
   if (!auth.state.authenticated || !user) {
     return (
@@ -45,7 +59,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
       <button type="button" aria-label={lang === "zh" ? "账户" : "Account"} aria-expanded={open} onClick={() => setOpen((value) => !value)} className="block h-10 w-10 rounded-full p-0.5 ring-2 ring-white/70 transition hover:ring-white">
         <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#2f65cf] text-[12px] font-bold text-white">
           <span aria-hidden="true">{label}</span>
-          {avatar ? <img src={avatar} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
+          {avatar ? <img src={avatar} crossOrigin={avatar.startsWith("data:") ? undefined : "anonymous"} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
         </span>
       </button>
       {open ? (
@@ -55,7 +69,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
             <div className="flex min-w-0 items-center gap-3 border-b border-slate-100 px-1 pb-3">
               <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#2f65cf] text-[13px] font-bold text-white">
                 <span aria-hidden="true">{label}</span>
-                {avatar ? <img src={avatar} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
+                {avatar ? <img src={avatar} crossOrigin={avatar.startsWith("data:") ? undefined : "anonymous"} alt="" onLoad={() => setAvatarLoaded(true)} onError={() => setAvatarFailed(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity ${avatarLoaded ? "opacity-100" : "opacity-0"}`} /> : null}
               </span>
               <div className="min-w-0">
                 <strong className="block truncate text-[14px]">{user.name || user.email || (lang === "zh" ? "账户" : "Account")}</strong>

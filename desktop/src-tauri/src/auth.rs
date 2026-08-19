@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -7,6 +8,7 @@ use tokio::{
 
 const DEFAULT_API_BASE: &str = "https://api.picbind.com/api";
 const OAUTH_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const MAX_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +61,76 @@ fn api_base() -> &'static str {
 
 fn api_error(error: ApiError) -> String {
     format!("{}:{}", error.code, error.message)
+}
+
+fn allowed_avatar_url(raw: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw).map_err(|_| "avatar_invalid:Invalid avatar URL")?;
+    let allowed_host = matches!(
+        url.host_str(),
+        Some("avatars.githubusercontent.com" | "lh3.googleusercontent.com")
+    );
+    if url.scheme() != "https"
+        || !allowed_host
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("avatar_invalid:Avatar host is not allowed".into());
+    }
+    Ok(url)
+}
+
+#[tauri::command]
+pub async fn desktop_auth_avatar_data_url(url: String) -> Result<String, String> {
+    let url = allowed_avatar_url(&url)?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| format!("avatar_unavailable:{error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("avatar_unavailable:{error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "avatar_unavailable:Avatar returned {}",
+            response.status()
+        ));
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_AVATAR_BYTES)
+    {
+        return Err("avatar_too_large:Avatar exceeds 2 MiB".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if !matches!(
+        content_type.as_str(),
+        "image/gif" | "image/jpeg" | "image/png" | "image/webp"
+    ) {
+        return Err("avatar_invalid:Avatar response is not a supported image".into());
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("avatar_unavailable:{error}"))?;
+    if bytes.len() as u64 > MAX_AVATAR_BYTES {
+        return Err("avatar_too_large:Avatar exceeds 2 MiB".into());
+    }
+    Ok(format!(
+        "data:{content_type};base64,{}",
+        BASE64_STANDARD.encode(bytes)
+    ))
 }
 
 async fn post_auth<T: Serialize>(path: &str, body: &T, origin: &str) -> Result<AuthState, String> {
@@ -222,7 +294,7 @@ pub async fn desktop_auth_oauth(provider: String) -> Result<AuthState, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::query_value;
+    use super::{allowed_avatar_url, query_value};
 
     #[test]
     fn reads_and_decodes_oauth_callback_values() {
@@ -233,5 +305,14 @@ mod tests {
         );
         assert_eq!(query_value(target, "auth_code").as_deref(), Some("a+b"));
         assert_eq!(query_value(target, "missing"), None);
+    }
+
+    #[test]
+    fn allows_only_google_and_github_avatar_hosts() {
+        assert!(allowed_avatar_url("https://lh3.googleusercontent.com/a/example=s96-c").is_ok());
+        assert!(allowed_avatar_url("https://avatars.githubusercontent.com/u/1?v=4").is_ok());
+        assert!(allowed_avatar_url("http://lh3.googleusercontent.com/a/example").is_err());
+        assert!(allowed_avatar_url("https://lh3.googleusercontent.com.evil.test/a").is_err());
+        assert!(allowed_avatar_url("https://example.com/avatar.png").is_err());
     }
 }

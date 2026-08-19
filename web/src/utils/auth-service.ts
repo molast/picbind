@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.picbind.com")
   .replace(/\/+$/, "");
 const AUTH_CACHE_KEY = "picbind:auth-cache:v1";
+const AVATAR_CACHE_KEY = "picbind:auth-avatar-cache:v1";
 const LAST_PROVIDER_KEY = "picbind:last-oauth-provider";
 
 export type OAuthProvider = "google" | "github";
@@ -36,6 +37,25 @@ export const anonymousAuthState = (): AuthState => ({
   authenticated: false,
   user: null,
 });
+
+export async function resolveAuthAvatar(avatar: string | null) {
+  if (!avatar) return null;
+  if (!isTauri()) return avatar;
+  try {
+    const cached = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || "null") as {
+      source?: string;
+      dataUrl?: string;
+    } | null;
+    if (cached?.source === avatar && cached.dataUrl?.startsWith("data:image/")) {
+      return cached.dataUrl;
+    }
+  } catch {}
+  const dataUrl = await invoke<string>("desktop_auth_avatar_data_url", { url: avatar });
+  try {
+    localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify({ source: avatar, dataUrl }));
+  } catch {}
+  return dataUrl;
+}
 
 function normalizeState(value: Partial<AuthState> | null | undefined): AuthState {
   return value?.authenticated && value.user
@@ -181,6 +201,9 @@ export const authService = {
     }
     const state = anonymousAuthState();
     writeCache(state);
+    try {
+      localStorage.removeItem(AVATAR_CACHE_KEY);
+    } catch {}
     return state;
   },
 };

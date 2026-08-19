@@ -41,6 +41,7 @@ pub fn run() {
             auth::desktop_auth_login,
             auth::desktop_auth_register,
             auth::desktop_auth_oauth,
+            auth::desktop_auth_avatar_data_url,
             download::commands::save_download,
             storage::commands::storage_put_image,
             storage::commands::storage_get_image,
