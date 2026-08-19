@@ -17,9 +17,47 @@ type SendOptions = {
   delivery?: RelayDelivery;
   dataClass?: WorkspaceEvent["dataClass"];
 };
+type PendingFrame = {
+  frame: string | ArrayBuffer;
+  delivery: RelayDelivery;
+  dataClass: WorkspaceEvent["dataClass"];
+};
+type Probe = { sentAt: number; qualification: boolean; timeout: number };
+type PeerState = {
+  key: string;
+  userId: string;
+  pc: RTCPeerConnection;
+  control: RTCDataChannel | null;
+  bulk: RTCDataChannel | null;
+  candidates: RTCIceCandidateInit[];
+  probes: Map<string, Probe>;
+  qualificationRtts: number[];
+  healthOutcomes: boolean[];
+  healthRtts: number[];
+  healthTimer: number | null;
+  qualificationStartedAt: number;
+  disconnectedAt: number;
+  degradedSince: number;
+  localReadyEpoch: number;
+  remoteReadyEpoch: number;
+  primary: boolean;
+  fallingBack: boolean;
+};
 
 const CLIENT_ID_KEY = "picbind.workspace.client-id";
-const PROTOCOL = "picbind.workspace.v2";
+const RTC_QUALITY = Object.freeze({
+  requiredQualificationProbes: 3,
+  maximumQualificationRttMs: 500,
+  minimumStableMs: 2_000,
+  healthIntervalMs: 2_000,
+  probeTimeoutMs: 2_500,
+  disconnectedFallbackMs: 3_000,
+  maximumBufferedBytes: 1024 * 1024,
+  degradedRttMs: 1_500,
+  degradedWindowMs: 5_000,
+  maximumLossRate: 0.3,
+  healthWindowSize: 10,
+});
 
 function persistentClientId() {
   let value = localStorage.getItem(CLIENT_ID_KEY);
@@ -32,11 +70,9 @@ function persistentClientId() {
 
 export class WorkspaceRealtimeClient {
   private socket: WebSocket | null = null;
-  private peer: RTCPeerConnection | null = null;
-  private control: RTCDataChannel | null = null;
-  private bulk: RTCDataChannel | null = null;
+  private readonly peers = new Map<string, PeerState>();
   private readonly listeners = new Set<Listener>();
-  private readonly reliable = new Map<string, string | ArrayBuffer>();
+  private readonly reliable = new Map<string, PendingFrame>();
   private readonly reliableTypes = new Map<string, string>();
   private readonly sequences = new Map<string, number>();
   private readonly eventGate = new WorkspaceEventGate();
@@ -45,16 +81,9 @@ export class WorkspaceRealtimeClient {
   private readonly localClientId = persistentClientId();
   private readonly localUserId: string;
   private reconnectTimer: number | null = null;
-  private healthTimer: number | null = null;
+  private reconnectAttempt = 0;
   private disposed = false;
-  private transportEpoch = 0;
-  private peerTarget: string | undefined;
-  private rtcOpenedAt = 0;
-  private localRtcReady = false;
-  private remoteRtcReady = false;
-  private qualificationProbes = new Set<string>();
-  private acknowledgedProbes = new Set<string>();
-  private pendingIceCandidates: RTCIceCandidateInit[] = [];
+  private ownerOnline = false;
   private iceServers: RTCIceServer[] = [];
   state: "idle" | "socket" | "rtc" | "unavailable" = "idle";
 
@@ -92,37 +121,43 @@ export class WorkspaceRealtimeClient {
       "https://api.picbind.com",
     );
     url.protocol = "wss:";
-    const socket = new WebSocket(url, [PROTOCOL, `picbind.ticket.${ticket.ticket}`]);
+    url.searchParams.set("ticket", ticket.ticket);
+    const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onopen = () => {
-      this.state = "socket";
+      this.reconnectAttempt = 0;
+      this.state = this.hasPrimaryPeer() ? "rtc" : "socket";
       this.flushReliable();
-      this.startRtc();
     };
     socket.onmessage = (message) => this.receive(message.data as string | ArrayBuffer, "socket");
     socket.onerror = () => {
-      if (this.state !== "rtc") this.state = "unavailable";
+      if (!this.hasPrimaryPeer()) this.state = "unavailable";
     };
-    socket.onclose = (event) => {
+    socket.onclose = () => {
       if (this.socket === socket) this.socket = null;
       if (this.disposed) return;
-      if (event.code === 1000 && event.reason === "rtc-promoted" && this.state === "rtc") return;
-      this.state = "unavailable";
-      this.stopPeer();
+      this.state = this.hasPrimaryPeer() ? "rtc" : "unavailable";
       this.scheduleReconnect();
     };
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer !== null || this.disposed) return;
+    const baseDelay = Math.min(1_500 * (2 ** this.reconnectAttempt), 15_000);
+    const delay = Math.floor(baseDelay * (0.8 + Math.random() * 0.4));
+    this.reconnectAttempt += 1;
     this.reconnectTimer = this.schedule(() => {
       this.reconnectTimer = null;
       void this.connect().catch(() => this.scheduleReconnect());
-    }, 1_500);
+    }, delay);
   }
 
-  private receive(raw: string | ArrayBuffer, transport: Transport) {
+  private peerKey(senderId?: string) {
+    return this.workspace.role === "collaborator" ? "owner" : senderId || "";
+  }
+
+  private receive(raw: string | ArrayBuffer, transport: Transport, rtcPeer?: PeerState) {
     let value: Record<string, unknown>;
     if (raw instanceof ArrayBuffer) {
       const decoded = decodeBinaryRelay(raw);
@@ -139,7 +174,7 @@ export class WorkspaceRealtimeClient {
     if (value.type === "eventAck" && typeof value.eventId === "string") {
       this.reliable.delete(value.eventId);
       this.reliableTypes.delete(value.eventId);
-      this.qualifyRtc();
+      this.peers.forEach((peer) => this.qualifyPeer(peer));
       return;
     }
     if (value.type === "eventNack" && typeof value.eventId === "string") {
@@ -147,71 +182,89 @@ export class WorkspaceRealtimeClient {
       this.reliable.delete(value.eventId);
       this.reliableTypes.delete(value.eventId);
       this.emit({ type: "deliveryFailed", eventId: value.eventId, eventType });
-      this.qualifyRtc();
+      this.peers.forEach((peer) => this.qualifyPeer(peer));
       return;
     }
-    if (value.type === "rtcProbe" && typeof value.probeId === "string") {
-      this.sendRtcControl({ type: "rtcProbeAck", probeId: value.probeId });
+    if (value.type === "rtcProbe" && typeof value.probeId === "string" && rtcPeer) {
+      this.sendPeerControl(rtcPeer, { type: "rtcProbeAck", probeId: value.probeId });
       return;
     }
-    if (value.type === "rtcProbeAck" && typeof value.probeId === "string") {
-      this.acknowledgedProbes.add(value.probeId);
-      this.qualifyRtc();
+    if (value.type === "rtcProbeAck" && typeof value.probeId === "string" && rtcPeer) {
+      this.ackProbe(rtcPeer, value.probeId);
       return;
     }
-    if (value.type === "peerLeaving") {
-      if (this.workspace.role === "owner" && this.peerTarget) {
-        const userId = this.peerTarget;
+    if (value.type === "peerLeaving" && rtcPeer) {
+      const userId = rtcPeer.userId;
+      this.fallbackPeer(rtcPeer, "peer-left", false);
+      if (this.workspace.role === "owner") {
         this.onlineCollaborators.delete(userId);
         this.emit({ type: "memberLeft", userId, role: "collaborator", transport: "rtc" });
       } else {
+        this.ownerOnline = false;
         this.emit({ type: "ownerPresence", online: false, transport: "rtc" });
       }
-      this.fallbackToSocket(false, false);
       return;
     }
     if (value.type === "transportReady") {
-      this.remoteRtcReady = true;
-      this.promoteRtc();
+      const peer = rtcPeer || this.peers.get(this.peerKey(String(value.senderId || "")));
+      if (peer) this.handleTransportReady(peer, value);
       return;
     }
     if (value.type === "transportFallback") {
-      this.fallbackToSocket(false, false);
+      const peer = rtcPeer || this.peers.get(this.peerKey(String(value.senderId || "")));
+      if (peer) this.fallbackPeer(peer, String(value.reason || "peer-requested"));
       return;
     }
-    if (value.type === "webRtcOffer"
-      || value.type === "webRtcAnswer"
-      || value.type === "webRtcIceCandidate") {
-      void this.handleSignal(value).catch(() => this.fallbackToSocket());
+    if (value.type === "webrtcOffer"
+      || value.type === "webrtcAnswer"
+      || value.type === "webrtcIceCandidate") {
+      void this.handleSignal(value).catch(() => {
+        const peer = this.peers.get(this.peerKey(String(value.senderId || "")));
+        if (peer) this.fallbackPeer(peer, "signal-failed");
+      });
       return;
     }
 
-    if (value.type === "connected" && this.workspace.role === "owner") {
-      this.onlineCollaborators.clear();
-      if (Array.isArray(value.members)) {
-        for (const member of value.members as Array<Record<string, unknown>>) {
-          if (member.role === "collaborator" && typeof member.userId === "string") {
-            this.onlineCollaborators.add(member.userId);
+    if (value.type === "connected") {
+      this.ownerOnline = value.ownerOnline === true || this.workspace.role === "owner";
+      if (this.workspace.role === "owner") {
+        this.onlineCollaborators.clear();
+        if (Array.isArray(value.members)) {
+          for (const member of value.members as Array<Record<string, unknown>>) {
+            if (member.role === "collaborator" && typeof member.userId === "string") {
+              this.onlineCollaborators.add(member.userId);
+            }
           }
         }
+        this.peers.forEach((peer) => {
+          if (peer.primary) this.onlineCollaborators.add(peer.userId);
+        });
+      } else if (this.ownerOnline) {
+        this.offerOwner();
       }
-      this.negotiateOnlyCollaborator();
     } else if (value.type === "memberJoined"
       && this.workspace.role === "owner"
       && typeof value.userId === "string") {
       this.onlineCollaborators.add(value.userId);
-      this.negotiateOnlyCollaborator();
     } else if (value.type === "memberLeft"
       && this.workspace.role === "owner"
       && typeof value.userId === "string") {
-      this.onlineCollaborators.delete(value.userId);
-      this.negotiateOnlyCollaborator();
+      const peer = this.peers.get(value.userId);
+      if (!peer?.primary) {
+        this.onlineCollaborators.delete(value.userId);
+        if (peer) this.fallbackPeer(peer, "peer-left", false);
+      }
+    } else if (value.type === "ownerPresence" && this.workspace.role === "collaborator") {
+      const peer = this.peers.get("owner");
+      this.ownerOnline = value.online === true || Boolean(peer?.primary);
+      value = { ...value, online: this.ownerOnline };
+      if (value.online === true) this.offerOwner();
     }
 
     if (value.type === "workspaceRelay" && value.event && typeof value.event === "object") {
       const event = value.event as WorkspaceEvent;
-      if (transport === "rtc" && event.reliability === "reliable") {
-        this.sendRtcControl({ type: "eventAck", eventId: event.eventId });
+      if (transport === "rtc" && event.reliability === "reliable" && rtcPeer) {
+        this.sendPeerControl(rtcPeer, { type: "eventAck", eventId: event.eventId });
       }
       const disposition = this.eventGate.accept(event);
       if (disposition === "duplicate") return;
@@ -246,19 +299,9 @@ export class WorkspaceRealtimeClient {
 
   send(type: string, payload: Record<string, unknown>, options: SendOptions = {}) {
     const event = this.nextEvent(type, payload, options);
-    const envelope = JSON.stringify({
-      type: "workspaceRelay",
-      version: 1,
-      route: options.route || "workspace",
-      targetUserId: options.targetUserId,
-      delivery: options.delivery || "reliable",
-      event,
-    });
-    if ((options.delivery || "reliable") === "reliable") {
-      this.reliable.set(event.eventId, envelope);
-      this.reliableTypes.set(event.eventId, type);
-    }
-    this.sendFrame(envelope, options, event.dataClass);
+    const frame = this.encodeJsonFrame(event, options.route || "workspace", options.targetUserId);
+    this.rememberReliable(event, frame, options);
+    this.routeFrame(frame, event, options);
     return event.eventId;
   }
 
@@ -276,243 +319,430 @@ export class WorkspaceRealtimeClient {
       event,
       bytes: binary,
     });
-    if (options.delivery === "reliable") {
-      this.reliable.set(event.eventId, frame);
-      this.reliableTypes.set(event.eventId, type);
-    }
-    this.sendFrame(frame, options, event.dataClass);
+    this.rememberReliable(event, frame, options);
+    this.routeFrame(frame, event, options);
     return event.eventId;
   }
 
-  private sendFrame(
-    frame: string | ArrayBuffer,
-    options: Pick<SendOptions, "delivery">,
-    dataClass: WorkspaceEvent["dataClass"],
-  ) {
-    if (this.state === "rtc") {
-      const channel = options.delivery === "bulk"
-        || dataClass === "preview"
-        || dataClass === "sourceOrCommit"
-        ? this.bulk
-        : this.control;
-      if (channel?.readyState === "open") {
-        try {
-          if (typeof frame === "string") channel.send(frame);
-          else channel.send(frame);
-          return;
-        } catch {
-          this.fallbackToSocket();
-        }
-      }
+  private encodeJsonFrame(event: WorkspaceEvent, route: RelayRoute, targetUserId?: string) {
+    return JSON.stringify({
+      type: "workspaceRelay",
+      version: 1,
+      route,
+      targetUserId,
+      delivery: event.reliability,
+      event,
+    });
+  }
+
+  private rememberReliable(event: WorkspaceEvent, frame: string | ArrayBuffer, options: SendOptions) {
+    if (event.reliability !== "reliable") return;
+    this.reliable.set(event.eventId, {
+      frame,
+      delivery: options.delivery || "reliable",
+      dataClass: event.dataClass,
+    });
+    this.reliableTypes.set(event.eventId, event.type);
+  }
+
+  private routeFrame(frame: string | ArrayBuffer, event: WorkspaceEvent, options: SendOptions) {
+    if (this.workspace.role === "collaborator") {
+      const peer = this.peers.get("owner");
+      if (peer?.primary && this.sendPeerFrame(peer, frame, event)) return;
+      this.sendSocket(frame);
+      return;
     }
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(frame);
+    if (options.route === "user" && options.targetUserId) {
+      const peer = this.peers.get(options.targetUserId);
+      if (peer?.primary && this.sendPeerFrame(peer, frame, event)) return;
+      this.sendSocket(frame);
+      return;
+    }
+    if ((options.route || "workspace") !== "workspace" || this.onlineCollaborators.size === 0) {
+      this.sendSocket(frame);
+      return;
+    }
+    for (const userId of this.onlineCollaborators) {
+      const peer = this.peers.get(userId);
+      if (peer?.primary && this.sendPeerFrame(peer, frame, event)) continue;
+      this.sendSocket(this.targetFrame(frame, userId));
+    }
+  }
+
+  private targetFrame(frame: string | ArrayBuffer, targetUserId: string) {
+    if (typeof frame === "string") {
+      const envelope = JSON.parse(frame) as { event: WorkspaceEvent };
+      return this.encodeJsonFrame(envelope.event, "user", targetUserId);
+    }
+    const decoded = decodeBinaryRelay(frame);
+    if (!decoded) return frame;
+    return encodeBinaryRelay({
+      route: "user",
+      targetUserId,
+      delivery: decoded.event.reliability === "reliable" ? "reliable" : "bulk",
+      event: decoded.event,
+      bytes: decoded.bytes,
+    });
+  }
+
+  private sendPeerFrame(peer: PeerState, frame: string | ArrayBuffer, event: WorkspaceEvent) {
+    const channel = event.reliability === "bulk"
+      || event.dataClass === "preview"
+      || event.dataClass === "sourceOrCommit"
+      ? peer.bulk
+      : peer.control;
+    if (channel?.readyState !== "open") return false;
+    try {
+      if (typeof frame === "string") channel.send(frame);
+      else channel.send(frame);
+      return true;
+    } catch {
+      this.fallbackPeer(peer, "send-failed");
+      return false;
+    }
+  }
+
+  private sendSocket(frame: string | ArrayBuffer) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(frame);
+    return true;
   }
 
   private flushReliable() {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
-    this.reliable.forEach((value) => this.socket?.send(value));
+    this.reliable.forEach(({ frame }) => this.socket?.send(frame));
   }
 
   private sendSignal(value: Record<string, unknown>) {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(value));
   }
 
-  private startRtc() {
-    this.stopPeer();
-    const peer = new RTCPeerConnection({ iceServers: this.iceServers });
-    this.peer = peer;
-    peer.onicecandidate = ({ candidate }) => {
+  private createPeer(key: string, userId: string, initiator: boolean) {
+    const existing = this.peers.get(key);
+    if (existing) this.stopPeer(existing);
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    const peer: PeerState = {
+      key,
+      userId,
+      pc,
+      control: null,
+      bulk: null,
+      candidates: [],
+      probes: new Map(),
+      qualificationRtts: [],
+      healthOutcomes: [],
+      healthRtts: [],
+      healthTimer: null,
+      qualificationStartedAt: 0,
+      disconnectedAt: 0,
+      degradedSince: 0,
+      localReadyEpoch: 0,
+      remoteReadyEpoch: 0,
+      primary: false,
+      fallingBack: false,
+    };
+    this.peers.set(key, peer);
+    pc.onicecandidate = ({ candidate }) => {
       if (!candidate) return;
       this.sendSignal({
-        type: "webRtcIceCandidate",
-        targetRole: this.workspace.role === "owner" ? undefined : "owner",
-        targetUserId: this.peerTarget,
-        candidate,
+        type: "webrtcIceCandidate",
+        targetRole: this.workspace.role === "collaborator" ? "owner" : undefined,
+        targetUserId: this.workspace.role === "owner" ? peer.userId : undefined,
+        candidate: candidate.toJSON(),
       });
     };
-    peer.ondatachannel = ({ channel }) => this.attachChannel(channel);
-    peer.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(peer.connectionState)) {
-        this.fallbackToSocket();
+    pc.ondatachannel = ({ channel }) => this.attachChannel(peer, channel);
+    pc.onconnectionstatechange = () => {
+      if (["failed", "closed"].includes(pc.connectionState)) {
+        this.fallbackPeer(peer, "peer-failed");
+      } else if (pc.connectionState === "connected") {
+        peer.disconnectedAt = 0;
+        this.startQualification(peer);
       }
     };
-  }
-
-  private negotiateOnlyCollaborator() {
-    if (this.workspace.role !== "owner" || this.socket?.readyState !== WebSocket.OPEN) return;
-    if (this.onlineCollaborators.size !== 1) {
-      this.fallbackToSocket(false);
-      return;
+    if (initiator) {
+      this.attachChannel(peer, pc.createDataChannel("workspace-control", { ordered: true }));
+      this.attachChannel(peer, pc.createDataChannel("workspace-bulk", { ordered: true }));
     }
-    const [target] = this.onlineCollaborators;
-    if (this.peerTarget === target && this.peer) return;
-    this.startRtc();
-    void this.createOffer(target).catch(() => this.fallbackToSocket());
+    return peer;
   }
 
-  private async createOffer(targetUserId: string) {
-    const peer = this.peer;
-    if (!peer) return;
-    this.peerTarget = targetUserId;
-    this.attachChannel(peer.createDataChannel("workspace-control", { ordered: true }));
-    this.attachChannel(peer.createDataChannel("workspace-bulk", { ordered: true }));
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    this.sendSignal({ type: "webRtcOffer", sdp: offer.sdp, targetUserId });
-  }
-
-  private attachChannel(channel: RTCDataChannel) {
-    if (channel.label === "workspace-bulk") this.bulk = channel;
-    else this.control = channel;
-    channel.binaryType = "arraybuffer";
-    channel.onmessage = (message) => this.receive(message.data as string | ArrayBuffer, "rtc");
-    channel.onclose = () => this.fallbackToSocket();
-    channel.onopen = () => {
-      if (channel.label !== "workspace-control") {
-        this.qualifyRtc();
-        return;
-      }
-      this.rtcOpenedAt = Date.now();
-      this.qualificationProbes.clear();
-      this.acknowledgedProbes.clear();
-      for (let index = 0; index < 3; index += 1) {
-        const probeId = crypto.randomUUID();
-        this.qualificationProbes.add(probeId);
-        this.schedule(() => this.sendRtcControl({ type: "rtcProbe", probeId }), index * 200);
-      }
-      this.schedule(() => this.qualifyRtc(), 2_100);
-    };
-  }
-
-  private sendRtcControl(value: Record<string, unknown>) {
-    if (this.control?.readyState === "open") this.control.send(JSON.stringify(value));
-  }
-
-  private qualifyRtc() {
-    const probesAcknowledged = [...this.qualificationProbes]
-      .every((probeId) => this.acknowledgedProbes.has(probeId));
-    if (this.localRtcReady
-      || this.control?.readyState !== "open"
-      || this.bulk?.readyState !== "open"
-      || this.qualificationProbes.size !== 3
-      || !probesAcknowledged
-      || Date.now() - this.rtcOpenedAt < 2_000
-      || this.reliable.size > 0) return;
-    this.localRtcReady = true;
-    this.transportEpoch += 1;
-    this.sendSignal({
-      type: "transportReady",
-      transportEpoch: this.transportEpoch,
-      transport: "webRtcDataChannel",
-      targetRole: this.workspace.role === "owner" ? undefined : "owner",
-      targetUserId: this.peerTarget,
-    });
-    this.promoteRtc();
-  }
-
-  private promoteRtc() {
-    if (!this.localRtcReady || !this.remoteRtcReady) return;
-    if (this.workspace.role === "owner" && this.onlineCollaborators.size !== 1) return;
-    this.state = "rtc";
-    if (this.workspace.role === "collaborator") this.socket?.close(1000, "rtc-promoted");
-    this.startHealthChecks();
-  }
-
-  private startHealthChecks() {
-    if (this.healthTimer !== null) window.clearInterval(this.healthTimer);
-    this.healthTimer = window.setInterval(() => {
-      if (this.control?.readyState !== "open" || this.bulk?.readyState !== "open") {
-        this.fallbackToSocket();
-        return;
-      }
-      const probeId = crypto.randomUUID();
-      this.acknowledgedProbes.delete(probeId);
-      this.sendRtcControl({ type: "rtcProbe", probeId });
-      this.schedule(() => {
-        if (!this.acknowledgedProbes.has(probeId)) this.fallbackToSocket();
-      }, 3_000);
-    }, 5_000);
+  private offerOwner() {
+    if (this.workspace.role !== "collaborator"
+      || !this.ownerOnline
+      || this.socket?.readyState !== WebSocket.OPEN) return;
+    const current = this.peers.get("owner");
+    if (current && !current.fallingBack && current.pc.connectionState !== "closed") return;
+    const peer = this.createPeer("owner", "owner", true);
+    void (async () => {
+      const offer = await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      this.sendSignal({ type: "webrtcOffer", description: offer, targetRole: "owner" });
+    })().catch(() => this.fallbackPeer(peer, "offer-failed"));
   }
 
   private async handleSignal(value: Record<string, unknown>) {
-    if (typeof value.senderId === "string") this.peerTarget = value.senderId;
-    if (!this.peer) this.startRtc();
-    const peer = this.peer!;
-    if (value.type === "webRtcOffer" && typeof value.sdp === "string") {
-      await peer.setRemoteDescription({ type: "offer", sdp: value.sdp });
-      await this.flushPendingIce(peer);
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      this.sendSignal({ type: "webRtcAnswer", sdp: answer.sdp, targetUserId: value.senderId });
-    } else if (value.type === "webRtcAnswer" && typeof value.sdp === "string") {
-      await peer.setRemoteDescription({ type: "answer", sdp: value.sdp });
-      await this.flushPendingIce(peer);
-    } else if (value.type === "webRtcIceCandidate" && value.candidate) {
+    const senderId = typeof value.senderId === "string" ? value.senderId : "";
+    if (!senderId) return;
+    const key = this.peerKey(senderId);
+    if (!key) return;
+    if (value.type === "webrtcOffer") {
+      if (this.workspace.role !== "owner") return;
+      this.onlineCollaborators.add(senderId);
+      const description = this.description(value, "offer");
+      if (!description) return;
+      const peer = this.createPeer(key, senderId, false);
+      await peer.pc.setRemoteDescription(description);
+      await this.flushCandidates(peer);
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      this.sendSignal({ type: "webrtcAnswer", description: answer, targetUserId: senderId });
+      return;
+    }
+    const peer = this.peers.get(key);
+    if (!peer) return;
+    if (value.type === "webrtcAnswer") {
+      const description = this.description(value, "answer");
+      if (!description) return;
+      await peer.pc.setRemoteDescription(description);
+      await this.flushCandidates(peer);
+    } else if (value.type === "webrtcIceCandidate" && value.candidate) {
       const candidate = value.candidate as RTCIceCandidateInit;
-      if (peer.remoteDescription) await peer.addIceCandidate(candidate);
-      else this.pendingIceCandidates.push(candidate);
+      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate);
+      else peer.candidates.push(candidate);
     }
   }
 
-  private async flushPendingIce(peer: RTCPeerConnection) {
-    const candidates = this.pendingIceCandidates.splice(0);
-    for (const candidate of candidates) await peer.addIceCandidate(candidate);
+  private description(value: Record<string, unknown>, type: "offer" | "answer") {
+    if (value.description && typeof value.description === "object") {
+      return value.description as RTCSessionDescriptionInit;
+    }
+    return typeof value.sdp === "string" ? { type, sdp: value.sdp } : null;
   }
 
-  private fallbackToSocket(renegotiate = true, notifyPeer = true) {
-    if (this.disposed) return;
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      if (notifyPeer) {
-        this.sendSignal({
-          type: "transportFallback",
-          transportEpoch: Math.max(1, this.transportEpoch),
-          reason: "peer-failed",
-          targetRole: this.workspace.role === "owner" ? undefined : "owner",
-          targetUserId: this.peerTarget,
-        });
+  private async flushCandidates(peer: PeerState) {
+    for (const candidate of peer.candidates.splice(0)) await peer.pc.addIceCandidate(candidate);
+  }
+
+  private attachChannel(peer: PeerState, channel: RTCDataChannel) {
+    if (channel.label === "workspace-control") peer.control = channel;
+    else if (channel.label === "workspace-bulk") peer.bulk = channel;
+    else {
+      channel.close();
+      return;
+    }
+    channel.binaryType = "arraybuffer";
+    channel.onmessage = (message) => {
+      this.receive(message.data as string | ArrayBuffer, "rtc", peer);
+    };
+    channel.onclose = () => this.fallbackPeer(peer, "channel-closed");
+    channel.onopen = () => this.startQualification(peer);
+  }
+
+  private startQualification(peer: PeerState) {
+    if (peer.qualificationStartedAt
+      || peer.control?.readyState !== "open"
+      || peer.bulk?.readyState !== "open") return;
+    peer.qualificationStartedAt = Date.now();
+    for (let index = 0; index < RTC_QUALITY.requiredQualificationProbes; index += 1) {
+      this.schedule(() => this.sendProbe(peer, true), index * 300);
+    }
+    this.schedule(() => this.qualifyPeer(peer), RTC_QUALITY.minimumStableMs + 100);
+    this.schedule(() => {
+      if (!peer.primary) this.fallbackPeer(peer, "qualification-failed");
+    }, 6_000);
+  }
+
+  private sendProbe(peer: PeerState, qualification: boolean) {
+    if (peer.control?.readyState !== "open") return;
+    const probeId = crypto.randomUUID();
+    const sentAt = Date.now();
+    const timeout = this.schedule(() => {
+      if (!peer.probes.delete(probeId)) return;
+      if (!qualification) {
+        this.pushHealth(peer, false);
+        this.evaluateHealth(peer);
       }
-      this.state = "socket";
-      this.flushReliable();
+    }, RTC_QUALITY.probeTimeoutMs);
+    peer.probes.set(probeId, { sentAt, qualification, timeout });
+    this.sendPeerControl(peer, { type: "rtcProbe", probeId });
+  }
+
+  private ackProbe(peer: PeerState, probeId: string) {
+    const probe = peer.probes.get(probeId);
+    if (!probe) return;
+    window.clearTimeout(probe.timeout);
+    this.timers.delete(probe.timeout);
+    peer.probes.delete(probeId);
+    const rtt = Math.max(0, Date.now() - probe.sentAt);
+    if (probe.qualification) {
+      peer.qualificationRtts.push(rtt);
+      this.qualifyPeer(peer);
     } else {
-      this.state = "unavailable";
-      this.scheduleReconnect();
-    }
-    this.stopPeer();
-    if (renegotiate && this.workspace.role === "owner" && this.onlineCollaborators.size === 1) {
-      this.schedule(() => this.negotiateOnlyCollaborator(), 1_000);
+      this.pushHealth(peer, true, rtt);
+      this.evaluateHealth(peer);
     }
   }
 
-  private stopPeer() {
-    if (this.healthTimer !== null) window.clearInterval(this.healthTimer);
-    this.healthTimer = null;
-    this.localRtcReady = false;
-    this.remoteRtcReady = false;
-    this.qualificationProbes.clear();
-    this.acknowledgedProbes.clear();
-    this.pendingIceCandidates = [];
-    if (this.control) this.control.onclose = null;
-    if (this.bulk) this.bulk.onclose = null;
-    this.control?.close();
-    this.bulk?.close();
-    this.peer?.close();
-    this.peer = null;
-    this.control = null;
-    this.bulk = null;
-    this.peerTarget = undefined;
+  private qualifyPeer(peer: PeerState) {
+    if (peer.localReadyEpoch
+      || peer.control?.readyState !== "open"
+      || peer.bulk?.readyState !== "open"
+      || peer.qualificationRtts.length < RTC_QUALITY.requiredQualificationProbes
+      || Math.max(...peer.qualificationRtts) > RTC_QUALITY.maximumQualificationRttMs
+      || Date.now() - peer.qualificationStartedAt < RTC_QUALITY.minimumStableMs
+      || this.reliable.size > 0) return;
+    const epoch = peer.remoteReadyEpoch
+      || (this.workspace.role === "collaborator" ? Math.max(1, Date.now()) : 0);
+    if (!epoch) return;
+    this.sendTransportReady(peer, epoch);
+  }
+
+  private sendTransportReady(peer: PeerState, epoch: number) {
+    peer.localReadyEpoch = epoch;
+    const message = {
+      type: "transportReady",
+      transportEpoch: epoch,
+      transport: "webRtcDataChannel",
+      targetRole: this.workspace.role === "collaborator" ? "owner" : undefined,
+      targetUserId: this.workspace.role === "owner" ? peer.userId : undefined,
+    };
+    this.sendSignal(message);
+    this.sendPeerControl(peer, message);
+    this.promotePeer(peer);
+  }
+
+  private handleTransportReady(peer: PeerState, value: Record<string, unknown>) {
+    const epoch = Number(value.transportEpoch);
+    if (!Number.isSafeInteger(epoch) || epoch < 1) return;
+    peer.remoteReadyEpoch = epoch;
+    if (!peer.localReadyEpoch) this.qualifyPeer(peer);
+    this.promotePeer(peer);
+  }
+
+  private promotePeer(peer: PeerState) {
+    if (peer.primary
+      || !peer.localReadyEpoch
+      || peer.localReadyEpoch !== peer.remoteReadyEpoch) return;
+    peer.primary = true;
+    this.state = "rtc";
+    this.emit({ type: "peerTransportChanged", userId: peer.userId, transport: "rtc" });
+    this.startHealthChecks(peer);
+  }
+
+  private startHealthChecks(peer: PeerState) {
+    if (peer.healthTimer !== null) window.clearInterval(peer.healthTimer);
+    peer.healthTimer = window.setInterval(() => {
+      if (peer.pc.connectionState === "disconnected") {
+        peer.disconnectedAt ||= Date.now();
+        if (Date.now() - peer.disconnectedAt >= RTC_QUALITY.disconnectedFallbackMs) {
+          this.fallbackPeer(peer, "peer-disconnected");
+          return;
+        }
+      } else {
+        peer.disconnectedAt = 0;
+      }
+      if (peer.control?.readyState !== "open" || peer.bulk?.readyState !== "open") {
+        this.fallbackPeer(peer, "channel-closed");
+        return;
+      }
+      this.sendProbe(peer, false);
+    }, RTC_QUALITY.healthIntervalMs);
+  }
+
+  private pushHealth(peer: PeerState, success: boolean, rtt?: number) {
+    peer.healthOutcomes.push(success);
+    if (peer.healthOutcomes.length > RTC_QUALITY.healthWindowSize) peer.healthOutcomes.shift();
+    if (rtt !== undefined) {
+      peer.healthRtts.push(rtt);
+      if (peer.healthRtts.length > RTC_QUALITY.healthWindowSize) peer.healthRtts.shift();
+    }
+  }
+
+  private evaluateHealth(peer: PeerState) {
+    const lossRate = peer.healthOutcomes.length
+      ? peer.healthOutcomes.filter((success) => !success).length / peer.healthOutcomes.length
+      : 0;
+    const averageRtt = peer.healthRtts.length
+      ? peer.healthRtts.reduce((sum, value) => sum + value, 0) / peer.healthRtts.length
+      : 0;
+    const buffered = Math.max(peer.control?.bufferedAmount || 0, peer.bulk?.bufferedAmount || 0);
+    const degraded = (peer.healthOutcomes.length >= 5 && lossRate >= RTC_QUALITY.maximumLossRate)
+      || averageRtt >= RTC_QUALITY.degradedRttMs
+      || buffered >= RTC_QUALITY.maximumBufferedBytes;
+    if (!degraded) {
+      peer.degradedSince = 0;
+      return;
+    }
+    peer.degradedSince ||= Date.now();
+    if (Date.now() - peer.degradedSince >= RTC_QUALITY.degradedWindowMs) {
+      this.fallbackPeer(peer, "health-degraded");
+    }
+  }
+
+  private sendPeerControl(peer: PeerState, value: Record<string, unknown>) {
+    if (peer.control?.readyState === "open") peer.control.send(JSON.stringify(value));
+  }
+
+  private fallbackPeer(peer: PeerState, reason: string, notifyPeer = true) {
+    if (this.disposed || peer.fallingBack || this.peers.get(peer.key) !== peer) return;
+    peer.fallingBack = true;
+    if (notifyPeer) {
+      const message = {
+        type: "transportFallback",
+        transportEpoch: peer.localReadyEpoch || peer.remoteReadyEpoch || 1,
+        reason,
+        targetRole: this.workspace.role === "collaborator" ? "owner" : undefined,
+        targetUserId: this.workspace.role === "owner" ? peer.userId : undefined,
+      };
+      this.sendSignal(message);
+      this.sendPeerControl(peer, message);
+    }
+    this.peers.delete(peer.key);
+    this.stopPeer(peer);
+    this.state = this.hasPrimaryPeer()
+      ? "rtc"
+      : this.socket?.readyState === WebSocket.OPEN ? "socket" : "unavailable";
+    this.emit({ type: "peerTransportChanged", userId: peer.userId, transport: "socket", reason });
+    this.flushReliable();
+    if (this.workspace.role === "collaborator" && this.ownerOnline) {
+      this.schedule(() => this.offerOwner(), 1_000);
+    }
+  }
+
+  private stopPeer(peer: PeerState) {
+    if (peer.healthTimer !== null) window.clearInterval(peer.healthTimer);
+    peer.healthTimer = null;
+    for (const probe of peer.probes.values()) {
+      window.clearTimeout(probe.timeout);
+      this.timers.delete(probe.timeout);
+    }
+    peer.probes.clear();
+    if (peer.control) peer.control.onclose = null;
+    if (peer.bulk) peer.bulk.onclose = null;
+    peer.control?.close();
+    peer.bulk?.close();
+    peer.pc.close();
+  }
+
+  private hasPrimaryPeer() {
+    return [...this.peers.values()].some((peer) => peer.primary);
   }
 
   disconnect() {
     this.disposed = true;
-    this.sendRtcControl({ type: "peerLeaving" });
+    this.peers.forEach((peer) => this.sendPeerControl(peer, { type: "peerLeaving" }));
     if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.reconnectAttempt = 0;
     this.timers.forEach((timer) => window.clearTimeout(timer));
     this.timers.clear();
-    this.stopPeer();
+    this.peers.forEach((peer) => this.stopPeer(peer));
+    this.peers.clear();
     this.socket?.close(1000, "page-left");
     this.socket = null;
     this.listeners.clear();
     this.onlineCollaborators.clear();
+    this.ownerOnline = false;
   }
 }

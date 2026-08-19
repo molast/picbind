@@ -6,6 +6,7 @@ import {
   isOriginBound,
   isRtcQualified,
   isValidWorkspaceTicket,
+  parseWorkspaceHandshake,
   parseWorkspaceSubprotocol,
   shouldFallbackRtc,
   validateTicketConsumption,
@@ -50,6 +51,21 @@ function healthyPrimarySnapshot(): RtcFallbackSnapshot {
 }
 
 describe("Workspace V2 subprotocol", () => {
+  it("accepts a query Ticket without browser subprotocol negotiation", () => {
+    expect(parseWorkspaceHandshake(null, VALID_TICKET)).toEqual({
+      ok: true,
+      value: { protocol: WORKSPACE_REALTIME_PROTOCOL, ticket: VALID_TICKET },
+    });
+  });
+
+  it("rejects an invalid query Ticket or additional browser subprotocols", () => {
+    expect(parseWorkspaceHandshake(WORKSPACE_REALTIME_PROTOCOL, "short").ok).toBe(false);
+    expect(parseWorkspaceHandshake(
+      `${WORKSPACE_REALTIME_PROTOCOL}, another.protocol`,
+      VALID_TICKET,
+    ).ok).toBe(false);
+  });
+
   it("extracts one valid ticket without changing the selected public protocol", () => {
     expect(parseWorkspaceSubprotocol(
       `${WORKSPACE_REALTIME_PROTOCOL}, picbind.ticket.${VALID_TICKET}`,

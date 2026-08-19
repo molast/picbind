@@ -120,6 +120,18 @@ async function connectV2(workspaceId: string, ticket: string, origin = ORIGIN) {
   });
 }
 
+async function connectV2WithQueryTicket(workspaceId: string, ticket: string, origin = ORIGIN) {
+  const url = new URL(`https://api.picbind.com/api/workspaces/${workspaceId}/realtime-v2`);
+  url.searchParams.set("ticket", ticket);
+  return SELF.fetch(url, {
+    headers: {
+      origin,
+      upgrade: "websocket",
+      "cf-connecting-ip": crypto.randomUUID(),
+    },
+  });
+}
+
 function nextSocketData(socket: WebSocket): Promise<string | ArrayBuffer | ArrayBufferView | Blob> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Timed out waiting for WebSocket message")), 2_000);
@@ -455,6 +467,20 @@ describe("Workspace Ticket communication", () => {
 });
 
 describe("Workspace WebSocket V2 communication", () => {
+  it("upgrades with a query Ticket without browser subprotocol negotiation", async () => {
+    const seeded = await seedHandoff();
+    const ticketResponse = await requestTicket(seeded);
+    const ticketEnvelope = await ticketResponse.response.json() as Record<string, any>;
+    const response = await connectV2WithQueryTicket(
+      seeded.workspaceId,
+      ticketEnvelope.data.ticket,
+    );
+    expect(response.status).toBe(101);
+    expect(response.headers.get("sec-websocket-protocol")).toBeNull();
+    response.webSocket?.accept();
+    response.webSocket?.close(1000, "test-complete");
+  });
+
   it("upgrades without Cookie, returns only the fixed protocol, and rejects Ticket reuse", async () => {
     const seeded = await seedHandoff();
     const ticketResponse = await requestTicket(seeded);

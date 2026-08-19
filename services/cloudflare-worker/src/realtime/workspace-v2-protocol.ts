@@ -217,6 +217,23 @@ export function parseWorkspaceSubprotocol(header: string | null): SubprotocolPar
   return { ok: true, value: { protocol: WORKSPACE_REALTIME_PROTOCOL, ticket } };
 }
 
+export function parseWorkspaceHandshake(
+  header: string | null,
+  queryTicket: string | null,
+): SubprotocolParseResult {
+  if (queryTicket === null) return parseWorkspaceSubprotocol(header);
+  if (header !== null && header !== WORKSPACE_REALTIME_PROTOCOL) {
+    return { ok: false, error: "protocol_header_invalid" };
+  }
+  if (!isValidWorkspaceTicket(queryTicket)) {
+    return { ok: false, error: "ticket_invalid" };
+  }
+  return {
+    ok: true,
+    value: { protocol: WORKSPACE_REALTIME_PROTOCOL, ticket: queryTicket },
+  };
+}
+
 export function canTransitionTransport(from: TransportState, to: TransportState): boolean {
   return TRANSPORT_TRANSITIONS[from].includes(to);
 }

@@ -49,6 +49,14 @@ const nextConfig = {
             },
           ]
         },
+        async rewrites() {
+          return [
+            {
+              source: "/workspace/:shareToken",
+              destination: "/workspace",
+            },
+          ]
+        },
       }
     : {}),
   webpack(config, { isServer }) {

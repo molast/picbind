@@ -124,6 +124,7 @@ export class WorkspaceRealtimeObject {
     const workspaceId = request.headers.get("x-picbind-workspace-id") || "";
     const role = request.headers.get("x-picbind-workspace-role");
     const isV2 = request.headers.get("x-picbind-workspace-v2") === "1";
+    const selectsProtocol = request.headers.get("x-picbind-workspace-select-protocol") === "1";
     if (!userId || !workspaceId || (role !== "owner" && role !== "collaborator")) {
       return new Response("Invalid workspace identity", { status: 403 });
     }
@@ -162,7 +163,9 @@ export class WorkspaceRealtimeObject {
     return new Response(null, {
       status: 101,
       webSocket: client,
-      headers: isV2 ? { "sec-websocket-protocol": WORKSPACE_REALTIME_PROTOCOL } : undefined,
+      headers: isV2 && selectsProtocol
+        ? { "sec-websocket-protocol": WORKSPACE_REALTIME_PROTOCOL }
+        : undefined,
     });
   }
 

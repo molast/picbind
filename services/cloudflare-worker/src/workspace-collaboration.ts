@@ -11,7 +11,7 @@ import {
   WORKSPACE_REALTIME_PROTOCOL,
   WORKSPACE_TICKET_BYTES,
   WORKSPACE_TICKET_TTL_SECONDS,
-  parseWorkspaceSubprotocol,
+  parseWorkspaceHandshake,
   type WorkspaceRole,
   type WorkspaceTicketMetadata,
 } from "./realtime/workspace-v2-protocol";
@@ -356,7 +356,11 @@ export async function handleWorkspaceRealtimeV2(
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return failure("upgrade_required", "WebSocket upgrade required", 426);
   }
-  const parsed = parseWorkspaceSubprotocol(request.headers.get("sec-websocket-protocol"));
+  const queryTicket = new URL(request.url).searchParams.get("ticket");
+  const parsed = parseWorkspaceHandshake(
+    request.headers.get("sec-websocket-protocol"),
+    queryTicket,
+  );
   if (!parsed.ok) {
     return failure(parsed.error, "Workspace realtime protocol is invalid", 400);
   }
@@ -377,6 +381,7 @@ export async function handleWorkspaceRealtimeV2(
     "x-picbind-user-name": encodeURIComponent(metadata.currentDisplayName),
     "x-picbind-workspace-role": metadata.currentRole,
     "x-picbind-workspace-v2": "1",
+    "x-picbind-workspace-select-protocol": queryTicket === null ? "1" : "0",
   });
   return workspaceRealtimeObject(env, workspaceId).fetch(new Request(
     "https://workspace-realtime/connect-v2",
