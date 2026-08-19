@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/desktop/src-tauri",
+  "crates/picbind-core",
+  "crates/picbind-image",
+  "crates/picbind-network",
+  "crates/picbind-perceptual",
+  "crates/picbind-protocol",
+  "crates/picbind-storage",
+]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.release.package.image_wasm]
+opt-level = "s"
+
+[profile.release.package.perceptual_wasm]
+opt-level = 3

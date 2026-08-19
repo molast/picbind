@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
-const webDir = join(rootDir, "web");
-const desktopDir = join(rootDir, "desktop");
+const webDir = join(rootDir, "apps", "web");
+const desktopDir = join(rootDir, "apps", "desktop");
 const isWindows = process.platform === "win32";
 const packageManager = "pnpm";
 const children = new Map();

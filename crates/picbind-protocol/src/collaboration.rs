@@ -1,0 +1,1 @@
+//! Collaboration protocol types.

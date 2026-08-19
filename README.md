@@ -10,23 +10,35 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 - Favicon Generator：通过文字、Google Fonts 字体、字重、颜色和背景形状生成 favicon 图标包。
 - Favicon 打包：生成 `favicon.ico`、16/32 PNG、Apple touch icon、Android chrome icon 和 `site.webmanifest`。
 - 中英文切换：首页和 favicon 工具页均支持中文/英文文案。
-- 静态部署：Web 项目已配置为 `next export` 风格输出，适合部署到 Cloudflare Pages。
-- Worker API 骨架：统计、访问量、后台配置、百度推送接口已迁移到独立 Cloudflare Worker 目录。
+- 静态部署：Web 项目使用 Next.js 静态导出，适合部署到 Cloudflare Pages。
+- Worker 服务：集中承载 API、OAuth、D1、WebSocket 信令、Durable Object 和对象存储协调。
 
 ## 项目结构
 
 ```text
 .
-├── cloudflare-worker/      # Cloudflare Worker API 服务骨架
-├── desktop/                # Tauri 桌面客户端（0.1.0）
-├── sdk/                    # 可独立构建和复用的前端 SDK
-│   ├── wasm/               # 可复用的 WASM Web SDK
-│   │   ├── image-wasm/     # 图片处理 WASM Web 产物
-│   │   └── perceptual-wasm/ # 感知质量 WASM Web 产物
-│   ├── mip/                # Motion Intent Protocol SDK
-│   └── room/               # Room SDK 与独立 Demo
-├── wasm/image_wasm/        # Rust WASM 图片处理库
-└── web/                    # Next.js 前端应用（SQLite WASM + OPFS 本地存储）
+├── apps/
+│   ├── web/                       # Next.js + React Web 应用
+│   └── desktop/                   # Tauri Desktop 应用
+├── packages/
+│   ├── ui/                        # Workspace、协作和共享 UI
+│   ├── shared/                    # 共享类型、工具和协议
+│   └── wasm/                      # WASM Web 包与浏览器编码器
+├── crates/
+│   ├── picbind-core/              # 跨平台领域逻辑
+│   ├── picbind-image/             # Rust WASM 图片处理库
+│   ├── picbind-network/           # WebSocket、WebRTC、信令和传输
+│   ├── picbind-perceptual/        # 感知质量 Rust WASM 库
+│   ├── picbind-protocol/          # 跨端稳定协议类型
+│   └── picbind-storage/           # 本地、缓存和数据库抽象
+├── services/
+│   └── cloudflare-worker/         # API、OAuth、信令和实时 Worker
+├── docs/
+│   ├── architecture/
+│   ├── protocol/
+│   └── product/
+├── Cargo.toml
+└── pnpm-workspace.yaml
 ```
 
 Web 端持久化文件统一写入 OPFS，SQLite 仅保存业务元数据和评审历史，页面通过
@@ -35,37 +47,34 @@ Repository 访问数据。语言、房间会话和页面恢复等短期状态仍
 
 ## Web 应用
 
-Web 应用位于 `web/`，主要页面包括：
+Web 应用位于 `apps/web/`，主要页面包括：
 
 - `/`：图片压缩首页。
 - `/favicon-converter`：从图片生成 favicon。
 - `/favicon-generator`：从文字生成 favicon。
-- `/admin`：当前为静态占位页，后台接口后续由 Worker 接入。
+- `/admin`：读取和维护 Worker 中的统计与站点配置。
 
 常用命令：
 
 ```bash
-cd web
-npm install
-npm run dev
-npm run build
+pnpm install
+pnpm dev:web
+pnpm build:web
 ```
 
-构建输出会生成到 `web/out/`，可作为 Cloudflare Pages 的静态产物目录。
+构建输出会生成到 `apps/web/out/`，可作为 Cloudflare Pages 的静态产物目录。
 
 ## Tauri 桌面客户端
 
-Tauri 客户端位于 `desktop/`，当前版本为 `0.1.0`。界面复用现有 Web 前端，
+Tauri 客户端位于 `apps/desktop/`，当前版本为 `0.1.0`。界面复用现有 Web 前端，
 微信 iLink Bot 的凭据、长轮询和媒体处理仅在 Desktop 本地运行。从仓库根目录运行：
 
 ```bash
-cd desktop
-pnpm install
-pnpm dev
+pnpm dev:desktop
 ```
 
 该命令会启动现有 Web 开发服务并打开 PicBind 桌面窗口。详细环境和检查命令见
-`docs/tauri/development.md`。
+`docs/architecture/desktop/development.md`。
 
 ## 本地 Desktop 开发
 
@@ -93,10 +102,10 @@ Cloudflare，应用才会使用到新实现。
 
 ## WASM 构建
 
-Rust WASM 代码位于 `wasm/image_wasm/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：
+Rust WASM 代码位于 `crates/picbind-image/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：
 
 ```bash
-cd sdk/wasm
+cd packages/wasm
 npm run build
 ```
 
@@ -105,8 +114,8 @@ npm run build
 生成文件会输出到：
 
 ```text
-sdk/wasm/image-wasm/
-sdk/wasm/perceptual-wasm/
+packages/wasm/image-wasm/
+packages/wasm/perceptual-wasm/
 ```
 
 ## Cloudflare Pages 部署
@@ -116,25 +125,25 @@ sdk/wasm/perceptual-wasm/
 推荐配置：
 
 ```text
-Build command: cd web && npm install && npm run build
-Build output directory: web/out
+Build command: pnpm install --frozen-lockfile && pnpm build:web
+Build output directory: apps/web/out
 ```
 
-如果 Cloudflare Pages 的项目根目录直接设置为 `web/`，则可以使用：
+如果 Cloudflare Pages 的项目根目录直接设置为 `apps/web/`，则可以使用：
 
 ```text
-Build command: npm install && npm run build
+Build command: pnpm install --frozen-lockfile && pnpm build
 Build output directory: out
 ```
 
 ## Cloudflare Worker API
 
-Worker 服务位于 `cloudflare-worker/`，用于替代旧的 Next API 路由。
+Worker 服务位于 `services/cloudflare-worker/`，用于替代旧的 Next API 路由。
 
 Cloudflare Git 部署必须使用以下设置：
 
 ```text
-Root directory: cloudflare-worker
+Root directory: services/cloudflare-worker
 Deploy command: npx wrangler deploy
 Configuration file: wrangler.toml
 ```
@@ -195,7 +204,7 @@ BAIDU_PUSH_TOKEN=<your-baidu-token>
 网站自己的 favicon 资源统一放在：
 
 ```text
-web/public/images/favicon/
+apps/web/public/images/favicon/
 ```
 
 包括：

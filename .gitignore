@@ -10,3 +10,7 @@
 .env*
 !.env.example
 /wrangler.jsonc
+node_modules
+dist
+.next
+target

@@ -46,7 +46,7 @@
 - 除非明确允许丢失 Alpha，否则不能静默将透明图片压平。
 - 单个候选编码失败时，不能错误丢弃其他有效候选。
 - 临时 `ImageBitmap`、Blob URL、Worker 和 WASM 资源得到正确释放。
-- 新增公开压缩配置时，同步更新 `web/.env.example`。
+- 新增公开压缩配置时，同步更新 `apps/web/.env.example`。
 - `COMPRESSION_ALGORITHM.md` 已反映最终实现。
 
 如果只修改 `COMPRESSION_ALGORITHM.md` 文档，则不需要重新编译 WASM。如果修改了压缩算法、Rust 代码或 WASM API，必须使用仓库规定的 WASM 构建流程，并同步提交 Web 应用所依赖的生成文件。

@@ -1,0 +1,16 @@
+{
+  "name": "picbind",
+  "version": "3.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "dev:web": "pnpm --dir apps/web dev",
+    "dev:desktop": "pnpm --dir apps/desktop dev",
+    "build:web": "pnpm --dir apps/web build",
+    "build:desktop": "pnpm --dir apps/desktop build",
+    "build:wasm": "pnpm --dir packages/wasm build",
+    "check:ui": "pnpm --dir packages/ui check",
+    "check:worker": "pnpm --dir services/cloudflare-worker check",
+    "test:worker": "pnpm --dir services/cloudflare-worker test"
+  }
+}

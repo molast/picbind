@@ -16,7 +16,7 @@ case "${TASK_CHOICE:-1}" in
     exec node "$ROOT_DIR/dev-local.mjs" desktop
     ;;
   2)
-    exec pnpm --dir "$ROOT_DIR/desktop" run build
+    exec pnpm --dir "$ROOT_DIR/apps/desktop" run build
     ;;
   3)
     exec node "$ROOT_DIR/dev-local.mjs" web

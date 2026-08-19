@@ -1,0 +1,13 @@
+{
+  "name": "@picbind/wasm",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:image && npm run build:perceptual",
+    "build:image": "cd ../../crates/picbind-image && wasm-pack build --target web --out-dir ../../packages/wasm/image-wasm",
+    "build:perceptual": "cd ../../crates/picbind-perceptual && cross-env RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --target web --out-dir ../../packages/wasm/perceptual-wasm"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}
