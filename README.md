@@ -55,8 +55,8 @@ npm run build
 
 ## Tauri 桌面客户端
 
-Tauri 客户端位于 `desktop/`，当前版本为 `0.1.0`。第一阶段直接复用现有 Web
-前端，不包含桌面专属业务逻辑。从仓库根目录运行：
+Tauri 客户端位于 `desktop/`，当前版本为 `0.1.0`。界面复用现有 Web 前端，
+微信 iLink Bot 的凭据、长轮询和媒体处理仅在 Desktop 本地运行。从仓库根目录运行：
 
 ```bash
 cd desktop
@@ -69,8 +69,8 @@ pnpm dev
 
 ## 本地 Web 开发
 
-本地只运行 Web 前端。Room、Messaging、Durable Object、R2、KV 和其他 Worker API
-统一请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
+本地只运行 Web 前端。Room、Durable Object、R2、KV 和其他 Worker API 统一请求
+已部署的 `https://api.picbind.com`；Web 不提供微信 Bot。从仓库根目录运行：
 
 ```bash
 # macOS / Linux / Git Bash / WSL

@@ -3148,6 +3148,7 @@ export default function ShareRoomPage({
       roomId={roomId}
       copied={copied}
       actionPending={isRoomActionPending}
+      messagingAvailable={messagingProviders.length > 0}
       messagingConnected={messagingProviders.some(
         (provider) => provider.status === "connected",
       )}
@@ -3417,24 +3418,28 @@ export default function ShareRoomPage({
         onSelect={selectShareRecipient}
         onClose={closeShareRecipientDialog}
       />
-      <MessagingServiceDialog
-        open={isMessagingServiceOpen}
-        service={messagingService}
-        providers={messagingProviders}
-        labels={labels}
-        onClose={() => setIsMessagingServiceOpen(false)}
-      />
-      <WeixinChatDialog
-        open={Boolean(messagingChatProviderId)}
-        provider={activeMessagingChatProvider}
-        messages={messagingChatMessages}
-        labels={labels}
-        sending={isMessagingChatSending}
-        onSend={handleMessagingChatSend}
-        onMoveImage={handleMoveWeixinImageToLibrary}
-        onLoadImage={loadMessagingImage}
-        onClose={() => setMessagingChatProviderId(null)}
-      />
+      {messagingProviders.length > 0 ? (
+        <MessagingServiceDialog
+          open={isMessagingServiceOpen}
+          service={messagingService}
+          providers={messagingProviders}
+          labels={labels}
+          onClose={() => setIsMessagingServiceOpen(false)}
+        />
+      ) : null}
+      {messagingProviders.length > 0 ? (
+        <WeixinChatDialog
+          open={Boolean(messagingChatProviderId)}
+          provider={activeMessagingChatProvider}
+          messages={messagingChatMessages}
+          labels={labels}
+          sending={isMessagingChatSending}
+          onSend={handleMessagingChatSend}
+          onMoveImage={handleMoveWeixinImageToLibrary}
+          onLoadImage={loadMessagingImage}
+          onClose={() => setMessagingChatProviderId(null)}
+        />
+      ) : null}
       </main>
       {isMinimized && roomId ? (
         <TemporaryRoomDock

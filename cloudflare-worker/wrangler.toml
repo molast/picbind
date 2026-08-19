@@ -15,10 +15,6 @@ id = "ffd6a9e2ce924cf2a4b93b782d525810"
 binding = "SHARE_IMAGES_R2"
 bucket_name = "picbind-bucket"
 
-[[r2_buckets]]
-binding = "MESSAGING_MEDIA_R2"
-bucket_name = "picbind-bucket"
-
 [[durable_objects.bindings]]
 name = "METRICS_COUNTER"
 class_name = "MetricsCounter"
@@ -26,10 +22,6 @@ class_name = "MetricsCounter"
 [[durable_objects.bindings]]
 name = "REALTIME_ROOMS"
 class_name = "ShareRoomObject"
-
-[[durable_objects.bindings]]
-name = "WEIXIN_MESSAGING"
-class_name = "WeixinMessagingObject"
 
 [[migrations]]
 tag = "v1"
@@ -43,6 +35,10 @@ new_sqlite_classes = ["ShareRoomObject"]
 tag = "v3"
 new_sqlite_classes = ["WeixinMessagingObject"]
 
+[[migrations]]
+tag = "v4"
+deleted_classes = ["WeixinMessagingObject"]
+
 [vars]
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
@@ -52,10 +48,6 @@ FILE_TRANSFER_MODE = "auto"
 MAX_IMAGE_TRANSFER_SIZE_MB = "10"
 R2_RTT_THRESHOLD_MS = "200"
 R2_FILE_TTL_SECONDS = "1800"
-MESSAGING_MEDIA_TTL_SECONDS = "900"
-MESSAGING_MEDIA_URL_TTL_SECONDS = "900"
-MESSAGING_MAX_MEDIA_SIZE_MB = "20"
-MESSAGING_PUBLIC_URL = "https://api.picbind.com"
 R2_BUCKET_NAME = "picbind-bucket"
 R2_ACCOUNT_ID = "a3af9fe482ea605e4cc8b2496a45b806"
 # QINIU_ACCESS_KEY and QINIU_SECRET_KEY must be configured with Wrangler Secret.

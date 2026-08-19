@@ -11,11 +11,6 @@ import {
 import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 import type { QiniuStorageEnv } from "./qiniu-storage";
-import {
-  handleWeixinMessaging,
-  type MessagingWorkerEnv,
-} from "./messaging/weixin-messaging";
-import { WeixinMessagingObject } from "./messaging/weixin-messaging-object";
 import workerPackage from "../package.json";
 
 type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
@@ -30,7 +25,7 @@ type MetricsConfig = {
   updatedAt: string;
 };
 
-type Env = RuntimeLogEnv & QiniuStorageEnv & MessagingWorkerEnv & {
+type Env = RuntimeLogEnv & QiniuStorageEnv & {
   LOCAL_RUNTIME?: string;
   METRICS_KV: {
     get(key: string): Promise<string | null>;
@@ -585,10 +580,6 @@ const worker = {
           : pathname === "/api/realtime/room/socket"
             ? await handleShareRoomSocket(request, env)
             : await handleShareRoomRealtime(request, env);
-      } else if (pathname.startsWith("/api/messaging/weixin")) {
-        response = hasMissingOrInvalidOrigin(env, request)
-          ? json({ error: "Invalid origin" }, { status: 403 })
-          : await handleWeixinMessaging(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }
@@ -606,4 +597,4 @@ const worker = {
 };
 
 export default worker;
-export { MetricsCounter, ShareRoomObject, WeixinMessagingObject };
+export { MetricsCounter, ShareRoomObject };

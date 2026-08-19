@@ -1,4 +1,5 @@
 mod download;
+mod messaging;
 mod storage;
 
 use tauri::Manager;
@@ -9,8 +10,29 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let store = storage::NativeImageStore::open(data_dir).map_err(std::io::Error::other)?;
+            let store =
+                storage::NativeImageStore::open(data_dir.clone()).map_err(std::io::Error::other)?;
             app.manage(store);
+
+            // iLink getupdates is a long poll and must not inherit the shorter
+            // timeout used by the regular API client.
+            let messaging_poll_client = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .pool_idle_timeout(std::time::Duration::from_secs(2))
+                .build()
+                .map_err(std::io::Error::other)?;
+            let messaging_api_client = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .timeout(std::time::Duration::from_secs(35))
+                .build()
+                .map_err(std::io::Error::other)?;
+            let messaging = messaging::DesktopMessagingRepository::new(
+                messaging_poll_client,
+                messaging_api_client,
+                data_dir.join("messaging"),
+            )
+            .map_err(std::io::Error::other)?;
+            app.manage(messaging);
 
             Ok(())
         })
@@ -25,6 +47,15 @@ pub fn run() {
             storage::commands::storage_get_usage,
             storage::commands::storage_prune_cache,
             storage::commands::storage_recover,
+            messaging::commands::messaging_status,
+            messaging::commands::messaging_start_login,
+            messaging::commands::messaging_login_status,
+            messaging::commands::messaging_connect,
+            messaging::commands::messaging_disconnect,
+            messaging::commands::messaging_send_text,
+            messaging::commands::messaging_send_image,
+            messaging::commands::messaging_download_image,
+            messaging::commands::messaging_take_events,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PicBind desktop");

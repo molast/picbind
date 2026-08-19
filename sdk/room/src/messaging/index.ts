@@ -15,7 +15,7 @@ export type {
 } from "./core/provider";
 export { MockMessageProvider } from "./providers/mock/provider";
 export { WeixinIlinkProvider } from "./providers/weixin/provider";
-export { IlinkHttpGatewayTransport } from "./providers/weixin/http-transport";
+export { IlinkTauriTransport } from "./providers/weixin/tauri-transport";
 export type {
   IlinkAccountCredentials,
   IlinkGatewayTransport,

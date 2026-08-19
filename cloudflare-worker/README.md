@@ -1,6 +1,8 @@
 # PicBind Cloudflare Worker
 
-This Worker replaces the old Next.js API routes when deploying the web app to Cloudflare Pages.
+This Worker provides metrics, Room signaling, WebSocket fallback, and R2
+transfer services. Weixin iLink messaging runs directly in the Tauri Desktop
+client and is not proxied by this Worker.
 
 ## Routes
 

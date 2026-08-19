@@ -46,10 +46,7 @@ export type IlinkGatewayTransport = {
   download(fileReference: string, fallbackFileId?: string): Promise<Blob>;
 };
 
-/**
- * Browser-side adapter for a trusted PicBind Messaging Gateway.
- * The gateway owns iLink credentials, QR login, long polling and media crypto.
- */
+/** Provider adapter backed by the local Desktop iLink transport. */
 export class WeixinIlinkProvider implements MessageProvider {
   readonly id = "weixin-ilink";
   readonly channel = "wechat" as const;
