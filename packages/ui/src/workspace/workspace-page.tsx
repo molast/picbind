@@ -244,6 +244,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     width: number;
     height: number;
   } | null>(null);
+  const [editorPreparing, setEditorPreparing] = React.useState(false);
   const [proposalPreview, setProposalPreview] = React.useState<{ proposalId: string; imageId: string; original: Blob; result: Blob } | null>(null);
   const [sourceRequestDialog, setSourceRequestDialog] = React.useState<Record<string, unknown> | null>(null);
   const [sourceRejectReason, setSourceRejectReason] = React.useState("");
@@ -544,20 +545,24 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       crop: "crop", resize: "resize", adjust: "color", review: "draw",
     };
     const editableParameterType = parameterType[operation];
+    const requestSequence = ++operationOpenSequence.current;
+    setEditorPreparing(Boolean(editableParameterType && image.shared));
     const container = image.shared ? collaborationContainers.current.get(image.imageId) : null;
     const source = editableParameterType && container?.sourceKind === "source"
       ? container.source
       : editableParameterType && image.shared
         ? await readWorkspaceImageSource(image)
         : await loadSource(image, image.shared);
+    if (operationOpenSequence.current !== requestSequence) return;
     if (!source) {
+      if (operationOpenSequence.current === requestSequence) setEditorPreparing(false);
       setNotice("Source data is unavailable");
       return;
     }
-    const requestSequence = ++operationOpenSequence.current;
     const sourceSize = editableParameterType && image.shared
       ? {width:container?.sourceWidth || image.width,height:container?.sourceHeight || image.height}
       : await dimensions(source);
+    if (operationOpenSequence.current !== requestSequence) return;
     setSelectedId(image.imageId);
     setProcessingSource({ imageId: image.imageId, blob: source, ...sourceSize });
     if (operation === "review") setReviewOpen(true);
@@ -574,13 +579,19 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
         parameterDocumentOperations({...image,parameterDocument:baseDocument}),
       ).then((result) => {
         if (operationOpenSequence.current !== requestSequence) return;
+        setEditorPreparing(false);
         setProcessingSource({imageId:image.imageId,blob:result.blob,width:result.width,height:result.height});
-      }).catch((error) => setNotice(error instanceof Error ? error.message : "Editor preview is unavailable"));
+      }).catch((error) => {
+        if (operationOpenSequence.current !== requestSequence) return;
+        setEditorPreparing(false);
+        setNotice(error instanceof Error ? error.message : "Editor preview is unavailable");
+      });
     }
   }
 
   function releaseProcessingSource() {
     operationOpenSequence.current += 1;
+    setEditorPreparing(false);
     setProcessingSource(null);
   }
 
@@ -1202,7 +1213,6 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       await submitProposal(proposal);
       // A Proposal is not the collaborator's current image. Until the Owner
       // commits it, both sides continue displaying the Owner's current state.
-      await updateImage(selected.imageId,{state:"reviewing"});
       await persistCollaborationActivity(workspace.workspaceId, "proposalSubmitted", selected.imageId, {
         proposalId: proposal.proposalId,
         operationId: operation.operationId,
@@ -1550,6 +1560,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   async function rotateSelected(){if(!workspace||!selected)return;if(selected.shared){await createOperation("rotate",{degrees:90});releaseProcessingSource();return;}const source=await loadSource(selected);if(!source)return;const result=await rotateImage(source,selected.name,90);await createOperation("rotate",{degrees:90},result);releaseProcessingSource();}
 
   const editorSource=selected&&processingSource?.imageId===selected.imageId?processingSource.blob:null;
+  const EMPTY_EDITOR_IMAGE_URL="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
   const previewUrl=React.useMemo(()=>editorSource?URL.createObjectURL(editorSource):null,[editorSource]);
   React.useEffect(()=>()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);},[previewUrl]);
   const editorImage = React.useMemo<RoomImage | null>(() => workspace && selected && processingSource && editorSource && previewUrl ? {
@@ -1558,8 +1569,8 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     rootImageId: selected.imageId, parentImageId: null, ownerId: workspace.role === "owner" ? "owner" : "remote",
     width: processingSource.width, height: processingSource.height, source: workspace.role === "owner" ? "local" : "received",
     operation: "original", version: 1, createdAt: selected.createdAt, updatedAt: selected.updatedAt,
-    url: previewUrl,
-  } : null, [editorSource, previewUrl, processingSource, selected, workspace]);
+    url: editorPreparing ? EMPTY_EDITOR_IMAGE_URL : previewUrl,
+  } : null, [editorPreparing, editorSource, previewUrl, processingSource, selected, workspace]);
   const initialColorAdjustments = React.useMemo<RoomColorAdjustments>(() => {
     const operation = selected?.parameterDocument?.operations.find((candidate) => candidate.type === "color");
     if (!operation) return DEFAULT_COLOR_ADJUSTMENTS;
@@ -1599,6 +1610,14 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       : [];
   }, [selected?.parameterDocument]);
   const labels = React.useMemo(() => getShareRoomLabels("en"), []);
+  const editorLoadingOverlay = editorPreparing ? (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-white/75 backdrop-blur-[1px]" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
+        <FiLoader className="h-4 w-4 animate-spin text-[#2f65cf]" />
+        <span>Preparing preview...</span>
+      </div>
+    </div>
+  ) : null;
   async function saveProcessedResult(result: ProcessedImageResult) {
     if (!workspace || !selected) return;
     const operationType: WorkspaceOperation["type"] = result.operation === "adjust"
@@ -1624,7 +1643,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   }
   if(!workspace&&runtime==="unavailable")return <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 text-center"><FiX className="mb-3 h-8 w-8 text-red-500"/><h1 className="text-lg font-semibold text-slate-900">Workspace unavailable</h1><p className="mt-2 max-w-md text-sm text-slate-600">{notice||"The share link is invalid or no longer active."}</p><a href="/workspace" className="mt-5 rounded-md bg-[#2f65cf] px-4 py-2 text-sm text-white">Open my workspace</a></main>;
   if(!workspace)return <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-500"><FiRefreshCw className="mr-2 animate-spin"/>Loading workspace</main>;
-  if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace roomId={workspace.workspaceId} image={editorImage} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} parameterAction={selected?.shared?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{setReviewOpen(false);releaseProcessingSource();await createOperation("other",{review:true,...parameters});}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/></main>;
+  if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace roomId={workspace.workspaceId} image={editorImage} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} parameterAction={selected?.shared?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{setReviewOpen(false);releaseProcessingSource();await createOperation("other",{review:true,...parameters});}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
     <header className="relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-[#dfe3e8] px-3 sm:gap-6 sm:px-[22px]" style={headerBackground(workspace.style)}>
       <div className="flex min-w-0 items-center gap-2 sm:gap-4">
@@ -1698,6 +1717,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     <ImageColorAdjustmentDialog image={editing === "adjust" ? editorImage : null} labels={labels} initialAdjustments={initialColorAdjustments} parameterAction={selected?.shared?(workspace.role==="owner"?"apply":"proposal"):undefined} onClose={() => {setEditing(null);releaseProcessingSource();}} onSave={(_source, result) => saveProcessedResult(result)} onApplyParameters={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("brightness",parameters as unknown as Record<string,unknown>);}}/>
     <ImageCompressionDialog image={editing === "compress" ? editorImage : null} labels={labels} onClose={() => {setEditing(null);setCompressingToWorkingImageId(null);releaseProcessingSource();}} onSave={async(_source, result) => {if(compressingToWorkingImage){await saveProcessedCopy(compressingToWorkingImage,result);releaseProcessingSource();return;}await saveProcessedResult(result);}}/>
     <ImageConversionDialog image={editing === "convert" ? editorImage : null} labels={labels} onClose={() => {setEditing(null);releaseProcessingSource();}} onSave={(_source, result) => saveProcessedResult(result)}/>
+    {editorLoadingOverlay}
     <CompressionSuggestionDialog open={Boolean(pendingWorkingImage)} weakNetwork={compressionSuggestionWeakNetwork} labels={labels} onCancel={()=>setPendingWorkingImageId(null)} onContinue={()=>{const image=pendingWorkingImage;setPendingWorkingImageId(null);if(image)void moveImageToWorking(image);}} onCompress={()=>{const image=pendingWorkingImage;setPendingWorkingImageId(null);if(image){setCompressingToWorkingImageId(image.imageId);void openImageOperation(image,"compress");}}}/>
     {pendingProcessedResult?<div className="fixed inset-0 z-[98] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event)=>event.target===event.currentTarget&&!processedResultSaving&&setPendingProcessedResult(null)}><section className="w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Save processed image"><header className="flex items-center justify-between border-b px-5 py-4"><div className="min-w-0"><h2 className="text-base font-semibold text-slate-900">Save processed image</h2><p className="mt-0.5 truncate text-xs text-slate-500">{pendingProcessedResult.result.name}</p></div><button type="button" disabled={processedResultSaving} onClick={()=>setPendingProcessedResult(null)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-40" aria-label="Cancel"><FiX/></button></header><div className="p-5"><div className="aspect-video overflow-hidden rounded-md border bg-slate-100"><BlobImageMedia blob={pendingProcessedResult.result.blob} alt={pendingProcessedResult.result.name}/></div><div className="mt-3 grid grid-cols-2 gap-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500"><span>{pendingProcessedResult.result.width} × {pendingProcessedResult.result.height}</span><span className="text-right">{bytes(pendingProcessedResult.result.blob.size)}</span></div><p className="mt-3 text-xs leading-5 text-slate-500">Choose where to keep the generated image. The source image will not be changed.</p></div><footer className="flex flex-wrap justify-end gap-2 border-t px-5 py-4"><button type="button" disabled={processedResultSaving} onClick={()=>setPendingProcessedResult(null)} className="h-9 rounded-md border px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">Cancel</button><button type="button" disabled={processedResultSaving} onClick={()=>void confirmProcessedResult("library")} className="flex h-9 items-center gap-2 rounded-md border border-[#2f65cf] px-4 text-xs font-semibold text-[#2f65cf] disabled:opacity-40"><FiHardDrive/>Save to Library</button><button type="button" disabled={processedResultSaving} onClick={()=>void confirmProcessedResult("working")} className="flex h-9 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white disabled:opacity-40"><FiArrowRight/>{processedResultSaving?"Saving...":"Save to Working"}</button></footer></section></div>:null}
     {leaveConfirmOpen?<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={(event)=>event.target===event.currentTarget&&setLeaveConfirmOpen(false)}><div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label="Leave workspace"><div className="flex h-10 w-10 items-center justify-center rounded-md bg-amber-50 text-amber-700"><FiUsers/></div><h2 className="mt-4 text-base font-semibold">Leave this workspace?</h2><p className="mt-2 text-sm leading-6 text-slate-600">Leaving disconnects the current collaboration session. Opening Image Workspace from the home page returns to your own workspace.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={()=>setLeaveConfirmOpen(false)} className="h-9 rounded-md border px-4 text-sm">Cancel</button><a href="/workspace" className="flex h-9 items-center rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white">Leave workspace</a></div></div></div>:null}
