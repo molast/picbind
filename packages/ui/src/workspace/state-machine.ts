@@ -61,5 +61,5 @@ export type CommitState = "current" | "historical" | "snapshotExpired";
 
 export function commitState(commit: WorkspaceCommit, currentCommitId: string | null): CommitState {
   if (commit.commitId === currentCommitId) return "current";
-  return commit.snapshot ? "historical" : "snapshotExpired";
+  return commit.snapshot || commit.snapshotCached ? "historical" : "snapshotExpired";
 }

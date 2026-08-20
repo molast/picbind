@@ -28,4 +28,5 @@ test("Commit state derives from Current Commit and snapshot availability", () =>
   assert.equal(commitState(commit, "commit"), "current");
   assert.equal(commitState(commit, "other"), "snapshotExpired");
   assert.equal(commitState({ ...commit, snapshot: new Blob(["snapshot"]) }, "other"), "historical");
+  assert.equal(commitState({ ...commit, snapshotCached: true }, "other"), "historical");
 });

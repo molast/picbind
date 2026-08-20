@@ -12,7 +12,8 @@ import { createWorkspaceShare, joinWorkspace, rotateWorkspaceShare, shareUrl } f
 import {
   deleteWorkspaceImage, listActivities, listCommits, listProposals, listWorkspaceImages,
   promoteLocalWorkspace, purgeExpiredCache, restoreLocalWorkspace, saveActivity, saveCommit, saveProposal,
-  readWorkspaceImagePreview, readWorkspaceImageSource, saveWorkspace, saveWorkspaceImage,
+  readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource,
+  saveWorkspace, saveWorkspaceImage,
 } from "./repository";
 import { WorkspaceRealtimeClient } from "./realtime";
 import { SourceTransferRegistry } from "./source-transfer";
@@ -51,6 +52,11 @@ import {
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const bytes = (size: number) => size < 1024 ? `${size} B` : size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`;
 const statusLabel: Record<WorkspaceRuntimeState, string> = { local: "Local", connecting: "Connecting", connected: "Connected", syncing: "Syncing", available: "Available", ownerOffline: "Owner offline", unavailable: "Unavailable" };
+const cachedCommit = (commit: WorkspaceCommit): WorkspaceCommit => ({
+  ...commit,
+  snapshotCached: commit.snapshotCached || Boolean(commit.snapshot),
+  snapshot: undefined,
+});
 
 function headerBackground(style: WorkspaceStyle): React.CSSProperties {
   const value = style.header.background;
@@ -263,7 +269,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     const sharedImages = sharedWorkingImages(imagesRef.current);
     const route = targetUserId ? "user" as const : "workspace" as const;
     realtimeRef.current?.send("stateSnapshot", {
-      images: sharedImages.map(({ source: _source, preview: _preview, ...image }) => image),
+      images: sharedImages.map(({ source: _source, preview: _preview, sourceCached: _sourceCached, previewCached: _previewCached, ...image }) => image),
       style: workspace.style,
     }, { route, targetUserId, delivery: "reliable" });
     sharedImages.forEach((image) => {
@@ -284,14 +290,15 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
         revision: image.previewRevision,
         currentCommitId: image.currentCommitId,
       }, { route, targetUserId, delivery: "reliable", dataClass: "preview" });
-      if (image.preview) void image.preview.arrayBuffer().then((buffer) => {
+      if (image.previewCached) void readWorkspaceImagePreview(image).then(async (preview) => {
+        if (!preview) return;
         realtimeRef.current?.sendBinary("previewUpsert", {
           image: {
             imageId: image.imageId,
-            mimeType: image.preview?.type || "image/webp",
+            mimeType: preview.type || "image/webp",
             version: image.previewRevision,
           },
-        }, buffer, { route, targetUserId, delivery: "bulk", dataClass: "preview" });
+        }, await preview.arrayBuffer(), { route, targetUserId, delivery: "bulk", dataClass: "preview" });
       });
     });
   }, [workspace]);
@@ -377,7 +384,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     else if (type === "sourceRejected") setNotice(typeof value.reason === "string" ? value.reason : "Source request was rejected");
     else if (type === "proposalSubmit" && workspace?.role === "owner" && value.proposal && typeof value.senderId === "string") { const incoming=value.proposal as WorkspaceProposal,senderId=value.senderId,image=images.find((item)=>item.imageId===incoming.imageId); if (!validateProposal(incoming,workspace.workspaceId,image)) return; const proposal={...incoming,state:image!.currentCommitId&&image!.currentCommitId!==incoming.baseCommitId?"conflict" as const:"pending" as const,authorId:senderId,operations:incoming.operations.map((operation)=>({...operation,authorId:senderId}))}; setProposals((current)=>current.some((p)=>p.proposalId===proposal.proposalId)?current:[...current,proposal]); void saveProposal(proposal); void updateImage(proposal.imageId,{state:"reviewing"}); }
     else if (type === "proposalDecision") { const proposalId=String(value.proposalId); setProposals((current)=>current.map((proposal)=>{if(proposal.proposalId!==proposalId)return proposal;const next={...proposal,state:String(value.state) as WorkspaceProposal["state"],rejectReason:typeof value.reason==="string"?value.reason:undefined};void saveProposal(next);return next;})); }
-    else if (type === "commitCreated" && value.commit) { const commit=value.commit as WorkspaceCommit; setCommits((current)=>[...current.filter((item)=>item.commitId!==commit.commitId),commit]); if(workspace?.role==="collaborator")setNewVersions((current)=>({...current,[commit.imageId]:commit.commitId})); void saveCommit(commit); }
+    else if (type === "commitCreated" && value.commit) { const commit=value.commit as WorkspaceCommit; const cached=cachedCommit(commit); setCommits((current)=>[...current.filter((item)=>item.commitId!==commit.commitId),cached]); if(workspace?.role==="collaborator")setNewVersions((current)=>({...current,[commit.imageId]:commit.commitId})); void saveCommit(commit); }
     else if (type === "styleUpdated" && value.style && isValidStyle(value.style as WorkspaceStyle)) { const style=value.style as WorkspaceStyle; setWorkspace((current)=>{if(!current||style.revision<=current.style.revision)return current;const next={...current,name:style.header.text.content,style};setStyleDraft(style);void saveWorkspace(next);return next;}); }
     else if (type === "reaction") {
       const emoji = String(value.emoji || "👍");
@@ -479,7 +486,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   }, [runtime, workspace?.role]);
   React.useEffect(() => { if(selectedId)void listCommits(selectedId).then((values)=>setCommits((current)=>[...current.filter((item)=>item.imageId!==selectedId),...values])); }, [selectedId]);
 
-  async function addFiles(files: FileList | File[]) { if(!workspace||workspace.role!=="owner")return;for(const file of Array.from(files)){if(!file.type.startsWith("image/"))continue;const [size,thumbnail]=await Promise.all([dimensions(file),generateShareThumbnail(file,320,240)]),imageId=id("image"),initialCommitId=`initial_${imageId}`,preview=new Blob([thumbnail.slice().buffer as ArrayBuffer],{type:"image/webp"});const image:WorkspaceImage={imageId,workspaceId:workspace.workspaceId,name:file.name,mimeType:file.type,size:file.size,...size,workspaceLocation:"library",state:"private",shared:false,currentCommitId:initialCommitId,previewRevision:0,createdAt:Date.now(),updatedAt:Date.now(),sourceCached:true,previewCached:true,source:file,preview};const initial:WorkspaceCommit={commitId:initialCommitId,imageId,authorId:"owner",parentCommitId:null,mergeParentCommitIds:[],operations:[],snapshot:file,snapshotName:file.name,snapshotMimeType:file.type,snapshotWidth:size.width,snapshotHeight:size.height,createdAt:Date.now()};await Promise.all([saveWorkspaceImage(image),saveCommit(initial)]);const cached={...image,source:undefined,preview:undefined};setImages((current)=>[...current,cached]);setCommits((current)=>[...current,initial]);setSelectedId(imageId);await persistActivity(workspace.workspaceId,"imageAdded",image.imageId);}if(inputRef.current)inputRef.current.value=""; }
+  async function addFiles(files: FileList | File[]) { if(!workspace||workspace.role!=="owner")return;for(const file of Array.from(files)){if(!file.type.startsWith("image/"))continue;const [size,thumbnail]=await Promise.all([dimensions(file),generateShareThumbnail(file,320,240)]),imageId=id("image"),initialCommitId=`initial_${imageId}`,preview=new Blob([thumbnail.slice().buffer as ArrayBuffer],{type:"image/webp"});const image:WorkspaceImage={imageId,workspaceId:workspace.workspaceId,name:file.name,mimeType:file.type,size:file.size,...size,workspaceLocation:"library",state:"private",shared:false,currentCommitId:initialCommitId,previewRevision:0,createdAt:Date.now(),updatedAt:Date.now(),sourceCached:true,previewCached:true,source:file,preview};const initial:WorkspaceCommit={commitId:initialCommitId,imageId,authorId:"owner",parentCommitId:null,mergeParentCommitIds:[],operations:[],snapshot:file,snapshotName:file.name,snapshotMimeType:file.type,snapshotWidth:size.width,snapshotHeight:size.height,createdAt:Date.now()};await saveWorkspaceImage(image);await saveCommit(initial);const cached={...image,source:undefined,preview:undefined};setImages((current)=>[...current,cached]);setCommits((current)=>[...current,cachedCommit(initial)]);setSelectedId(imageId);await persistActivity(workspace.workspaceId,"imageAdded",image.imageId);}if(inputRef.current)inputRef.current.value=""; }
   async function moveImageToWorking(image: WorkspaceImage) {
     if (!workspace || workspace.role !== "owner") return;
     await updateImage(image.imageId, {
@@ -552,9 +559,10 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       snapshotHeight: result.height,
       createdAt,
     };
-    await Promise.all([saveWorkspaceImage(image), saveCommit(initialCommit)]);
+    await saveWorkspaceImage(image);
+    await saveCommit(initialCommit);
     setImages((current) => [...current, { ...image, source: undefined, preview: undefined }]);
-    setCommits((current) => [...current, initialCommit]);
+    setCommits((current) => [...current, cachedCommit(initialCommit)]);
     setSelectedId(imageId);
     setCompressingToWorkingImageId(null);
     setEditing(null);
@@ -637,7 +645,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       snapshotMimeType: latest.mimeType, snapshotWidth: latest.width, snapshotHeight: latest.height,
       createdAt: Date.now() };
     await saveCommit(commit);
-    setCommits((current) => [...current, commit]);
+    setCommits((current) => [...current, cachedCommit(commit)]);
     const updated = { ...latest, currentCommitId: commit.commitId, state: "committed" as const };
     await updateImage(selected.imageId, updated);
     if (updated.shared) await publishPreview(updated, latestSource);
@@ -650,11 +658,16 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   async function proposalInput(proposal: WorkspaceProposal) {
     const image = images.find((item) => item.imageId === proposal.imageId);
     if (!image) throw new Error("Proposal image is unavailable");
-    if (image.currentCommitId === proposal.baseCommitId) return image;
+    if (image.currentCommitId === proposal.baseCommitId) {
+      const source = await readWorkspaceImageSource(image);
+      if (!source) throw new Error("Proposal base version is unavailable");
+      return { ...image, source };
+    }
     const history = await listCommits(proposal.imageId);
     const base = history.find((commit) => commit.commitId === proposal.baseCommitId);
-    if (!base?.snapshot) throw new Error("Proposal base version is unavailable");
-    return { ...image, source: base.snapshot, name: base.snapshotName || image.name,
+    const snapshot = base ? await readWorkspaceCommitSnapshot(base) : null;
+    if (!base || !snapshot) throw new Error("Proposal base version is unavailable");
+    return { ...image, source: snapshot, name: base.snapshotName || image.name,
       mimeType: base.snapshotMimeType || image.mimeType, width: base.snapshotWidth || image.width,
       height: base.snapshotHeight || image.height };
   }
@@ -675,7 +688,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       try{
         const result=await replayOperations(await proposalInput(proposal),proposal.operations);
         const commit:WorkspaceCommit={commitId:id("commit"),imageId:proposal.imageId,authorId:"owner",parentCommitId:image.currentCommitId,mergeParentCommitIds:image.currentCommitId!==proposal.baseCommitId?[proposal.baseCommitId]:[],operations:proposal.operations,snapshot:result.blob,snapshotName:result.name,snapshotMimeType:result.mimeType,snapshotWidth:result.width,snapshotHeight:result.height,createdAt:Date.now()};
-        await saveCommit(commit);setCommits((current)=>[...current,commit]);
+        await saveCommit(commit);setCommits((current)=>[...current,cachedCommit(commit)]);
         const updated={...image,source:result.blob,preview:result.blob,name:result.name,mimeType:result.mimeType,size:result.blob.size,width:result.width,height:result.height,currentCommitId:commit.commitId,state:"committed" as const};
         await updateImage(proposal.imageId,updated);
         if(updated.shared)await publishPreview(updated,result.blob);
@@ -686,21 +699,24 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   }
   async function saveStyle(){if(!workspace||workspace.role!=="owner"||!isValidStyle(styleDraft))return;const style={...styleDraft,revision:workspace.style.revision+1};const next={...workspace,name:style.header.text.content,style,updatedAt:Date.now()};await saveWorkspace(next);setWorkspace(next);setStyleDraft(style);setSettingsOpen(false);realtimeRef.current?.send("styleUpdated",{style},{delivery:"reliable"});}
   async function rollbackCommit(commit: WorkspaceCommit) {
-    if (workspace?.role !== "owner" || !selected || !commit.snapshot) return;
+    if (workspace?.role !== "owner" || !selected || !commit.snapshotCached) return;
+    const snapshot = await readWorkspaceCommitSnapshot(commit);
+    if (!snapshot) return;
     const rollback: WorkspaceCommit = { ...commit, commitId: id("commit"), authorId: "owner",
+      snapshot,
       parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [{
         operationId: id("operation"), imageId: selected.imageId, authorId: "owner",
         baseCommitId: selected.currentCommitId || commit.commitId, type: "other",
         parameters: { rollbackTo: commit.commitId }, createdAt: Date.now(),
       }], createdAt: Date.now() };
     await saveCommit(rollback);
-    setCommits((current) => [...current, rollback]);
-    const updated = { ...selected, source: commit.snapshot, preview: commit.snapshot,
+    setCommits((current) => [...current, cachedCommit(rollback)]);
+    const updated = { ...selected, source: snapshot, preview: snapshot,
       name: commit.snapshotName || selected.name, mimeType: commit.snapshotMimeType || selected.mimeType,
       width: commit.snapshotWidth || selected.width, height: commit.snapshotHeight || selected.height,
-      size: commit.snapshot.size, currentCommitId: rollback.commitId, state: "committed" as const };
+      size: snapshot.size, currentCommitId: rollback.commitId, state: "committed" as const };
     await updateImage(selected.imageId, updated);
-    if (updated.shared) await publishPreview(updated, commit.snapshot);
+    if (updated.shared) await publishPreview(updated, snapshot);
     const { snapshot: _snapshot, ...metadata } = rollback;
     realtimeRef.current?.send("commitCreated", { commit: metadata }, {
       delivery: "reliable", dataClass: "sourceOrCommit",
@@ -786,7 +802,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
           <section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-sm font-semibold text-[#26344c]"><FiImage/><span>Selected image</span></div>{selected?<><div className="mt-3 grid grid-cols-[56px_minmax(0,1fr)] items-center gap-3"><div className="h-14 w-14 overflow-hidden rounded-md border bg-slate-100"><WorkspaceImageMedia image={selected} role={workspace.role}/></div><div className="min-w-0"><strong className="block truncate text-[13px]">{selected.name}</strong><span className="block text-[11px] text-slate-500">{selected.width} × {selected.height} · {selected.mimeType.replace("image/","").toUpperCase()}</span><span className="block text-[11px] text-slate-500">{bytes(selected.size)}</span></div></div><dl className="mt-3 grid gap-2 text-xs"><div className="flex justify-between gap-3"><dt className="text-slate-500">Location</dt><dd>{selected.workspaceLocation==="library"?"Origin":"Working"}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Status</dt><dd className="capitalize">{selected.state}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Current commit</dt><dd className="max-w-[160px] truncate">{selected.currentCommitId||"Initial"}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">Collaboration</dt><dd>{selected.shared?"Shared":"Not shared"}</dd></div></dl>{selectedIsLibrary?<button type="button" onClick={()=>requestMoveImageToWorking(selected)} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-[#2f65cf] bg-[#2f65cf] text-xs font-bold text-white hover:bg-[#2457bd]"><FiArrowRight/>Add to Working</button>:workspace.role==="owner"?<button type="button" onClick={()=>void publishImage(selected)} className={`mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs font-bold ${selected.shared?"border-slate-300 bg-white text-slate-600 hover:bg-slate-50":"border-[#2f65cf] bg-[#2f65cf] text-white hover:bg-[#2457bd]"}`}><FiShield/>{selected.shared?"Unshare image":"Share for collaboration"}</button>:!selected.sourceCached?<button type="button" onClick={()=>requestSource(selected)} disabled={runtime!=="available"} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white disabled:opacity-40"><FiDownload/>Request source</button>:null}<div className="mt-4 text-[11px] font-bold uppercase text-[#778294]">Quick actions</div><div className="mt-2 grid grid-cols-3 gap-2"><WorkspaceAction icon={<FiCrop/>} label="Crop" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"crop")}/><WorkspaceAction icon={<FiMaximize2/>} label="Resize" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"resize")}/><WorkspaceAction icon={<FiSliders/>} label="Adjust" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"adjust")}/><WorkspaceAction icon={<FiMinimize2/>} label="Compress" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"compress")}/><WorkspaceAction icon={<FiRefreshCw/>} label="Convert" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"convert")}/><WorkspaceAction icon={<FiEye/>} label="Review" disabled={selectedIsLibrary||!selected.sourceCached} onClick={()=>void openImageOperation(selected,"review")}/></div><div className="mt-3 flex gap-2">{selected.sourceCached?<button type="button" onClick={()=>void downloadImage(selected)} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md border text-xs"><FiDownload/>Download</button>:null}{selectedIsLibrary?<button type="button" onClick={()=>{void deleteWorkspaceImage(selected.imageId);setImages((current)=>current.filter((item)=>item.imageId!==selected.imageId));}} className="flex h-9 w-9 items-center justify-center rounded-md border border-red-200 text-red-600" title="Delete"><FiTrash2/></button>:workspace.role==="owner"?<button type="button" onClick={()=>void moveImageToLibrary(selected)} className="flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600" title="Return to Origin"><FiArrowLeft/></button>:null}</div>{workspace.role==="collaborator"&&newVersions[selected.imageId]?<div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs"><strong className="text-blue-900">A new version is available</strong><div className="mt-2 flex gap-2"><button type="button" onClick={()=>void readWorkspaceImagePreview(selected).then((preview)=>preview?setVersionPreview({imageName:selected.name,blob:preview}):setNotice("The new Preview is still loading"))} className="rounded border bg-white px-2 py-1">Review</button><button type="button" onClick={()=>requestSource(selected)} disabled={runtime!=="available"} className="rounded bg-[#2f65cf] px-2 py-1 text-white">Update</button><button type="button" onClick={()=>setNewVersions((current)=>{const next={...current};delete next[selected.imageId];return next;})}>Later</button></div></div>:null}</>:<div className="mt-4 flex flex-col items-center gap-2 py-5 text-center text-xs text-slate-400"><FiImage className="h-6 w-6"/><p>Select an image to inspect it.</p></div>}</section>
           <section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiHardDrive/><span>Workspace overview</span></div><div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{images.length}</strong><span className="text-[10px] text-slate-500">Images total</span></div><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{images.filter((image)=>image.shared).length}</strong><span className="text-[10px] text-slate-500">Shared</span></div></div><div className="mt-3 flex gap-2 rounded-md bg-emerald-50 p-3 text-emerald-800"><FiShield className="mt-0.5 shrink-0"/><p className="text-[11px] leading-4">Image data is stored locally on this device.</p></div></section>
           <section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiShare2/><span>Workspace share</span></div>{workspace.role!=="owner"?<p className="mt-3 text-xs leading-5 text-slate-500">Joined with a permanent share link.</p>:<><p className="mt-3 text-xs leading-5 text-slate-500">Create a permanent link for collaborators. Creating a new link invalidates the previous one.</p>{workspace.shareToken?<button type="button" onClick={()=>void rotateShare()} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs"><FiRefreshCw/>Create new link</button>:<button type="button" onClick={()=>void createShare()} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white"><FiLink/>Create share link</button>}</>}</section>
-          {selected&&commits.some((commit)=>commit.imageId===selected.imageId)?<section className="p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiClock/><span>Version history</span></div><div className="mt-3 grid gap-2">{commits.filter((commit)=>commit.imageId===selected.imageId).slice().reverse().map((commit)=><div key={commit.commitId} className="flex items-center justify-between rounded-md border p-2 text-[11px]"><div className="min-w-0"><strong className="block truncate">{commit.commitId===selected.currentCommitId?"Current version":commit.commitId.startsWith("initial_")?"Initial version":commit.operations.map((operation)=>operation.type).join(", ")||"Version"}</strong><span className="text-slate-400">{new Date(commit.createdAt).toLocaleString()}</span></div>{workspace.role==="owner"&&commit.snapshot&&commit.commitId!==selected.currentCommitId?<button type="button" onClick={()=>void rollbackCommit(commit)} className="ml-2 rounded border px-2 py-1">Restore</button>:workspace.role==="collaborator"&&commit.commitId!==selected.currentCommitId?<button type="button" onClick={()=>requestSource(selected)} disabled={runtime!=="available"} className="ml-2 rounded border px-2 py-1">Update</button>:null}</div>)}</div></section>:null}
+          {selected&&commits.some((commit)=>commit.imageId===selected.imageId)?<section className="p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiClock/><span>Version history</span></div><div className="mt-3 grid gap-2">{commits.filter((commit)=>commit.imageId===selected.imageId).slice().reverse().map((commit)=><div key={commit.commitId} className="flex items-center justify-between rounded-md border p-2 text-[11px]"><div className="min-w-0"><strong className="block truncate">{commit.commitId===selected.currentCommitId?"Current version":commit.commitId.startsWith("initial_")?"Initial version":commit.operations.map((operation)=>operation.type).join(", ")||"Version"}</strong><span className="text-slate-400">{new Date(commit.createdAt).toLocaleString()}</span></div>{workspace.role==="owner"&&commit.snapshotCached&&commit.commitId!==selected.currentCommitId?<button type="button" onClick={()=>void rollbackCommit(commit)} className="ml-2 rounded border px-2 py-1">Restore</button>:workspace.role==="collaborator"&&commit.commitId!==selected.currentCommitId?<button type="button" onClick={()=>requestSource(selected)} disabled={runtime!=="available"} className="ml-2 rounded border px-2 py-1">Update</button>:null}</div>)}</div></section>:null}
         </>}
       </aside>
     </div>

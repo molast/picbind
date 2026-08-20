@@ -69,6 +69,19 @@ export async function promoteLocalWorkspace(previousId: string, workspace: Works
       return { ...image, source: source || image.source, preview: preview || image.preview, workspaceId: workspace.workspaceId };
     } catch { return { ...image, workspaceId: workspace.workspaceId }; }
   }));
+  const commits = (await Promise.all(stored.map((image) =>
+    db.commits.where("imageId").equals(image.imageId).toArray()))).flat();
+  const commitSnapshots = await Promise.all(commits.map(async (commit) => {
+    if (!commit.snapshotCached && !commit.snapshot) return null;
+    try {
+      return await repository.read(
+        "room", previousId, `commit:${commit.commitId}`, "original",
+        commit.snapshotMimeType || "application/octet-stream",
+      ) || commit.snapshot || null;
+    } catch {
+      return commit.snapshot || null;
+    }
+  }));
   await db.transaction("rw", db.workspaces, db.images, db.proposals, db.activities, db.cache, async () => {
     await db.images.bulkPut(images);
     await db.proposals.bulkPut(proposals.map((value) => ({ ...value, workspaceId: workspace.workspaceId })));
@@ -85,6 +98,10 @@ export async function promoteLocalWorkspace(previousId: string, workspace: Works
   await Promise.all(images.map(async (image) => {
     await saveWorkspaceImage(image);
     await repository.delete("room", previousId, image.imageId).catch(() => undefined);
+  }));
+  await Promise.all(commits.map(async (commit, index) => {
+    await saveCommit({ ...commit, snapshot: commitSnapshots[index] || undefined });
+    await repository.delete("room", previousId, `commit:${commit.commitId}`).catch(() => undefined);
   }));
   localStorage.setItem(LOCAL_WORKSPACE_KEY, workspace.workspaceId);
 }
@@ -222,13 +239,55 @@ export async function saveProposal(value: WorkspaceProposal) { await getWorkspac
 export async function listProposals(workspaceId: string) { return getWorkspaceDatabase().proposals.where("workspaceId").equals(workspaceId).sortBy("createdAt"); }
 export async function saveCommit(value: WorkspaceCommit) {
   const table = getWorkspaceDatabase().commits;
-  await table.put(value);
+  const { snapshot, ...metadata } = value;
+  const image = await getWorkspaceDatabase().images.get(value.imageId);
+  let snapshotStoredAsFile = false;
+  if (snapshot && image) {
+    try {
+      await getImageStorageRepository().put({
+        scope: "room",
+        scopeKey: image.workspaceId,
+        id: `commit:${value.commitId}`,
+        metadata: metadata as unknown as Record<string, unknown>,
+        mimeType: value.snapshotMimeType || snapshot.type || image.mimeType,
+        data: snapshot,
+        createdAt: value.createdAt,
+      });
+      snapshotStoredAsFile = true;
+    } catch {
+      // IndexedDB Blob fallback is retained only when file-backed storage is unavailable.
+    }
+  }
+  await table.put({
+    ...metadata,
+    snapshotCached: Boolean(snapshot || value.snapshotCached),
+    snapshot: snapshotStoredAsFile ? undefined : snapshot,
+  });
   const commits = await table.where("imageId").equals(value.imageId).sortBy("createdAt");
-  if (commits.length > 20) await table.bulkDelete(commits.slice(0, commits.length - 20).map((item) => item.commitId));
-  const image=await getWorkspaceDatabase().images.get(value.imageId);
+  if (commits.length > 20) {
+    const expired = commits.slice(0, commits.length - 20);
+    await table.bulkDelete(expired.map((item) => item.commitId));
+    if (image) await Promise.all(expired.map((item) =>
+      getImageStorageRepository().delete("room", image.workspaceId, `commit:${item.commitId}`).catch(() => undefined)));
+  }
   if(image)await getWorkspaceDatabase().cache.put({key:`commit:${image.workspaceId}:${value.commitId}`,workspaceId:image.workspaceId,kind:"commit",accessedAt:Date.now(),expiresAt:Date.now()+30*DAY});
 }
-export async function listCommits(imageId: string) { const values=await getWorkspaceDatabase().commits.where("imageId").equals(imageId).sortBy("createdAt");const cutoff=Date.now()-30*DAY;return values.map((value)=>value.createdAt<cutoff?{...value,snapshot:undefined}:value); }
+export async function listCommits(imageId: string) { const values=await getWorkspaceDatabase().commits.where("imageId").equals(imageId).sortBy("createdAt");const cutoff=Date.now()-30*DAY;return values.map((value)=>value.createdAt<cutoff?{...value,snapshotCached:false,snapshot:undefined}:{...value,snapshot:undefined}); }
+export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
+  if (!commit.snapshotCached) return null;
+  const image = await getWorkspaceDatabase().images.get(commit.imageId);
+  if (!image) return null;
+  try {
+    const snapshot = await getImageStorageRepository().read(
+      "room", image.workspaceId, `commit:${commit.commitId}`, "original",
+      commit.snapshotMimeType || image.mimeType,
+    );
+    if (snapshot) return snapshot;
+  } catch {
+    // Older databases may still contain the pre-file-cache Blob record.
+  }
+  return (await getWorkspaceDatabase().commits.get(commit.commitId))?.snapshot ?? null;
+}
 export async function saveActivity(workspaceId: string, value: WorkspaceActivity) {
   const table = getWorkspaceDatabase().activities;
   await table.put({ ...value, workspaceId });
@@ -246,7 +305,7 @@ export async function purgeExpiredCache(now = Date.now()) {
   const db=getWorkspaceDatabase(),table = db.cache;
   const expired = await table.filter((item) => item.expiresAt !== null && item.expiresAt <= now).toArray();
   const repository = getImageStorageRepository();
-  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined,[entry.kind==="preview"?"previewCached":"sourceCached"]:false});await repository.deleteVariant("room",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit?.snapshot)await db.commits.put({...commit,snapshot:undefined});}else if(entry.kind==="activity")await db.activities.delete(recordId);}
+  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined,[entry.kind==="preview"?"previewCached":"sourceCached"]:false});await repository.deleteVariant("room",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit){await db.commits.put({...commit,snapshotCached:false,snapshot:undefined});await repository.delete("room",entry.workspaceId,`commit:${recordId}`).catch(()=>undefined);}}else if(entry.kind==="activity")await db.activities.delete(recordId);}
   await table.bulkDelete(expired.map((item) => item.key));
   await repository.pruneCache({maxBytes:512*1024*1024,maxAgeMillis:90*DAY}).catch(()=>undefined);
   return expired.length;

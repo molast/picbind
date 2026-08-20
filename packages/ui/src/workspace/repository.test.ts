@@ -4,7 +4,8 @@ import { afterEach, beforeEach, test } from "node:test";
 import {
   WorkspaceDatabase, deleteWorkspaceImage, listActivities, listCommits, listProposals, listWorkspaceImages,
   promoteLocalWorkspace, purgeExpiredCache, restoreLocalWorkspace, saveActivity, saveCommit,
-  readWorkspaceImagePreview, readWorkspaceImageSource, saveProposal, saveWorkspace, saveWorkspaceImage,
+  readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource,
+  saveProposal, saveWorkspace, saveWorkspaceImage,
   setWorkspaceDatabaseForTests,
 } from "./repository";
 import { defaultWorkspaceStyle, type WorkspaceIdentity, type WorkspaceImage } from "./types";
@@ -134,6 +135,9 @@ test("keeps only the latest 20 Commit snapshots for each image", async () => {
   assert.equal(commits.length, 20);
   assert.equal(commits[0].commitId, "commit-5");
   assert.equal(commits.at(-1)?.commitId, "commit-24");
+  assert.equal(commits.every((commit) => commit.snapshot === undefined), true);
+  assert.equal(commits.every((commit) => commit.snapshotCached), true);
+  assert.equal(await (await readWorkspaceCommitSnapshot(commits.at(-1)!))?.text(), "24");
 });
 
 test("promotes images and collaboration records without losing local data", async () => {

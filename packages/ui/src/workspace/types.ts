@@ -117,6 +117,7 @@ export type WorkspaceCommit = {
   parentCommitId: string | null;
   mergeParentCommitIds: string[];
   operations: WorkspaceOperation[];
+  snapshotCached?: boolean;
   snapshot?: Blob;
   snapshotName?: string;
   snapshotMimeType?: string;
