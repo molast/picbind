@@ -297,6 +297,21 @@ export class WorkspaceRealtimeObject {
       return;
     }
     const type = typeof payload.type === "string" ? payload.type : "";
+    if (type === "memberKick") {
+      if (attachment.role !== "owner" || !nonEmptyString(payload.targetUserId, 128)) return;
+      const targetUserId = payload.targetUserId;
+      const targets = this.state.getWebSockets(`user:${targetUserId}`);
+      if (!targets.length) return;
+      this.sendToSockets(targets, {
+        type: "memberRemoved",
+        userId: targetUserId,
+        reason: "Removed by Owner",
+      });
+      for (const target of targets) {
+        try { target.close(4003, "Removed by Owner"); } catch { /* Closing sockets are ignored. */ }
+      }
+      return;
+    }
     if (type === RELAY_TYPE) {
       this.relayGenericEvent(socket, payload, attachment);
       return;

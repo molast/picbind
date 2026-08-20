@@ -74,6 +74,7 @@ export type WorkspaceImage = {
 export type Collaborator = {
   clientId: string;
   displayName: string;
+  role?: WorkspaceRole;
   online: boolean;
   currentAction?: string;
   currentImageId?: string;

@@ -306,6 +306,12 @@ export class WorkspaceRealtimeClient {
     return event.eventId;
   }
 
+  removeCollaborator(userId: string) {
+    if (this.workspace.role !== "owner" || !userId || this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ type: "memberKick", targetUserId: userId }));
+    return true;
+  }
+
   sendBinary(
     type: string,
     payload: Record<string, unknown>,
