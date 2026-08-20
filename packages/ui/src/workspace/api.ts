@@ -37,5 +37,7 @@ export async function realtimeTicket(workspace: WorkspaceIdentity, clientId: str
 }
 
 export function shareUrl(shareToken: string) {
-  return `${location.origin}/workspace/${encodeURIComponent(shareToken)}`;
+  const url = new URL("/workspace", location.origin);
+  url.searchParams.set("share", shareToken);
+  return url.toString();
 }
