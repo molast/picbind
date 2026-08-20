@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isInboundEventAllowed, validateOperation, validateProposal } from "./policy";
+import { isInboundEventAllowed, proposalHasCurrentBase, validateOperation, validateProposal } from "./policy";
 import type { WorkspaceImage, WorkspaceOperation, WorkspaceProposal } from "./types";
 
 const image: WorkspaceImage = { imageId: "image", workspaceId: "workspace", name: "image.png",
@@ -17,6 +17,13 @@ test("accepts business events only from the role that owns them", () => {
   assert.equal(isInboundEventAllowed("owner", "proposalSubmit", "collaborator"), true);
   assert.equal(isInboundEventAllowed("owner", "proposalSubmit", "owner"), false);
   assert.equal(isInboundEventAllowed("owner", "message", "collaborator"), true);
+  assert.equal(isInboundEventAllowed("collaborator", "historyRolledBack", "owner"), true);
+  assert.equal(isInboundEventAllowed("owner", "historyRolledBack", "collaborator"), false);
+});
+
+test("rejects a Proposal based on a stale Commit", () => {
+  assert.equal(proposalHasCurrentBase(proposal, image), true);
+  assert.equal(proposalHasCurrentBase({ ...proposal, baseCommitId: "stale" }, image), false);
 });
 
 test("rejects invalid operation bounds before Proposal review", () => {

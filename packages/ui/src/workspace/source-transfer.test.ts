@@ -34,14 +34,21 @@ test("assembles ordered Source chunks and ignores exact duplicates", async () =>
   assert.equal(registry.size, 0);
 });
 
-test("rejects missing and corrupt Source chunks and clears request state", async () => {
+test("waits for chunks that arrive after Source completion", async () => {
   const bytes = new Uint8Array([1, 2, 3, 4]);
   const missing = new SourceTransferRegistry();
   missing.start(await manifest(bytes));
   missing.push("request-1", 0, bytes.slice(0, 2));
   assert.equal(await missing.complete("request-1"), null);
+  assert.equal(missing.isCompletionPending("request-1"), true);
+  missing.push("request-1", 1, bytes.slice(2));
+  const completed = await missing.complete("request-1");
+  assert.deepEqual([...new Uint8Array(await completed!.source.arrayBuffer())], [...bytes]);
   assert.equal(missing.size, 0);
+});
 
+test("rejects corrupt Source chunks and clears request state", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
   const corrupt = new SourceTransferRegistry();
   corrupt.start(await manifest(bytes));
   corrupt.push("request-1", 0, bytes.slice(0, 2));

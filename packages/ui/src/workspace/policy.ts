@@ -16,6 +16,7 @@ const OWNER_EVENTS = new Set([
   "sourceRejected",
   "proposalDecision",
   "commitCreated",
+  "historyRolledBack",
   "styleUpdated",
 ]);
 const COLLABORATOR_EVENTS = new Set(["stateRequest", "sourceRequest", "proposalSubmit"]);
@@ -94,4 +95,8 @@ export function validateProposal(
     && proposal.operations.every((operation) => operation.imageId === proposal.imageId
       && operation.baseCommitId === proposal.baseCommitId
       && validateOperation(operation)));
+}
+
+export function proposalHasCurrentBase(proposal: WorkspaceProposal, image: WorkspaceImage) {
+  return proposal.baseCommitId === image.currentCommitId;
 }

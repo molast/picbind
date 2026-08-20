@@ -14,6 +14,9 @@ type ImageResizeDialogProps = {
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  parameterAction?: "apply" | "proposal";
+  onApplyParameters?(size: { width: number; height: number }): void | Promise<void>;
+  initialSize?: { width: number; height: number };
 };
 
 const MAX_DIMENSION = 16384;
@@ -22,7 +25,7 @@ function validDimension(value: number) {
   return Number.isFinite(value) && value >= 1 && value <= MAX_DIMENSION;
 }
 
-export default function ImageResizeDialog({ image, labels, onClose, onSave }: ImageResizeDialogProps) {
+export default function ImageResizeDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialSize }: ImageResizeDialogProps) {
   const [width, setWidth] = React.useState(1);
   const [height, setHeight] = React.useState(1);
   const [locked, setLocked] = React.useState(true);
@@ -32,15 +35,15 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave }: Im
 
   React.useEffect(() => {
     if (!image) return;
-    const nextWidth = Math.max(1, image.width || 1);
-    const nextHeight = Math.max(1, image.height || 1);
+    const nextWidth = Math.max(1, initialSize?.width || image.width || 1);
+    const nextHeight = Math.max(1, initialSize?.height || image.height || 1);
     ratioRef.current = nextWidth / nextHeight;
     setWidth(nextWidth);
     setHeight(nextHeight);
     setLocked(true);
     setWorking(false);
     setError(null);
-  }, [image]);
+  }, [image, initialSize]);
 
   React.useEffect(() => {
     if (!image) return;
@@ -94,9 +97,9 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave }: Im
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
-          <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); void resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)).catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+          <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters({width,height})):resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {working ? labels.processing : labels.generateResult}
+            {working?(parameterAction==="proposal"?"Submitting...":parameterAction?"Applying...":labels.processing):parameterAction==="proposal"?"Submit proposal":parameterAction?"Apply changes":labels.generateResult}
           </button>
         </footer>
       </section>

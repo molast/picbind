@@ -6,8 +6,8 @@ export type ImageCollaborationState =
   | "private" | "shared" | "working" | "reviewing" | "committed";
 export type WorkspaceImageLocation = "library" | "working";
 export type ProposalState =
-  | "draft" | "submitted" | "pending" | "applied" | "rejected"
-  | "deferred" | "failed" | "conflict";
+  | "draft" | "submitted" | "pending" | "approved" | "rejected"
+  | "later" | "failed" | "conflict";
 
 export type WorkspaceStyle = {
   version: 1;
@@ -59,6 +59,7 @@ export type WorkspaceImage = {
   shared: boolean;
   currentCommitId: string | null;
   previewRevision: number;
+  parameterDocument?: import("./image-protocol").ImageParameterDocument;
   pinnedAt?: number;
   createdAt: number;
   updatedAt: number;
@@ -86,6 +87,7 @@ export type WorkspaceActivity = {
   imageId?: string;
   detail?: unknown;
   createdAt: number;
+  scope: "workspaceLog" | "collaborationActivity";
 };
 
 export type WorkspaceOperation = {

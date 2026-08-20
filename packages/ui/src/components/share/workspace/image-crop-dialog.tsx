@@ -16,13 +16,16 @@ type ImageCropDialogProps = {
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  parameterAction?: "apply" | "proposal";
+  onApplyParameters?(crop: NormalizedCrop): void | Promise<void>;
+  initialCrop?: NormalizedCrop;
 };
 
 type RatioValue = "free" | "original" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 
 const INITIAL_CROP: NormalizedCrop = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
-export default function ImageCropDialog({ image, labels, onClose, onSave }: ImageCropDialogProps) {
+export default function ImageCropDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialCrop }: ImageCropDialogProps) {
   const [ratioValue, setRatioValue] = React.useState<RatioValue>("free");
   const [crop, setCrop] = React.useState<NormalizedCrop>(INITIAL_CROP);
   const [working, setWorking] = React.useState(false);
@@ -31,10 +34,10 @@ export default function ImageCropDialog({ image, labels, onClose, onSave }: Imag
   React.useEffect(() => {
     if (!image) return;
     setRatioValue("free");
-    setCrop(INITIAL_CROP);
+    setCrop(initialCrop || INITIAL_CROP);
     setWorking(false);
     setError(null);
-  }, [image]);
+  }, [image, initialCrop]);
 
   React.useEffect(() => {
     if (!image) return;
@@ -81,9 +84,8 @@ export default function ImageCropDialog({ image, labels, onClose, onSave }: Imag
 
           <KonvaCropEditor
             imageUrl={image.url}
-            imageWidth={image.width}
-            imageHeight={image.height}
             aspect={aspect}
+            initialCrop={initialCrop}
             onCropChange={setCrop}
           />
 
@@ -96,9 +98,9 @@ export default function ImageCropDialog({ image, labels, onClose, onSave }: Imag
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
-          <button type="button" disabled={working} onClick={() => { setWorking(true); setError(null); void cropRoomImage(new File([image.blob], image.name, { type: image.type }), crop).then((result) => onSave(image, result)).catch((reason) => setError(reason instanceof Error ? reason.message : labels.cropFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+          <button type="button" disabled={working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters(crop)):cropRoomImage(new File([image.blob], image.name, { type: image.type }), crop).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.cropFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {working ? labels.processing : labels.generateResult}
+            {working?(parameterAction==="proposal"?"Submitting...":parameterAction?"Applying...":labels.processing):parameterAction==="proposal"?"Submit proposal":parameterAction?"Apply changes":labels.generateResult}
           </button>
         </footer>
       </section>

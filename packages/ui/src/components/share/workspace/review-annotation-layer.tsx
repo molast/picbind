@@ -203,6 +203,28 @@ function createAnnotationNode(
   });
 }
 
+export async function renderReviewAnnotations(
+  annotations: ReviewAnnotation[],
+  width: number,
+  height: number,
+) {
+  const container = document.createElement("div");
+  container.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px`;
+  document.body.append(container);
+  const stage = new Konva.Stage({ container, width, height });
+  try {
+    const layer = new Konva.Layer({ listening: false });
+    stage.add(layer);
+    annotations.forEach((annotation) => layer.add(createAnnotationNode(annotation, false, 1)));
+    layer.draw();
+    const response = await fetch(stage.toDataURL({ pixelRatio: 1 }));
+    return response.blob();
+  } finally {
+    stage.destroy();
+    container.remove();
+  }
+}
+
 export default function ReviewAnnotationLayer(props: ReviewAnnotationLayerProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const stageRef = React.useRef<Konva.Stage | null>(null);

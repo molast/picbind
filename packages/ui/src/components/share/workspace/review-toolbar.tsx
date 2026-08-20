@@ -4,6 +4,7 @@ import React from "react";
 import type { IconType } from "react-icons";
 import {
   FiArrowLeft,
+  FiCheck,
   FiCircle,
   FiCornerUpLeft,
   FiCornerUpRight,
@@ -93,6 +94,10 @@ type ReviewToolbarProps = {
   onReset(): void;
   onGenerateImage(): void;
   generatingImage: boolean;
+  generateActionLabel?: string;
+  generatingActionLabel?: string;
+  generateActionIsParameter?: boolean;
+  showCollaborationControls?: boolean;
 };
 
 type ToolButtonProps = {
@@ -178,6 +183,10 @@ export default function ReviewToolbar({
   onReset,
   onGenerateImage,
   generatingImage,
+  generateActionLabel,
+  generatingActionLabel,
+  generateActionIsParameter = false,
+  showCollaborationControls = true,
 }: ReviewToolbarProps) {
   const [openPanel, setOpenPanel] = React.useState<
     | "emoji"
@@ -245,14 +254,16 @@ export default function ReviewToolbar({
           onClick={onGenerateImage}
           disabled={generatingImage}
           className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#2f65cf] px-2.5 text-xs font-semibold text-white transition hover:bg-[#2457bd] disabled:opacity-50"
-          title={labels.generateImage}
+          title={generateActionLabel || labels.generateImage}
         >
           {generatingImage ? (
             <FiLoader className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : generateActionIsParameter ? (
+            <FiCheck className="h-3.5 w-3.5" aria-hidden="true" />
           ) : (
             <FiImage className="h-3.5 w-3.5" aria-hidden="true" />
           )}
-          <span>{generatingImage ? labels.generatingImage : labels.generateImage}</span>
+          <span>{generatingImage ? (generatingActionLabel || labels.generatingImage) : (generateActionLabel || labels.generateImage)}</span>
         </button>
         <div className="shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-semibold text-slate-600">
           {zoomPercent}%
@@ -513,7 +524,7 @@ export default function ReviewToolbar({
         />
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
         </div>
-        <div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
+        {showCollaborationControls?<div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
         {commentMode ? (
           <button
             type="button"
@@ -567,7 +578,7 @@ export default function ReviewToolbar({
           }
           onClick={() => onModeChange(localMode === "present" ? null : "present")}
         />
-        </div>
+        </div>:null}
       </div>
     </div>
   );

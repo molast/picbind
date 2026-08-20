@@ -37,6 +37,9 @@ type ImageColorAdjustmentDialogProps = {
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  parameterAction?: "apply" | "proposal";
+  onApplyParameters?(adjustments: RoomColorAdjustments): void | Promise<void>;
+  initialAdjustments?: RoomColorAdjustments;
 };
 
 type Category = "light" | "color" | "balance" | "advanced";
@@ -71,7 +74,7 @@ function SliderRow({ label, value, min = -100, max = 100, suffix = "%", resetVal
   );
 }
 
-export default function ImageColorAdjustmentDialog({ image, labels, onClose, onSave }: ImageColorAdjustmentDialogProps) {
+export default function ImageColorAdjustmentDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialAdjustments }: ImageColorAdjustmentDialogProps) {
   const [category, setCategory] = React.useState<Category>("light");
   const [submenu, setSubmenu] = React.useState<Submenu>("tone");
   const [comparisonMode, setComparisonMode] = React.useState<ColorComparisonMode>("in-place");
@@ -88,10 +91,10 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
     setComparisonMode("in-place");
     setMaximized(false);
     setToneRange("midtones");
-    setAdjustments(DEFAULT_COLOR_ADJUSTMENTS);
+    setAdjustments(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
     setWorking(false);
     setError(null);
-  }, [image]);
+  }, [image, initialAdjustments]);
   React.useEffect(() => {
     if (!image) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !working) onClose(); };
@@ -113,7 +116,7 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
     balance: [{ value: "balance", label: copy.balance, icon: FiSliders }, { value: "photo", label: copy.photoFilter, icon: FiAperture }],
     advanced: [{ value: "selective", label: copy.selective, icon: FiTarget }, { value: "replace", label: copy.replace, icon: FiRepeat }, { value: "channels", label: copy.channels, icon: FiLayers }, { value: "recolor", label: copy.recolor, icon: FiDroplet }],
   };
-  const unchanged = JSON.stringify(adjustments) === JSON.stringify(DEFAULT_COLOR_ADJUSTMENTS);
+  const unchanged = JSON.stringify(adjustments) === JSON.stringify(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
   const setValue = <Key extends keyof RoomColorAdjustments>(key: Key, value: RoomColorAdjustments[Key]) => setAdjustments((current) => ({ ...current, [key]: value }));
   const setBalance = (key: keyof RoomColorAdjustments["balance"][ColorToneRange], value: number) => setAdjustments((current) => ({
     ...current,
@@ -181,7 +184,7 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
           </div>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => setAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => { setWorking(true); setError(null); void adjustRoomImage(new File([image.blob], image.name, { type: image.type }), adjustments).then((result) => onSave(image, result)).catch((reason) => setError(reason instanceof Error ? reason.message : labels.colorAdjustmentFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? labels.processing : labels.generateResult}</button></div></footer>
+        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => setAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters(adjustments)):adjustRoomImage(new File([image.blob], image.name, { type: image.type }), adjustments).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.colorAdjustmentFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working?(parameterAction==="proposal"?"Submitting...":parameterAction?"Applying...":labels.processing):parameterAction==="proposal"?"Submit proposal":parameterAction?"Apply changes":labels.generateResult}</button></div></footer>
         {error ? <p className="border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</p> : null}
       </section>
     </div>

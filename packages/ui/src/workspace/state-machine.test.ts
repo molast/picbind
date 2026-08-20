@@ -18,7 +18,7 @@ test("Workspace runtime requires connection and sync transitions", () => {
 test("Image and Proposal terminal states reject invalid transitions", () => {
   assert.equal(transitionImageState("private", "committed"), "private");
   assert.equal(transitionImageState("private", "working"), "working");
-  assert.equal(transitionProposalState("applied", "rejected"), "applied");
+  assert.equal(transitionProposalState("approved", "rejected"), "approved");
   assert.equal(transitionProposalState("failed", "submitted"), "submitted");
 });
 

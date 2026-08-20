@@ -16,6 +16,7 @@ export type CompletedSourceTransfer = {
 
 type PendingTransfer = SourceTransferManifest & {
   chunks: Map<number, Uint8Array>;
+  completionRequested: boolean;
 };
 
 function bytesFrom(value: ArrayBuffer | ArrayBufferView) {
@@ -49,7 +50,7 @@ export class SourceTransferRegistry {
       || !/^[0-9a-f]{64}$/i.test(manifest.sha256)) {
       return false;
     }
-    this.transfers.set(manifest.requestId, { ...manifest, chunks: new Map() });
+    this.transfers.set(manifest.requestId, { ...manifest, chunks: new Map(), completionRequested: false });
     return true;
   }
 
@@ -72,8 +73,10 @@ export class SourceTransferRegistry {
 
   async complete(requestId: string): Promise<CompletedSourceTransfer | null> {
     const transfer = this.transfers.get(requestId);
+    if (!transfer) return null;
+    transfer.completionRequested = true;
+    if (transfer.chunks.size !== transfer.totalChunks) return null;
     this.transfers.delete(requestId);
-    if (!transfer || transfer.chunks.size !== transfer.totalChunks) return null;
     const ordered: Uint8Array[] = [];
     for (let index = 0; index < transfer.totalChunks; index += 1) {
       const chunk = transfer.chunks.get(index);
@@ -92,6 +95,12 @@ export class SourceTransferRegistry {
       source,
     };
   }
+
+  isCompletionPending(requestId: string) {
+    return this.transfers.get(requestId)?.completionRequested === true;
+  }
+
+  has(requestId: string) { return this.transfers.has(requestId); }
 
   cancel(requestId: string) { this.transfers.delete(requestId); }
   clear() { this.transfers.clear(); }

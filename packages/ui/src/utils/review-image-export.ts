@@ -9,6 +9,7 @@ export type ReviewImageExport = {
   width: number;
   height: number;
   format: Exclude<RoomCompressionFormat, "auto">;
+  parameters?: Record<string, unknown>;
 };
 
 export type ReviewImageExportStage =

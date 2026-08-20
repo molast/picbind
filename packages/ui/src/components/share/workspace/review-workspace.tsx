@@ -44,6 +44,7 @@ type ReviewWorkspaceProps = {
   actorId: string;
   role: RoomRole | null;
   fullscreen: boolean;
+  collaborationEnabled?: boolean;
   shareRecipients: ShareRecipient[];
   subscribeMessages(
     listener: (event: {
@@ -66,6 +67,9 @@ type ReviewWorkspaceProps = {
     report: (stage: ReviewImageExportStage) => void,
     recipient?: ShareRecipient,
   ): Promise<ReviewImageExportOutcome>;
+  parameterAction?: "apply" | "proposal";
+  onApplyParameters?(parameters: { annotations: ReviewAnnotation[] }): void | Promise<void>;
+  initialAnnotations?: ReviewAnnotation[];
   onResolveRejectedImage(imageId: string, save: boolean): Promise<void>;
   onBack(): void;
 };
@@ -106,6 +110,7 @@ export default function ReviewWorkspace({
   actorId,
   role,
   fullscreen,
+  collaborationEnabled = true,
   shareRecipients,
   subscribeMessages,
   onSendMessage,
@@ -113,6 +118,9 @@ export default function ReviewWorkspace({
   onReviewEditingChange,
   onFullscreenChange,
   onGenerateImage,
+  parameterAction,
+  onApplyParameters,
+  initialAnnotations,
   onResolveRejectedImage,
   onBack,
 }: ReviewWorkspaceProps) {
@@ -311,9 +319,22 @@ export default function ReviewWorkspace({
     setRemoteReviewActive(false);
     setRemoteMagnifier(null);
     setHydratedHistoryKey(null);
-    replace([], 0);
+    const parameterOperations: ReviewOperation[] = (initialAnnotations || []).map((annotation, index) => ({
+      id: `parameter-${annotation.id}`,
+      actorId: annotation.createdBy || actorId,
+      kind: "create",
+      annotationId: annotation.id,
+      before: null,
+      after: annotation,
+      createdAt: index,
+    }));
+    replace(parameterOperations, parameterOperations.length);
     incomingStatesRef.current.clear();
     void (async () => {
+      if (parameterAction) {
+        setHydratedHistoryKey(cacheKey);
+        return;
+      }
       let cached: Awaited<ReturnType<typeof loadReviewHistory>> = null;
       try {
         cached = await loadReviewHistory(roomId, image.id);
@@ -362,12 +383,15 @@ export default function ReviewWorkspace({
     };
   }, [
     baseMessage,
+    actorId,
     image.id,
+    initialAnnotations,
     onSendMessage,
     operationsRef,
     replace,
     resetViewport,
     roomId,
+    parameterAction,
   ]);
 
   React.useEffect(() => {
@@ -836,11 +860,21 @@ export default function ReviewWorkspace({
   const handleGenerateImage = React.useCallback(() => {
     if (generatingImage) return;
     setGeneratingImage(true);
+    if (parameterAction && onApplyParameters) {
+      void Promise.resolve().then(() => onApplyParameters({ annotations }))
+        .finally(() => setGeneratingImage(false));
+      return;
+    }
     const source = new File([image.blob], image.name, { type: image.type });
     void generateReviewImage(source, annotationSnapshot)
-      .then(setGeneratedImage)
+      .then((result) => setGeneratedImage({
+        ...result,
+        parameters: {
+          annotations,
+        },
+      }))
       .finally(() => setGeneratingImage(false));
-  }, [annotationSnapshot, generatingImage, image.blob, image.name, image.type]);
+  }, [annotationSnapshot, annotations, generatingImage, image.blob, image.name, image.type, onApplyParameters, parameterAction]);
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -958,6 +992,10 @@ export default function ReviewWorkspace({
         onReset={resetWorkspace}
         onGenerateImage={handleGenerateImage}
         generatingImage={generatingImage}
+        generateActionLabel={parameterAction === "proposal" ? "Submit proposal" : parameterAction ? "Apply changes" : undefined}
+        generatingActionLabel={parameterAction === "proposal" ? "Submitting..." : parameterAction ? "Applying..." : undefined}
+        generateActionIsParameter={Boolean(parameterAction)}
+        showCollaborationControls={collaborationEnabled}
       />
       <ReviewCanvas
         image={image}

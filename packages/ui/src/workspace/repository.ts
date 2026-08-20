@@ -24,6 +24,18 @@ class WorkspaceDatabase extends Dexie {
       activities: "eventId, workspaceId, [workspaceId+createdAt]",
       cache: "key, workspaceId, kind, expiresAt, accessedAt",
     });
+    this.version(2).stores({
+      workspaces: "workspaceId, updatedAt, shareToken",
+      images: "imageId, workspaceId, [workspaceId+updatedAt], state",
+      proposals: "proposalId, workspaceId, imageId, state, createdAt",
+      commits: "commitId, imageId, createdAt",
+      activities: "eventId, workspaceId, scope, [workspaceId+scope+createdAt], [workspaceId+createdAt]",
+      cache: "key, workspaceId, kind, expiresAt, accessedAt",
+    }).upgrade(async (transaction) => {
+      await transaction.table("activities").toCollection().modify((activity) => {
+        activity.scope = "workspaceLog";
+      });
+    });
   }
 }
 
@@ -223,6 +235,14 @@ export async function deleteWorkspaceImage(imageId: string) {
   const db = getWorkspaceDatabase();
   const image = await db.images.get(imageId);
   if (image) await getImageStorageRepository().delete("room", image.workspaceId, imageId).catch(() => undefined);
+  const commits = await db.commits.where("imageId").equals(imageId).toArray();
+  const activities = image
+    ? await db.activities.where("workspaceId").equals(image.workspaceId)
+      .filter((activity) => activity.scope === "collaborationActivity" && activity.imageId === imageId)
+      .toArray()
+    : [];
+  if (image) await Promise.all(commits.map((commit) =>
+    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
   const cacheKeys = image
     ? (await db.cache.where("workspaceId").equals(image.workspaceId)
       .filter((entry) => (entry.kind === "preview" || entry.kind === "source")
@@ -230,8 +250,39 @@ export async function deleteWorkspaceImage(imageId: string) {
       .toArray())
       .map((entry) => entry.key)
     : [];
-  await db.transaction("rw", db.images, db.cache, async () => {
+  await db.transaction("rw", db.images, db.proposals, db.commits, db.activities, db.cache, async () => {
     await db.images.delete(imageId);
+    await db.proposals.where("imageId").equals(imageId).delete();
+    await db.commits.where("imageId").equals(imageId).delete();
+    await db.activities.bulkDelete(activities.map((activity) => activity.eventId));
+    if (cacheKeys.length) await db.cache.bulkDelete(cacheKeys);
+    if (image) await db.cache.where("workspaceId").equals(image.workspaceId)
+      .filter((entry) => entry.key.includes(`:${imageId}`)
+        || commits.some((commit) => entry.key.endsWith(`:${commit.commitId}`))
+        || activities.some((activity) => entry.key.endsWith(`:${activity.eventId}`)))
+      .delete();
+  });
+}
+export async function clearWorkspaceImageHistory(imageId: string) {
+  const db = getWorkspaceDatabase();
+  const image = await db.images.get(imageId);
+  if (!image) return;
+  const [commits, activities] = await Promise.all([
+    db.commits.where("imageId").equals(imageId).toArray(),
+    db.activities.where("workspaceId").equals(image.workspaceId)
+      .filter((activity) => activity.scope === "collaborationActivity" && activity.imageId === imageId)
+      .toArray(),
+  ]);
+  await Promise.all(commits.map((commit) =>
+    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
+  const cacheKeys = [
+    ...commits.map((commit) => `commit:${image.workspaceId}:${commit.commitId}`),
+    ...activities.map((activity) => `activity:${image.workspaceId}:${activity.eventId}`),
+  ];
+  await db.transaction("rw", db.proposals, db.commits, db.activities, db.cache, async () => {
+    await db.proposals.where("imageId").equals(imageId).delete();
+    await db.commits.where("imageId").equals(imageId).delete();
+    await db.activities.bulkDelete(activities.map((activity) => activity.eventId));
     if (cacheKeys.length) await db.cache.bulkDelete(cacheKeys);
   });
 }
@@ -273,6 +324,39 @@ export async function saveCommit(value: WorkspaceCommit) {
   if(image)await getWorkspaceDatabase().cache.put({key:`commit:${image.workspaceId}:${value.commitId}`,workspaceId:image.workspaceId,kind:"commit",accessedAt:Date.now(),expiresAt:Date.now()+30*DAY});
 }
 export async function listCommits(imageId: string) { const values=await getWorkspaceDatabase().commits.where("imageId").equals(imageId).sortBy("createdAt");const cutoff=Date.now()-30*DAY;return values.map((value)=>value.createdAt<cutoff?{...value,snapshotCached:false,snapshot:undefined}:{...value,snapshot:undefined}); }
+export async function deleteCommitsAfter(imageId: string, createdAt: number) {
+  const db = getWorkspaceDatabase();
+  const image = await db.images.get(imageId);
+  const removed = await db.commits.where("imageId").equals(imageId)
+    .filter((commit) => commit.createdAt > createdAt)
+    .toArray();
+  if (!removed.length) return [];
+  await db.transaction("rw", db.commits, db.cache, async () => {
+    await db.commits.bulkDelete(removed.map((commit) => commit.commitId));
+    await db.cache.bulkDelete(removed.map((commit) => `commit:${image?.workspaceId || ""}:${commit.commitId}`));
+  });
+  if (image) await Promise.all(removed.map((commit) =>
+    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
+  return removed.map((commit) => commit.commitId);
+}
+export async function deleteCollaborationActivitiesAfter(
+  workspaceId: string,
+  imageId: string,
+  createdAt: number,
+) {
+  const db = getWorkspaceDatabase();
+  const removed = await db.activities.where("workspaceId").equals(workspaceId)
+    .filter((activity) => activity.scope === "collaborationActivity"
+      && activity.imageId === imageId
+      && activity.createdAt > createdAt)
+    .toArray();
+  if (!removed.length) return [];
+  await db.transaction("rw", db.activities, db.cache, async () => {
+    await db.activities.bulkDelete(removed.map((activity) => activity.eventId));
+    await db.cache.bulkDelete(removed.map((activity) => `activity:${workspaceId}:${activity.eventId}`));
+  });
+  return removed.map((activity) => activity.eventId);
+}
 export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
   if (!commit.snapshotCached) return null;
   const image = await getWorkspaceDatabase().images.get(commit.imageId);
@@ -288,18 +372,58 @@ export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
   }
   return (await getWorkspaceDatabase().commits.get(commit.commitId))?.snapshot ?? null;
 }
-export async function saveActivity(workspaceId: string, value: WorkspaceActivity) {
+type NewWorkspaceActivity = Omit<WorkspaceActivity, "scope"> & { scope?: WorkspaceActivity["scope"] };
+
+async function saveScopedActivity(
+  workspaceId: string,
+  value: NewWorkspaceActivity,
+  scope: WorkspaceActivity["scope"],
+  limit: number,
+) {
   const table = getWorkspaceDatabase().activities;
-  await table.put({ ...value, workspaceId });
-  const values = await table.where("workspaceId").equals(workspaceId).sortBy("createdAt");
-  if (values.length > 50) await table.bulkDelete(values.slice(0, values.length - 50).map((item) => item.eventId));
+  await table.put({ ...value, scope, workspaceId });
+  const values = await table.where("workspaceId").equals(workspaceId)
+    .filter((item) => item.scope === scope)
+    .sortBy("createdAt");
+  if (values.length > limit) await table.bulkDelete(values.slice(0, values.length - limit).map((item) => item.eventId));
   await getWorkspaceDatabase().cache.put({key:`activity:${workspaceId}:${value.eventId}`,workspaceId,kind:"activity",accessedAt:Date.now(),expiresAt:value.createdAt+30*DAY});
 }
+
+// Compatibility API: ordinary Workspace events belong to the complete operation log.
+export async function saveActivity(workspaceId: string, value: NewWorkspaceActivity) {
+  await saveScopedActivity(workspaceId, value, "workspaceLog", 500);
+}
+
+export async function saveCollaborationActivity(workspaceId: string, value: NewWorkspaceActivity) {
+  await saveScopedActivity(workspaceId, value, "collaborationActivity", 100);
+}
+
 export async function listActivities(workspaceId: string, now = Date.now()) {
   const cutoff = now - 30 * 86_400_000;
   const table = getWorkspaceDatabase().activities;
-  const values = await table.where("workspaceId").equals(workspaceId).filter((item) => item.createdAt >= cutoff).sortBy("createdAt");
-  return values.slice(-50);
+  const values = await table.where("workspaceId").equals(workspaceId)
+    .filter((item) => item.scope === "collaborationActivity" && item.createdAt >= cutoff)
+    .sortBy("createdAt");
+  return values.slice(-100);
+}
+
+export async function listOperationLogs(workspaceId: string, now = Date.now()) {
+  const cutoff = now - 30 * 86_400_000;
+  const values = await getWorkspaceDatabase().activities.where("workspaceId").equals(workspaceId)
+    .filter((item) => item.scope !== "collaborationActivity" && item.createdAt >= cutoff)
+    .sortBy("createdAt");
+  return values.slice(-500);
+}
+
+export async function clearOperationLogs(workspaceId: string) {
+  const table = getWorkspaceDatabase().activities;
+  const logs = await table.where("workspaceId").equals(workspaceId).toArray();
+  if (!logs.length) return;
+  const db = getWorkspaceDatabase();
+  await db.transaction("rw", db.activities, db.cache, async () => {
+    await table.bulkDelete(logs.map((item) => item.eventId));
+    await db.cache.bulkDelete(logs.map((item) => `activity:${workspaceId}:${item.eventId}`));
+  });
 }
 export async function purgeExpiredCache(now = Date.now()) {
   const db=getWorkspaceDatabase(),table = db.cache;

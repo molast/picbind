@@ -2,8 +2,9 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
-  WorkspaceDatabase, deleteWorkspaceImage, listActivities, listCommits, listProposals, listWorkspaceImages,
-  promoteLocalWorkspace, purgeExpiredCache, restoreLocalWorkspace, saveActivity, saveCommit,
+  WorkspaceDatabase, clearOperationLogs, clearWorkspaceImageHistory, deleteCollaborationActivitiesAfter, deleteCommitsAfter, deleteWorkspaceImage, listActivities, listCommits,
+  listOperationLogs, listProposals, listWorkspaceImages, promoteLocalWorkspace, purgeExpiredCache,
+  restoreLocalWorkspace, saveActivity, saveCollaborationActivity, saveCommit,
   readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource,
   saveProposal, saveWorkspace, saveWorkspaceImage,
   setWorkspaceDatabaseForTests,
@@ -57,15 +58,19 @@ test("isolates image content by Workspace", async () => {
   assert.deepEqual((await listWorkspaceImages("workspace-b")).map((value) => value.imageId), ["b"]);
 });
 
-test("keeps only 50 recent activities and drops entries older than 30 days", async () => {
+test("separates Workspace operation logs from collaborative image Activity", async () => {
   const now = 40 * 86_400_000;
   await saveActivity("workspace", { eventId: "expired", sequence: 0, actorId: "a", kind: "old", createdAt: 0 });
   for (let index = 0; index < 55; index += 1) {
-    await saveActivity("workspace", { eventId: `event-${index}`, sequence: index + 1, actorId: "a", kind: "message", createdAt: now + index });
+    await saveActivity("workspace", { eventId: `log-${index}`, sequence: index + 1, actorId: "a", kind: "imageMovedToWorking", createdAt: now + index });
   }
-  const values = await listActivities("workspace", now + 100);
-  assert.equal(values.length, 50);
-  assert.equal(values.some((value) => value.eventId === "expired"), false);
+  await saveCollaborationActivity("workspace", { eventId: "activity", sequence: 60, actorId: "a",
+    kind: "operationCommitted", imageId: "image", detail: { parameters: { degrees: 90 } }, createdAt: now + 60 });
+  assert.deepEqual((await listActivities("workspace", now + 100)).map((value) => value.eventId), ["activity"]);
+  assert.equal((await listOperationLogs("workspace", now + 100)).length, 55);
+  await clearOperationLogs("workspace");
+  assert.equal((await listOperationLogs("workspace", now + 100)).length, 0);
+  assert.equal((await listActivities("workspace", now + 100)).length, 0);
 });
 
 test("expires collaborator Source and Preview while retaining Owner Source", async () => {
@@ -94,11 +99,39 @@ test("deleting a collaborator image removes its source and thumbnail cache entri
     preview: new Blob(["preview"], { type: "image/webp" }),
   });
   assert.equal(await database.cache.where("workspaceId").equals("collaborator").count(), 2);
+  await saveCommit({ commitId: "commit", imageId: "remote", authorId: "owner", parentCommitId: null,
+    mergeParentCommitIds: [], operations: [], snapshot: new Blob(["commit"]), createdAt: 1 });
+  await saveProposal({ proposalId: "proposal", workspaceId: "collaborator", imageId: "remote",
+    authorId: "guest", baseCommitId: "commit", operations: [], state: "pending", createdAt: 1 });
+  await saveCollaborationActivity("collaborator", { eventId: "activity", sequence: 1, actorId: "guest",
+    kind: "proposalSubmitted", imageId: "remote", createdAt: 1 });
 
   await deleteWorkspaceImage("remote");
 
   assert.equal(await database.images.get("remote"), undefined);
+  assert.equal(await database.commits.where("imageId").equals("remote").count(), 0);
+  assert.equal(await database.proposals.where("imageId").equals("remote").count(), 0);
+  assert.equal(await database.activities.where("workspaceId").equals("collaborator").count(), 0);
   assert.equal(await database.cache.where("workspaceId").equals("collaborator").count(), 0);
+});
+
+test("clears image operation history while preserving the Library source", async () => {
+  await saveWorkspace(workspace("owner"));
+  await saveWorkspaceImage({ ...image("working", "owner"), workspaceLocation: "working" });
+  await saveCommit({ commitId: "commit", imageId: "working", authorId: "owner", parentCommitId: null,
+    mergeParentCommitIds: [], operations: [], snapshot: new Blob(["commit"]), createdAt: 1 });
+  await saveProposal({ proposalId: "proposal", workspaceId: "owner", imageId: "working",
+    authorId: "guest", baseCommitId: "commit", operations: [], state: "pending", createdAt: 1 });
+  await saveCollaborationActivity("owner", { eventId: "activity", sequence: 1, actorId: "owner",
+    kind: "operationCommitted", imageId: "working", createdAt: 1 });
+
+  await clearWorkspaceImageHistory("working");
+
+  assert.equal((await listWorkspaceImages("owner")).length, 1);
+  assert.equal(await (await readWorkspaceImageSource((await listWorkspaceImages("owner"))[0]))?.text(), String.fromCharCode(1));
+  assert.equal((await listCommits("working")).length, 0);
+  assert.equal((await listProposals("owner")).length, 0);
+  assert.equal((await listActivities("owner", 10)).length, 0);
 });
 
 test("metadata-only image updates preserve stored source and thumbnail blobs", async () => {
@@ -140,6 +173,26 @@ test("keeps only the latest 20 Commit snapshots for each image", async () => {
   assert.equal(await (await readWorkspaceCommitSnapshot(commits.at(-1)!))?.text(), "24");
 });
 
+test("deletes Commit history after a rollback target", async () => {
+  await saveWorkspace(workspace("workspace"));
+  await saveWorkspaceImage(image("image", "workspace"));
+  for (let index = 1; index <= 3; index += 1) {
+    await saveCommit({ commitId: `commit-${index}`, imageId: "image", authorId: "owner",
+      parentCommitId: index === 1 ? null : `commit-${index - 1}`, mergeParentCommitIds: [], operations: [],
+      createdAt: index });
+  }
+  assert.deepEqual(await deleteCommitsAfter("image", 1), ["commit-2", "commit-3"]);
+  assert.deepEqual((await listCommits("image")).map(({ commitId }) => commitId), ["commit-1"]);
+});
+
+test("deletes later collaborative Activity for one image", async () => {
+  await saveCollaborationActivity("workspace", {eventId:"keep",sequence:1,actorId:"owner",kind:"operationCommitted",imageId:"image",detail:{},createdAt:1});
+  await saveCollaborationActivity("workspace", {eventId:"remove",sequence:2,actorId:"owner",kind:"operationCommitted",imageId:"image",detail:{},createdAt:2});
+  await saveCollaborationActivity("workspace", {eventId:"other",sequence:3,actorId:"owner",kind:"operationCommitted",imageId:"other",detail:{},createdAt:3});
+  assert.deepEqual(await deleteCollaborationActivitiesAfter("workspace","image",1),["remove"]);
+  assert.deepEqual((await listActivities("workspace",10)).map((activity)=>activity.eventId),["keep","other"]);
+});
+
 test("promotes images and collaboration records without losing local data", async () => {
   await saveWorkspace(workspace("local"));
   await saveWorkspaceImage({ ...image("image", "local"), preview: new Blob(["preview"]) });
@@ -149,7 +202,7 @@ test("promotes images and collaboration records without losing local data", asyn
   await promoteLocalWorkspace("local", { ...workspace("shared"), shareToken: "share-new" });
 
   assert.equal((await listWorkspaceImages("shared"))[0].workspaceId, "shared");
-  assert.equal((await listActivities("shared")).length, 1);
+  assert.equal((await listOperationLogs("shared")).length, 1);
   assert.equal((await listProposals("shared"))[0].workspaceId, "shared");
   assert.equal(await database.workspaces.get("local"), undefined);
   assert.ok((await database.cache.where("workspaceId").equals("shared").count()) > 0);

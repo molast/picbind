@@ -1,10 +1,11 @@
 import "./globals.css";
 import "@picbind/ui/source.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import WorkerVersionWarning from "@picbind/ui/source/worker-version-warning";
 import { getSiteUrl } from "@/server/site-config";
 import AuthProvider from "@/components/auth/auth-provider";
+import PageZoomLock from "@/components/page-zoom-lock";
 
 const siteUrl = getSiteUrl();
 const siteName = "PicBind";
@@ -90,10 +91,18 @@ export const metadata: Metadata = {
   category: "technology",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
+        <PageZoomLock />
         <WorkerVersionWarning />
         <Script id="lang-title-bootstrap" strategy="beforeInteractive">
           {`(() => {

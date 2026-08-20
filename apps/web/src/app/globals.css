@@ -81,9 +81,11 @@
   html {
     /* Keep scrollbar space reserved to avoid layout shift between short/long pages. */
     scrollbar-gutter: stable;
+    touch-action: pan-x pan-y;
   }
   body {
     @apply bg-background text-foreground;
+    touch-action: pan-x pan-y;
   }
 }
 

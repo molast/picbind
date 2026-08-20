@@ -45,12 +45,12 @@ export function transitionImageState(
 const PROPOSAL_TRANSITIONS: Record<ProposalState, ProposalState[]> = {
   draft: ["submitted"],
   submitted: ["pending", "failed"],
-  pending: ["applied", "rejected", "deferred", "conflict"],
-  applied: [],
+  pending: ["approved", "rejected", "later", "conflict"],
+  approved: [],
+  later: ["pending", "approved", "rejected", "conflict"],
   rejected: [],
-  deferred: ["applied", "rejected", "pending", "conflict"],
   failed: ["submitted"],
-  conflict: ["applied", "rejected", "deferred"],
+  conflict: ["rejected"],
 };
 
 export function transitionProposalState(current: ProposalState, next: ProposalState) {

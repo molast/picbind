@@ -6,9 +6,8 @@ import type { NormalizedCrop } from "../../../utils/room-image-editing";
 
 type KonvaCropEditorProps = {
   imageUrl: string;
-  imageWidth: number;
-  imageHeight: number;
   aspect: number | null;
+  initialCrop?: NormalizedCrop;
   onCropChange(crop: NormalizedCrop): void;
 };
 
@@ -16,9 +15,8 @@ const PADDING = 18;
 
 export default function KonvaCropEditor({
   imageUrl,
-  imageWidth,
-  imageHeight,
   aspect,
+  initialCrop,
   onCropChange,
 }: KonvaCropEditorProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -38,9 +36,7 @@ export default function KonvaCropEditor({
       const rect = container.getBoundingClientRect();
       const stageWidth = Math.max(280, rect.width);
       const stageHeight = Math.max(280, rect.height);
-      const sourceRatio = imageWidth > 0 && imageHeight > 0
-        ? imageWidth / imageHeight
-        : image.naturalWidth / image.naturalHeight;
+      const sourceRatio = image.naturalWidth / image.naturalHeight;
       const availableWidth = stageWidth - PADDING * 2;
       const availableHeight = stageHeight - PADDING * 2;
       let displayWidth = availableWidth;
@@ -52,8 +48,12 @@ export default function KonvaCropEditor({
       const imageX = (stageWidth - displayWidth) / 2;
       const imageY = (stageHeight - displayHeight) / 2;
       const selectedRatio = aspect ? aspect / sourceRatio : null;
-      const initialWidth = selectedRatio && selectedRatio < 1 ? displayWidth * 0.82 * selectedRatio : displayWidth * 0.82;
-      const initialHeight = selectedRatio && selectedRatio >= 1 ? displayHeight * 0.82 / selectedRatio : displayHeight * 0.82;
+      const initialWidth = initialCrop
+        ? displayWidth * initialCrop.width
+        : selectedRatio && selectedRatio < 1 ? displayWidth * 0.82 * selectedRatio : displayWidth * 0.82;
+      const initialHeight = initialCrop
+        ? displayHeight * initialCrop.height
+        : selectedRatio && selectedRatio >= 1 ? displayHeight * 0.82 / selectedRatio : displayHeight * 0.82;
 
       stage?.destroy();
       container.replaceChildren();
@@ -65,8 +65,8 @@ export default function KonvaCropEditor({
       const shades = Array.from({ length: 4 }, () => new Konva.Rect({ fill: "rgba(2, 6, 23, 0.62)", listening: false }));
       shades.forEach((shade) => layer.add(shade));
       const cropRect = new Konva.Rect({
-        x: imageX + (displayWidth - initialWidth) / 2,
-        y: imageY + (displayHeight - initialHeight) / 2,
+        x: imageX + (initialCrop ? displayWidth * initialCrop.x : (displayWidth - initialWidth) / 2),
+        y: imageY + (initialCrop ? displayHeight * initialCrop.y : (displayHeight - initialHeight) / 2),
         width: initialWidth,
         height: initialHeight,
         stroke: "#ffffff",
@@ -141,7 +141,7 @@ export default function KonvaCropEditor({
       resizeObserver?.disconnect();
       stage?.destroy();
     };
-  }, [aspect, imageHeight, imageUrl, imageWidth]);
+  }, [aspect, imageUrl, initialCrop]);
 
   return <div ref={containerRef} className="h-[min(52vh,430px)] min-h-72 w-full overflow-hidden rounded-md bg-slate-900" />;
 }

@@ -480,6 +480,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线保持 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色的既有顺序。基础通道与光影步骤预编译为三个 `256` 项 LUT，逐像素循环只执行当前设置实际启用的 HSL、色彩平衡、滤镜、替换和重着色阶段；未启用阶段不再做浮点运算，也不再为每个像素创建 HSL 数组、色调权重对象或闭包。色调曲线支持添加、移动和删除控制点，端点保留且可调整输出值，控制点最多 `12` 个；处理时按输入值排序，经 Catmull-Rom 插值生成 `256` 项 LUT。弹窗在最长边不超过 `720×420` 的 Canvas 预览副本上执行同一像素函数，连续操作按约 `36 ms` 合并更新。最终输出的原始尺寸像素循环由独立 `room-color-adjustment.worker.ts` 执行，避免大图处理阻塞弹窗主线程；调整后的 RGBA 在同一个 Worker 内直接交给 PNG、WebP 或 AVIF 编码器，JPEG 因当前 WASM 未提供公开 RGBA 入口而在该 Worker 内使用一次临时 PNG 载体，不再把临时 PNG 传回主线程后启动第二个 Worker。颜色替换可从预览点击取样，Alpha 始终保持原值且不会被静默压平；生成结果记录为 `adjust`，后续由统一结果弹窗决定本地存储或分享。全部设置保持默认值时禁止生成无意义结果。
 12. Review 标注线宽以图片归一化比例保存，渲染时乘以原图到当前适配画布的缩放比例。因此不同像素尺寸的图片在相同线宽档位和初始适配视图下具有一致的屏幕视觉粗细，同时图形自身拉伸不会放大描边。自由画笔、直线、箭头、矩形、圆形、虚线和圆点线共用该换算。Transformer 锚点、旋转手柄、旋转偏移和选框边框属于操作 UI，只按视口缩放反向补偿，不受原图分辨率影响。
 13. Review 保存图片时先在全尺寸 `OffscreenCanvas` 合成原图与标注快照，但合成得到的 PNG 只作为临时无损像素载体，不再直接作为最终文件。随后通过一次性压缩 Worker 编码为源图格式：JPEG、PNG 使用共享 `image-wasm`，WebP、AVIF 使用 Room 现有对应编码器。若首选结果超过 `max(原图大小 × 1.5, 原图大小 + 512 KB)`，会额外尝试 WebP；WebP 源则尝试 AVIF，并选择两个有效结果中更小的一个。该护栏不能退回原图，因为原图不包含新标注。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
+14. 新版 Image Workspace 的协作图片使用延迟物化流程。裁剪、尺寸调整、色彩调整、旋转和 Doodle 在协作状态下只提交版本化 JSON 参数；画布、卡片和对端同步使用最长边受限的 WebP 预览，参数提交不会调用全尺寸编辑编码器，也不会用预览 Blob 替换完整渲染结果。Owner 使用 `Apply changes`，Collaborator 使用 `Submit proposal`；非协作图片仍使用 `Generate result` 生成独立结果。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。只有保存协作图片、导出或下载时，才从缓存原图重放参数栈并物化完整结果；未获得原图的 Collaborator 只基于 Owner 已渲染预览应用新增参数，Owner 发送新预览或原图后会重建该预览基线，避免重复应用已有参数。
 
 关键实现：
 
@@ -498,4 +499,6 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 - Room 图片编辑编码：`packages/ui/src/utils/room-image-editing.ts`
 - Review 标注渲染：`packages/ui/src/components/share/workspace/review-annotation-layer.tsx`
 - Review 图片合成与编码：`packages/ui/src/utils/review-image-export.ts`
+- Image Workspace 参数预览：`packages/ui/src/workspace/parameter-preview.ts`
+- Image Workspace 协作容器：`packages/ui/src/workspace/collaboration-image-container.ts`
 - 图片内容身份与 metadata：`crates/picbind-image/src/content_identity.rs`
