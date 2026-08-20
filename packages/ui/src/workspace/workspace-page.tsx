@@ -28,7 +28,7 @@ import {
 } from "./types";
 import { generateSharePlaceholder } from "../utils/share-placeholder";
 import { generateShareThumbnail } from "../utils/share-thumbnail";
-import { getShareRoomLabels } from "../locales";
+import { getLang, getShareRoomLabels } from "../locales";
 import type { RoomImage } from "../components/share/share-room-types";
 import ImageCropDialog from "../components/share/workspace/image-crop-dialog";
 import ImageResizeDialog from "../components/share/workspace/image-resize-dialog";
@@ -80,6 +80,7 @@ import WorkspaceOperationLogDialog from "./workspace-operation-log-dialog";
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const bytes = (size: number) => size < 1024 ? `${size} B` : size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`;
 const statusLabel: Record<WorkspaceRuntimeState, string> = { local: "Local", connecting: "Connecting", connected: "Connected", syncing: "Syncing", available: "Available", ownerOffline: "Owner offline", unavailable: "Unavailable" };
+const collaborationStatusLabel = () => getLang() === "zh" ? "协作中" : "Collaborating";
 const cachedCommit = (commit: WorkspaceCommit): WorkspaceCommit => ({
   ...commit,
   snapshotCached: commit.snapshotCached || Boolean(commit.snapshot),
@@ -1621,7 +1622,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       ? operation.params.annotations as ReviewAnnotation[]
       : [];
   }, [selected?.parameterDocument]);
-  const labels = React.useMemo(() => getShareRoomLabels("en"), []);
+  const labels = React.useMemo(() => getShareRoomLabels(getLang()), []);
   const editorLoadingOverlay = editorPreparing ? (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-white/75 backdrop-blur-[1px]" role="status" aria-live="polite">
       <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
@@ -1763,7 +1764,7 @@ function WorkspaceGalleryCard({image,role,selected,onlinePeers,requestingSource,
       {hasSource&&!image.shared?<button ref={menuButtonRef} type="button" onClick={(event)=>{event.stopPropagation();setMenuOpen((value)=>!value);}} className="absolute right-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur hover:text-[#2f65cf]" title="Image actions" aria-expanded={menuOpen}><FiMoreHorizontal className="h-4 w-4"/></button>:null}
       {menuOpen?<WorkspaceImageActionMenu anchor={menuButtonRef} onClose={()=>setMenuOpen(false)} onOperation={(operation)=>{setMenuOpen(false);onOperation(operation);}}/>:null}
     </div>
-    <button type="button" onClick={onSelect} className="block w-full px-3 pt-3 text-left"><div className="flex min-w-0 items-center justify-between gap-2"><strong className="truncate text-sm font-semibold text-slate-800">{image.name}</strong>{image.shared?<span className="inline-flex h-5 shrink-0 items-center rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-bold text-emerald-700">协作中</span>:null}</div></button>
+    <button type="button" onClick={onSelect} className="block w-full px-3 pt-3 text-left"><div className="flex min-w-0 items-center justify-between gap-2"><strong className="truncate text-sm font-semibold text-slate-800">{image.name}</strong>{image.shared?<span className="inline-flex h-5 shrink-0 items-center rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-bold text-emerald-700">{collaborationStatusLabel()}</span>:null}</div></button>
     <div className="flex min-h-12 items-center justify-between gap-2 px-3 pb-3 pt-1 text-xs text-slate-500"><span className="min-w-0"><span className="block">{bytes(image.size)}</span><span className="block text-[10px] text-slate-400">{image.width} × {image.height}</span></span><span className="flex shrink-0 items-center gap-1.5">{role!=="owner"&&!hasSource?<button type="button" onClick={onRequestSource} disabled={!onlinePeers||requestingSource} className="flex h-7 w-7 items-center justify-center rounded-md bg-[#2f65cf] text-white disabled:opacity-60" title={requestingSource?"Requesting source data":"Request source data"} aria-label={requestingSource?"Requesting source data":"Request source data"}>{requestingSource?<FiLoader className="h-3.5 w-3.5 animate-spin"/>:<FiBookmark className="h-3.5 w-3.5"/>}</button>:null}{hasSource?<button type="button" onClick={onDownload} className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50" title="Download"><FiDownload className="h-3.5 w-3.5"/></button>:<button type="button" disabled className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-300" title="Source data unavailable"><FiDownload className="h-3.5 w-3.5"/></button>}</span></div>
   </article>;
 }
