@@ -26,8 +26,8 @@ type ImageCommandsOptions = {
   deleteChoice: "library" | "permanent";
   deletingImage: WorkspaceImage | null;
   setSelectedId: SetState<string | null>;
-  setPendingWorkingImageId?: SetState<string | null>;
-  setCompressionSuggestionWeakNetwork?: SetState<boolean>;
+  setPendingWorkingImageId: SetState<string | null>;
+  setCompressionSuggestionWeakNetwork: SetState<boolean>;
   setImages: SetState<WorkspaceImage[]>;
   setCommits: SetState<WorkspaceCommit[]>;
   setActivities: SetState<WorkspaceActivity[]>;
@@ -54,7 +54,7 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
   const {
     workspace, imagesRef, collaborationContainers, selectedId, maximizedImageId,
     processingSource, activityPreview, rollbackTarget, deleteChoice, deletingImage,
-    setSelectedId, setImages, setCommits, setActivities, setProposals, setNewVersions,
+    setSelectedId, setPendingWorkingImageId, setCompressionSuggestionWeakNetwork, setImages, setCommits, setActivities, setProposals, setNewVersions,
     setMaximizedImageId, setProcessingSource, setEditing, setReviewOpen, setActivityPreview,
     setRollbackTarget, setRollbackPreview, setDeletingImage, setDeleteChoice, setNotice,
     sendRealtime, collaborationDeleteBlockedMessage, updateImage, persistWorkspaceLog, releaseProcessingSource,
@@ -90,12 +90,12 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
   const requestMoveImageToWorking = React.useCallback((image: WorkspaceImage) => {
     const weakNetwork = browserReportsWeakNetwork();
     if (shouldSuggestWorkspaceCompression(image.size, weakNetwork)) {
-      options.setCompressionSuggestionWeakNetwork?.(weakNetwork);
-      options.setPendingWorkingImageId?.(image.imageId);
+      setCompressionSuggestionWeakNetwork(weakNetwork);
+      setPendingWorkingImageId(image.imageId);
       return;
     }
     void moveImageToWorking(image);
-  }, [moveImageToWorking, options]);
+  }, [moveImageToWorking, setCompressionSuggestionWeakNetwork, setPendingWorkingImageId]);
 
   const moveImageToLibrary = React.useCallback(async (image: WorkspaceImage) => {
     if (!workspace || workspace.role !== "owner") return;

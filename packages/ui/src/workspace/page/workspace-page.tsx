@@ -4,7 +4,7 @@ import React from "react";
 import { FiMinimize2, FiTerminal, FiUploadCloud } from "react-icons/fi";
 import { joinWorkspace } from "../api";
 import {
-  clearOperationLogs, deleteCollaborationActivitiesAfter, deleteCommitsAfter, deleteWorkspaceImage, listActivities, listCommits, listOperationLogs,
+  clearOperationLogs, deleteCollaborationActivitiesAfter, deleteCollaborationActivitiesByIds, deleteCommitsAfter, deleteWorkspaceImage, listActivities, listCommits, listOperationLogs,
   listProposals, listWorkspaceImages, purgeExpiredCache, restoreLocalWorkspace,
   saveActivity, saveCollaborationActivity, saveCommit, saveProposal,
   readWorkspaceImagePreview, readWorkspaceImageSource,
@@ -31,6 +31,7 @@ import {
   emptyImageParameterDocument,
   isValidImageParameterDocument,
   setImageOperation,
+  type ImageParameterDocument,
 } from "../image-protocol";
 import { disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
 import { renderWorkspaceParameterPreview } from "../parameter-preview";
@@ -85,8 +86,9 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   const [activities, setActivities] = React.useState<WorkspaceActivity[]>([]);
   const [operationLogs, setOperationLogs] = React.useState<WorkspaceActivity[]>([]);
   const [proposals, setProposals] = React.useState<WorkspaceProposal[]>([]);
-  const [commits, setCommits] = React.useState<WorkspaceCommit[]>([]);
-  const { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, compressingToWorkingImageId, setCompressingToWorkingImageId, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, copied, setCopied, notice, setNotice, requestingSourceIds, setRequestingSourceIds, setNewVersions } = useWorkspacePageState();
+  const [commitEntries, setCommits] = React.useState<WorkspaceCommit[]>([]);
+  const commits = React.useMemo(() => Array.from(new Map(commitEntries.map((commit) => [commit.commitId, commit])).values()), [commitEntries]);
+  const { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, compressingToWorkingImageId, setCompressingToWorkingImageId, compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, copied, setCopied, notice, setNotice, requestingSourceIds, setRequestingSourceIds, setNewVersions } = useWorkspacePageState();
   const { editing, setEditing, reviewOpen, setReviewOpen, reviewFullscreen, setReviewFullscreen, processingSource, setProcessingSource, editorPreparing, setEditorPreparing, maximizedImageId, setMaximizedImageId } = useWorkspacePreview();
   const { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, saveCollaborationOpen, setSaveCollaborationOpen, collaborationSaveChoice, setCollaborationSaveChoice, collaborationSaving, setCollaborationSaving, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving } = useWorkspaceDialogs();
   const reviewListeners = React.useRef(new Set<(event:{sequence:number;message:ReviewCollaborationMessage})=>void>());
@@ -398,8 +400,28 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       setNotice(error instanceof Error ? error.message : "The received image could not be decoded");
     });
     else if (type === "sourceRejected") {finishSourceRequest({requestId:typeof value.requestId==="string"?value.requestId:undefined,imageId:typeof value.imageId==="string"?value.imageId:undefined});setNotice(typeof value.reason === "string" ? value.reason : "Source request was rejected");}
-    else if (type === "proposalSubmit" && workspace?.role === "owner" && value.proposal && typeof value.senderId === "string") { const incoming=value.proposal as WorkspaceProposal,senderId=value.senderId,image=images.find((item)=>item.imageId===incoming.imageId); if (!validateProposal(incoming,workspace.workspaceId,image)) return; const proposal={...incoming,state:image!.currentCommitId&&image!.currentCommitId!==incoming.baseCommitId?"conflict" as const:"pending" as const,authorId:senderId,operations:incoming.operations.map((operation)=>({...operation,authorId:senderId}))}; setProposals((current)=>current.some((p)=>p.proposalId===proposal.proposalId)?current:[...current,proposal]); void saveProposal(proposal); void updateImage(proposal.imageId,{state:"reviewing"}); void persistCollaborationActivity(workspace.workspaceId,"proposalSubmitted",proposal.imageId,{proposalId:proposal.proposalId,operations:proposal.operations.map(({operationId,type,parameters})=>({operationId,type,parameters})),status:proposal.state},senderId); }
-    else if (type === "proposalDecision") { const proposalId=String(value.proposalId); setProposals((current)=>current.map((proposal)=>{if(proposal.proposalId!==proposalId)return proposal;const next={...proposal,state:String(value.state) as WorkspaceProposal["state"],rejectReason:typeof value.reason==="string"?value.reason:undefined};const operation=proposal.operations[0];void saveProposal(next);if(workspace)void persistCollaborationActivity(workspace.workspaceId,`proposal${next.state[0].toUpperCase()}${next.state.slice(1)}`,proposal.imageId,{proposalId,commitId:typeof value.commitId==="string"?value.commitId:undefined,operationType:typeof value.operationType==="string"?value.operationType:operation?.type,operations:Array.isArray(value.operations)?value.operations:proposal.operations.map(({operationId,type,parameters,authorId})=>({operationId,operationType:type,parameters,actorId:authorId})),parameterDocument:isValidImageParameterDocument(value.parameterDocument)?value.parameterDocument:undefined,reason:next.rejectReason},"owner");if(next.state==="rejected"||next.state==="later"){const image=imagesRef.current.find((candidate)=>candidate.imageId===proposal.imageId);if(image?.sourceCached)void syncCollaborationPreview(image,image.parameterDocument||emptyImageParameterDocument()).catch((error)=>setNotice(error instanceof Error?error.message:"Image preview is unavailable"));}return next;})); }
+    else if (type === "proposalSubmit" && workspace?.role === "owner" && value.proposal && typeof value.senderId === "string") { const incoming=value.proposal as WorkspaceProposal,senderId=value.senderId,image=images.find((item)=>item.imageId===incoming.imageId); if (!validateProposal(incoming,workspace.workspaceId,image) || !incoming.commit || incoming.commit.imageId !== incoming.imageId || incoming.commit.operations.length !== incoming.operations.length) return; const proposal={...incoming,state:image!.currentCommitId&&image!.currentCommitId!==incoming.baseCommitId?"conflict" as const:"pending" as const,authorId:senderId,operations:incoming.operations.map((operation)=>({...operation,authorId:senderId})),commit:incoming.commit}; setProposals((current)=>current.some((p)=>p.proposalId===proposal.proposalId)?current:[...current,proposal]); void saveCommit(proposal.commit);setCommits((current)=>current.some((commit)=>commit.commitId===proposal.commit!.commitId)?current:[...current,cachedCommit(proposal.commit!)]); void saveProposal(proposal); void updateImage(proposal.imageId,{state:"reviewing"}); void persistCollaborationActivity(workspace.workspaceId,"proposalSubmitted",proposal.imageId,{proposalId:proposal.proposalId,commitId:proposal.commit.commitId,operations:proposal.operations.map(({operationId,type,parameters})=>({operationId,type,parameters})),status:proposal.state},senderId); }
+    else if (type === "proposalDecision") {
+      const proposalId = String(value.proposalId);
+      const proposal = proposals.find((candidate) => candidate.proposalId === proposalId);
+      if (!proposal) return;
+      const next = { ...proposal, state: String(value.state) as WorkspaceProposal["state"], rejectReason: typeof value.reason === "string" ? value.reason : undefined };
+      const operation = proposal.operations[0];
+      setProposals((current) => current.map((candidate) => candidate.proposalId === proposalId ? next : candidate));
+      void saveProposal(next);
+      if (workspace) void persistCollaborationActivity(workspace.workspaceId, `proposal${next.state[0].toUpperCase()}${next.state.slice(1)}`, proposal.imageId, {
+        proposalId,
+        commitId: typeof value.commitId === "string" ? value.commitId : undefined,
+        operationType: typeof value.operationType === "string" ? value.operationType : operation?.type,
+        operations: Array.isArray(value.operations) ? value.operations : proposal.operations.map(({ operationId, type, parameters, authorId }) => ({ operationId, operationType: type, parameters, actorId: authorId })),
+        parameterDocument: isValidImageParameterDocument(value.parameterDocument) ? value.parameterDocument : undefined,
+        reason: next.rejectReason,
+      }, "owner");
+      if (next.state === "rejected" || next.state === "later") {
+        const image = imagesRef.current.find((candidate) => candidate.imageId === proposal.imageId);
+        if (image?.sourceCached) void syncCollaborationPreview(image, image.parameterDocument || emptyImageParameterDocument()).catch((error) => setNotice(error instanceof Error ? error.message : "Image preview is unavailable"));
+      }
+    }
     else if (type === "commitCreated" && value.commit) {
       const commit=value.commit as WorkspaceCommit;
       if(workspace?.role==="collaborator"&&!imagesRef.current.some((image)=>image.imageId===commit.imageId))return;
@@ -410,7 +432,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
         setNewVersions((current)=>({...current,[commit.imageId]:commit.commitId}));
         const image=imagesRef.current.find((candidate)=>candidate.imageId===commit.imageId);
         if(image){
-          const patched={...image,currentCommitId:commit.commitId,parameterDocument,state:"shared" as const};
+          const patched={...image,currentCommitId:commit.commitId,...(parameterDocument ? { parameterDocument } : {}),state:"shared" as const};
           imagesRef.current=imagesRef.current.map((candidate)=>candidate.imageId===commit.imageId?patched:candidate);
           setImages(imagesRef.current);
           void updateImage(commit.imageId,{currentCommitId:commit.commitId,parameterDocument,state:"shared"});
@@ -426,8 +448,71 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       const parameterDocument=isValidImageParameterDocument(value.parameterDocument)?value.parameterDocument:emptyImageParameterDocument();
       const targetCreatedAt=Number(value.targetCreatedAt||0);
       const activityCreatedAt=typeof value.activityCreatedAt==="number"?value.activityCreatedAt:null;
+      const removedProposalIds=new Set(Array.isArray(value.removedProposalIds)?value.removedProposalIds.filter((proposalId):proposalId is string=>typeof proposalId==="string"):[]);
+      const proposalStates=new Map(proposals.map((proposal)=>[proposal.proposalId,proposal.state]));
+      const proposalCreatedAt=new Map(proposals.map((proposal)=>[proposal.proposalId,proposal.createdAt]));
       if(targetCreatedAt){setCommits((current)=>current.filter((commit)=>commit.imageId!==imageId||commit.createdAt<=targetCreatedAt));void deleteCommitsAfter(imageId,targetCreatedAt);}
-      if(workspace&&activityCreatedAt!==null){setActivities((current)=>current.filter((activity)=>activity.imageId!==imageId||activity.createdAt<=activityCreatedAt));void deleteCollaborationActivitiesAfter(workspace.workspaceId,imageId,activityCreatedAt);}
+      if(workspace&&activityCreatedAt!==null){
+        const retainedCommitIds=new Set(commits.filter((commit)=>commit.imageId===imageId&&commit.createdAt<=targetCreatedAt).map((commit)=>commit.commitId));
+        const removedActivityIds:string[]=[];
+        setActivities((current)=>{
+          const imageActivities=current.filter((activity)=>activity.imageId===imageId);
+          const targetCommit=commits.find((commit)=>commit.commitId===commitId&&commit.imageId===imageId);
+          const targetOperationIds=new Set(targetCommit?.operations.map((operation)=>operation.operationId) || []);
+          // A proposal submission and its approval share the same Commit ID.
+          // Rollback must stop at the latest matching Activity (the approval),
+          // otherwise collaborators keep the stale submitted entry.
+          const reverseTargetIndex=imageActivities.slice().reverse().findIndex((activity: WorkspaceActivity)=>{
+            const detail=activity.detail&&typeof activity.detail==="object"?activity.detail as Record<string,unknown>:null;
+            if(detail?.commitId===commitId)return true;
+            if(!targetOperationIds.size)return false;
+            if(typeof detail?.operationId==="string"&&targetOperationIds.has(detail.operationId))return true;
+            const operations=Array.isArray(detail?.operations)?detail.operations:[];
+            return operations.some((operation)=>operation&&typeof operation==="object"&&typeof (operation as Record<string,unknown>).operationId==="string"&&targetOperationIds.has((operation as Record<string,unknown>).operationId as string));
+          });
+          const targetIndex=reverseTargetIndex<0?-1:imageActivities.length-1-reverseTargetIndex;
+          if(targetIndex>=0){
+            const retainedEvents=new Set(imageActivities.slice(0,targetIndex+1).map((activity)=>activity.eventId));
+            return current.filter((activity)=>{
+              if(activity.imageId!==imageId)return true;
+              const keep=retainedEvents.has(activity.eventId);
+              if(!keep)removedActivityIds.push(activity.eventId);
+              return keep;
+            });
+          }
+          return current.filter((activity)=>{
+          if(activity.imageId!==imageId)return true;
+          const detail=activity.detail&&typeof activity.detail==="object"?activity.detail as Record<string,unknown>:null;
+          const activityCommitId=typeof detail?.commitId==="string"?detail.commitId:null;
+          if(activityCommitId){const keep=retainedCommitIds.has(activityCommitId);if(!keep)removedActivityIds.push(activity.eventId);return keep;}
+          const proposalId=typeof detail?.proposalId==="string"?detail.proposalId:null;
+          if(!proposalId)return true;
+          if(removedProposalIds.has(proposalId)){removedActivityIds.push(activity.eventId);return false;}
+          if(activity.kind === "proposalSubmitted"){
+            const state=proposalStates.get(proposalId);
+            const createdAt=proposalCreatedAt.get(proposalId) || 0;
+            const keep=state !== "submitted" && state !== "pending" && state !== "conflict" && (!targetCreatedAt || createdAt <= targetCreatedAt);if(!keep)removedActivityIds.push(activity.eventId);return keep;
+          }
+          return true;
+          });
+        });
+        void deleteCollaborationActivitiesByIds(workspace.workspaceId, removedActivityIds);
+        setActivities((current)=>{
+          const hasCurrent=current.some((activity)=>{
+            if(activity.imageId!==imageId)return false;
+            const detail=activity.detail&&typeof activity.detail==="object"?activity.detail as Record<string,unknown>:null;
+            return detail?.commitId===commitId;
+          });
+          if(hasCurrent)return current;
+          const candidateIndex=current.reduce((latestIndex,activity,index)=>activity.imageId===imageId&&(activity.kind==="proposalApproved"||activity.kind==="operationCommitted")?index:latestIndex,-1);
+          if(candidateIndex<0)return current;
+          return current.map((activity,index)=>{
+            if(index!==candidateIndex)return activity;
+            const detail=activity.detail&&typeof activity.detail==="object"?activity.detail as Record<string,unknown>:{};
+            return {...activity,detail:{...detail,commitId}};
+          });
+        });
+      }
       const image=imagesRef.current.find((candidate)=>candidate.imageId===imageId);
       if(image){
         const patched={...image,currentCommitId:commitId,parameterDocument,state:"shared" as const};
@@ -477,15 +562,16 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   }, [runtime, workspace?.role]);
   React.useEffect(() => { if(selectedId)void listCommits(selectedId).then((values)=>setCommits((current)=>[...current.filter((item)=>item.imageId!==selectedId),...values])); }, [selectedId]);
 
-  const { requestMoveImageToWorking, requestDeleteImage, confirmDeleteImage } = useWorkspaceImageCommands({
+  React.useEffect(() => { setCommits((current) => { const unique = Array.from(new Map(current.map((commit) => [commit.commitId, commit])).values()); return unique.length === current.length ? current : unique; }); }, [commits, setCommits]);
+  const { moveImageToWorking, requestMoveImageToWorking, requestDeleteImage, confirmDeleteImage } = useWorkspaceImageCommands({
     workspace, imagesRef, collaborationContainers, selectedId, maximizedImageId, processingSource,
     activityPreview, rollbackTarget, deleteChoice, deletingImage, setSelectedId, setImages, setCommits,
+    setPendingWorkingImageId, setCompressionSuggestionWeakNetwork,
     setActivities, setProposals, setNewVersions, setMaximizedImageId, setProcessingSource, setEditing,
     setReviewOpen, setActivityPreview, setRollbackTarget, setRollbackPreview, setDeletingImage, setDeleteChoice,
     setNotice, updateImage, persistWorkspaceLog, releaseProcessingSource,
     sendRealtime: (type, payload) => realtimeRef.current?.send(type, payload, { delivery: "reliable", dataClass: "preview" }),
     collaborationDeleteBlockedMessage: workspaceText("collaborationDeleteBlocked"),
-    setPendingWorkingImageId, setCompressionSuggestionWeakNetwork,
   });
   const { saveProcessedCopy, queueProcessedResult, confirmProcessedResult } = useWorkspaceProcessedResults({
     workspace, setImages, setCommits, setSelectedId, setEditing, setCompressingToWorkingImageId,
@@ -529,7 +615,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       const original = input.source;
       if (!original) throw new Error("Proposal base version is unavailable");
       const baseDocument = workspace?.role === "collaborator" || proposal.authorId === "local" || image.currentCommitId === proposal.baseCommitId
-        ? image.parameterDocument || emptyImageParameterDocument()
+        ? collaborationContainers.current.get(proposal.imageId)?.parameterDocument || image.parameterDocument || emptyImageParameterDocument()
         : emptyImageParameterDocument();
       const parameterDocument = proposal.operations.reduce((document, operation) => setImageOperation(document, {
         id: operation.operationId,
@@ -582,7 +668,28 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
           return;
         }
       }
-      if (proposal) { await previewProposal(proposal); return; }
+      if (proposal) {
+        const image = imagesRef.current.find((candidate) => candidate.imageId === proposal.imageId);
+        if (!image) throw new Error("Proposal image is unavailable");
+        const input = await proposalInput(proposal);
+        if (!input.source) throw new Error("Proposal source is unavailable");
+        const containerDocument = collaborationContainers.current.get(proposal.imageId)?.parameterDocument;
+        const parameterDocument = proposal.operations.reduce((document, operation) => setImageOperation(document, {
+          id: operation.operationId,
+          userId: operation.authorId,
+          time: operation.createdAt,
+          type: protocolOperationType(operation.type, operation.parameters),
+          params: { ...operation.parameters, workspaceOperationType: operation.type },
+        }), containerDocument || image.parameterDocument || emptyImageParameterDocument());
+        const rendered = await renderWorkspaceParameterPreview(
+          input.source,
+          { width: input.width, height: input.height },
+          parameterDocumentOperations({ ...input, parameterDocument }),
+        );
+        setProposalPreview({ proposalId: proposal.proposalId, imageId: proposal.imageId, original: input.source, result: rendered.blob });
+        setActivityPreview({ activity, parameterDocument, preview: rendered.blob });
+        return;
+      }
       if (workspace?.role === "collaborator" && activity.actorId === "local") {
         const operationType = typeof detail?.operationType === "string"
           ? detail.operationType as WorkspaceOperation["type"]
@@ -638,16 +745,22 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
 
   function cancelActivityPreview() {
     setActivityPreview(null);
+    setProposalPreview(null);
   }
+
+  const previewProposalId = proposalPreview?.proposalId || (activityPreview?.activity.detail && typeof activityPreview.activity.detail === "object" && typeof (activityPreview.activity.detail as Record<string, unknown>).proposalId === "string" ? (activityPreview.activity.detail as Record<string, unknown>).proposalId as string : undefined);
 
   async function decideProposal(proposal:WorkspaceProposal,state:"approved"|"rejected"|"later",rejectReason?:string){
     const reason=state==="rejected"?(rejectReason?.trim()||"Rejected by Owner"):undefined;
     let approvedCommitId: string | undefined;
+    let approvedParameterDocument: ImageParameterDocument | undefined;
     if(state==="approved"){
       const image=images.find((item)=>item.imageId===proposal.imageId);if(!image)return;
       if(image.currentCommitId!==proposal.baseCommitId){setNotice(workspaceText("proposalStale"));return;}
       const parameterDocument=proposal.operations.reduce((document,operation)=>setImageOperation(document,{id:operation.operationId,userId:operation.authorId,time:operation.createdAt,type:protocolOperationType(operation.type,operation.parameters),params:{...operation.parameters,workspaceOperationType:operation.type}}),image.parameterDocument||emptyImageParameterDocument());
-      const commit:WorkspaceCommit={commitId:id("commit"),imageId:proposal.imageId,authorId:"owner",parentCommitId:image.currentCommitId,mergeParentCommitIds:[],operations:proposal.operations,createdAt:Date.now()};
+      approvedParameterDocument = parameterDocument;
+      if (!proposal.commit || proposal.commit.imageId !== proposal.imageId) { setNotice("Proposal is missing its original Commit"); return; }
+      const commit: WorkspaceCommit = proposal.commit;
       approvedCommitId = commit.commitId;
       await saveCommit(commit);setCommits((current)=>[...current,cachedCommit(commit)]);
       await updateImage(proposal.imageId,{parameterDocument,currentCommitId:commit.commitId,state:"shared"});
@@ -655,7 +768,7 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       realtimeRef.current?.send("commitCreated",{commit,parameterDocument},{delivery:"reliable",dataClass:"collaborationEvent"});
       await persistCollaborationActivity(workspace!.workspaceId,"proposalApproved",proposal.imageId,{proposalId:proposal.proposalId,commitId:commit.commitId,operations:proposal.operations.map(({operationId,type,parameters,authorId})=>({operationId,operationType:type,parameters,actorId:authorId})),parameterDocument,status:"approved"},"owner");
     }
-    const next={...proposal,state,rejectReason:reason};await saveProposal(next);setProposals((current)=>current.map((item)=>item.proposalId===proposal.proposalId?next:item));realtimeRef.current?.send("proposalDecision",{proposalId:proposal.proposalId,state,reason,commitId:approvedCommitId,operationType:proposal.operations[0]?.type,operations:proposal.operations.map(({operationId,type,parameters,authorId})=>({operationId,operationType:type,parameters,actorId:authorId})),parameterDocument:state==="approved"?imagesRef.current.find((image)=>image.imageId===proposal.imageId)?.parameterDocument:undefined},{route:"user",targetUserId:proposal.authorId,delivery:"reliable"});
+    const next={...proposal,state,rejectReason:reason};await saveProposal(next);setProposals((current)=>current.map((item)=>item.proposalId===proposal.proposalId?next:item));realtimeRef.current?.send("proposalDecision",{proposalId:proposal.proposalId,state,reason,commitId:approvedCommitId,operationType:proposal.operations[0]?.type,operations:proposal.operations.map(({operationId,type,parameters,authorId})=>({operationId,operationType:type,parameters,actorId:authorId})),parameterDocument:approvedParameterDocument},{route:"user",targetUserId:proposal.authorId,delivery:"reliable"});
     if(state==="rejected")await updateImage(proposal.imageId,{state:"shared"});
     if(state==="rejected")await persistCollaborationActivity(workspace!.workspaceId,"proposalRejected",proposal.imageId,{proposalId:proposal.proposalId,reason,status:"rejected"},"owner");
     if(state==="later")await persistCollaborationActivity(workspace!.workspaceId,"proposalDeferred",proposal.imageId,{proposalId:proposal.proposalId,status:"pending"},"owner");
@@ -667,7 +780,11 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     persistCollaborationActivity, sendRealtime: (type, payload) => realtimeRef.current?.send(type, payload, { delivery: "reliable", dataClass: "collaborationEvent" }),
   });
 
-  const { editorImage, initialColorAdjustments, initialCrop, initialResize, initialReviewAnnotations, labels, editorLoadingOverlay } = useWorkspaceEditorState({ workspace, selected, processingSource, editorPreparing });
+  const editorContainerDocument = selected?.shared ? collaborationContainers.current.get(selected.imageId)?.parameterDocument : undefined;
+  const editorSelected = React.useMemo(() => selected && selected.shared
+    ? { ...selected, parameterDocument: editorContainerDocument || selected.parameterDocument }
+    : selected, [editorContainerDocument, selected]);
+  const { editorImage, initialColorAdjustments, initialCrop, initialResize, initialReviewAnnotations, labels, editorLoadingOverlay } = useWorkspaceEditorState({ workspace, selected: editorSelected, processingSource, editorPreparing });
   const { saveProcessedResult } = useWorkspaceProcessedResultCommand({ workspace, selected, setEditing, createOperation, queueProcessedResult, releaseProcessingSource });
   if(!workspace&&runtime==="unavailable")return <WorkspaceUnavailable notice={notice}/>;
   if(!workspace)return <WorkspaceLoading/>;
@@ -690,6 +807,6 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
       </WorkspaceSidebar>
     </div>
     <WorkspaceEditorDialogs editing={editing} image={editorImage} labels={labels} initialCrop={initialCrop} initialSize={initialResize} initialAdjustments={initialColorAdjustments} parameterAction={selected?.shared ? (workspace.role === "owner" ? "apply" : "proposal") : undefined} loadingOverlay={editorLoadingOverlay} onClose={()=>{setEditing(null);setCompressingToWorkingImageId(null);releaseProcessingSource();}} onSave={(_source,result)=>saveProcessedResult(result)} onApplyCrop={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("crop",parameters);}} onApplyResize={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("resize",parameters);}} onApplyColor={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("brightness",parameters);}} onSaveCompression={async(_source,result)=>{if(compressingToWorkingImage){await saveProcessedCopy(compressingToWorkingImage,result);releaseProcessingSource();return;}await saveProcessedResult(result);}} onSaveConversion={(_source,result)=>saveProcessedResult(result)} />
-    <WorkspaceDialogs workspace={workspace} runtime={runtime} leaveOpen={leaveConfirmOpen} removed={removedFromWorkspace} deleteImage={deletingImage} deleteChoice={deleteChoice} proposalPreview={proposalPreview} activityPreview={activityPreview} activityPreviewIsCurrent={activityPreviewIsCurrent} rollbackTarget={rollbackTarget} rollbackPreview={rollbackPreview} saveCollaborationOpen={saveCollaborationOpen} collaborationSaving={collaborationSaving} collaborationSaveChoice={collaborationSaveChoice} sourceRequest={sourceRequestDialog} sourceRequestImageName={images.find((image)=>image.imageId===sourceRequestDialog?.imageId)?.name} sourceRejectReason={sourceRejectReason} rejectingProposal={rejectingProposal} proposalRejectReason={proposalRejectReason} operationLogOpen={operationLogOpen} operationLogs={completeOperationLog} pendingResult={pendingProcessedResult?.result || null} resultSaving={processedResultSaving} settingsOpen={settingsOpen} styleDraft={styleDraft} onCloseLeave={()=>setLeaveConfirmOpen(false)} onCloseDelete={()=>setDeletingImage(null)} onDeleteChoice={setDeleteChoice} onConfirmDelete={()=>void confirmDeleteImage()} onCloseProposalPreview={()=>setProposalPreview(null)} onRejectProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"rejected");}} onApproveProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"approved");}} onCloseActivityPreview={()=>void cancelActivityPreview()} onRollbackActivity={()=>void rollbackActivityParameterState()} onCloseRollback={()=>void cancelRollbackTarget()} onConfirmRollback={()=>rollbackTarget&&void rollbackCommit(rollbackTarget)} onCloseSaveCollaboration={()=>setSaveCollaborationOpen(false)} onSaveChoice={setCollaborationSaveChoice} onSaveCollaboration={()=>void saveCollaborativeImage()} onSourceReasonChange={setSourceRejectReason} onRejectSource={()=>sourceRequestDialog&&rejectSourceRequest(sourceRequestDialog)} onAcceptSource={()=>sourceRequestDialog&&void acceptSourceRequest(sourceRequestDialog)} onCloseRejectProposal={()=>setRejectingProposal(null)} onProposalReasonChange={setProposalRejectReason} onRejectProposal={()=>{const proposal=rejectingProposal;setRejectingProposal(null);if(proposal)void decideProposal(proposal,"rejected",proposalRejectReason);}} onCloseOperationLog={()=>setOperationLogOpen(false)} onClearOperationLog={async()=>{await clearOperationLogs(workspace.workspaceId);setOperationLogs([]);setActivities([]);}} onCancelResult={()=>setPendingProcessedResult(null)} onSaveResult={(destination)=>void confirmProcessedResult(destination)} onCloseSettings={()=>setSettingsOpen(false)} onStyleChange={setStyleDraft} onSaveStyle={()=>void saveStyle()} />
+    <WorkspaceDialogs workspace={workspace} runtime={runtime} leaveOpen={leaveConfirmOpen} removed={removedFromWorkspace} deleteImage={deletingImage} deleteChoice={deleteChoice} proposalPreview={proposalPreview} activityPreview={activityPreview} activityPreviewIsCurrent={activityPreviewIsCurrent} rollbackTarget={rollbackTarget} rollbackPreview={rollbackPreview} saveCollaborationOpen={saveCollaborationOpen} collaborationSaving={collaborationSaving} collaborationSaveChoice={collaborationSaveChoice} sourceRequest={sourceRequestDialog} sourceRequestImageName={images.find((image)=>image.imageId===sourceRequestDialog?.imageId)?.name} sourceRejectReason={sourceRejectReason} rejectingProposal={rejectingProposal} proposalRejectReason={proposalRejectReason} operationLogOpen={operationLogOpen} operationLogs={completeOperationLog} pendingResult={pendingProcessedResult?.result || null} resultSaving={processedResultSaving} settingsOpen={settingsOpen} styleDraft={styleDraft} compressionSuggestionOpen={Boolean(pendingWorkingImageId)} compressionSuggestionWeakNetwork={compressionSuggestionWeakNetwork} compressionLabels={labels as any} onCompressionContinue={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (image) void moveImageToWorking(image); }} onCompression={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (image) void moveImageToWorking(image); }} onCompressionCancel={() => setPendingWorkingImageId(null)} onCloseLeave={()=>setLeaveConfirmOpen(false)} onCloseDelete={()=>setDeletingImage(null)} onDeleteChoice={setDeleteChoice} onConfirmDelete={()=>void confirmDeleteImage()} onCloseProposalPreview={()=>setProposalPreview(null)} onRejectProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"rejected");}} onApproveProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"approved");}} onCloseActivityPreview={()=>void cancelActivityPreview()} onRollbackActivity={()=>void rollbackActivityParameterState()} onCloseRollback={()=>void cancelRollbackTarget()} onConfirmRollback={()=>rollbackTarget&&void rollbackCommit(rollbackTarget)} onCloseSaveCollaboration={()=>setSaveCollaborationOpen(false)} onSaveChoice={setCollaborationSaveChoice} onSaveCollaboration={()=>void saveCollaborativeImage()} onSourceReasonChange={setSourceRejectReason} onRejectSource={()=>sourceRequestDialog&&rejectSourceRequest(sourceRequestDialog)} onAcceptSource={()=>sourceRequestDialog&&void acceptSourceRequest(sourceRequestDialog)} onCloseRejectProposal={()=>setRejectingProposal(null)} onProposalReasonChange={setProposalRejectReason} onRejectProposal={()=>{const proposal=rejectingProposal;setRejectingProposal(null);if(proposal)void decideProposal(proposal,"rejected",proposalRejectReason);}} onCloseOperationLog={()=>setOperationLogOpen(false)} onClearOperationLog={async()=>{await clearOperationLogs(workspace.workspaceId);setOperationLogs([]);setActivities([]);}} onCancelResult={()=>setPendingProcessedResult(null)} onSaveResult={(destination)=>void confirmProcessedResult(destination)} onCloseSettings={()=>setSettingsOpen(false)} onStyleChange={setStyleDraft} onSaveStyle={()=>void saveStyle()} />
   </main>;
 }

@@ -9,15 +9,82 @@ export { readableActivityName } from "../utils/workspace-activity-display";
 
 const text = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
-function ProposalStatusIcon({ state }: { state: WorkspaceProposal["state"] }) { const properties: Record<WorkspaceProposal["state"], { label: string; className: string; icon: React.ReactNode }> = { draft: { label: "Draft", className: "text-slate-400", icon: <FiMoreHorizontal /> }, submitted: { label: "Submitted", className: "text-blue-500", icon: <FiUploadCloud /> }, pending: { label: "Pending review", className: "text-amber-500", icon: <FiClock /> }, approved: { label: "Approved", className: "text-emerald-600", icon: <FiCheck /> }, rejected: { label: "Rejected", className: "text-red-500", icon: <FiX /> }, later: { label: "Review later", className: "text-slate-500", icon: <FiClock /> }, failed: { label: "Send failed", className: "text-red-500", icon: <FiX /> }, conflict: { label: "Version conflict", className: "text-amber-600", icon: <FiRefreshCw /> } }; const property = properties[state]; return <span className={`flex h-5 w-5 shrink-0 items-center justify-center ${property.className}`} title={property.label} aria-label={property.label}>{property.icon}</span>; }
+function ProposalStatusIcon({ state }: { state: WorkspaceProposal["state"] }) {
+  const properties: Record<WorkspaceProposal["state"], { label: string; className: string; icon: React.ReactNode }> = {
+    draft: { label: "Draft", className: "text-slate-400", icon: <FiMoreHorizontal /> },
+    submitted: { label: "Submitted", className: "text-blue-500", icon: <FiUploadCloud /> },
+    pending: { label: "Pending review", className: "text-amber-500", icon: <FiClock /> },
+    approved: { label: "Approved", className: "text-emerald-600", icon: <FiCheck /> },
+    rejected: { label: "Rejected", className: "text-red-500", icon: <FiX /> },
+    later: { label: "Review later", className: "text-slate-500", icon: <FiClock /> },
+    failed: { label: "Send failed", className: "text-red-500", icon: <FiX /> },
+    conflict: { label: "Version conflict", className: "text-amber-600", icon: <FiRefreshCw /> },
+  };
+  const property = properties[state];
+  return <span className={`flex h-5 w-5 shrink-0 items-center justify-center ${property.className}`} title={property.label} aria-label={property.label}>{property.icon}</span>;
+}
 
-export function WorkspaceActivityList({ activities, proposals, role, originalCommit, currentCommitId, canRollback, onActivity, onOriginal }: { activities: WorkspaceActivity[]; proposals: WorkspaceProposal[]; role: WorkspaceIdentity["role"]; originalCommit?: WorkspaceCommit; currentCommitId?: string | null; canRollback: boolean; onActivity(activity: WorkspaceActivity): void; onOriginal(): void }) {
+export function WorkspaceActivityList({ activities, proposals, role, originalCommit, currentCommitId, canRollback, onActivity, onOriginal }: {
+  activities: WorkspaceActivity[];
+  proposals: WorkspaceProposal[];
+  role: WorkspaceIdentity["role"];
+  originalCommit?: WorkspaceCommit;
+  currentCommitId?: string | null;
+  canRollback: boolean;
+  onActivity(activity: WorkspaceActivity): void;
+  onOriginal(): void;
+}) {
   if (!activities.length) return <p className="text-xs text-slate-400">{text("noActivity")}</p>;
-  const approvedCommitIds = new Set(activities.filter((activity) => activity.kind === "proposalApproved").map((activity) => { const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null; return typeof detail?.commitId === "string" ? detail.commitId : null; }).filter((commitId): commitId is string => Boolean(commitId)));
+  const approvedCommitIds = new Set(activities.filter((activity) => activity.kind === "proposalApproved").map((activity) => {
+    const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+    return typeof detail?.commitId === "string" ? detail.commitId : null;
+  }).filter((commitId): commitId is string => Boolean(commitId)));
   const approvedOperationIds = new Set(proposals.filter((proposal) => proposal.state === "approved").flatMap((proposal) => proposal.operations.map((operation) => operation.operationId)));
-  const visibleActivities = activities.filter((activity) => { if (role !== "collaborator" || activity.kind !== "operationCommitted") return true; const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null; return (typeof detail?.commitId !== "string" || !approvedCommitIds.has(detail.commitId)) && (typeof detail?.operationId !== "string" || !approvedOperationIds.has(detail.operationId)); }).reduce<WorkspaceActivity[]>((result, activity) => { const proposalId = proposalIdForActivity(activity); if (!proposalId || !activity.kind.startsWith("proposal")) { result.push(activity); return result; } const duplicateIndex = result.findIndex((candidate) => candidate.kind.startsWith("proposal") && proposalIdForActivity(candidate) === proposalId); if (duplicateIndex >= 0) result[duplicateIndex] = activity; else result.push(activity); return result; }, []);
-  const rawCurrentEventId = currentActivityEventId(activities, currentCommitId); let currentEventId = currentActivityEventId(visibleActivities, currentCommitId);
-  if (!currentEventId && rawCurrentEventId) { const rawCurrent = activities.find((activity) => activity.eventId === rawCurrentEventId); const operationId = rawCurrent?.detail && typeof rawCurrent.detail === "object" ? (rawCurrent.detail as Record<string, unknown>).operationId : null; if (typeof operationId === "string") currentEventId = visibleActivities.find((activity) => { if (activity.kind !== "proposalApproved") return false; const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null; const operations = Array.isArray(detail?.operations) ? detail.operations : []; const directMatch = operations.some((operation) => operation && typeof operation === "object" && (operation as Record<string, unknown>).operationId === operationId); if (directMatch) return true; const proposalId = typeof detail?.proposalId === "string" ? detail.proposalId : null; return Boolean(proposalId && proposals.find((proposal) => proposal.proposalId === proposalId)?.operations.some((operation) => operation.operationId === operationId)); })?.eventId || null; }
-  const originalIsCurrent = Boolean(originalCommit && originalCommit.commitId === currentCommitId); const proposalsById = new Map(proposals.map((proposal) => [proposal.proposalId, proposal]));
-  return <div className="grid gap-1">{visibleActivities.slice(-10).reverse().map((activity) => { const current = activity.eventId === currentEventId; const proposalId = proposalIdForActivity(activity); const proposal = proposalId ? proposalsById.get(proposalId) : undefined; const ownProposal = role === "collaborator" && activity.kind === "proposalSubmitted" && activity.actorId === "local"; const operationLabel = proposal && activity.kind.startsWith("proposal") && !activityOperationName(activity) ? proposal.operations[0] : undefined; const operationName = operationLabel?.type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (character) => character.toUpperCase()); const displayName = operationName ? `${operationName} · ${activity.kind === "proposalApproved" ? text("proposalApproved") : activity.kind === "proposalRejected" ? text("proposalRejected") : activity.kind === "proposalDeferred" ? text("proposalDeferred") : text("proposalSubmitted")}` : readableActivityName(activity); return <button type="button" key={activity.eventId} disabled={current} onClick={() => onActivity(activity)} aria-current={current ? "step" : undefined} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${current ? "cursor-default border-[#2f65cf] bg-blue-50" : "border-slate-200 hover:border-[#2f65cf] hover:bg-slate-50"}`}><strong className={`min-w-0 flex-1 truncate font-semibold ${current ? "text-[#2457bd]" : "text-slate-700"}`}>{displayName}</strong>{ownProposal ? <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-violet-600">{text("you")}</span> : null}{proposal ? <ProposalStatusIcon state={proposal.state} /> : null}{current ? <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#2457bd]">{text("current")}</span> : <time className="shrink-0 text-[10px] text-slate-400">{new Date(activity.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>}</button>; })}{originalCommit ? <button type="button" onClick={onOriginal} disabled={originalIsCurrent} aria-current={originalIsCurrent ? "step" : undefined} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${originalIsCurrent ? "border-[#2f65cf] bg-blue-50" : "border-slate-300 hover:border-[#2f65cf] hover:bg-slate-50"} disabled:cursor-default`}><strong className={`min-w-0 flex-1 truncate font-semibold ${originalIsCurrent ? "text-[#2457bd]" : "text-slate-600"}`}>{text("originalImage")}</strong><span className={`shrink-0 text-[10px] ${originalIsCurrent ? "font-bold uppercase text-[#2457bd]" : "text-slate-400"}`}>{originalIsCurrent ? text("current") : canRollback ? text("rollback") : text("preview")}</span></button> : null}</div>;
+  const visibleActivities = activities.filter((activity) => {
+    if (role !== "collaborator" || activity.kind !== "operationCommitted") return true;
+    const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+    return (typeof detail?.commitId !== "string" || !approvedCommitIds.has(detail.commitId)) && (typeof detail?.operationId !== "string" || !approvedOperationIds.has(detail.operationId));
+  }).reduce<WorkspaceActivity[]>((result, activity) => {
+    const proposalId = proposalIdForActivity(activity);
+    if (!proposalId || !activity.kind.startsWith("proposal")) { result.push(activity); return result; }
+    const duplicateIndex = result.findIndex((candidate) => candidate.kind.startsWith("proposal") && proposalIdForActivity(candidate) === proposalId);
+    if (duplicateIndex >= 0) result[duplicateIndex] = activity; else result.push(activity);
+    return result;
+  }, []);
+  const rawCurrentEventId = currentActivityEventId(activities, currentCommitId);
+  let currentEventId = currentActivityEventId(visibleActivities, currentCommitId);
+  if (!currentEventId && currentCommitId) currentEventId = visibleActivities.slice().reverse().find((activity) => activity.kind === "proposalApproved" || activity.kind === "operationCommitted")?.eventId || null;
+  if (!currentEventId && rawCurrentEventId) {
+    const rawCurrent = activities.find((activity) => activity.eventId === rawCurrentEventId);
+    const rawDetail = rawCurrent?.detail && typeof rawCurrent.detail === "object" ? rawCurrent.detail as Record<string, unknown> : null;
+    const operationId = rawDetail?.operationId;
+    if (typeof operationId === "string") currentEventId = visibleActivities.find((activity) => {
+      if (activity.kind !== "proposalApproved") return false;
+      const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+      const operations = Array.isArray(detail?.operations) ? detail.operations : [];
+      return operations.some((operation) => operation && typeof operation === "object" && (operation as Record<string, unknown>).operationId === operationId);
+    })?.eventId || null;
+  }
+  const originalIsCurrent = Boolean(originalCommit && originalCommit.commitId === currentCommitId);
+  const proposalsById = new Map(proposals.map((proposal) => [proposal.proposalId, proposal]));
+  return <div className="grid gap-1">
+    {visibleActivities.slice(-10).reverse().map((activity) => {
+      const current = activity.eventId === currentEventId;
+      const proposalId = proposalIdForActivity(activity);
+      const proposal = proposalId ? proposalsById.get(proposalId) : undefined;
+      const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+      const commitId = typeof detail?.commitId === "string" ? detail.commitId : proposal?.commit?.commitId;
+      const ownProposal = role === "collaborator" && activity.kind === "proposalSubmitted" && activity.actorId === "local";
+      const operationLabel = proposal && activity.kind.startsWith("proposal") && !activityOperationName(activity) ? proposal.operations[0] : undefined;
+      const operationName = operationLabel?.type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (character) => character.toUpperCase());
+      const displayName = operationName ? `${operationName} · ${activity.kind === "proposalApproved" ? text("proposalApproved") : activity.kind === "proposalRejected" ? text("proposalRejected") : activity.kind === "proposalDeferred" ? text("proposalDeferred") : text("proposalSubmitted")}` : readableActivityName(activity);
+      return <button type="button" key={activity.eventId} title={commitId ? `Commit ID: ${commitId}` : undefined} disabled={current} onClick={() => onActivity(activity)} aria-current={current ? "step" : undefined} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${current ? "cursor-default border-[#2f65cf] bg-blue-50" : "border-slate-200 hover:border-[#2f65cf] hover:bg-slate-50"}`}>
+        <strong className={`min-w-0 flex-1 truncate font-semibold ${current ? "text-[#2457bd]" : "text-slate-700"}`}>{displayName}</strong>
+        {ownProposal ? <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-violet-600">{text("you")}</span> : null}
+        {proposal ? <ProposalStatusIcon state={proposal.state} /> : null}
+        {current ? <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#2457bd]">{text("current")}</span> : <time className="shrink-0 text-[10px] text-slate-400">{new Date(activity.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>}
+      </button>;
+    })}
+    {originalCommit ? <button type="button" onClick={onOriginal} disabled={originalIsCurrent} aria-current={originalIsCurrent ? "step" : undefined} title={`Commit ID: ${originalCommit.commitId}`} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${originalIsCurrent ? "border-[#2f65cf] bg-blue-50" : "border-slate-300 hover:border-[#2f65cf] hover:bg-slate-50"} disabled:cursor-default`}><strong className={`min-w-0 flex-1 truncate font-semibold ${originalIsCurrent ? "text-[#2457bd]" : "text-slate-600"}`}>{text("originalImage")}</strong><span className={`shrink-0 text-[10px] ${originalIsCurrent ? "font-bold uppercase text-[#2457bd]" : "text-slate-400"}`}>{originalIsCurrent ? text("current") : canRollback ? text("rollback") : text("preview")}</span></button> : null}
+  </div>;
 }

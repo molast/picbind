@@ -108,6 +108,7 @@ export type WorkspaceProposal = {
   authorId: string;
   baseCommitId: string;
   operations: WorkspaceOperation[];
+  commit?: WorkspaceCommit;
   state: ProposalState;
   rejectReason?: string;
   createdAt: number;

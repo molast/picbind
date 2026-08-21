@@ -357,6 +357,18 @@ export async function deleteCollaborationActivitiesAfter(
   });
   return removed.map((activity) => activity.eventId);
 }
+export async function deleteCollaborationActivitiesByIds(workspaceId: string, eventIds: string[]) {
+  if (!eventIds.length) return [];
+  const db = getWorkspaceDatabase();
+  const existing = await db.activities.where("workspaceId").equals(workspaceId)
+    .filter((activity) => activity.scope === "collaborationActivity" && eventIds.includes(activity.eventId)).toArray();
+  if (!existing.length) return [];
+  await db.transaction("rw", db.activities, db.cache, async () => {
+    await db.activities.bulkDelete(existing.map((activity) => activity.eventId));
+    await db.cache.bulkDelete(existing.map((activity) => `activity:${workspaceId}:${activity.eventId}`));
+  });
+  return existing.map((activity) => activity.eventId);
+}
 export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
   if (!commit.snapshotCached) return null;
   const image = await getWorkspaceDatabase().images.get(commit.imageId);

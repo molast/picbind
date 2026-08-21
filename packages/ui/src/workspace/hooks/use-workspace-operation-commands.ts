@@ -5,7 +5,7 @@ import { emptyImageParameterDocument, setImageOperation } from "../image-protoco
 import { protocolOperationType } from "../utils/workspace-operation-mapping";
 import { cachedCommit } from "../utils/workspace-page-utils";
 import { workspaceOperationStorageMode } from "../image-flow";
-import { readWorkspaceCommitSnapshot, readWorkspaceImageSource } from "../repository";
+import { readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource } from "../repository";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage, WorkspaceOperation, WorkspaceProposal } from "../types";
 
@@ -47,14 +47,17 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
       return;
     }
     if (workspace.role === "collaborator") {
+      const localCommit: WorkspaceCommit = { commitId: id("commit"), imageId: selected.imageId, authorId: "local", parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
       const proposal: WorkspaceProposal = { proposalId: id("proposal"), workspaceId: workspace.workspaceId, imageId: selected.imageId,
-        authorId: "local", baseCommitId: operation.baseCommitId, operations: [operation], state: "draft", createdAt: Date.now() };
+        authorId: "local", baseCommitId: operation.baseCommitId, operations: [operation], commit: localCommit, state: "draft", createdAt: Date.now() };
+      await saveCommit(localCommit);
+      setCommits((current) => [...current, cachedCommit(localCommit)]);
       await saveProposal(proposal);
       setProposals((current) => [...current, proposal]);
       await submitProposal(proposal);
       await persistCollaborationActivity(workspace.workspaceId, "proposalSubmitted", selected.imageId, {
         proposalId: proposal.proposalId, operationId: operation.operationId, operationType: type, parameters,
-        commitId: operation.baseCommitId, actorId: operation.authorId, status: "pending",
+        commitId: localCommit.commitId, actorId: operation.authorId, status: "pending",
       });
       return;
     }
@@ -84,12 +87,17 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
     if (!image) throw new Error("Proposal image is unavailable");
     if (workspace?.role === "collaborator" || proposal.authorId === "local") {
       const container = collaborationContainers.current.get(proposal.imageId);
-      const source = container?.sourceKind === "source" ? container.source : await readWorkspaceImageSource(image);
+      const source = container?.sourceKind === "source"
+        ? container.source
+        : await readWorkspaceImageSource(image) || await readWorkspaceImagePreview(image);
       if (!source) throw new Error("Source is not available for Proposal preview");
       return { ...image, source };
     }
-    if (image.currentCommitId === proposal.baseCommitId) {
-      const source = await readWorkspaceImageSource(image);
+    // The initial commit is represented by the immutable image source and does
+    // not need a separately materialized snapshot in the repository.
+    const initialCommitId = `initial_${image.imageId}`;
+    if (image.currentCommitId === proposal.baseCommitId || proposal.baseCommitId === initialCommitId) {
+      const source = await readWorkspaceImageSource(image) || await readWorkspaceImagePreview(image);
       if (!source) throw new Error("Proposal base version is unavailable");
       return { ...image, source };
     }

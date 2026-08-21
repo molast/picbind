@@ -58,12 +58,16 @@ export function useWorkspaceRollbackCommands({ workspace, selected, commits, sel
       return detail?.commitId === commit.commitId;
     }).at(-1);
     const activityCreatedAt = targetActivity?.createdAt ?? -1;
+    const removedProposalIds = selectedCollaborationActivities.filter((activity) => activity.imageId === selected.imageId && activity.createdAt > activityCreatedAt).map((activity) => {
+      const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+      return typeof detail?.proposalId === "string" ? detail.proposalId : null;
+    }).filter((proposalId): proposalId is string => Boolean(proposalId));
     await Promise.all([deleteCommitsAfter(selected.imageId, commit.createdAt), deleteCollaborationActivitiesAfter(workspace.workspaceId, selected.imageId, activityCreatedAt)]);
     setCommits((current) => current.filter((item) => item.imageId !== selected.imageId || item.createdAt <= commit.createdAt));
     setActivities((current) => current.filter((activity) => activity.imageId !== selected.imageId || activity.createdAt <= activityCreatedAt));
     await updateImage(selected.imageId, { currentCommitId: commit.commitId, parameterDocument, state: "shared" });
     await syncCollaborationPreview({ ...selected, currentCommitId: commit.commitId, parameterDocument, state: "shared" }, parameterDocument);
-    sendRealtime("historyRolledBack", { imageId: selected.imageId, commitId: commit.commitId, targetCreatedAt: commit.createdAt, activityCreatedAt, parameterDocument });
+    sendRealtime("historyRolledBack", { imageId: selected.imageId, commitId: commit.commitId, targetCreatedAt: commit.createdAt, activityCreatedAt, removedProposalIds, parameterDocument });
     setRollbackTarget(null); setRollbackPreview(null);
   }, [parameterDocumentAtCommit, selected, selectedCollaborationActivities, sendRealtime, setActivities, setCommits, setRollbackPreview, setRollbackTarget, syncCollaborationPreview, updateImage, workspace]);
 
@@ -78,7 +82,11 @@ export function useWorkspaceRollbackCommands({ workspace, selected, commits, sel
     setActivities((current) => current.filter((activity) => activity.imageId !== selected.imageId || activity.createdAt <= activityPreview.activity.createdAt));
     await updateImage(selected.imageId, { currentCommitId: commitId, parameterDocument, state: "shared" });
     await syncCollaborationPreview({ ...selected, currentCommitId: commitId, parameterDocument, state: "shared" }, parameterDocument);
-    sendRealtime("historyRolledBack", { imageId: selected.imageId, commitId, parameterDocument, targetCreatedAt: targetCommit.createdAt, activityCreatedAt: activityPreview.activity.createdAt });
+    const removedProposalIds = selectedCollaborationActivities.filter((activity) => activity.imageId === selected.imageId && activity.createdAt > activityPreview.activity.createdAt).map((activity) => {
+      const detail = activity.detail && typeof activity.detail === "object" ? activity.detail as Record<string, unknown> : null;
+      return typeof detail?.proposalId === "string" ? detail.proposalId : null;
+    }).filter((proposalId): proposalId is string => Boolean(proposalId));
+    sendRealtime("historyRolledBack", { imageId: selected.imageId, commitId, parameterDocument, targetCreatedAt: targetCommit.createdAt, activityCreatedAt: activityPreview.activity.createdAt, removedProposalIds });
     setActivityPreview(null);
   }, [activityPreview, commits, currentActivityId, selected, sendRealtime, setActivities, setActivityPreview, setCommits, setNotice, syncCollaborationPreview, updateImage, workspace]);
 
