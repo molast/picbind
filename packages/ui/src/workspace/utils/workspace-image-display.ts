@@ -1,0 +1,28 @@
+import type { WorkspaceImage } from "../types";
+import type { WorkspaceIdentity } from "../types";
+import { canRenderFromCollaborationSource } from "../image-flow";
+
+export async function dimensions(file: Blob) {
+  const bitmap = await createImageBitmap(file);
+  try { return { width: bitmap.width, height: bitmap.height }; } finally { bitmap.close(); }
+}
+
+export function blobFromBytes(value: unknown, mimeType: string) {
+  return value instanceof ArrayBuffer ? new Blob([value], { type: mimeType }) : Array.isArray(value) ? new Blob([new Uint8Array(value.map(Number)).buffer as ArrayBuffer], { type: mimeType }) : null;
+}
+
+export function placeholderFrom(value: unknown): WorkspaceImage["placeholder"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  return Number.isFinite(candidate.width) && Number(candidate.width) > 0
+    && Number.isFinite(candidate.height) && Number(candidate.height) > 0
+    && typeof candidate.dominantColor === "string"
+    && typeof candidate.blurHash === "string"
+    ? candidate as WorkspaceImage["placeholder"]
+    : undefined;
+}
+
+export function collaborationPreviewFor(image: WorkspaceImage, workspace: WorkspaceIdentity | null, containers: Map<string, { sourceKind: "source" | "preview"; preview?: Blob }>) {
+  const container = containers.get(image.imageId);
+  return workspace && container && canRenderFromCollaborationSource(workspace.role, container.sourceKind === "source") ? container.preview : undefined;
+}

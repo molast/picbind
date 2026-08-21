@@ -1,0 +1,29 @@
+import React from "react";
+import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
+import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage, WorkspaceProposal, WorkspaceRuntimeState, WorkspaceStyle } from "../types";
+import { WorkspaceLeaveDialog, WorkspaceRemovedDialog } from "./workspace-leave-dialog";
+import { WorkspaceDeleteDialog } from "./workspace-delete-dialog";
+import { WorkspaceSourceRequestDialog } from "./workspace-source-request-dialog";
+import { WorkspaceProposalRejectDialog, WorkspaceProposalPreviewDialog } from "./workspace-proposal-dialog";
+import { WorkspaceActivityPreviewDialog, WorkspaceRollbackDialog } from "./workspace-activity-preview-dialog";
+import { WorkspaceProcessedResultDialog } from "./workspace-result-dialog";
+import { WorkspaceSaveDialog } from "./workspace-save-dialog";
+import { WorkspaceSettingsDialog } from "./workspace-settings-dialog";
+import WorkspaceOperationLogDialog from "../workspace-operation-log-dialog";
+
+export function WorkspaceDialogs({ workspace, runtime, leaveOpen, removed, deleteImage, deleteChoice, proposalPreview, activityPreview, activityPreviewIsCurrent, rollbackTarget, rollbackPreview, saveCollaborationOpen, collaborationSaving, collaborationSaveChoice, sourceRequest, sourceRequestImageName, sourceRejectReason, rejectingProposal, proposalRejectReason, operationLogOpen, operationLogs, pendingResult, resultSaving, settingsOpen, styleDraft, onCloseLeave, onCloseDelete, onDeleteChoice, onConfirmDelete, onCloseProposalPreview, onRejectProposalPreview, onApproveProposalPreview, onCloseActivityPreview, onRollbackActivity, onCloseRollback, onConfirmRollback, onCloseSaveCollaboration, onSaveChoice, onSaveCollaboration, onSourceReasonChange, onRejectSource, onAcceptSource, onCloseRejectProposal, onProposalReasonChange, onRejectProposal, onCloseOperationLog, onClearOperationLog, onCancelResult, onSaveResult, onCloseSettings, onStyleChange, onSaveStyle }: { workspace: WorkspaceIdentity; runtime: WorkspaceRuntimeState; leaveOpen: boolean; removed: boolean; deleteImage: WorkspaceImage | null; deleteChoice: "library" | "permanent"; proposalPreview: { proposalId: string; imageId: string; original: Blob; result: Blob } | null; activityPreview: { activity: WorkspaceActivity; parameterDocument: { operations: unknown[] }; preview: Blob } | null; activityPreviewIsCurrent: boolean; rollbackTarget: WorkspaceCommit | null; rollbackPreview?: Blob | null; saveCollaborationOpen: boolean; collaborationSaving: boolean; collaborationSaveChoice: "replace" | "copy"; sourceRequest: Record<string, unknown> | null; sourceRequestImageName?: string; sourceRejectReason: string; rejectingProposal: WorkspaceProposal | null; proposalRejectReason: string; operationLogOpen: boolean; operationLogs: WorkspaceActivity[]; pendingResult: ProcessedImageResult | null; resultSaving: boolean; settingsOpen: boolean; styleDraft: WorkspaceStyle; onCloseLeave(): void; onCloseDelete(): void; onDeleteChoice(choice: "library" | "permanent"): void; onConfirmDelete(): void; onCloseProposalPreview(): void; onRejectProposalPreview(): void; onApproveProposalPreview(): void; onCloseActivityPreview(): void; onRollbackActivity(): void; onCloseRollback(): void; onConfirmRollback(): void; onCloseSaveCollaboration(): void; onSaveChoice(choice: "replace" | "copy"): void; onSaveCollaboration(): void; onSourceReasonChange(reason: string): void; onRejectSource(): void; onAcceptSource(): void; onCloseRejectProposal(): void; onProposalReasonChange(reason: string): void; onRejectProposal(): void; onCloseOperationLog(): void; onClearOperationLog(): Promise<void>; onCancelResult(): void; onSaveResult(destination: "library" | "working"): void; onCloseSettings(): void; onStyleChange: React.Dispatch<React.SetStateAction<WorkspaceStyle>>; onSaveStyle(): void }) {
+  return <>
+    <WorkspaceProcessedResultDialog result={pendingResult} saving={resultSaving} bytes={(size) => size < 1024 ? `${size} B` : size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`} onCancel={onCancelResult} onSave={onSaveResult} />
+    <WorkspaceLeaveDialog open={leaveOpen} onClose={onCloseLeave} />
+    <WorkspaceRemovedDialog open={removed} />
+    <WorkspaceProposalPreviewDialog proposal={proposalPreview} role={workspace.role} onClose={onCloseProposalPreview} onReject={onRejectProposalPreview} onApprove={onApproveProposalPreview} />
+    <WorkspaceActivityPreviewDialog preview={activityPreview} role={workspace.role} isCurrent={activityPreviewIsCurrent} onClose={onCloseActivityPreview} onRollback={onRollbackActivity} />
+    <WorkspaceRollbackDialog target={rollbackTarget} preview={rollbackPreview || undefined} role={workspace.role} onClose={onCloseRollback} onRollback={onConfirmRollback} />
+    <WorkspaceSaveDialog open={saveCollaborationOpen} saving={collaborationSaving} choice={collaborationSaveChoice} onChoiceChange={onSaveChoice} onClose={onCloseSaveCollaboration} onSave={onSaveCollaboration} />
+    <WorkspaceDeleteDialog image={deleteImage} choice={deleteChoice} onChoiceChange={onDeleteChoice} onClose={onCloseDelete} onConfirm={onConfirmDelete} />
+    <WorkspaceSourceRequestDialog request={sourceRequest} imageName={sourceRequestImageName} reason={sourceRejectReason} onReasonChange={onSourceReasonChange} onReject={onRejectSource} onAccept={onAcceptSource} />
+    <WorkspaceProposalRejectDialog proposal={rejectingProposal} reason={proposalRejectReason} onReasonChange={onProposalReasonChange} onClose={onCloseRejectProposal} onReject={onRejectProposal} />
+    <WorkspaceOperationLogDialog open={operationLogOpen} logs={operationLogs} onClose={onCloseOperationLog} onClear={onClearOperationLog} />
+    <WorkspaceSettingsDialog open={settingsOpen} workspace={workspace} runtime={runtime} styleDraft={styleDraft} onStyleChange={onStyleChange} onClose={onCloseSettings} onSave={onSaveStyle} />
+  </>;
+}

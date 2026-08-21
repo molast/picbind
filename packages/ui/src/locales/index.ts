@@ -1,4 +1,6 @@
 import en from "./en";
+export { getWorkspaceLabels } from "./workspace";
+export type { WorkspaceLabels } from "./workspace";
 import zh from "./zh";
 
 export type Lang = "en" | "zh";
