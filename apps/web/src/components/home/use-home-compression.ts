@@ -307,7 +307,6 @@ export function useHomeCompression({
   showCompressedCount = false,
 }: UseHomeCompressionOptions) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const langMenuRef = React.useRef<HTMLDivElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
   const displayedCountRef = React.useRef(0);
   const timersRef = React.useRef<Record<string, number>>({});
@@ -341,7 +340,6 @@ export function useHomeCompression({
   const [isCountBouncing, setIsCountBouncing] = React.useState(false);
   const [lang, setLang] = React.useState<Lang>(initialLang);
   const [langReady, setLangReady] = React.useState(false);
-  const [isLangMenuOpen, setIsLangMenuOpen] = React.useState(false);
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
   const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
     [],
@@ -469,30 +467,6 @@ export function useHomeCompression({
     setLang(getLang());
     setLangReady(true);
   }, []);
-
-  React.useEffect(() => {
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      if (!langMenuRef.current) {
-        return;
-      }
-      const target = event.target;
-      if (target instanceof Node && !langMenuRef.current.contains(target)) {
-        setIsLangMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("touchstart", handlePointerDown);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("touchstart", handlePointerDown);
-    };
-  }, []);
-
-  React.useEffect(() => {
-    setIsLangMenuOpen(false);
-  }, [lang]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1302,10 +1276,7 @@ export function useHomeCompression({
     langReady,
     copy,
     lang,
-    langMenuRef,
     inputRef,
-    isLangMenuOpen,
-    setIsLangMenuOpen,
     isDragging,
     setIsDragging,
     showFormatOptions,

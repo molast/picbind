@@ -6,6 +6,8 @@ export { configureRoomSdk } from "./config";
 export { ROOM_VERSION } from "./version";
 export { default as WorkerVersionWarning } from "./components/share/worker-version-warning";
 export { default as WorkspacePage } from "./workspace/page/workspace-page";
+export { WorkspaceLanguageSwitcher } from "./workspace/components/workspace-language-switcher";
+export { default as WorkspaceShareIdEntryDialog } from "./workspace/dialogs/workspace-share-id-entry-dialog";
 export * from "./workspace/types";
 export {
   EXPECTED_WORKER_VERSION,

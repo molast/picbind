@@ -2,7 +2,7 @@
 
 import React from "react";
 import { FiArrowRight, FiHash, FiX } from "react-icons/fi";
-import type { Lang } from "@/locales";
+import type { Lang } from "../../locales";
 
 export default function WorkspaceShareIdEntryDialog({
   open,
@@ -27,10 +27,10 @@ export default function WorkspaceShareIdEntryDialog({
   const labels = lang === "zh"
     ? {
         title: "进入工作区",
-        shareId: "Share ID",
-        placeholder: "粘贴 Share ID",
+        shareId: "分享 ID",
+        placeholder: "粘贴分享 ID",
         enter: "进入工作区",
-        invalid: "请输入有效的 Share ID",
+        invalid: "请输入有效的分享 ID",
         close: "关闭",
       }
     : {

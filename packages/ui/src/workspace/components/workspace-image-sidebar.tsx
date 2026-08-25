@@ -7,9 +7,68 @@ import { WorkspaceAction } from "./workspace-action";
 import { WorkspaceActivityList } from "./workspace-activity-list";
 import { workspacePersonName } from "../utils/workspace-person-display";
 
-const text = (key: string) => key === "workspaceId" ? "Share ID" : getWorkspaceLabels(getLang())[key] || key;
+const text = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
-export function WorkspaceImageSidebar({ selected, selectedIsLibrary, shareId, role, runtime, imagesCount, workingCount, collaborators, commits, activities, proposals, selectedOriginalCommit, requestingSource, previewBlob, onPublish, onDelete, onRequestSource, onOperation, onSave, onActivity, onOriginal, onRollback, onCreateShare, onRotateShare, hasShareToken }: { selected?: WorkspaceImage | null; selectedIsLibrary: boolean; shareId: string | null; role: WorkspaceIdentity["role"]; runtime: string; imagesCount: number; workingCount: number; collaborators: Collaborator[]; commits: WorkspaceCommit[]; activities: WorkspaceActivity[]; proposals: WorkspaceProposal[]; selectedOriginalCommit?: WorkspaceCommit; requestingSource: boolean; previewBlob?: Blob; onPublish(image: WorkspaceImage): void; onDelete(image: WorkspaceImage): void; onRequestSource(image: WorkspaceImage): void; onOperation(image: WorkspaceImage, operation: "crop" | "adjust" | "review"): void; onRollback(commit: WorkspaceCommit): void; onCreateShare(): void; onRotateShare(): void; onSave(): void; onActivity(activity: WorkspaceActivity): void; onOriginal(): void; hasShareToken: boolean }) {
+function WorkspaceShareIdDisplay({ value, copied, onCopy }: { value: string; copied: boolean; onCopy(): void }) {
+  return <div className="mt-3 min-w-0 rounded-md bg-slate-50 px-3 py-2.5">
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] font-bold uppercase text-slate-500">{text("shareId")}</span>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-[#2f65cf]"
+        title={copied ? text("workspaceIdCopied") : text("copyWorkspaceId")}
+        aria-label={copied ? text("workspaceIdCopied") : text("copyWorkspaceId")}
+      >
+        {copied ? <FiCheck className="h-3.5 w-3.5" /> : <FiCopy className="h-3.5 w-3.5" />}
+      </button>
+    </div>
+    <code className="mt-1 block truncate font-mono text-[13px] font-medium text-slate-700" title={value}>
+      {value}
+    </code>
+  </div>;
+}
+
+function WorkspaceSharePanel({ role, shareId, copied, onCopy, onCreate, onRotate }: {
+  role: WorkspaceIdentity["role"];
+  shareId: string;
+  copied: boolean;
+  onCopy(): void;
+  onCreate(): void;
+  onRotate(): void;
+}) {
+  const hasShareId = Boolean(shareId);
+  return <section className="p-4">
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-[#26344c]">
+        <FiShare2 className="shrink-0" />
+        <span>{text("workspaceShare")}</span>
+      </div>
+      {role === "owner" && hasShareId ? <button
+        type="button"
+        onClick={onRotate}
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+      >
+        <FiRefreshCw />
+        {text("createNewLink")}
+      </button> : null}
+    </div>
+    <p className="mt-2 max-w-[34rem] text-[11px] leading-[18px] text-slate-500">
+      {role === "owner" ? text("createPermanentLink") : text("joinedPermanentLink")}
+    </p>
+    {hasShareId ? <WorkspaceShareIdDisplay value={shareId} copied={copied} onCopy={onCopy} /> : null}
+    {role === "owner" && !hasShareId ? <button
+      type="button"
+      onClick={onCreate}
+      className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white"
+    >
+      <FiLink />
+      {text("createShareLink")}
+    </button> : null}
+  </section>;
+}
+
+export function WorkspaceImageSidebar({ selected, selectedIsLibrary, shareId, role, runtime, imagesCount, workingCount, collaborators, commits, activities, proposals, selectedOriginalCommit, requestingSource, previewBlob, onPublish, onDelete, onRequestSource, onOperation, onSave, onActivity, onOriginal, onRollback, onCreateShare, onRotateShare, onCopySuccess, hasShareToken }: { selected?: WorkspaceImage | null; selectedIsLibrary: boolean; shareId: string | null; role: WorkspaceIdentity["role"]; runtime: string; imagesCount: number; workingCount: number; collaborators: Collaborator[]; commits: WorkspaceCommit[]; activities: WorkspaceActivity[]; proposals: WorkspaceProposal[]; selectedOriginalCommit?: WorkspaceCommit; requestingSource: boolean; previewBlob?: Blob; onPublish(image: WorkspaceImage): void; onDelete(image: WorkspaceImage): void; onRequestSource(image: WorkspaceImage): void; onOperation(image: WorkspaceImage, operation: "crop" | "adjust" | "review"): void; onRollback(commit: WorkspaceCommit): void; onCreateShare(): void; onRotateShare(): void; onCopySuccess(): void; onSave(): void; onActivity(activity: WorkspaceActivity): void; onOriginal(): void; hasShareToken: boolean }) {
   const workspaceId = shareId || "";
   const [workspaceIdCopied, setWorkspaceIdCopied] = React.useState(false);
   const copyWorkspaceId = async () => {
@@ -17,6 +76,7 @@ export function WorkspaceImageSidebar({ selected, selectedIsLibrary, shareId, ro
       if (!workspaceId) return;
       await navigator.clipboard.writeText(workspaceId);
       setWorkspaceIdCopied(true);
+      onCopySuccess();
       window.setTimeout(() => setWorkspaceIdCopied(false), 1500);
     } catch {
       setWorkspaceIdCopied(false);
@@ -27,6 +87,16 @@ export function WorkspaceImageSidebar({ selected, selectedIsLibrary, shareId, ro
   collaborators = collaborators.map((person) => ({ ...person, displayName: workspacePersonName(person.displayName) }));
   return <>{<section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-sm font-semibold text-[#26344c]"><FiImage /><span>{text("imageInformation")}</span></div>{selected ? <><div className="mt-3 grid grid-cols-[56px_minmax(0,1fr)] items-center gap-3"><div className="h-14 w-14 overflow-hidden rounded-md border bg-slate-100">{selected.shared && previewBlob ? <BlobImageMedia blob={previewBlob} alt={selected.name} fit="contain" /> : <WorkspaceImageMedia image={selected} role={role} preferOriginal={role === "owner" && selected.workspaceLocation === "working"} />}</div><div className="min-w-0"><strong className="block truncate text-[13px]">{selected.name}</strong><span className="block text-[11px] text-slate-500">{selected.width} × {selected.height} · {selected.mimeType.replace("image/", "").toUpperCase()}</span><span className="block text-[11px] text-slate-500">{selected.size} B</span></div></div><dl className="mt-3 grid gap-2 text-xs"><div className="flex justify-between gap-3"><dt className="text-slate-500">{text("created")}</dt><dd>{new Date(selected.createdAt).toLocaleString()}</dd></div><div className="flex justify-between gap-3"><dt className="text-slate-500">{text("source")}</dt><dd>{selected.workspaceLocation === "library" ? text("library") : text("working")}</dd></div>{selected.shared ? <div className="flex justify-between gap-3"><dt className="text-slate-500">{text("currentCommit")}</dt><dd className="max-w-[160px] truncate">{selected.currentCommitId || text("initial")}</dd></div> : null}</dl>{!selectedIsLibrary && !selected.shared && role === "owner" ? <div className="mt-3 flex gap-2"><button type="button" onClick={() => onPublish(selected)} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white"><FiShield />{text("startCollaboration")}</button><button type="button" onClick={() => onDelete(selected)} className="flex h-9 w-9 items-center justify-center rounded-md border border-red-200 text-red-600" title={text("deleteImage")}><FiTrash2 /></button></div> : null}{selected.shared && role === "owner" ? <button type="button" onClick={() => onPublish(selected)} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs font-bold text-slate-600"><FiShield />{text("stopCollaboration")}</button> : null}{selected.shared && !selected.sourceCached && role === "collaborator" ? <button type="button" onClick={() => onRequestSource(selected)} disabled={runtime !== "available" || requestingSource} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white disabled:opacity-60">{requestingSource ? <><FiRefreshCw className="animate-spin" />{text("requestingSource")}</> : <><FiDownload />{text("requestSource")}</>}</button> : null}</> : <div className="mt-4 flex flex-col items-center gap-2 py-5 text-center text-xs text-slate-400"><FiImage className="h-6 w-6" /><p>{text("noSelection")}</p></div>}</section>}
     {selected?.shared ? <><section className="border-b border-[#e4e7eb] p-4"><div className="text-[11px] font-bold uppercase text-[#778294]">{text("imageProcessing")}</div><div className="mt-2 grid grid-cols-2 gap-2"><WorkspaceAction icon={<FiCrop />} label={text("crop")} disabled={!selected.sourceCached} onClick={() => onOperation(selected, "crop")} /><WorkspaceAction icon={<FiSliders />} label={text("color")} disabled={!selected.sourceCached} onClick={() => onOperation(selected, "adjust")} /><WorkspaceAction icon={<FiEye />} label={text("doodle")} disabled={!selected.sourceCached} onClick={() => onOperation(selected, "review")} /><WorkspaceAction icon={<FiDownload />} label={text("saveImage")} disabled={role !== "owner" || !selected.sourceCached} onClick={onSave} /></div></section><section className="border-b border-[#e4e7eb] p-4"><div className="text-[11px] font-bold uppercase text-[#778294]">{text("activity")}</div><div className="mt-2"><WorkspaceActivityList activities={activities} proposals={proposals} role={role} originalCommit={selectedOriginalCommit} currentCommitId={selected.currentCommitId} canRollback={role === "owner" && selectedOriginalCommit?.commitId !== selected.currentCommitId} onActivity={onActivity} onOriginal={onOriginal} /></div></section><section className="border-b border-[#e4e7eb] p-4"><div className="text-[11px] font-bold uppercase text-[#778294]">{text("collaborators")}</div>{collaborators.filter((person) => person.online).length ? collaborators.filter((person) => person.online).map((person) => <div key={person.clientId} className="mt-2 flex items-center gap-2 text-xs"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold">{person.displayName.slice(0, 2).toUpperCase()}</span><span className="truncate">{person.displayName}</span></div>) : <p className="mt-2 text-xs text-slate-400">{text("noCollaborators")}</p>}</section>{imageCommits.length ? <section className="p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiClock /><span>{text("history")}</span></div><div className="mt-3 grid gap-2">{imageCommits.slice().reverse().map((commit) => <div key={commit.commitId} className="flex items-center justify-between rounded-md border p-2 text-[11px]"><div className="min-w-0"><strong className="block truncate">{commit.commitId === selected.currentCommitId ? text("currentVersion") : commit.commitId.startsWith("initial_") ? text("initialVersion") : commit.operations.map((operation) => operation.type).join(", ") || text("version")}</strong><span className="text-slate-400">{new Date(commit.createdAt).toLocaleString()}</span></div>{role === "owner" && commit.commitId !== selected.currentCommitId ? <button type="button" onClick={() => onRollback(commit)} className="ml-2 rounded border px-2 py-1">{text("rollback")}</button> : null}</div>)}</div></section> : null}</> : null}
-    {!selected?.shared ? <><section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiHardDrive /><span>{text("workspaceOverview")}</span></div><div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{imagesCount}</strong><span className="text-[10px] text-slate-500">{text("imagesTotal")}</span></div><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{workingCount}</strong><span className="text-[10px] text-slate-500">{text("inWorking")}</span></div></div><div className="mt-3 flex gap-2 rounded-md bg-emerald-50 p-3 text-emerald-800"><FiShield className="mt-0.5 shrink-0" /><p className="text-[11px] leading-4">{text("imagesStayLocal")}</p></div></section><section className="p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiShare2 /><span>{text("workspaceShare")}</span></div>{role === "owner" ? <p className="mt-3 text-xs leading-5 text-slate-500">{text("createPermanentLink")}</p> : <p className="mt-3 text-xs leading-5 text-slate-500">{text("joinedPermanentLink")}</p>}{hasShareToken ? <div className="mt-3"><span className="text-[10px] font-bold uppercase text-slate-500">{text("workspaceId")}</span><div className="mt-1 flex h-9 min-w-0 items-center rounded-md border border-slate-200 bg-slate-50 pl-3"><code className="min-w-0 flex-1 truncate text-[11px] text-slate-700" title={workspaceId}>{workspaceId}</code><button type="button" onClick={() => void copyWorkspaceId()} className="flex h-full w-9 shrink-0 items-center justify-center border-l text-slate-500 hover:bg-white hover:text-[#2f65cf]" title={workspaceIdCopied ? text("workspaceIdCopied") : text("copyWorkspaceId")} aria-label={workspaceIdCopied ? text("workspaceIdCopied") : text("copyWorkspaceId")}>{workspaceIdCopied ? <FiCheck /> : <FiCopy />}</button></div></div> : null}{role === "owner" ? hasShareToken ? <button type="button" onClick={onRotateShare} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs"><FiRefreshCw />{text("createNewLink")}</button> : <button type="button" onClick={onCreateShare} className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#2f65cf] text-xs font-bold text-white"><FiLink />{text("createShareLink")}</button> : null}</section></> : null}
+    {!selected?.shared ? <>
+      <section className="border-b border-[#e4e7eb] p-4"><div className="flex items-center gap-2 text-xs font-semibold text-[#26344c]"><FiHardDrive /><span>{text("workspaceOverview")}</span></div><div className="mt-3 grid grid-cols-2 gap-2"><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{imagesCount}</strong><span className="text-[10px] text-slate-500">{text("imagesTotal")}</span></div><div className="rounded-md bg-slate-50 p-3"><strong className="block text-xl text-slate-800">{workingCount}</strong><span className="text-[10px] text-slate-500">{text("inWorking")}</span></div></div><div className="mt-3 flex gap-2 rounded-md bg-emerald-50 p-3 text-emerald-800"><FiShield className="mt-0.5 shrink-0" /><p className="text-[11px] leading-4">{text("imagesStayLocal")}</p></div></section>
+      <WorkspaceSharePanel
+        role={role}
+        shareId={hasShareToken ? workspaceId : ""}
+        copied={workspaceIdCopied}
+        onCopy={() => void copyWorkspaceId()}
+        onCreate={onCreateShare}
+        onRotate={onRotateShare}
+      />
+    </> : null}
   </>;
 }

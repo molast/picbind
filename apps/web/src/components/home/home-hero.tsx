@@ -5,23 +5,20 @@ import Image from "next/image";
 import Link from "next/link";
 import { isTauri } from "@tauri-apps/api/core";
 import { FiPlus } from "react-icons/fi";
+import { WorkspaceLanguageSwitcher, WorkspaceShareIdEntryDialog } from "@picbind/ui/source";
 import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
 import AccountControl from "@/components/auth/account-control";
-import WorkspaceShareIdEntryDialog from "@/components/workspace-share-id-entry-dialog";
 
 type HomeHeroProps = {
   copy: HomeCompressLandingCopy;
   lang: Lang;
-  langMenuRef: React.RefObject<HTMLDivElement>;
   inputRef: React.RefObject<HTMLInputElement>;
-  isLangMenuOpen: boolean;
   isDragging: boolean;
   showFormatOptions: boolean;
   selectedFormats: OutputFormat[];
   formatOptions: Array<{ key: OutputFormat; label: string }>;
-  onLangMenuChange(open: boolean): void;
   onSwitchLang(lang: Lang): void;
   onDraggingChange(dragging: boolean): void;
   onDrop(event: React.DragEvent<HTMLDivElement>): void;
@@ -36,14 +33,11 @@ type HomeHeroProps = {
 export default function HomeHero({
   copy,
   lang,
-  langMenuRef,
   inputRef,
-  isLangMenuOpen,
   isDragging,
   showFormatOptions,
   selectedFormats,
   formatOptions,
-  onLangMenuChange,
   onSwitchLang,
   onDraggingChange,
   onDrop,
@@ -112,56 +106,7 @@ export default function HomeHero({
               </div>
               <div className="flex items-center gap-3">
                 <AccountControl lang={lang} />
-                <div ref={langMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => onLangMenuChange(!isLangMenuOpen)}
-                  className="inline-flex items-center gap-2 rounded-full border border-[#c8d8f4] bg-[rgba(246,250,255,0.85)] px-4 py-1.5 text-[13px] font-semibold text-[#415c8a] shadow-[0_8px_20px_rgba(64,95,156,0.12)] backdrop-blur-sm transition hover:bg-white"
-                  aria-haspopup="menu"
-                  aria-expanded={isLangMenuOpen}
-                >
-                  <span>{lang === "zh" ? "中文" : "EN"}</span>
-                  <svg
-                    viewBox="0 0 20 20"
-                    className={`h-4 w-4 transition ${isLangMenuOpen ? "rotate-180" : ""}`}
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </button>
-                <div
-                  className={`absolute right-0 top-[calc(100%+10px)] z-40 w-[130px] rounded-2xl border border-[#c4d7fb] bg-[rgba(244,249,255,0.95)] p-1.5 shadow-[0_18px_35px_rgba(55,84,142,0.2)] backdrop-blur-md transition-all duration-150 ${
-                    isLangMenuOpen
-                      ? "pointer-events-auto translate-y-0 opacity-100"
-                      : "pointer-events-none -translate-y-1 opacity-0"
-                  }`}
-                  role="menu"
-                >
-                  {(["en", "zh"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => onSwitchLang(option)}
-                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-[13px] font-semibold transition ${
-                        option === "zh" ? "mt-1" : ""
-                      } ${
-                        lang === option
-                          ? "bg-[#d8e8ff] text-[#2d5fc2]"
-                          : "text-[#52688e] hover:bg-white"
-                      }`}
-                      role="menuitem"
-                    >
-                      <span>{option === "zh" ? "中文" : "EN"}</span>
-                      {lang === option ? <span className="text-[12px]">✓</span> : null}
-                    </button>
-                  ))}
-                </div>
-                </div>
+                <WorkspaceLanguageSwitcher lang={lang} onChange={onSwitchLang} />
               </div>
             </div>
           </div>

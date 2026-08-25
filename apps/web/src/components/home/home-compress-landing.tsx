@@ -57,14 +57,11 @@ export default function HomeCompressLanding({
       <HomeHero
         copy={home.copy}
         lang={home.lang}
-        langMenuRef={home.langMenuRef}
         inputRef={home.inputRef}
-        isLangMenuOpen={home.isLangMenuOpen}
         isDragging={home.isDragging}
         showFormatOptions={home.showFormatOptions}
         selectedFormats={home.selectedFormats}
         formatOptions={home.formatOptions}
-        onLangMenuChange={home.setIsLangMenuOpen}
         onSwitchLang={home.handleSwitchLang}
         onDraggingChange={home.setIsDragging}
         onDrop={home.handleDrop}
