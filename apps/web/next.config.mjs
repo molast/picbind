@@ -2,6 +2,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url))
+const isDevelopment = process.env.NODE_ENV === "development"
 
 function isJsquashAvifCircularChunkWarning(warning, compilation) {
   const match = warning.message?.match(
@@ -29,14 +30,13 @@ function isJsquashAvifCircularChunkWarning(warning, compilation) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "export",
   transpilePackages: [
     "@picbind/image-codecs",
     "@picbind/image-wasm",
     "@picbind/perceptual-wasm",
     "@picbind/ui",
   ],
-  ...(process.env.NODE_ENV === "development"
+  ...(isDevelopment
     ? {
         async headers() {
           return [
@@ -58,7 +58,7 @@ const nextConfig = {
           ]
         },
       }
-    : {}),
+    : { output: "export" }),
   webpack(config, { isServer }) {
     if (process.env.NODE_ENV === "production" && !isServer) {
       config.optimization.realContentHash = false
