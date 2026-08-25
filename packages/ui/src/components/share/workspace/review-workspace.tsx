@@ -45,6 +45,7 @@ type ReviewWorkspaceProps = {
   role: RoomRole | null;
   fullscreen: boolean;
   collaborationEnabled?: boolean;
+  showCommentAnchors?: boolean;
   shareRecipients: ShareRecipient[];
   subscribeMessages(
     listener: (event: {
@@ -111,6 +112,7 @@ export default function ReviewWorkspace({
   role,
   fullscreen,
   collaborationEnabled = true,
+  showCommentAnchors = true,
   shareRecipients,
   subscribeMessages,
   onSendMessage,
@@ -134,9 +136,10 @@ export default function ReviewWorkspace({
   const [deletedAnchors, setDeletedAnchors] = React.useState<ReviewAnchor[]>([]);
   const [clearCommentsOpen, setClearCommentsOpen] = React.useState(false);
   const visibleAnchors = React.useMemo(
-    () => anchors.filter((anchor) => !anchor.deleted),
-    [anchors],
+    () => showCommentAnchors ? anchors.filter((anchor) => !anchor.deleted) : [],
+    [anchors, showCommentAnchors],
   );
+  const effectiveCommentMode = showCommentAnchors && commentMode;
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [defaultColor, setDefaultColor] = React.useState("#000000");
   const [defaultFill, setDefaultFill] = React.useState<string | null>(null);
@@ -946,7 +949,7 @@ export default function ReviewWorkspace({
         remoteMode={remoteMode}
         remoteReviewActive={remoteReviewActive}
         workspaceLocked={localMode === "follow"}
-        commentMode={commentMode}
+        commentMode={effectiveCommentMode}
         fullscreen={fullscreen}
         annotationColor={displayedColor}
         fillColor={displayedFill}
@@ -996,6 +999,7 @@ export default function ReviewWorkspace({
         generatingActionLabel={parameterAction === "proposal" ? "Submitting..." : parameterAction ? "Applying..." : undefined}
         generateActionIsParameter={Boolean(parameterAction)}
         showCollaborationControls={collaborationEnabled}
+        showCommentControls={showCommentAnchors}
       />
       <ReviewCanvas
         image={image}
@@ -1013,7 +1017,7 @@ export default function ReviewWorkspace({
         arrowStyle={arrowStyle}
         lineStyle={lineStyle}
         interactionDisabled={localMode === "follow"}
-        commentMode={commentMode}
+        commentMode={effectiveCommentMode}
         anchors={visibleAnchors}
         remoteMagnifier={localMode === "follow" ? remoteMagnifier : null}
         laserColor={laserColor}
@@ -1032,7 +1036,7 @@ export default function ReviewWorkspace({
         onAnnotationSnapshotChange={setAnnotationSnapshot}
       />
       <ReviewStatusBar image={image} dimensions={dimensions.width ? dimensions : null} />
-      {deletedAnchors.length ? (
+      {showCommentAnchors && deletedAnchors.length ? (
         <div className="fixed bottom-6 left-1/2 z-[140] flex -translate-x-1/2 items-center gap-4 rounded-md bg-slate-950 px-4 py-3 text-sm text-white shadow-2xl">
           <span>{labels.anchorDeleted}</span>
           <button
@@ -1045,7 +1049,7 @@ export default function ReviewWorkspace({
         </div>
       ) : null}
       <ReviewClearCommentsDialog
-        open={clearCommentsOpen}
+        open={showCommentAnchors && clearCommentsOpen}
         count={clearableAnchors.length}
         labels={labels}
         onCancel={() => setClearCommentsOpen(false)}

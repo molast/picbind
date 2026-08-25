@@ -13,7 +13,7 @@ export function useWorkspaceProcessedResultCommand({ workspace, selected, setEdi
   const saveProcessedResult = React.useCallback(async (result: ProcessedImageResult) => {
     if (!workspace || !selected) return;
     const operationType: WorkspaceOperation["type"] = result.operation === "adjust" ? "brightness" : result.operation === "compress" ? "compression" : result.operation === "convert" ? "other" : result.operation;
-    if (selected.shared && ["brightness", "crop", "resize"].includes(operationType)) {
+    if (selected.workspaceLocation === "working" && ["brightness", "crop", "resize"].includes(operationType)) {
       setEditing(null);
       await createOperation(operationType, result.parameters || {}, { blob: result.blob, name: result.name, mimeType: result.blob.type || selected.mimeType, width: result.width, height: result.height });
       releaseProcessingSource();

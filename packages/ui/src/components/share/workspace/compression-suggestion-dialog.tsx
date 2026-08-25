@@ -26,10 +26,12 @@ export default function CompressionSuggestionDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
       <div role="alertdialog" aria-modal="true" className="w-full max-w-md rounded-lg bg-white p-5 shadow-2xl">
-        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
-          <FiZap className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <h2 className="mt-4 text-base font-semibold text-slate-900">{labels.compressionSuggested}</h2>
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
+            <FiZap className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <h2 className="min-w-0 text-base font-semibold text-slate-900">{labels.compressionSuggested}</h2>
+        </div>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           {weakNetwork ? labels.weakNetworkSuggestion : labels.largeImageSuggestion}
         </p>

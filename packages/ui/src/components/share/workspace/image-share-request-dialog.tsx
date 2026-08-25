@@ -54,11 +54,10 @@ export default function ImageShareRequestDialog({ request, labels, thumbnail, on
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 p-4">
       <section className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label={labels.receiveSharedImage}>
-        <div className="flex items-start justify-between gap-4">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiDownloadCloud className="h-5 w-5" aria-hidden="true" /></span>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiDownloadCloud className="h-5 w-5" aria-hidden="true" /></span><h2 className="min-w-0 text-base font-semibold text-slate-900">{labels.peerSharedImage}</h2></div>
           <button type="button" onClick={() => onDecision("reject")} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={labels.reject}><FiX className="h-4 w-4" /></button>
         </div>
-        <h2 className="mt-4 text-base font-semibold text-slate-900">{labels.peerSharedImage}</h2>
         {request.payload.placeholder ? (
           <div ref={mediaRef} className="relative mt-4 aspect-[5/3] overflow-hidden rounded-md bg-slate-100">
             <RoomImageMedia alt={image.name} placeholder={request.payload.placeholder} />

@@ -107,14 +107,8 @@ export default function ToneCurveEditor({ points, labels, onChange }: ToneCurveE
             </g>
             <path d={path} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
             {sorted.map((point, index) => (
-              <circle
+              <g
                 key={`${index}-${point.x}`}
-                cx={point.x * WIDTH}
-                cy={(1 - point.y) * HEIGHT}
-                r={selectedIndex === index ? 6 : 5}
-                fill={selectedIndex === index ? "#2f65cf" : "#ffffff"}
-                stroke="#60a5fa"
-                strokeWidth="2"
                 className="cursor-move"
                 onPointerDown={(event) => {
                   event.preventDefault();
@@ -130,7 +124,18 @@ export default function ToneCurveEditor({ points, labels, onChange }: ToneCurveE
                     setSelectedIndex(null);
                   }
                 }}
-              />
+              >
+                <circle cx={point.x * WIDTH} cy={(1 - point.y) * HEIGHT} r={selectedIndex === index ? 10 : 9} fill="transparent" stroke="transparent" />
+                <circle
+                  cx={point.x * WIDTH}
+                  cy={(1 - point.y) * HEIGHT}
+                  r={selectedIndex === index ? 6 : 5}
+                  fill={selectedIndex === index ? "#2f65cf" : "#ffffff"}
+                  stroke="#60a5fa"
+                  strokeWidth="2"
+                  pointerEvents="none"
+                />
+              </g>
             ))}
         </svg>
       </div>

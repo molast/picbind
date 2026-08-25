@@ -51,7 +51,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     }
     const result = await renderWorkspaceParameterPreview(container.source, { width: container.sourceWidth, height: container.sourceHeight }, parameterDocumentOperations({ ...image, parameterDocument }));
     if (latestRenders.current.get(image.imageId) !== requestSequence) return collaborationContainers.current.get(image.imageId) || null;
-    if (!imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.shared)) {
+    if (!imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.workspaceLocation === "working")) {
       collaborationContainers.current.delete(image.imageId);
       latestRenders.current.delete(image.imageId);
       return null;
@@ -97,7 +97,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
   const loadSource = React.useCallback(async (image: WorkspaceImage, materialize = false) => {
     if (processingSource?.imageId === image.imageId) return processingSource.blob;
     const container = collaborationContainers.current.get(image.imageId);
-    if (image.shared && materialize) return (await syncCollaborationContainer(image, image.parameterDocument || emptyImageParameterDocument()))?.rendered || null;
+    if (image.workspaceLocation === "working" && materialize) return (await syncCollaborationContainer(image, image.parameterDocument || emptyImageParameterDocument()))?.rendered || null;
     if (image.shared && container && !container.disposed) return container.preview;
     if (image.shared) return (await syncCollaborationPreview(image, image.parameterDocument || emptyImageParameterDocument()))?.preview || null;
     return readWorkspaceImageSource(image);

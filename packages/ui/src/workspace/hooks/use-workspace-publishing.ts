@@ -4,16 +4,17 @@ import { generateSharePlaceholder } from "../../utils/share-placeholder";
 import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import { canStartImageCollaboration } from "../image-flow";
 import { emptyImageParameterDocument } from "../image-protocol";
-import { createCollaborationImageContainer, disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
+import { createCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
 import { dimensions } from "../utils/workspace-image-display";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
-export function useWorkspacePublishing({ workspace, imagesRef, collaborationContainers, updateImage, syncCollaborationPreview, persistWorkspaceLog, setNotice, sendRealtime, sendRealtimeBinary, }: {
+export function useWorkspacePublishing({ workspace, imagesRef, collaborationContainers, updateImage, syncCollaborationPreview, clearCollaborationHistory, persistWorkspaceLog, setNotice, sendRealtime, sendRealtimeBinary, }: {
   workspace: WorkspaceIdentity | null;
   imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   collaborationContainers: React.MutableRefObject<Map<string, CollaborationImageContainer>>;
   updateImage: (imageId: string, patch: Partial<WorkspaceImage>) => Promise<void>;
-  syncCollaborationPreview: (image: WorkspaceImage, document: any) => Promise<unknown>;
+  syncCollaborationPreview: (image: WorkspaceImage, document: any) => Promise<CollaborationImageContainer | null>;
+  clearCollaborationHistory: (imageId: string) => Promise<void>;
   persistWorkspaceLog: (workspaceId: string, kind: string, imageId?: string) => Promise<void>;
   setNotice: (message: string) => void;
   sendRealtime: (type: string, payload: Record<string, unknown>, options?: Record<string, unknown>) => void;
@@ -47,13 +48,16 @@ export function useWorkspacePublishing({ workspace, imagesRef, collaborationCont
       setNotice("Only one image can be shared at a time");
       return;
     }
-    const next = { ...image, shared, state: shared ? "shared" as const : "private" as const };
-    await updateImage(image.imageId, { shared, state: next.state });
+    const nextState = shared ? "shared" as const : image.workspaceLocation === "working" ? "working" as const : "private" as const;
+    const next = { ...image, shared, state: nextState };
+    await updateImage(image.imageId, {
+      shared,
+      state: nextState,
+      ...(!shared ? { currentCommitId: `initial_${image.imageId}` } : {}),
+    });
     if (!shared) {
       sendRealtime("previewRemove", { imageId: image.imageId }, { delivery: "reliable", dataClass: "preview" });
-      const container = collaborationContainers.current.get(image.imageId);
-      if (container) disposeCollaborationImageContainer(container);
-      collaborationContainers.current.delete(image.imageId);
+      await clearCollaborationHistory(image.imageId);
       await persistWorkspaceLog(workspace.workspaceId, "imageUnshared", image.imageId);
       return;
     }
@@ -64,10 +68,10 @@ export function useWorkspacePublishing({ workspace, imagesRef, collaborationCont
     const container = createCollaborationImageContainer({ imageId: image.imageId, source, sourceKind: "source", name: image.name,
       mimeType: image.mimeType, width: sourceSize.width, height: sourceSize.height, parameterDocument: emptyImageParameterDocument() });
     collaborationContainers.current.set(image.imageId, container);
-    await syncCollaborationPreview({ ...next, parameterDocument }, parameterDocument);
-    await publishPreview(next, source);
+    const rendered = await syncCollaborationPreview({ ...next, parameterDocument }, parameterDocument);
+    await publishPreview(next, rendered?.preview || source);
     await persistWorkspaceLog(workspace.workspaceId, "imageShared", image.imageId);
-  }, [collaborationContainers, imagesRef, persistWorkspaceLog, publishPreview, sendRealtime, setNotice, syncCollaborationPreview, updateImage, workspace]);
+  }, [clearCollaborationHistory, collaborationContainers, imagesRef, persistWorkspaceLog, publishPreview, sendRealtime, setNotice, syncCollaborationPreview, updateImage, workspace]);
 
   return { publishPreview, publishImage };
 }

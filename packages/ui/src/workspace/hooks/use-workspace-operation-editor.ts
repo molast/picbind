@@ -23,25 +23,26 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
     const parameterType: Partial<Record<WorkspaceCardOperation, ImageOperationType>> = { crop: "crop", resize: "resize", adjust: "color", review: "draw" };
     const editableParameterType = parameterType[operation];
     const requestSequence = ++openSequence.current;
-    setEditorPreparing(Boolean(editableParameterType && image.shared));
-    let container = image.shared ? collaborationContainers.current.get(image.imageId) : null;
-    if (editableParameterType && image.shared) {
+    const usesParameterDocument = Boolean(editableParameterType && image.workspaceLocation === "working");
+    setEditorPreparing(usesParameterDocument);
+    let container = usesParameterDocument ? collaborationContainers.current.get(image.imageId) : null;
+    if (usesParameterDocument) {
       await loadSource(image, false);
       container = collaborationContainers.current.get(image.imageId) || container;
     }
-    const source = editableParameterType && image.shared && container
+    const source = usesParameterDocument && container
       ? container.source
-      : editableParameterType && image.shared ? await readWorkspaceImageSource(image) : await loadSource(image, image.shared);
+      : usesParameterDocument ? await readWorkspaceImageSource(image) : await loadSource(image, image.shared);
     if (openSequence.current !== requestSequence) return;
     if (!source) { setEditorPreparing(false); setNotice("Source data is unavailable"); return; }
-    const sourceSize = editableParameterType && image.shared
+    const sourceSize = usesParameterDocument
       ? { width: container?.sourceWidth || image.width, height: container?.sourceHeight || image.height }
       : await dimensions(source);
     if (openSequence.current !== requestSequence) return;
     setSelectedId(image.imageId);
     setProcessingSource({ imageId: image.imageId, blob: source, ...sourceSize });
     if (operation === "review") setReviewOpen(true); else setEditing(operation);
-    if (editableParameterType && image.shared) {
+    if (usesParameterDocument) {
       const parameterDocument = container?.parameterDocument || image.parameterDocument || { version: 1 as const, operations: [] };
       const baseDocument = { ...parameterDocument, operations: parameterDocument.operations.filter((candidate) => candidate.type !== editableParameterType) };
       void renderWorkspaceParameterPreview(source, sourceSize, parameterDocumentOperations({ ...image, parameterDocument: baseDocument })).then((result) => {

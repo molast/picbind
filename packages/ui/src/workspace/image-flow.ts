@@ -47,8 +47,8 @@ export function canDeleteWorkspaceImage(image: Pick<WorkspaceImage, "shared">) {
   return !image.shared;
 }
 
-export function workspaceOperationStorageMode(image: Pick<WorkspaceImage, "shared">) {
-  return image.shared ? "parameters" as const : "newImage" as const;
+export function workspaceOperationStorageMode(image: Pick<WorkspaceImage, "workspaceLocation">) {
+  return image.workspaceLocation === "working" ? "parameters" as const : "newImage" as const;
 }
 
 export function browserReportsWeakNetwork() {

@@ -98,6 +98,7 @@ type ReviewToolbarProps = {
   generatingActionLabel?: string;
   generateActionIsParameter?: boolean;
   showCollaborationControls?: boolean;
+  showCommentControls?: boolean;
 };
 
 type ToolButtonProps = {
@@ -187,6 +188,7 @@ export default function ReviewToolbar({
   generatingActionLabel,
   generateActionIsParameter = false,
   showCollaborationControls = true,
+  showCommentControls = true,
 }: ReviewToolbarProps) {
   const [openPanel, setOpenPanel] = React.useState<
     | "emoji"
@@ -498,16 +500,18 @@ export default function ReviewToolbar({
             setOpenPanel(null);
           }}
         />
-        <ToolButton
-          icon={FiMessageSquare}
-          label={labels.anchorTool}
-          active={commentMode}
-          disabled={workspaceLocked}
-          onClick={() => {
-            setOpenPanel(null);
-            onCommentModeChange(!commentMode);
-          }}
-        />
+        {showCommentControls ? (
+          <ToolButton
+            icon={FiMessageSquare}
+            label={labels.anchorTool}
+            active={commentMode}
+            disabled={workspaceLocked}
+            onClick={() => {
+              setOpenPanel(null);
+              onCommentModeChange(!commentMode);
+            }}
+          />
+        ) : null}
         <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />
         <ToolButton icon={FiCornerUpLeft} label={labels.undo} onClick={onUndo} disabled={controlsDisabled || !canUndo} />
         <ToolButton icon={FiCornerUpRight} label={labels.redo} onClick={onRedo} disabled={controlsDisabled || !canRedo} />
@@ -525,7 +529,7 @@ export default function ReviewToolbar({
         <ToolButton icon={FiRotateCcw} label={labels.resetView} onClick={onReset} disabled={controlsDisabled} />
         </div>
         {showCollaborationControls?<div className="flex shrink-0 items-center gap-1 border-l border-slate-200 bg-white px-2 sm:pr-4">
-        {commentMode ? (
+        {showCommentControls && commentMode ? (
           <button
             type="button"
             onClick={onClearComments}

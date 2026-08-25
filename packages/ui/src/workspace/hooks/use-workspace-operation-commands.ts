@@ -46,6 +46,16 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
         width: processed.width, height: processed.height } as ProcessedImageResult);
       return;
     }
+    const parameterDocument = setImageOperation(selected.parameterDocument || emptyImageParameterDocument(), {
+      id: operation.operationId, userId: operation.authorId, time: operation.createdAt,
+      type: protocolOperationType(type, parameters), params: { ...parameters, workspaceOperationType: type },
+    });
+    if (!selected.shared) {
+      await updateImage(selected.imageId, { parameterDocument, state: "working" });
+      const rendered = await syncCollaborationPreview({ ...selected, parameterDocument, state: "working" }, parameterDocument);
+      if (rendered) collaborationContainers.current.set(selected.imageId, rendered);
+      return;
+    }
     if (workspace.role === "collaborator") {
       const localCommit: WorkspaceCommit = { commitId: id("commit"), imageId: selected.imageId, authorId: "local", parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
       const proposal: WorkspaceProposal = { proposalId: id("proposal"), workspaceId: workspace.workspaceId, imageId: selected.imageId,
@@ -61,10 +71,6 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
       });
       return;
     }
-    const parameterDocument = setImageOperation(selected.parameterDocument || emptyImageParameterDocument(), {
-      id: operation.operationId, userId: operation.authorId, time: operation.createdAt,
-      type: protocolOperationType(type, parameters), params: { ...parameters, workspaceOperationType: type },
-    });
     const parameterCommit: WorkspaceCommit = { commitId: id("commit"), imageId: selected.imageId, authorId: "owner",
       parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
     await saveCommit(parameterCommit);

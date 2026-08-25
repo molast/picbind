@@ -26,3 +26,24 @@ export function collaborationPreviewFor(image: WorkspaceImage, workspace: Worksp
   const container = containers.get(image.imageId);
   return workspace && container && canRenderFromCollaborationSource(workspace.role, container.sourceKind === "source") ? container.preview : undefined;
 }
+
+export function workspaceRenderedDimensions(image: Pick<WorkspaceImage, "width" | "height" | "parameterDocument">) {
+  let width = image.width;
+  let height = image.height;
+  for (const operation of image.parameterDocument?.operations || []) {
+    if (operation.type === "crop") {
+      const cropWidth = Number(operation.params.width);
+      const cropHeight = Number(operation.params.height);
+      if (Number.isFinite(cropWidth) && cropWidth > 0) width = Math.max(1, Math.round(width * cropWidth));
+      if (Number.isFinite(cropHeight) && cropHeight > 0) height = Math.max(1, Math.round(height * cropHeight));
+    } else if (operation.type === "resize") {
+      const nextWidth = Number(operation.params.width);
+      const nextHeight = Number(operation.params.height);
+      if (Number.isFinite(nextWidth) && nextWidth > 0) width = Math.round(nextWidth);
+      if (Number.isFinite(nextHeight) && nextHeight > 0) height = Math.round(nextHeight);
+    } else if (operation.type === "rotate" && [90, 270].includes(Number(operation.params.degrees))) {
+      [width, height] = [height, width];
+    }
+  }
+  return { width, height };
+}

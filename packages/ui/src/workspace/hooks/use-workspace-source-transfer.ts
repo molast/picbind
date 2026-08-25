@@ -79,7 +79,7 @@ export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationCon
 
   const rejectSourceRequest = React.useCallback((value: Record<string, unknown>) => {
     const reason = sourceRejectReason.trim() || "Rejected by Owner";
-    sendRealtime("sourceRejected", { requestId: value.requestId, reason }, { route: "user", targetUserId: String(value.senderId), delivery: "reliable" });
+    sendRealtime("sourceRejected", { requestId: value.requestId, imageId: value.imageId, reason }, { route: "user", targetUserId: String(value.senderId), delivery: "reliable", dataClass: "collaborationEvent" });
     setSourceRequestDialog(null); setSourceRejectReason("");
   }, [sendRealtime, setSourceRejectReason, setSourceRequestDialog, sourceRejectReason]);
 

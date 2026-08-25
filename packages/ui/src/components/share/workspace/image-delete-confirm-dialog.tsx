@@ -59,10 +59,15 @@ export default function ImageDeleteConfirmDialog({
         aria-modal="true"
         aria-label={labels.deleteImage}
       >
-        <div className="flex items-start justify-between gap-4">
-          <span className="flex h-10 w-10 items-center justify-center rounded-md bg-red-50 text-red-600">
-            <FiTrash2 className="h-5 w-5" aria-hidden="true" />
-          </span>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-600">
+              <FiTrash2 className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <h2 className="min-w-0 text-base font-semibold text-slate-900">
+              {isEditing ? labels.editingImageTitle : labels.removeImageTitle}
+            </h2>
+          </div>
           <button
             type="button"
             disabled={Boolean(pendingAction)}
@@ -73,9 +78,6 @@ export default function ImageDeleteConfirmDialog({
             <FiX className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <h2 className="mt-4 text-base font-semibold text-slate-900">
-          {isEditing ? labels.editingImageTitle : labels.removeImageTitle}
-        </h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
           {isEditing
             ? returnToLibraryOnly

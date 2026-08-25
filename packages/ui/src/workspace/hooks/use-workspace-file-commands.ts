@@ -42,12 +42,15 @@ export function useWorkspaceFileCommands({ workspace, inputRef, setImages, setCo
   }, [inputRef, persistWorkspaceLog, setCommits, setImages, setSelectedId, workspace]);
 
   const downloadImage = React.useCallback(async (image: WorkspaceImage) => {
-    const source = await loadSource(image, image.shared);
-    if (!source) { setNotice("Source data is unavailable"); return; }
+    const source = await loadSource(image, image.workspaceLocation === "working");
+    if (!source) { setNotice("Source data is unavailable"); return false; }
     const url = URL.createObjectURL(source);
     const anchor = document.createElement("a");
-    anchor.href = url; anchor.download = image.name; anchor.click();
+    anchor.href = url;
+    anchor.download = source instanceof File && source.name ? source.name : image.name;
+    anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
   }, [loadSource, setNotice]);
 
   return { addFiles, downloadImage };
