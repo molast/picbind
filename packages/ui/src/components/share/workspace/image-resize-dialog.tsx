@@ -99,7 +99,7 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave, para
           <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
           <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters({width,height})):resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {working?(parameterAction==="proposal"?"Submitting...":parameterAction?"Applying...":labels.processing):parameterAction==="proposal"?"Submit proposal":parameterAction?"Apply changes":labels.generateResult}
+            {working?(parameterAction==="proposal"?labels.submittingProposal:parameterAction?labels.applyingChanges:labels.processing):parameterAction==="proposal"?labels.submitProposal:parameterAction?labels.applyChanges:labels.generateResult}
           </button>
         </footer>
       </section>

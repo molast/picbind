@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { collaborationActivitiesForImage, currentActivityEventId } from "./activity";
 import type { WorkspaceActivity } from "./types";
+import { readableActivityName } from "./utils/workspace-activity-display";
+import { workspacePersonName } from "./utils/workspace-person-display";
 
 function activity(eventId: string, kind: string, scope: WorkspaceActivity["scope"], imageId = "image"): WorkspaceActivity {
   return { eventId, sequence: 1, actorId: "owner", kind, imageId, detail: {}, createdAt: 1, scope };
@@ -42,4 +44,12 @@ test("rollback transport events are not collaborative Activity entries", () => {
   assert.deepEqual(collaborationActivitiesForImage([
     activity("rollback", "historyRolledBack", "collaborationActivity"),
   ], "image"), []);
+});
+
+test("localizes collaborative Activity and protocol guest names for Chinese UI", () => {
+  const value = activity("brightness", "operationCommitted", "collaborationActivity");
+  value.detail = { operationType: "brightness" };
+  assert.equal(readableActivityName(value, "zh"), "亮度 · 已应用");
+  assert.equal(workspacePersonName("Guest", "zh"), "访客");
+  assert.equal(workspacePersonName("Owner", "zh"), "所有者");
 });

@@ -3,7 +3,7 @@ import { FiCheck, FiClock, FiMoreHorizontal, FiRefreshCw, FiUploadCloud, FiX } f
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceProposal } from "../types";
 import { currentActivityEventId } from "../activity";
 import { getLang, getWorkspaceLabels } from "../../locales";
-import { activityOperationName, proposalIdForActivity, readableActivityName } from "../utils/workspace-activity-display";
+import { activityOperationName, proposalIdForActivity, readableActivityName, readableOperationName } from "../utils/workspace-activity-display";
 
 export { readableActivityName } from "../utils/workspace-activity-display";
 
@@ -11,14 +11,14 @@ const text = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
 function ProposalStatusIcon({ state }: { state: WorkspaceProposal["state"] }) {
   const properties: Record<WorkspaceProposal["state"], { label: string; className: string; icon: React.ReactNode }> = {
-    draft: { label: "Draft", className: "text-slate-400", icon: <FiMoreHorizontal /> },
-    submitted: { label: "Submitted", className: "text-blue-500", icon: <FiUploadCloud /> },
-    pending: { label: "Pending review", className: "text-amber-500", icon: <FiClock /> },
-    approved: { label: "Approved", className: "text-emerald-600", icon: <FiCheck /> },
-    rejected: { label: "Rejected", className: "text-red-500", icon: <FiX /> },
-    later: { label: "Review later", className: "text-slate-500", icon: <FiClock /> },
-    failed: { label: "Send failed", className: "text-red-500", icon: <FiX /> },
-    conflict: { label: "Version conflict", className: "text-amber-600", icon: <FiRefreshCw /> },
+    draft: { label: text("draft"), className: "text-slate-400", icon: <FiMoreHorizontal /> },
+    submitted: { label: text("submitted"), className: "text-blue-500", icon: <FiUploadCloud /> },
+    pending: { label: text("pendingReview"), className: "text-amber-500", icon: <FiClock /> },
+    approved: { label: text("approvedStatus"), className: "text-emerald-600", icon: <FiCheck /> },
+    rejected: { label: text("rejectedStatus"), className: "text-red-500", icon: <FiX /> },
+    later: { label: text("reviewLater"), className: "text-slate-500", icon: <FiClock /> },
+    failed: { label: text("sendFailed"), className: "text-red-500", icon: <FiX /> },
+    conflict: { label: text("versionConflict"), className: "text-amber-600", icon: <FiRefreshCw /> },
   };
   const property = properties[state];
   return <span className={`flex h-5 w-5 shrink-0 items-center justify-center ${property.className}`} title={property.label} aria-label={property.label}>{property.icon}</span>;
@@ -76,15 +76,15 @@ export function WorkspaceActivityList({ activities, proposals, role, originalCom
       const commitId = typeof detail?.commitId === "string" ? detail.commitId : proposal?.commit?.commitId;
       const ownProposal = role === "collaborator" && activity.kind === "proposalSubmitted" && activity.actorId === "local";
       const operationLabel = proposal && activity.kind.startsWith("proposal") && !activityOperationName(activity) ? proposal.operations[0] : undefined;
-      const operationName = operationLabel?.type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (character) => character.toUpperCase());
+      const operationName = operationLabel ? readableOperationName(operationLabel.type, getWorkspaceLabels(getLang())) : undefined;
       const displayName = operationName ? `${operationName} · ${activity.kind === "proposalApproved" ? text("proposalApproved") : activity.kind === "proposalRejected" ? text("proposalRejected") : activity.kind === "proposalDeferred" ? text("proposalDeferred") : text("proposalSubmitted")}` : readableActivityName(activity);
-      return <button type="button" key={activity.eventId} title={commitId ? `Commit ID: ${commitId}` : undefined} disabled={current} onClick={() => onActivity(activity)} aria-current={current ? "step" : undefined} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${current ? "cursor-default border-[#2f65cf] bg-blue-50" : "border-slate-200 hover:border-[#2f65cf] hover:bg-slate-50"}`}>
+      return <button type="button" key={activity.eventId} title={commitId ? `${text("commitId")}: ${commitId}` : undefined} disabled={current} onClick={() => onActivity(activity)} aria-current={current ? "step" : undefined} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${current ? "cursor-default border-[#2f65cf] bg-blue-50" : "border-slate-200 hover:border-[#2f65cf] hover:bg-slate-50"}`}>
         <strong className={`min-w-0 flex-1 truncate font-semibold ${current ? "text-[#2457bd]" : "text-slate-700"}`}>{displayName}</strong>
         {ownProposal ? <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-violet-600">{text("you")}</span> : null}
         {proposal ? <ProposalStatusIcon state={proposal.state} /> : null}
         {current ? <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-[#2457bd]">{text("current")}</span> : <time className="shrink-0 text-[10px] text-slate-400">{new Date(activity.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>}
       </button>;
     })}
-    {originalCommit ? <button type="button" onClick={onOriginal} disabled={originalIsCurrent} aria-current={originalIsCurrent ? "step" : undefined} title={`Commit ID: ${originalCommit.commitId}`} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${originalIsCurrent ? "border-[#2f65cf] bg-blue-50" : "border-slate-300 hover:border-[#2f65cf] hover:bg-slate-50"} disabled:cursor-default`}><strong className={`min-w-0 flex-1 truncate font-semibold ${originalIsCurrent ? "text-[#2457bd]" : "text-slate-600"}`}>{text("originalImage")}</strong><span className={`shrink-0 text-[10px] ${originalIsCurrent ? "font-bold uppercase text-[#2457bd]" : "text-slate-400"}`}>{originalIsCurrent ? text("current") : canRollback ? text("rollback") : text("preview")}</span></button> : null}
+    {originalCommit ? <button type="button" onClick={onOriginal} disabled={originalIsCurrent} aria-current={originalIsCurrent ? "step" : undefined} title={`${text("commitId")}: ${originalCommit.commitId}`} className={`flex h-9 min-w-0 items-center gap-2 border-l-2 px-2 text-left text-[11px] ${originalIsCurrent ? "border-[#2f65cf] bg-blue-50" : "border-slate-300 hover:border-[#2f65cf] hover:bg-slate-50"} disabled:cursor-default`}><strong className={`min-w-0 flex-1 truncate font-semibold ${originalIsCurrent ? "text-[#2457bd]" : "text-slate-600"}`}>{text("originalImage")}</strong><span className={`shrink-0 text-[10px] ${originalIsCurrent ? "font-bold uppercase text-[#2457bd]" : "text-slate-400"}`}>{originalIsCurrent ? text("current") : canRollback ? text("rollback") : text("preview")}</span></button> : null}
   </div>;
 }

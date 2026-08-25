@@ -995,8 +995,8 @@ export default function ReviewWorkspace({
         onReset={resetWorkspace}
         onGenerateImage={handleGenerateImage}
         generatingImage={generatingImage}
-        generateActionLabel={parameterAction === "proposal" ? "Submit proposal" : parameterAction ? "Apply changes" : undefined}
-        generatingActionLabel={parameterAction === "proposal" ? "Submitting..." : parameterAction ? "Applying..." : undefined}
+        generateActionLabel={parameterAction === "proposal" ? labels.submitProposal : parameterAction ? labels.applyChanges : undefined}
+        generatingActionLabel={parameterAction === "proposal" ? labels.submittingProposal : parameterAction ? labels.applyingChanges : undefined}
         generateActionIsParameter={Boolean(parameterAction)}
         showCollaborationControls={collaborationEnabled}
         showCommentControls={showCommentAnchors}

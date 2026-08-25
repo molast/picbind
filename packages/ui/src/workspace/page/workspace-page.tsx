@@ -18,7 +18,7 @@ import {
   type WorkspaceCommit, type WorkspaceEvent, type WorkspaceIdentity, type WorkspaceImage,
   type WorkspaceOperation, type WorkspaceProposal, type WorkspaceStyle,
 } from "../types";
-import { getLang, getWorkspaceLabels } from "../../locales";
+import { getLang, getWorkspaceLabels, setLang as persistLang, type Lang } from "../../locales";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import ReviewWorkspace from "../../components/share/workspace/review-workspace";
 import type { ReviewCollaborationMessage } from "../../utils/review-collaboration";
@@ -75,6 +75,7 @@ const workspaceText = (key: string) => getWorkspaceLabels(getLang())[key] || key
 
 
 export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
+  const [lang, setLanguage] = React.useState<Lang>("en");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const realtimeRef = React.useRef<WorkspaceRealtimeClient | null>(null);
   const realtimeEventRef = React.useRef<(value: WorkspaceEvent | Record<string, unknown>) => void>(() => undefined);
@@ -105,6 +106,10 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
     ? collaborationPreviewFor(maximizedWorkspaceImage, workspace, collaborationContainers.current)
     : undefined;
   imagesRef.current = deduplicatedImages;
+
+  React.useEffect(() => {
+    setLanguage(getLang());
+  }, []);
 
   React.useEffect(() => {
     if (deduplicatedImages.length !== images.length) setImages(deduplicatedImages);
@@ -841,13 +846,13 @@ export default function WorkspacePage({ shareToken }: { shareToken?: string }) {
   const editorSelected = React.useMemo(() => selected && selected.workspaceLocation === "working"
     ? { ...selected, parameterDocument: editorContainerDocument || selected.parameterDocument }
     : selected, [editorContainerDocument, selected]);
-  const { editorImage, initialColorAdjustments, initialCrop, initialResize, initialReviewAnnotations, labels, editorLoadingOverlay } = useWorkspaceEditorState({ workspace, selected: editorSelected, processingSource, editorPreparing });
+  const { editorImage, initialColorAdjustments, initialCrop, initialResize, initialReviewAnnotations, labels, editorLoadingOverlay } = useWorkspaceEditorState({ workspace, selected: editorSelected, processingSource, editorPreparing, lang });
   const { saveProcessedResult } = useWorkspaceProcessedResultCommand({ workspace, selected, setEditing, createOperation, queueProcessedResult, releaseProcessingSource });
   if(!workspace&&runtime==="unavailable")return <WorkspaceUnavailable notice={notice}/>;
   if(!workspace)return <WorkspaceLoading/>;
   if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace roomId={workspace.workspaceId} image={editorImage} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
-    <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} copied={copied} onLeave={()=>setLeaveConfirmOpen(true)} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>{if(workspace.shareToken)void copyShare();else if(workspace.role==="owner")void createShare();}} onSettings={()=>setSettingsOpen(true)} />
+    <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} copied={copied} lang={lang} onLanguageChange={(nextLang)=>{persistLang(nextLang);setLanguage(nextLang);}} onLeave={()=>setLeaveConfirmOpen(true)} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>{if(workspace.shareToken)void copyShare();else if(workspace.role==="owner")void createShare();}} onSettings={()=>setSettingsOpen(true)} />
     <WorkspaceStatusBands workspace={workspace} runtime={runtime} notice={notice} imageCount={images.length} onDismissNotice={()=>setNotice(null)}/>
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:overflow-hidden">
       <section className={`flex min-w-0 flex-col lg:min-h-0 ${maximizedWorkspaceImage?"overflow-hidden":"p-4 sm:p-6 lg:overflow-auto"}`}>
