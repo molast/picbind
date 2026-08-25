@@ -53,6 +53,9 @@ export async function resolveAuthAvatar(avatar: string | null) {
   if (!avatar) return null;
   if (!isTauri()) return avatar;
   try {
+    if (new URL(avatar).hostname === "api.picbind.com") return avatar;
+  } catch {}
+  try {
     const cached = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || "null") as {
       source?: string;
       dataUrl?: string;
@@ -61,11 +64,17 @@ export async function resolveAuthAvatar(avatar: string | null) {
       return cached.dataUrl;
     }
   } catch {}
-  const dataUrl = await invoke<string>("desktop_auth_avatar_data_url", { url: avatar });
   try {
-    localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify({ source: avatar, dataUrl }));
-  } catch {}
-  return dataUrl;
+    const dataUrl = await invoke<string>("desktop_auth_avatar_data_url", { url: avatar });
+    try {
+      localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify({ source: avatar, dataUrl }));
+    } catch {}
+    return dataUrl;
+  } catch {
+    // The native HTTP client may not share the browser's system proxy.
+    // A regular image request remains safe here and does not require CORS.
+    return avatar;
+  }
 }
 
 function normalizeState(value: Partial<AuthState> | null | undefined): AuthState {

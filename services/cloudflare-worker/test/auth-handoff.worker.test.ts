@@ -385,6 +385,21 @@ describe("OAuth User provisioning", () => {
       expect(rows.results[0].workspace_id).not.toBe(firstMapping?.workspace_id);
     });
   }
+
+  it("does not persist a Provider URL before the avatar is cached in R2", async () => {
+    const providerUserId = `google-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const userId = await ensureOAuthUser(testEnv, "google", {
+      providerUserId,
+      name: "Google User",
+      avatar: "https://lh3.googleusercontent.com/a/provider-avatar=s96-c",
+    }, now);
+    const user = await testEnv.USER_DB.prepare(
+      "SELECT avatar FROM users WHERE id = ?",
+    ).bind(userId).first<{ avatar: string | null }>();
+
+    expect(user?.avatar).toBeNull();
+  });
 });
 
 describe("Workspace Ticket communication", () => {

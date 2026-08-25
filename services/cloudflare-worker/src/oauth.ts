@@ -9,8 +9,9 @@ import {
   sha256,
   uuidV7,
 } from "./auth";
+import { cacheOAuthAvatar, type OAuthAvatarEnv } from "./oauth-avatar";
 
-export type OAuthEnv = AuthEnv & {
+export type OAuthEnv = AuthEnv & OAuthAvatarEnv & {
   SITE_URL?: string;
   ALLOWED_ORIGINS?: string;
   OAUTH_CALLBACK_ORIGIN?: string;
@@ -256,7 +257,7 @@ export async function ensureOAuthUser(
     await env.USER_DB.batch([
       env.USER_DB.prepare(
         "INSERT INTO users (id, email, name, avatar, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ).bind(userId, null, profile.name, profile.avatar, now, now),
+      ).bind(userId, null, profile.name, null, now, now),
       env.USER_DB.prepare(
         "INSERT INTO auth_identities (provider, provider_user_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
       ).bind(provider, profile.providerUserId, userId, now, now),
@@ -340,7 +341,13 @@ export async function handleOAuthCallback(request: Request, env: OAuthEnv, provi
       ? await exchangeGoogle(config, code, stored.code_verifier, callbackUrl(request, env, provider))
       : await exchangeGithub(config, code, stored.code_verifier, callbackUrl(request, env, provider));
     const userId = await ensureOAuthUser(env, provider, profile, now);
-    await updateOAuthAvatar(env, userId, profile.avatar, now);
+    const avatar = await cacheOAuthAvatar(
+      env,
+      new URL(request.url).origin,
+      userId,
+      profile.avatar,
+    ).catch(() => null);
+    await updateOAuthAvatar(env, userId, avatar, now);
     const session = await createSessionStatement(env, userId, now);
     const handoff = await createAuthHandoffStatement(
       env,

@@ -27,6 +27,7 @@ import {
   type OAuthEnv,
   type OAuthProvider,
 } from "./oauth";
+import { handleOAuthAvatar } from "./oauth-avatar";
 import {
   handleWorkspaceDetail,
   handleWorkspaceIceServers,
@@ -682,6 +683,9 @@ const worker = {
           : await handleLogout(request, env);
       } else if (pathname === "/api/auth/session") {
         response = await handleSession(request, env);
+      } else if (/^\/api\/auth\/avatars\/[^/]+$/.test(pathname)) {
+        const userId = decodeURIComponent(pathname.split("/")[4]);
+        response = await handleOAuthAvatar(request, env, userId);
       } else if (/^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/.test(pathname)) {
         const [, provider, action] = pathname.match(
           /^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/,
