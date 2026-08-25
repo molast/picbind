@@ -1,0 +1,120 @@
+name: Release desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  NODE_VERSION: "20"
+  PNPM_VERSION: "11.10.0"
+
+jobs:
+  macos-apple-silicon:
+    name: macOS Apple Silicon
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: macos-apple-silicon
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Apple Silicon installer
+        run: pnpm --dir apps/desktop exec tauri build --target aarch64-apple-darwin --bundles dmg --ci
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PicBind-macOS-Apple-Silicon
+          path: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Attach macOS installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          fail_on_unmatched_files: true
+
+  windows-x86-64:
+    name: Windows x86_64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: windows-x86-64
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check build environment
+        shell: pwsh
+        run: |
+          node --version
+          pnpm --version
+          rustc --version
+          cargo --version
+          rustup show
+
+      - name: Build x86_64 Windows installers
+        shell: pwsh
+        run: pnpm --dir apps/desktop exec tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi --ci
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PicBind-Windows-x86_64
+          path: |
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+      - name: Attach Windows installers to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          fail_on_unmatched_files: true
