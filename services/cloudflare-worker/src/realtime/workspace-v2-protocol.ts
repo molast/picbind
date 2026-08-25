@@ -25,6 +25,7 @@ export const RTC_HEALTH = Object.freeze({
 export const REALTIME_V2_PATHS = Object.freeze({
   authExchange: "/api/auth/exchange",
   workspaceJoin: (shareId: string) => `/api/workspace-links/${encodeURIComponent(shareId)}/join`,
+  workspaceIdJoin: (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/join`,
   workspaceTicket: (workspaceId: string) =>
     `/api/workspaces/${encodeURIComponent(workspaceId)}/realtime-ticket`,
   workspaceSocket: (workspaceId: string) =>

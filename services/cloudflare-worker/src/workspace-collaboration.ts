@@ -1,4 +1,5 @@
 import {
+  createWorkspaceShareId,
   failure,
   randomToken,
   sha256,
@@ -68,7 +69,7 @@ export async function handleWorkspaces(request: Request, env: AuthEnv) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 80) return failure("invalid_input", "Invalid workspace name", 400);
   const id = uuidV7();
-  const shareId = `share_${randomToken(24)}`;
+  const shareId = createWorkspaceShareId();
   const ownerCapability = randomToken(32);
   const now = new Date().toISOString();
   await env.USER_DB.prepare(
@@ -112,7 +113,7 @@ export async function handleWorkspaceShareLink(
   if (!await requireOwnerCapability(request, workspace)) {
     return failure("owner_capability_invalid", "Owner capability is invalid", 403);
   }
-  const shareId = `share_${randomToken(24)}`;
+  const shareId = createWorkspaceShareId();
   const updatedAt = new Date().toISOString();
   await env.USER_DB.prepare("UPDATE workspaces SET share_id = ?, updated_at = ? WHERE id = ?")
     .bind(shareId, updatedAt, workspaceId)

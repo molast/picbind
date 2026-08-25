@@ -1,12 +1,15 @@
 "use client";
 
-import type React from "react";
+import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { isTauri } from "@tauri-apps/api/core";
+import { FiPlus } from "react-icons/fi";
 import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { OutputFormat } from "@/utils/wasm";
 import AccountControl from "@/components/auth/account-control";
+import WorkspaceShareIdEntryDialog from "@/components/workspace-share-id-entry-dialog";
 
 type HomeHeroProps = {
   copy: HomeCompressLandingCopy;
@@ -51,6 +54,13 @@ export default function HomeHero({
   hasActiveRoom = false,
   onRestoreActiveRoom,
 }: HomeHeroProps) {
+  const [desktop, setDesktop] = React.useState(false);
+  const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setDesktop(isTauri());
+  }, []);
+
   return (
     <section className="relative min-h-[470px] overflow-hidden bg-[#c8d8f2] sm:min-h-[520px] lg:min-h-[560px]">
       <div className="absolute inset-0 bg-[url('/images/hero-background.avif')] bg-cover bg-center bg-no-repeat" />
@@ -88,6 +98,16 @@ export default function HomeHero({
                   <Link href="/workspace" className="rounded-full px-3 py-1 transition hover:bg-white/35">
                     {lang === "zh" ? "图片工作区" : "Image Workspace"}
                   </Link>
+                  {desktop ? (
+                    <button
+                      type="button"
+                      onClick={() => setWorkspaceEntryOpen(true)}
+                      className="inline-flex items-center gap-1 rounded-full px-3 py-1 transition hover:bg-white/35"
+                    >
+                      <FiPlus className="h-4 w-4" />
+                      {lang === "zh" ? "进入工作区" : "Enter Workspace"}
+                    </button>
+                  ) : null}
                 </nav>
               </div>
               <div className="flex items-center gap-3">
@@ -268,6 +288,11 @@ export default function HomeHero({
           </div>
         </div>
       </div>
+      <WorkspaceShareIdEntryDialog
+        open={workspaceEntryOpen}
+        lang={lang}
+        onClose={() => setWorkspaceEntryOpen(false)}
+      />
     </section>
   );
 }

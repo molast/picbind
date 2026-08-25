@@ -12,7 +12,7 @@ Workspace realtime 与登录权限完全独立；登录生命周期负责默认 
 - `/workspace/{share_id}` 以 Guest 模式打开分享 Workspace。
 - 未登录用户可以创建 Workspace、打开分享链接并建立实时连接。
 - realtime 连接不读取登录状态；退出登录和 Session 过期不会中断当前连接。
-- `Workspace ID` 是内部稳定标识；`share_id` 是可重新生成的固定分享链接标识。
+- `Workspace ID` 是内部稳定标识；短 `share_id` 是可重新生成的公开分享标识，也是 Desktop 的加入凭证。
 - D1 只保存 Workspace 标识、分享链接、名称和时间字段，不保存图片预览或图片源数据。
 - Worker 只负责连接建立、WebRTC 信令和通用消息转发，不理解 Workspace 业务事件。
 
@@ -202,7 +202,7 @@ Worker 不校验、不解析、不存储内部业务字段。新增预览、占�
 | --- | --- | --- |
 | LINK-001 | 匿名打开有效 `share_id` | 返回对应 Workspace |
 | LINK-002 | 把 Workspace ID 当作分享 ID | 返回 404 |
-| LINK-003 | 重新生成分享链接 | Workspace ID 不变，`share_id` 改变 |
+| LINK-003 | 重新生成短 Share ID | Workspace ID 不变，`share_id` 改变且符合 `share_` + 12 位字符格式 |
 | LINK-004 | 使用旧分享链接 Join/Ticket | 返回 404 |
 | LINK-005 | 使用新分享链接 | Join 和 Ticket 成功 |
 

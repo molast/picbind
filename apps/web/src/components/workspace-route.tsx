@@ -8,7 +8,8 @@ export default function WorkspaceRoute() {
   const auth = useAuth();
   const [shareToken, setShareToken] = React.useState<string | null | undefined>(undefined);
   React.useEffect(() => {
-    setShareToken(new URLSearchParams(window.location.search).get("share"));
+    const params = new URLSearchParams(window.location.search);
+    setShareToken(params.get("share"));
   }, []);
   const initialWorkspace = React.useMemo<WorkspaceIdentity | undefined>(() => {
     const workspace = auth.state.workspaces[0];
@@ -24,8 +25,14 @@ export default function WorkspaceRoute() {
       style: defaultWorkspaceStyle(),
     };
   }, [auth.state.authenticated, auth.state.workspaces]);
+  const guestShareToken = shareToken === initialWorkspace?.shareToken
+    ? undefined
+    : shareToken || undefined;
   if (shareToken === undefined || (auth.checking && !shareToken && !initialWorkspace)) {
     return <main className="min-h-screen bg-slate-50"/>;
   }
-  return <WorkspacePage shareToken={shareToken || undefined} initialWorkspace={initialWorkspace}/>;
+  return <WorkspacePage
+    shareToken={guestShareToken}
+    initialWorkspace={initialWorkspace}
+  />;
 }

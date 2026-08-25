@@ -207,10 +207,21 @@ describe("OAuth Handoff communication", () => {
     expect(envelope.data.user.id).toBe(seeded.userId);
     expect(envelope.data.workspaces).toEqual([expect.objectContaining({
       id: seeded.workspaceId,
-      shareId: seeded.shareId,
       ownerCapability: seeded.ownerCapability,
     })]);
+    expect(envelope.data.workspaces[0].shareId).toMatch(/^share_[A-Za-z0-9_-]{12}$/);
+    expect(envelope.data.workspaces[0].shareId).not.toBe(seeded.shareId);
     expect(envelope.data).not.toHaveProperty("realtimeGrant");
+    const stored = await testEnv.USER_DB.prepare(
+      "SELECT share_id FROM workspaces WHERE id = ?",
+    ).bind(seeded.workspaceId).first<{ share_id: string }>();
+    expect(stored?.share_id).toBe(envelope.data.workspaces[0].shareId);
+
+    const oldShareLink = await SELF.fetch(
+      `https://api.picbind.com/api/workspace-links/${seeded.shareId}/join`,
+      { method: "POST", headers: { origin: ORIGIN, "cf-connecting-ip": crypto.randomUUID() } },
+    );
+    expect(oldShareLink.status).toBe(404);
 
     const reused = await exchange(seeded.code);
     expect(reused.status).toBe(409);
@@ -263,6 +274,7 @@ describe("email authentication communication", () => {
     const envelope = await response.json() as Record<string, any>;
     expect(envelope.data.user.email).toBe(email);
     expect(envelope.data.workspaces).toHaveLength(1);
+    expect(envelope.data.workspaces[0].shareId).toMatch(/^share_[A-Za-z0-9_-]{12}$/);
     expect(envelope.data.workspaces[0].ownerCapability).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(envelope.data).not.toHaveProperty("realtimeGrant");
 
@@ -478,6 +490,7 @@ describe("Workspace Ticket communication", () => {
     const rotatedEnvelope = await rotated.json() as Record<string, any>;
     const newShareId = rotatedEnvelope.data.workspace.shareId as string;
     expect(newShareId).not.toBe(owner.shareId);
+    expect(newShareId).toMatch(/^share_[A-Za-z0-9_-]{12}$/);
     expect(rotatedEnvelope.data.workspace.id).toBe(owner.workspaceId);
 
     const join = (shareId: string) => SELF.fetch(
@@ -510,6 +523,7 @@ describe("Workspace Ticket communication", () => {
     const workspace = envelope.data.workspace as Record<string, string>;
     const capability = envelope.data.ownerCapability as string;
     expect(capability).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(workspace.shareId).toMatch(/^share_[A-Za-z0-9_-]{12}$/);
     expect(JSON.stringify(workspace)).not.toContain(capability);
 
     const detailUrl = `https://api.picbind.com/api/workspaces/${workspace.id}`;

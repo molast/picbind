@@ -53,6 +53,11 @@ export const MAX_SESSIONS_PER_USER = 20;
 const MAX_JSON_BODY_BYTES = 16_384;
 const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_ALGORITHM = "pbkdf2-sha256-v1";
+const SHORT_SHARE_ID_PATTERN = /^share_[A-Za-z0-9_-]{12}$/;
+
+export function createWorkspaceShareId() {
+  return `share_${randomToken(9)}`;
+}
 
 function requestId() {
   return crypto.randomUUID();
@@ -211,10 +216,24 @@ async function findDefaultWorkspace(env: AuthEnv, userId: string) {
 
 export async function ensureDefaultWorkspace(env: AuthEnv, userId: string, now = new Date().toISOString()) {
   const existing = await findDefaultWorkspace(env, userId);
-  if (existing) return publicDefaultWorkspace(existing);
+  if (existing) {
+    if (!SHORT_SHARE_ID_PATTERN.test(existing.share_id)) {
+      const shareId = createWorkspaceShareId();
+      const updated = await env.USER_DB.prepare(
+        "UPDATE workspaces SET share_id = ?, updated_at = ? WHERE id = ? AND share_id = ?",
+      ).bind(shareId, now, existing.id, existing.share_id).run();
+      if (updated.meta.changes === 0) {
+        const concurrent = await findDefaultWorkspace(env, userId);
+        if (concurrent) return publicDefaultWorkspace(concurrent);
+      }
+      existing.share_id = shareId;
+      existing.updated_at = now;
+    }
+    return publicDefaultWorkspace(existing);
+  }
 
   const workspaceId = uuidV7();
-  const shareId = `share_${randomToken(24)}`;
+  const shareId = createWorkspaceShareId();
   const ownerCapability = randomToken(32);
   try {
     await env.USER_DB.batch([

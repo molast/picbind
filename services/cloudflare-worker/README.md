@@ -38,9 +38,13 @@ Owner Capability so Web and Desktop clients can restore the same Workspace
 without waiting for the first visit to `/workspace`. Migration
 `0009_user_default_workspaces.sql` stores the one-to-one provisioning mapping.
 This mapping is not a realtime permission or Workspace membership system.
+Restoring an older default Workspace automatically replaces its legacy long
+Share ID with the compact format and invalidates the old share link.
 
-Anyone can join a Workspace by opening its unguessable `shareId` link; no login,
-Session Cookie, user membership, or account permission is involved. D1 stores
+Anyone can join a Workspace by opening its unguessable `shareId` link or by
+entering the same `shareId` in the Desktop client; no login, Session Cookie,
+user membership, or account permission is involved. A Share ID uses the compact
+`share_` plus 12-character Base64URL format. D1 stores
 only persistent Workspace identity and its replaceable share link. Image previews
 remain on the owner's device and are relayed only while peers are connected. The Workspace Durable Object
 uses WebSocket hibernation for connection fan-out and does not persist image
