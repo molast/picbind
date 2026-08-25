@@ -1,6 +1,7 @@
 import { applyD1Migrations, env, runInDurableObject, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { sha256 } from "../src/auth";
+import { ensureDefaultWorkspace, sha256 } from "../src/auth";
+import { ensureOAuthUser } from "../src/oauth";
 import { WORKSPACE_REALTIME_PROTOCOL } from "../src/realtime/workspace-v2-protocol";
 import { generateTurnIceServers } from "../src/realtime/share-room";
 
@@ -41,6 +42,9 @@ async function seedHandoff(options?: {
     testEnv.USER_DB.prepare(
       "INSERT INTO workspaces (id, share_id, owner_capability_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).bind(workspaceId, shareId, await sha256(ownerCapability), "My Workspace", nowIso, nowIso),
+    testEnv.USER_DB.prepare(
+      "INSERT INTO user_default_workspaces (user_id, workspace_id, owner_capability, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ).bind(userId, workspaceId, ownerCapability, nowIso, nowIso),
     testEnv.USER_DB.prepare(
       "INSERT INTO auth_sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).bind(sessionId, userId, await sha256(`session-token-${suffix}`), nowIso, new Date(now.getTime() + 3_600_000).toISOString(), nowIso),
@@ -194,14 +198,18 @@ beforeAll(async () => {
 });
 
 describe("OAuth Handoff communication", () => {
-  it("exchanges once for user-only AuthState", async () => {
+  it("exchanges once with the User's stable default Workspace", async () => {
     const seeded = await seedHandoff();
     const response = await exchange(seeded.code);
     expect(response.status).toBe(200);
     const envelope = await response.json() as Record<string, any>;
     expect(envelope.data.authenticated).toBe(true);
     expect(envelope.data.user.id).toBe(seeded.userId);
-    expect(envelope.data).not.toHaveProperty("workspaces");
+    expect(envelope.data.workspaces).toEqual([expect.objectContaining({
+      id: seeded.workspaceId,
+      shareId: seeded.shareId,
+      ownerCapability: seeded.ownerCapability,
+    })]);
     expect(envelope.data).not.toHaveProperty("realtimeGrant");
 
     const reused = await exchange(seeded.code);
@@ -240,7 +248,7 @@ describe("OAuth Handoff communication", () => {
 });
 
 describe("email authentication communication", () => {
-  it("creates only a user profile", async () => {
+  it("creates a User and its default Workspace during registration", async () => {
     const email = `worker-test-${crypto.randomUUID()}@example.com`;
     const response = await SELF.fetch("https://api.picbind.com/api/auth/register", {
       method: "POST",
@@ -254,9 +262,91 @@ describe("email authentication communication", () => {
     expect(response.status).toBe(201);
     const envelope = await response.json() as Record<string, any>;
     expect(envelope.data.user.email).toBe(email);
-    expect(envelope.data).not.toHaveProperty("workspaces");
+    expect(envelope.data.workspaces).toHaveLength(1);
+    expect(envelope.data.workspaces[0].ownerCapability).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(envelope.data).not.toHaveProperty("realtimeGrant");
+
+    const mapping = await testEnv.USER_DB.prepare(
+      "SELECT workspace_id FROM user_default_workspaces WHERE user_id = ?",
+    ).bind(envelope.data.user.id).first<{ workspace_id: string }>();
+    expect(mapping?.workspace_id).toBe(envelope.data.workspaces[0].id);
+
+    const { response: ticket } = await requestTicket({
+      workspaceId: envelope.data.workspaces[0].id,
+      ownerCapability: envelope.data.workspaces[0].ownerCapability,
+    } as Awaited<ReturnType<typeof seedHandoff>>);
+    expect(ticket.status).toBe(200);
   });
+
+  it("backfills a missing Workspace on login and keeps it stable", async () => {
+    const email = `worker-login-${crypto.randomUUID()}@example.com`;
+    const password = "correct-horse-battery-staple";
+    const register = await SELF.fetch("https://api.picbind.com/api/auth/register", {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json", "cf-connecting-ip": crypto.randomUUID() },
+      body: JSON.stringify({ email, password }),
+    });
+    const registered = await register.json() as Record<string, any>;
+    const userId = registered.data.user.id as string;
+    const oldWorkspaceId = registered.data.workspaces[0].id as string;
+    await testEnv.USER_DB.prepare("DELETE FROM workspaces WHERE id = ?").bind(oldWorkspaceId).run();
+
+    const login = () => SELF.fetch("https://api.picbind.com/api/auth/login", {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json", "cf-connecting-ip": crypto.randomUUID() },
+      body: JSON.stringify({ email, password }),
+    });
+    const first = await (await login()).json() as Record<string, any>;
+    const second = await (await login()).json() as Record<string, any>;
+    expect(first.data.workspaces).toHaveLength(1);
+    expect(second.data.workspaces[0].id).toBe(first.data.workspaces[0].id);
+    const count = await testEnv.USER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM user_default_workspaces WHERE user_id = ?",
+    ).bind(userId).first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+
+  it("creates only one Workspace when provisioning races", async () => {
+    const suffix = crypto.randomUUID();
+    const userId = `race-user-${suffix}`;
+    const now = new Date().toISOString();
+    await testEnv.USER_DB.prepare(
+      "INSERT INTO users (id, email, name, avatar, created_at, updated_at) VALUES (?, NULL, ?, NULL, ?, ?)",
+    ).bind(userId, "Race User", now, now).run();
+    const workspaces = await Promise.all([
+      ensureDefaultWorkspace(testEnv, userId, now),
+      ensureDefaultWorkspace(testEnv, userId, now),
+    ]);
+    expect(workspaces[1].id).toBe(workspaces[0].id);
+    const count = await testEnv.USER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM user_default_workspaces WHERE user_id = ?",
+    ).bind(userId).first<{ count: number }>();
+    expect(count?.count).toBe(1);
+  });
+});
+
+describe("OAuth User provisioning", () => {
+  for (const provider of ["google", "github"] as const) {
+    it(`creates one stable default Workspace for ${provider}`, async () => {
+      const providerUserId = `${provider}-${crypto.randomUUID()}`;
+      const profile = { providerUserId, name: `${provider} User`, avatar: null };
+      const now = new Date().toISOString();
+      const firstUserId = await ensureOAuthUser(testEnv, provider, profile, now);
+      const firstMapping = await testEnv.USER_DB.prepare(
+        "SELECT workspace_id FROM user_default_workspaces WHERE user_id = ?",
+      ).bind(firstUserId).first<{ workspace_id: string }>();
+      await testEnv.USER_DB.prepare("DELETE FROM workspaces WHERE id = ?")
+        .bind(firstMapping?.workspace_id)
+        .run();
+      const secondUserId = await ensureOAuthUser(testEnv, provider, profile, now);
+      expect(secondUserId).toBe(firstUserId);
+      const rows = await testEnv.USER_DB.prepare(
+        "SELECT workspace_id FROM user_default_workspaces WHERE user_id = ?",
+      ).bind(firstUserId).all<{ workspace_id: string }>();
+      expect(rows.results).toHaveLength(1);
+      expect(rows.results[0].workspace_id).not.toBe(firstMapping?.workspace_id);
+    });
+  }
 });
 
 describe("Workspace Ticket communication", () => {

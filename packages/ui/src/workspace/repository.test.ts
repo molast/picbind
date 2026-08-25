@@ -4,7 +4,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import {
   WorkspaceDatabase, clearOperationLogs, clearWorkspaceImageHistory, deleteCollaborationActivitiesAfter, deleteCommitsAfter, deleteWorkspaceImage, listActivities, listCommits,
   listOperationLogs, listProposals, listWorkspaceImages, promoteLocalWorkspace, purgeExpiredCache,
-  restoreLocalWorkspace, saveActivity, saveCollaborationActivity, saveCommit,
+  restoreLocalWorkspace, restoreProvisionedWorkspace, saveActivity, saveCollaborationActivity, saveCommit,
   readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource,
   saveProposal, saveWorkspace, saveWorkspaceImage,
   setWorkspaceDatabaseForTests,
@@ -49,6 +49,19 @@ test("restores one local Workspace without any login state", async () => {
   assert.equal(restored.workspaceId, first.workspaceId);
   assert.equal(restored.createdAt, 10);
   assert.equal(JSON.stringify(restored).includes("session"), false);
+});
+
+test("promotes local Workspace data into an authenticated provisioned Workspace", async () => {
+  const local = await restoreLocalWorkspace(10);
+  await saveWorkspaceImage(image("local-image", local.workspaceId));
+  const provisioned = workspace("remote-workspace");
+  provisioned.shareToken = "share-remote";
+  provisioned.ownerCapability = "owner-remote";
+  const restored = await restoreProvisionedWorkspace(provisioned);
+  assert.equal(restored.workspaceId, "remote-workspace");
+  assert.equal(localStorage.getItem("picbind.workspace.local-id"), "remote-workspace");
+  assert.deepEqual((await listWorkspaceImages("remote-workspace")).map((value) => value.imageId), ["local-image"]);
+  assert.equal(await database.workspaces.get(local.workspaceId), undefined);
 });
 
 test("isolates image content by Workspace", async () => {

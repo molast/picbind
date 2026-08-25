@@ -37,6 +37,15 @@ type AuthHandoffRow = {
   consumed_at: string | null;
 };
 
+type DefaultWorkspaceRow = {
+  id: string;
+  share_id: string;
+  name: string;
+  owner_capability: string;
+  created_at: string;
+  updated_at: string;
+};
+
 const SESSION_COOKIE = "__Host-picbind_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const SESSION_TOUCH_INTERVAL_MS = 15 * 60 * 1000;
@@ -179,6 +188,59 @@ function publicUser(row: UserRow) {
   };
 }
 
+function publicDefaultWorkspace(row: DefaultWorkspaceRow) {
+  return {
+    id: row.id,
+    shareId: row.share_id,
+    name: row.name,
+    ownerCapability: row.owner_capability,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function findDefaultWorkspace(env: AuthEnv, userId: string) {
+  return env.USER_DB.prepare(
+    `SELECT workspace.id, workspace.share_id, workspace.name,
+            mapping.owner_capability, workspace.created_at, workspace.updated_at
+     FROM user_default_workspaces mapping
+     JOIN workspaces workspace ON workspace.id = mapping.workspace_id
+     WHERE mapping.user_id = ?`,
+  ).bind(userId).first<DefaultWorkspaceRow>();
+}
+
+export async function ensureDefaultWorkspace(env: AuthEnv, userId: string, now = new Date().toISOString()) {
+  const existing = await findDefaultWorkspace(env, userId);
+  if (existing) return publicDefaultWorkspace(existing);
+
+  const workspaceId = uuidV7();
+  const shareId = `share_${randomToken(24)}`;
+  const ownerCapability = randomToken(32);
+  try {
+    await env.USER_DB.batch([
+      env.USER_DB.prepare(
+        "INSERT INTO workspaces (id, share_id, owner_capability_hash, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(workspaceId, shareId, await sha256(ownerCapability), "My Workspace", now, now),
+      env.USER_DB.prepare(
+        "INSERT INTO user_default_workspaces (user_id, workspace_id, owner_capability, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).bind(userId, workspaceId, ownerCapability, now, now),
+    ]);
+  } catch (error) {
+    const concurrent = await findDefaultWorkspace(env, userId);
+    if (concurrent) return publicDefaultWorkspace(concurrent);
+    throw error;
+  }
+
+  return {
+    id: workspaceId,
+    shareId,
+    name: "My Workspace",
+    ownerCapability,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function readCookie(request: Request, name: string) {
   const cookies = request.headers.get("cookie") || "";
   for (const pair of cookies.split(";")) {
@@ -264,7 +326,8 @@ export async function userState(env: AuthEnv, userId: string) {
     "SELECT id, email, name, avatar, created_at, updated_at FROM users WHERE id = ?",
   ).bind(userId).first<UserRow>();
   if (!user) return null;
-  return { user: publicUser(user) };
+  const workspace = await ensureDefaultWorkspace(env, userId);
+  return { user: publicUser(user), workspaces: [workspace] };
 }
 
 async function readLimitedBody(request: Request) {

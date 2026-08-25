@@ -63,6 +63,28 @@ export async function restoreLocalWorkspace(now = Date.now()): Promise<Workspace
 }
 
 export async function saveWorkspace(workspace: WorkspaceIdentity) { await getWorkspaceDatabase().workspaces.put(workspace); }
+export async function restoreProvisionedWorkspace(workspace: WorkspaceIdentity) {
+  const db = getWorkspaceDatabase();
+  const localId = localStorage.getItem(LOCAL_WORKSPACE_KEY);
+  if (!localId || localId === workspace.workspaceId) {
+    const existing = await db.workspaces.get(workspace.workspaceId);
+    const restored = existing
+      ? { ...workspace, style: existing.style }
+      : workspace;
+    await db.workspaces.put(restored);
+    localStorage.setItem(LOCAL_WORKSPACE_KEY, restored.workspaceId);
+    return restored;
+  }
+  const local = await db.workspaces.get(localId);
+  if (local) {
+    const promoted = { ...workspace, style: local.style };
+    await promoteLocalWorkspace(localId, promoted);
+    return promoted;
+  }
+  await db.workspaces.put(workspace);
+  localStorage.setItem(LOCAL_WORKSPACE_KEY, workspace.workspaceId);
+  return workspace;
+}
 export async function promoteLocalWorkspace(previousId: string, workspace: WorkspaceIdentity) {
   const db = getWorkspaceDatabase();
   const repository = getImageStorageRepository();

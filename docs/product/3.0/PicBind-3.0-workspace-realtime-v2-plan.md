@@ -2,15 +2,16 @@
 
 ## 1. 最终边界
 
-Workspace 与登录系统完全独立。
+Workspace realtime 与登录权限完全独立；登录生命周期负责默认 Workspace 的预创建和恢复。
 
-- 登录只创建、恢复和展示用户资料。
-- 注册、登录、OAuth、Session 和退出登录不创建、不查询、不选择 Workspace。
+- 邮箱注册/登录、Google/GitHub OAuth、Session 恢复会确保用户存在一个默认 Workspace。
+- 认证响应返回该默认 Workspace 与 Owner Capability，客户端据此恢复同一个本地 Workspace。
+- `user_default_workspaces` 仅是用户默认 Workspace 的一对一初始化映射，不是成员或 realtime 权限表。
 - Workspace 不保存 `owner_id`，不保存成员关系，也不读取用户 Session。
 - `/workspace` 以 Owner 模式打开本地当前 Workspace。
 - `/workspace/{share_id}` 以 Guest 模式打开分享 Workspace。
 - 未登录用户可以创建 Workspace、打开分享链接并建立实时连接。
-- 登录、退出登录和 Session 过期不能改变当前 Workspace。
+- realtime 连接不读取登录状态；退出登录和 Session 过期不会中断当前连接。
 - `Workspace ID` 是内部稳定标识；`share_id` 是可重新生成的固定分享链接标识。
 - D1 只保存 Workspace 标识、分享链接、名称和时间字段，不保存图片预览或图片源数据。
 - Worker 只负责连接建立、WebRTC 信令和通用消息转发，不理解 Workspace 业务事件。
@@ -38,6 +39,20 @@ workspaces
 
 用户表、登录凭据、OAuth Identity 和 Auth Session 只服务用户资料登录。
 
+迁移 `0009_user_default_workspaces.sql` 新增一对一初始化映射：
+
+```text
+user_default_workspaces
+  user_id
+  workspace_id
+  owner_capability
+  created_at
+  updated_at
+```
+
+该表用于认证时幂等预创建和客户端恢复默认 Workspace，不参与分享链接访问、
+Owner realtime ticket 或协作者 realtime ticket 的权限判断。
+
 ## 3. Worker API
 
 ### 3.1 用户资料接口
@@ -52,16 +67,26 @@ GET  /api/auth/oauth/{provider}/start
 GET  /api/auth/oauth/{provider}/callback
 ```
 
-成功的认证响应只包含：
+成功的认证响应包含用户资料和一个默认 Workspace：
 
 ```json
 {
   "authenticated": true,
-  "user": {}
+  "user": {},
+  "workspaces": [
+    {
+      "id": "...",
+      "shareId": "...",
+      "name": "My Workspace",
+      "ownerCapability": "...",
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
 }
 ```
 
-响应不得包含 Workspace、Realtime Grant 或其他业务授权信息。
+响应不得包含 Realtime Grant；realtime 仍通过短期 Ticket 和独立 Capability 建立。
 
 ### 3.2 Workspace 接口
 

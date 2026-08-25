@@ -17,9 +17,19 @@ export type AuthUser = {
   updatedAt: string;
 };
 
+export type AuthWorkspace = {
+  id: string;
+  shareId: string;
+  name: string;
+  ownerCapability: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AuthState = {
   authenticated: boolean;
   user: AuthUser | null;
+  workspaces: AuthWorkspace[];
 };
 
 type ApiEnvelope<T> = {
@@ -36,6 +46,7 @@ export class AuthServiceError extends Error {
 export const anonymousAuthState = (): AuthState => ({
   authenticated: false,
   user: null,
+  workspaces: [],
 });
 
 export async function resolveAuthAvatar(avatar: string | null) {
@@ -59,7 +70,11 @@ export async function resolveAuthAvatar(avatar: string | null) {
 
 function normalizeState(value: Partial<AuthState> | null | undefined): AuthState {
   return value?.authenticated && value.user
-    ? { authenticated: true, user: value.user }
+    ? {
+        authenticated: true,
+        user: value.user,
+        workspaces: Array.isArray(value.workspaces) ? value.workspaces : [],
+      }
     : anonymousAuthState();
 }
 

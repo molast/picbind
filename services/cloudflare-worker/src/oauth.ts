@@ -3,10 +3,10 @@ import {
   type AuthEnv,
   createAuthHandoffStatement,
   createSessionStatement,
+  ensureDefaultWorkspace,
   randomToken,
   sessionCookie,
   sha256,
-  userState,
   uuidV7,
 } from "./auth";
 
@@ -34,7 +34,7 @@ type OAuthIdentityRow = {
   user_id: string;
 };
 
-type OAuthProfile = {
+export type OAuthProfile = {
   providerUserId: string;
   name: string;
   avatar: string | null;
@@ -239,14 +239,17 @@ async function updateOAuthAvatar(
   ).bind(avatar, now, userId).run();
 }
 
-async function ensureOAuthUser(
+export async function ensureOAuthUser(
   env: OAuthEnv,
   provider: OAuthProvider,
   profile: OAuthProfile,
   now: string,
 ) {
   const identity = await findIdentity(env, provider, profile.providerUserId);
-  if (identity) return identity.user_id;
+  if (identity) {
+    await ensureDefaultWorkspace(env, identity.user_id, now);
+    return identity.user_id;
+  }
 
   const userId = uuidV7();
   try {
@@ -258,12 +261,14 @@ async function ensureOAuthUser(
         "INSERT INTO auth_identities (provider, provider_user_id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
       ).bind(provider, profile.providerUserId, userId, now, now),
     ]);
-    const state = await userState(env, userId);
-    if (!state) throw new Error("OAuth registration completed without a valid user");
+    await ensureDefaultWorkspace(env, userId, now);
     return userId;
   } catch (error) {
     const concurrentIdentity = await findIdentity(env, provider, profile.providerUserId);
-    if (concurrentIdentity) return concurrentIdentity.user_id;
+    if (concurrentIdentity) {
+      await ensureDefaultWorkspace(env, concurrentIdentity.user_id, now);
+      return concurrentIdentity.user_id;
+    }
     throw error;
   }
 }

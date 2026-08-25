@@ -34,15 +34,15 @@ export function useAuth() {
 }
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setStateValue] = React.useState<AuthState>(anonymousAuthState);
+  const [state, setStateValue] = React.useState<AuthState>(
+    () => authService.cachedState() || anonymousAuthState(),
+  );
   const [checking, setChecking] = React.useState(true);
   const [dialog, setDialog] = React.useState<DialogState | null>(null);
   const [restoreError, setRestoreError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let active = true;
-    const cached = authService.cachedState();
-    if (cached) setStateValue(cached);
     void authService
       .restore()
       .then((next) => {

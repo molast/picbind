@@ -32,9 +32,12 @@ runs directly in the Desktop Rust client and is not proxied by this Worker.
 - `GET /api/workspaces/:workspaceId/realtime` (WebSocket upgrade)
 - `GET /api/workspaces/:workspaceId/realtime-v2` (one-time Ticket WebSocket upgrade)
 
-Registration creates only the user profile, password credential, and login
-Session. Login exists only to restore that profile. It does not create, list,
-own, authorize, or otherwise affect Workspaces.
+Registration and every successful login ensure that the User has one stable
+default Workspace. The authentication response includes that Workspace and its
+Owner Capability so Web and Desktop clients can restore the same Workspace
+without waiting for the first visit to `/workspace`. Migration
+`0009_user_default_workspaces.sql` stores the one-to-one provisioning mapping.
+This mapping is not a realtime permission or Workspace membership system.
 
 Anyone can join a Workspace by opening its unguessable `shareId` link; no login,
 Session Cookie, user membership, or account permission is involved. D1 stores
@@ -152,10 +155,11 @@ set `PICBIND_API_URL` to a localhost Worker for application development.
 Production uses the `picbind-users` D1 database bound as `USER_DB` in
 `wrangler.toml`.
 
-The Web Session Cookie remains `HttpOnly; Secure; SameSite=None` only for user
-profile login state. OAuth callbacks also create a 60-second, one-time Handoff
-Code. Workspace creation, link resolution, link rotation, TURN configuration,
-and realtime connections do not read the login Cookie or Auth Session.
+The Web Session Cookie remains `HttpOnly; Secure; SameSite=None` for user
+profile login state and default Workspace restoration. OAuth callbacks also
+create a 60-second, one-time Handoff Code. Link resolution, link rotation, TURN
+configuration, and realtime connections do not read the login Cookie or Auth
+Session; they continue to use the Owner Capability or public share link.
 
 Run every pending D1 migration before deploying a Worker version that uses the
 new schema. Migration `0007_decouple_users_from_workspaces.sql` removes the
