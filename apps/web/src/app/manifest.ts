@@ -4,8 +4,8 @@ export const dynamic = "force-static";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "PicBind",
-    short_name: "PicBind",
+    name: "PicBind Web",
+    short_name: "PicBind Web",
     description:
       "Compress WebP, PNG, JPEG and AVIF images online with intelligent format handling.",
     start_url: "/",
