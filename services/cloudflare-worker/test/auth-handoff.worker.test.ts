@@ -612,6 +612,27 @@ describe("Workspace Ticket communication", () => {
 });
 
 describe("Workspace WebSocket V2 communication", () => {
+  for (const productionOrigin of ["tauri://localhost", "http://tauri.localhost"]) {
+    it(`allows the Desktop production Origin ${productionOrigin}`, async () => {
+      const seeded = await seedHandoff();
+      const ticketResponse = await requestTicket(seeded, productionOrigin);
+
+      expect(ticketResponse.response.status).toBe(200);
+      expect(ticketResponse.response.headers.get("access-control-allow-origin"))
+        .toBe(productionOrigin);
+
+      const envelope = await ticketResponse.response.json() as Record<string, any>;
+      const upgrade = await connectV2(
+        seeded.workspaceId,
+        envelope.data.ticket,
+        productionOrigin,
+      );
+      expect(upgrade.status).toBe(101);
+      upgrade.webSocket?.accept();
+      upgrade.webSocket?.close(1000, "test-complete");
+    });
+  }
+
   it("upgrades with a query Ticket without browser subprotocol negotiation", async () => {
     const seeded = await seedHandoff();
     const ticketResponse = await requestTicket(seeded);

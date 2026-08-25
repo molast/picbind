@@ -4,8 +4,9 @@ import { promoteLocalWorkspace, saveWorkspace } from "../repository";
 import { WorkspaceRealtimeClient } from "../realtime";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
-export function useWorkspaceShareCommands({ workspace, setWorkspace, setImages, realtimeRef, subscribe, transition, setCopied, setNotice, }: {
+export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspace, setImages, realtimeRef, subscribe, transition, setCopied, setNotice, }: {
   workspace: WorkspaceIdentity | null;
+  publicSiteUrl?: string;
   setWorkspace: React.Dispatch<React.SetStateAction<WorkspaceIdentity | null>>;
   setImages: React.Dispatch<React.SetStateAction<WorkspaceImage[]>>;
   realtimeRef: React.MutableRefObject<WorkspaceRealtimeClient | null>;
@@ -42,10 +43,10 @@ export function useWorkspaceShareCommands({ workspace, setWorkspace, setImages, 
 
   const copyShare = React.useCallback(async () => {
     if (!workspace?.shareToken) return;
-    await navigator.clipboard.writeText(shareUrl(workspace.shareToken));
+    await navigator.clipboard.writeText(shareUrl(workspace.shareToken, publicSiteUrl));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
-  }, [setCopied, workspace]);
+  }, [publicSiteUrl, setCopied, workspace]);
 
   return { createShare, rotateShare, copyShare };
 }

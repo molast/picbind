@@ -4,6 +4,10 @@ import React from "react";
 import { defaultWorkspaceStyle, WorkspacePage, type WorkspaceIdentity } from "@picbind/ui/source";
 import { useAuth } from "./auth/auth-provider";
 
+const PUBLIC_WORKSPACE_SITE_URL = process.env.NODE_ENV === "production"
+  ? process.env.NEXT_PUBLIC_SITE_URL || "https://picbind.com"
+  : undefined;
+
 export default function WorkspaceRoute() {
   const auth = useAuth();
   const [shareToken, setShareToken] = React.useState<string | null | undefined>(undefined);
@@ -34,5 +38,6 @@ export default function WorkspaceRoute() {
   return <WorkspacePage
     shareToken={guestShareToken}
     initialWorkspace={initialWorkspace}
+    publicSiteUrl={PUBLIC_WORKSPACE_SITE_URL}
   />;
 }

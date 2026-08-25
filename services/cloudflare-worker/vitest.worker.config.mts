@@ -9,7 +9,7 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.toml" },
       miniflare: {
         bindings: {
-          ALLOWED_ORIGINS: "http://127.0.0.1:4174,http://localhost:4174",
+          ALLOWED_ORIGINS: "http://127.0.0.1:4174,http://localhost:4174,tauri://localhost,http://tauri.localhost",
           LOCAL_RUNTIME: "1",
           TEST_MIGRATIONS: migrations,
         },

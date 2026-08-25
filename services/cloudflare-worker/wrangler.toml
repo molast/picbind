@@ -70,7 +70,7 @@ SITE_URL = "https://picbind.com"
 OAUTH_CALLBACK_ORIGIN = "https://api.picbind.com"
 # Optional standalone Room deployment origin. Defaults to SITE_URL.
 # ROOM_URL = "https://room.picbind.com"
-ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,https://room.picbind.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4174,http://127.0.0.1:4174"
+ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,https://room.picbind.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4174,http://127.0.0.1:4174,tauri://localhost,http://tauri.localhost"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
 
 [[ratelimits]]

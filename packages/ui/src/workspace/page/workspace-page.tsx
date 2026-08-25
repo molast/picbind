@@ -77,7 +77,11 @@ const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 const workspaceText = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
 
-export default function WorkspacePage({ shareToken, initialWorkspace }: { shareToken?: string; initialWorkspace?: WorkspaceIdentity }) {
+export default function WorkspacePage({ shareToken, initialWorkspace, publicSiteUrl }: {
+  shareToken?: string;
+  initialWorkspace?: WorkspaceIdentity;
+  publicSiteUrl?: string;
+}) {
   const [lang, setLanguage] = React.useState<Lang>("en");
   const [shareIdEntryOpen, setShareIdEntryOpen] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -658,7 +662,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace }: { shareT
     }
   }, [saveCollaborativeCopy, setNotice, setStopCollaborationImage, setStoppingCollaboration, stopCollaborationImage, stoppingCollaboration, togglePublishedImage]);
   const { createShare, rotateShare, copyShare } = useWorkspaceShareCommands({
-    workspace, setWorkspace, setImages, realtimeRef,
+    workspace, publicSiteUrl, setWorkspace, setImages, realtimeRef,
     subscribe: (client) => client.subscribe((value) => realtimeEventRef.current(value)),
     transition: () => transitionRuntime({ type: "transition", next: "connecting" }), setCopied, setNotice,
   });
