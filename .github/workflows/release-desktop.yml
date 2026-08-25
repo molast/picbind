@@ -11,7 +11,7 @@ permissions:
 
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   PNPM_VERSION: "11.10.0"
 
 jobs:
@@ -21,15 +21,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+      - name: Check JavaScript environment
+        run: |
+          node --version
+          pnpm --version
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -66,15 +69,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+      - name: Check JavaScript environment
+        shell: pwsh
+        run: |
+          node --version
+          pnpm --version
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,8 +98,6 @@ jobs:
       - name: Check build environment
         shell: pwsh
         run: |
-          node --version
-          pnpm --version
           rustc --version
           cargo --version
           rustup show
