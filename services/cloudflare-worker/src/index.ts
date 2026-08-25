@@ -343,6 +343,24 @@ function hasMissingOrInvalidOrigin(env: Env, request: Request) {
   return !allowedOrigins(env, request).has(origin);
 }
 
+function isDesktopAuthExchangeOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:"
+      && url.hostname === "127.0.0.1"
+      && url.port !== ""
+      && url.origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+function hasInvalidAuthExchangeOrigin(env: Env, request: Request) {
+  return hasMissingOrInvalidOrigin(env, request) && !isDesktopAuthExchangeOrigin(request);
+}
+
 function getAdminKey(request: Request) {
   const url = new URL(request.url);
   return url.searchParams.get("key") || request.headers.get("x-admin-key") || "";
@@ -655,7 +673,7 @@ const worker = {
           ? apiError("invalid_origin", "Invalid origin", 403)
           : await handleLogin(request, env);
       } else if (pathname === "/api/auth/exchange") {
-        response = hasMissingOrInvalidOrigin(env, request)
+        response = hasInvalidAuthExchangeOrigin(env, request)
           ? apiError("auth_origin_mismatch", "Authentication origin does not match", 403)
           : await handleAuthExchange(request, env);
       } else if (pathname === "/api/auth/logout") {

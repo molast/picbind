@@ -198,6 +198,32 @@ beforeAll(async () => {
 });
 
 describe("OAuth Handoff communication", () => {
+  it("accepts the dynamically assigned Desktop loopback callback port", async () => {
+    const desktopOrigin = "http://127.0.0.1:53147";
+    const seeded = await seedHandoff({ origin: desktopOrigin });
+    const response = await exchange(seeded.code, desktopOrigin);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        authenticated: true,
+        user: { id: seeded.userId },
+      },
+    });
+  });
+
+  it("keeps Desktop handoff codes bound to the exact callback port", async () => {
+    const desktopOrigin = "http://127.0.0.1:53148";
+    const seeded = await seedHandoff({ origin: desktopOrigin });
+    const mismatch = await exchange(seeded.code, "http://127.0.0.1:53149");
+
+    expect(mismatch.status).toBe(403);
+    await expect(mismatch.json()).resolves.toMatchObject({
+      error: { code: "auth_origin_mismatch" },
+    });
+    expect((await exchange(seeded.code, desktopOrigin)).status).toBe(200);
+  });
+
   it("exchanges once with the User's stable default Workspace", async () => {
     const seeded = await seedHandoff();
     const response = await exchange(seeded.code);
