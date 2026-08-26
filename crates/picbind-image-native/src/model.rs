@@ -42,6 +42,13 @@ impl NativeImageFormat {
 
 pub const MAX_INPUT_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_PIXELS: u64 = 100_000_000;
+pub const MAX_DIMENSION: u32 = 16_384;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeImageDimensions {
+    pub width: u32,
+    pub height: u32,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeImageMetadata {
@@ -60,6 +67,7 @@ pub struct NativeEncodeOptions {
     pub compression_gain: u16,
     pub allow_alpha_loss: bool,
     pub force_encode: bool,
+    pub dimensions: Option<NativeImageDimensions>,
 }
 
 impl NativeEncodeOptions {
@@ -70,6 +78,7 @@ impl NativeEncodeOptions {
             compression_gain: 100,
             allow_alpha_loss: false,
             force_encode: false,
+            dimensions: None,
         }
     }
 

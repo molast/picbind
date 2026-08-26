@@ -1,4 +1,7 @@
+mod auto;
 mod matrix;
+mod planned;
+mod resize;
 mod same_format;
 
 use image::{DynamicImage, RgbaImage};
@@ -29,6 +32,7 @@ pub(super) fn transform(
             compression_gain: 100,
             allow_alpha_loss: true,
             force_encode,
+            dimensions: None,
         },
     )
     .unwrap()

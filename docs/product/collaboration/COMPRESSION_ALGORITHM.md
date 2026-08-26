@@ -63,11 +63,12 @@ PCE 前端入口
 
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
-`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的 `interactive` 固定目标且不改变
-尺寸的请求使用 Native Adapter；`planner`、`auto`、带目标尺寸的请求以及尚未迁移的参数操作由组合根显式调用 Web
-Adapter，结果中的 `engine` 保持真实值。
+`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的固定目标和 `auto` 且不改变
+尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放，`planner` 执行
+多候选编码与 Native 质量护栏但按现有契约不接受目标尺寸。尚未迁移的参数操作由组合根显式
+调用 Web Adapter，结果中的 `engine` 保持真实值。
 
-每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，任务继续在独立 Worker 中执行，返回压缩页面后沿用原有队列和结果状态。
+Web 路径的每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Native 路径由 Tauri `spawn_blocking` 执行，当前只支持调用前后取消结果交付，尚未支持编码器内部协作式取消。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，返回压缩页面后沿用原有队列和结果状态。
 
 ## 3. PCE 分层
 
@@ -233,8 +234,31 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP 或 AVIF，再统一转换为 RGBA。因此四种
 输入都可以输出四种目标格式，实际覆盖 4×4 共 16 条编解码路径。Native 固定格式压缩仍
 遵守同格式不增大和默认 Alpha 保护；跨格式转换使用 `forceEncode`，不套用返回源文件规则。
-Native 当前尚未接入 Web PCE 的多候选感知护栏和 `auto` Predictor，不能把固定格式 Native
-编码描述成已完成完整 Planner 迁移。
+Native `auto` Predictor 对解码后的 RGBA 进行有界采样，提取真实 Alpha、颜色熵、细节覆盖和
+平坦区域覆盖：平坦低熵图优先 PNG，透明细节图优先 WebP，其他透明图和高细节不透明图优先
+AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG。
+
+Native `planner` 围绕 Gain 计算后的有效质量生成 `+8 / 0 / -8` 三档去重候选；PNG 最低质量
+限制为 50，其他格式为 45。每个候选独立编码、重新解码和校验，单个候选编码或解码失败不
+影响其他候选。通过护栏的候选中选择文件最小者。Native 质量比较最多均匀采样 16 万像素，
+计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95 误差。当前
+阈值如下：
+
+| 格式 | 最低 SSIM | 最低 PSNR | 最低边缘保留率 | Alpha 护栏 |
+|---|---:|---:|---:|---|
+| JPEG | 0.955 | 28.0 dB | 0.72 | 透明输入仍由显式 Alpha loss 规则控制 |
+| PNG | 0.985 | 32.0 dB | 0.86 | 平均误差 <= 0.1，P95 <= 1 |
+| WebP | 0.960 | 29.0 dB | 0.74 | 平均误差 <= 1，P95 <= 3 |
+| AVIF | 0.955 | 22.5 dB | 0.72 | 平均误差 <= 1，P95 <= 3 |
+
+Native 护栏是平台专用的轻量实现，不包含 Web PCE 的 MS-SSIM、Delta E 或 Butteraugli，不能
+把两端描述成字节级或指标实现完全一致；两端共同保证格式、尺寸、Alpha 和产品回退语义。
+
+Desktop Native `interactive` 收到目标尺寸时，在统一 RGBA 解码后使用 Rust `image` 的
+`Lanczos3` 精确缩放，再执行固定格式或 Auto Predictor 编码。目标宽高必须分别处于
+`1..=16384`，且总像素不能超过 `100,000,000`；校验在目标缓冲分配前执行。目标尺寸等于源图
+尺寸时视为未缩放，继续应用同格式不增大规则；目标尺寸发生变化时禁止返回原文件，否则会把
+原始宽高错误地伪装成缩放结果。Native Auto Predictor 使用缩放后的像素特征选择格式。
 
 ## 5. JPEG 流程
 
@@ -348,9 +372,9 @@ Web PCE 路径：
 7. 第一个通过护栏的候选直接返回。
 8. 超过 1200 万像素时，只尝试最多两个非 100 质量候选，控制耗时和内存。
 
-Desktop Native 固定 AVIF 请求不经过上述 Web PCE 多候选流程：Tauri 后台阻塞任务使用
-`ravif/rav1e` speed 9 单线程编码一次，并用 `zenavif` 解码输入和验证输出格式。Native PCE
-质量护栏尚未接入，属于后续阶段。
+Desktop Native `interactive` AVIF 请求不经过上述 Web PCE 多候选流程：Tauri 后台阻塞任务
+使用 `ravif/rav1e` speed 9 单线程编码一次，并用 `zenavif` 解码输入和验证输出格式。
+`planner` AVIF 使用同一编码器生成三档候选，再执行上文的 Native 质量护栏。
 9. AVIF 转 AVIF 若候选不小于原图或编码失败，返回原图。
 10. 跨格式转 AVIF 若没有候选通过但至少存在有效候选，返回最后一个有效候选；完全没有有效候选才报错。
 
@@ -425,6 +449,9 @@ if source_format == target_format
 | WebP 同格式无有效候选 | 返回原 WebP |
 | AVIF 同格式无更小候选或失败 | 返回原 AVIF |
 | AVIF 跨格式无任何有效候选 | 抛出明确错误，由 UI 标记该格式失败 |
+| Native Planner 单个候选失败或未通过护栏 | 忽略该候选并继续其余候选 |
+| Native Planner 同格式无通过护栏的更小候选 | 返回原图 |
+| Native Planner 跨格式无候选通过护栏 | 抛出明确编码错误，不返回错误格式或低质量候选 |
 | JPEG 目标遇到真实 Alpha 且不允许丢失 | 拒绝压缩，不静默破坏透明区域 |
 | Room 中显式执行其他格式转 JPEG | 视为用户明确允许 JPEG 丢失 Alpha，先与白色背景合成再编码 |
 
@@ -440,6 +467,8 @@ if source_format == target_format
 - 每个任务独立 Worker，避免编码阻塞主线程。
 - Tauri 固定格式 AVIF 在 Rust `spawn_blocking` 任务中单线程编码；回退到 Web Adapter 的
   AVIF 请求使用单线程 WASM。Web 站点在运行环境支持时仍可使用多线程 AVIF 编码器。
+- Desktop Native resize 与后续编码位于同一个 `spawn_blocking` 任务；缩放后的 RGBA 缓冲在
+  编码任务返回时释放，不通过 IPC 往返传输。
 
 AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回解码同时存在时内存峰值最高。
 
@@ -495,6 +524,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | 感知指标 | `crates/picbind-image/src/core/metrics.rs`、`crates/picbind-image/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
 | Desktop Native 四格式 codec | `crates/picbind-image-native/src/` |
+| Desktop Native resize | `crates/picbind-image-native/src/resize/` |
 | Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
 
 ## 16. Room Image Workspace 压缩入口

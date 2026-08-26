@@ -62,7 +62,7 @@ function checkContext(context?: ImageTaskContext) {
   }
 }
 
-function outputName(name: string, format: ImageOutputFormat) {
+function outputName(name: string, format: ImageOutputFormat | string) {
   const extension = format === "jpeg" ? "jpg" : format;
   return `${name.replace(/\.[^.]+$/, "") || "image"}.${extension}`;
 }
@@ -207,12 +207,24 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     ) {
       throw new ImageProcessingError("invalidRequest", "Compression profile is invalid");
     }
-    if (
-      request.options.format === "auto"
-      || request.options.profile === "planner"
-      || request.options.dimensions
-    ) {
-      return this.webFallback.compress(request, context);
+    if (request.options.dimensions
+      && (!Number.isInteger(request.options.dimensions.width)
+        || !Number.isInteger(request.options.dimensions.height)
+        || request.options.dimensions.width < 1
+        || request.options.dimensions.height < 1
+        || request.options.dimensions.width > 16_384
+        || request.options.dimensions.height > 16_384
+        || request.options.dimensions.width * request.options.dimensions.height > 100_000_000)) {
+      throw new ImageProcessingError(
+        "invalidRequest",
+        "Compression dimensions exceed the native size limits",
+      );
+    }
+    if (request.options.profile === "planner" && request.options.dimensions) {
+      throw new ImageProcessingError(
+        "invalidRequest",
+        "Planner compression does not accept resize dimensions",
+      );
     }
     const quality = request.options.quality ?? 80;
     const gain = request.options.compressionGain ?? 1;
@@ -226,16 +238,18 @@ export class DesktopImageProcessingService implements ImageProcessingService {
       operation: "encode",
       options: {
         format: request.options.format,
+        profile: request.options.profile ?? "interactive",
         quality,
         compressionGain: gain,
         allowAlphaLoss: request.options.allowAlphaLoss ?? false,
         forceEncode: request.options.forceEncode ?? false,
+        dimensions: request.options.dimensions,
       },
     }, request.source, context);
     report(context, "completed");
     return {
       artifact: { kind: "blob", blob: new Blob([bytes], { type: result.metadata.mimeType }) },
-      name: outputName(request.source.name, request.options.format),
+      name: outputName(request.source.name, result.metadata.format),
       metadata: result.metadata,
       engine: this.engine,
       sourceUnchanged: true,
@@ -259,10 +273,12 @@ export class DesktopImageProcessingService implements ImageProcessingService {
       operation: "encode",
       options: {
         format: request.format,
+        profile: "interactive",
         quality,
         compressionGain: 1,
         allowAlphaLoss: request.allowAlphaLoss ?? false,
         forceEncode: true,
+        dimensions: undefined,
       },
     }, request.source, context);
     report(context, "completed");

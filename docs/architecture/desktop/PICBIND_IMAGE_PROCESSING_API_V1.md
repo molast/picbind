@@ -1,6 +1,6 @@
 # PicBind Image Processing API V1
 
-> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native 已启用 metadata、interactive 固定目标压缩与四格式转换
+> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native 已启用 metadata、auto、interactive 固定目标压缩与四格式转换
 > 适用范围：Web 与 Tauri Desktop 的图片检查、参数预览、最终物化、压缩、转换和协作派生资源
 > 最后校对：2026-08-26
 
@@ -63,10 +63,10 @@ V1 采用以下设计：
 - `apps/desktop/src-tauri/src/image_processing` 已提供受控来源解析和二进制图片处理命令。
 - WebP / AVIF 的部分 Web 编码能力位于 `packages/wasm/image-codecs`，不是纯 Rust Core。
 
-当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE，Desktop `interactive`
-固定目标格式使用 Native codec。参数重放、预览、质量分析、`planner` profile 和带 resize
-的压缩尚未迁移到 Native，
-由组合根显式配置的 Web Adapter 执行，结果仍标记为 `engine: "web"`。
+当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE，Desktop `auto`、
+支持目标尺寸的 `interactive` 固定目标格式以及无 resize 的 `planner` 使用 Native codec。
+参数重放、预览和质量分析尚未迁移到 Native，由组合根显式配置的 Web Adapter 执行，结果仍
+标记为 `engine: "web"`。
 
 ## 4. 目标与非目标
 
@@ -923,12 +923,15 @@ Planner 和参数重放仍待提取。
   16 条路径。
 - JPEG 使用 `mozjpeg-rs`；PNG 使用 `imagequant + lodepng + oxipng` 并保留无损候选；
   WebP 使用 `zenwebp`；AVIF 编码使用 `image` 的 `ravif/rav1e` 后端，解码使用 `zenavif`。
-- `inspect()`、`interactive` 固定目标且不 resize 的 `compress()`、`convert()` 通过 Tauri
-  二进制 IPC 执行。
+- `inspect()`、支持目标尺寸的 `interactive` 固定目标 `compress()`、`auto` 和 `convert()`
+  通过 Tauri 二进制 IPC 执行。Native resize 使用 Lanczos3，单边限制 16384 且总像素限制
+  100,000,000。
 - Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
   传输，不使用 Base64 或 JSON 数字数组。
-- `auto` Planner、resize、参数预览、物化、质量分析和协作派生资源尚未 Native 化，当前由
-  组合根显式注入的 Web Adapter 执行，返回值继续声明实际 `engine: "web"`。
+- 固定目标和 `auto` 的 `planner` profile 已使用 Native 多质量候选、候选失败隔离、轻量
+  感知质量护栏和最小有效候选选择。参数预览、物化、质量分析和协作派生资源尚未 Native 化，
+  当前由组合根显式注入的 Web Adapter 执行，返回值继续声明实际
+  `engine: "web"`。
 - Native 编码当前不支持运行中的协作式取消、临时 artifact 和进度事件流；capabilities 不会
   声明这些能力。
 
@@ -936,15 +939,31 @@ Planner 和参数重放仍待提取。
 - 优先实现 metadata、参数预览、物化、JPEG / PNG，再补 WebP / AVIF。
 - 未实现能力通过 capabilities 明确报告，不能返回伪成功。
 
+#### 阶段 5 Native 子任务
+
+| 子阶段 | 状态 | 范围与验收条件 |
+| --- | --- | --- |
+| 5.1 四格式 Codec | 已完成 | 四种输入到四种输出的 4×4 矩阵、Alpha 保护、同格式不增大 |
+| 5.2 Auto Predictor | 已完成 | Native 像素特征提取；透明图不选 JPEG；自动结果可重新解码且格式与预测一致 |
+| 5.3 Planner 质量护栏 | 已完成 | 固定目标与 auto 的多质量候选、候选失败隔离、SSIM / PSNR / 边缘 / Alpha 阈值和最小有效候选选择 |
+| 5.4 Native Resize | 已完成 | interactive 在 Rust 内使用 Lanczos3 缩放后编码；尺寸、像素上限和同格式回退语义正确 |
+| 5.5 参数重放 | 待实现 | crop、rotate、resize、color、draw 等有序参数应用于同一源图 |
+| 5.6 Preview / Materialize | 待实现 | 受限预览与全尺寸物化分离，不在参数提交时编码全图 |
+| 5.7 派生资源与质量分析 | 待实现 | placeholder、WebP thumbnail、质量对比及资源释放 |
+| 5.8 Native 任务治理 | 待实现 | 任务表、协作式取消、进度事件、临时 artifact 和过期清理 |
+| 5.9 Adapter 一致性与实机验证 | 待实现 | 共享契约、性能、内存、取消和 macOS 双架构验证 |
+
 ### 阶段 6：一致性验证和切换
 
-当前状态：四格式 codec 矩阵、Alpha 拒绝和同格式不增大已经通过 Rust 测试；完整 Adapter
-契约、参数操作、取消、性能和内存实机验证尚未完成。
+当前状态：四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
+Alpha 拒绝和同格式不增大已经通过 Rust 测试；完整 Adapter 契约、参数操作、取消、性能和
+内存实机验证尚未完成。
 
 - 对 Web 和 Desktop Adapter 运行同一套契约测试。
 - 对性能、内存、取消和异常清理做 Desktop 实机测试。
-- 只有对应能力通过测试后，Desktop selector 才能把该方法切换为 Native；当前仅切换
-  `inspect`、`interactive` 固定格式无 resize 的 `compress` 和 `convert`。
+- 只有对应能力通过测试后，Desktop selector 才能把该方法切换为 Native；当前切换
+  `inspect`、无 resize 的 `planner`、支持 resize 的 `interactive` 固定格式与 `auto`
+  `compress`，以及 `convert`。
 - 删除迁移期重复入口和不再需要的显式 fallback。
 
 ## 20. 测试策略

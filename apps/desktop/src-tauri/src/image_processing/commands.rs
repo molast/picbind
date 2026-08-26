@@ -1,5 +1,6 @@
 use picbind_image_native::{
-    NativeEncodeOptions, NativeImageFormat, NativeImageMetadata, encode, inspect,
+    NativeEncodeOptions, NativeImageDimensions, NativeImageFormat, NativeImageMetadata, encode,
+    encode_auto, encode_auto_planned, encode_planned, inspect,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -43,10 +44,20 @@ enum NativeSource {
 #[serde(rename_all = "camelCase")]
 struct NativeTransformOptions {
     format: String,
+    #[serde(default)]
+    profile: Option<String>,
     quality: u8,
     compression_gain: f64,
     allow_alpha_loss: bool,
     force_encode: bool,
+    #[serde(default)]
+    dimensions: Option<NativeDimensions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeDimensions {
+    width: u32,
+    height: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,26 +121,51 @@ fn execute(
                     "Encode options are required".to_string(),
                 )
             })?;
-            let format = NativeImageFormat::parse(&options.format)
-                .map_err(|error| ("unsupportedFormat", error.to_string()))?;
+            let automatic = options.format.eq_ignore_ascii_case("auto");
+            let format = if automatic {
+                NativeImageFormat::WebP
+            } else {
+                NativeImageFormat::parse(&options.format)
+                    .map_err(|error| ("unsupportedFormat", error.to_string()))?
+            };
             let compression_gain = if options.compression_gain.is_finite() {
                 (options.compression_gain.clamp(0.25, 4.0) * 100.0).round() as u16
             } else {
                 100
             };
-            let output = encode(
-                &source,
-                &NativeEncodeOptions {
-                    format,
-                    quality: options.quality.clamp(1, 100),
-                    compression_gain,
-                    allow_alpha_loss: options.allow_alpha_loss,
-                    force_encode: options.force_encode,
-                },
-            )
+            let encode_options = NativeEncodeOptions {
+                format,
+                quality: options.quality.clamp(1, 100),
+                compression_gain,
+                allow_alpha_loss: options.allow_alpha_loss,
+                force_encode: options.force_encode,
+                dimensions: options.dimensions.map(|dimensions| NativeImageDimensions {
+                    width: dimensions.width,
+                    height: dimensions.height,
+                }),
+            };
+            let planned = match options.profile.as_deref().unwrap_or("interactive") {
+                "interactive" => false,
+                "planner" => true,
+                _ => {
+                    return Err((
+                        "invalidParameters",
+                        "Compression profile is invalid".to_string(),
+                    ));
+                }
+            };
+            let output = match (automatic, planned) {
+                (true, true) => encode_auto_planned(&source, &encode_options),
+                (true, false) => encode_auto(&source, &encode_options),
+                (false, true) => encode_planned(&source, &encode_options),
+                (false, false) => encode(&source, &encode_options),
+            }
             .map_err(|error| {
                 let code = match error {
                     picbind_image_native::NativeImageError::AlphaLossDenied => "alphaLossDenied",
+                    picbind_image_native::NativeImageError::InvalidDimensions(_) => {
+                        "invalidParameters"
+                    }
                     picbind_image_native::NativeImageError::UnsupportedFormat(_) => {
                         "unsupportedFormat"
                     }

@@ -11,28 +11,109 @@ pub fn encode(
     input: &[u8],
     options: &NativeEncodeOptions,
 ) -> Result<NativeImageOutput, NativeImageError> {
-    let (source_format, image) = decode::decode(input)?;
+    encode_with(input, options, Target::Fixed, Strategy::Interactive)
+}
+
+pub fn encode_auto(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(input, options, Target::Auto, Strategy::Interactive)
+}
+
+pub fn encode_planned(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(input, options, Target::Fixed, Strategy::Planner)
+}
+
+pub fn encode_auto_planned(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(input, options, Target::Auto, Strategy::Planner)
+}
+
+#[derive(Clone, Copy)]
+enum Target {
+    Fixed,
+    Auto,
+}
+
+#[derive(Clone, Copy)]
+enum Strategy {
+    Interactive,
+    Planner,
+}
+
+fn encode_with(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+    target: Target,
+    strategy: Strategy,
+) -> Result<NativeImageOutput, NativeImageError> {
+    if matches!(strategy, Strategy::Planner) && options.dimensions.is_some() {
+        return Err(NativeImageError::InvalidDimensions(
+            "planner compression does not accept resize dimensions".into(),
+        ));
+    }
+    let (source_format, source_image) = decode::decode(input)?;
+    let (image, dimensions_changed) = crate::resize::apply(source_image, options.dimensions)?;
+    let mut selected = options.clone();
+    if matches!(target, Target::Auto) {
+        selected.format = crate::planner::predict_format(&image);
+    }
     let has_alpha = image.to_rgba8().pixels().any(|pixel| pixel[3] < 255);
-    if options.format == crate::NativeImageFormat::Jpeg && has_alpha && !options.allow_alpha_loss {
+    if selected.format == crate::NativeImageFormat::Jpeg && has_alpha && !selected.allow_alpha_loss
+    {
         return Err(NativeImageError::AlphaLossDenied);
     }
-    let encoded = formats::encode(
-        &image,
-        options.format,
-        options.effective_quality(),
-        options.allow_alpha_loss,
-    )?;
-    if !options.force_encode && source_format == options.format && encoded.len() >= input.len() {
-        return Ok(NativeImageOutput {
-            bytes: input.to_vec(),
-            metadata: decode::metadata(&image, source_format, input.len())?,
-            returned_original: true,
-        });
+
+    let encoded = match strategy {
+        Strategy::Interactive => formats::encode(
+            &image,
+            selected.format,
+            selected.effective_quality(),
+            selected.allow_alpha_loss,
+        ),
+        Strategy::Planner => crate::planner::encode_best_candidate(&image, &selected),
+    };
+    let encoded = match encoded {
+        Ok(candidate) => candidate,
+        Err(_)
+            if matches!(strategy, Strategy::Planner)
+                && !dimensions_changed
+                && !selected.force_encode
+                && source_format == selected.format =>
+        {
+            return original_output(input, &image, source_format);
+        }
+        Err(error) => return Err(error),
+    };
+    if !dimensions_changed
+        && !selected.force_encode
+        && source_format == selected.format
+        && encoded.len() >= input.len()
+    {
+        return original_output(input, &image, source_format);
     }
     let metadata = inspect(&encoded)?;
     Ok(NativeImageOutput {
         bytes: encoded,
         metadata,
         returned_original: false,
+    })
+}
+
+fn original_output(
+    input: &[u8],
+    image: &image::DynamicImage,
+    source_format: crate::NativeImageFormat,
+) -> Result<NativeImageOutput, NativeImageError> {
+    Ok(NativeImageOutput {
+        bytes: input.to_vec(),
+        metadata: decode::metadata(image, source_format, input.len())?,
+        returned_original: true,
     })
 }
