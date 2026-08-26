@@ -118,6 +118,33 @@ packages/wasm/image-wasm/
 packages/wasm/perceptual-wasm/
 ```
 
+## Rustup 国内镜像
+
+项目提供 `scripts/rustup-cn.sh`，默认使用 `rsproxy.cn` 下载 Rust 工具链。执行单条
+命令时可以直接通过包装脚本调用：
+
+```bash
+bash scripts/rustup-cn.sh toolchain install stable
+bash scripts/rustup-cn.sh target add wasm32-unknown-unknown
+```
+
+如果希望当前 Bash 会话中的后续 `rustup` 命令都使用该镜像，可以先加载环境变量：
+
+```bash
+source scripts/rustup-cn.sh
+rustup show
+```
+
+PowerShell 可以使用等价配置：
+
+```powershell
+$env:RUSTUP_DIST_SERVER = "https://rsproxy.cn"
+$env:RUSTUP_UPDATE_ROOT = "https://rsproxy.cn/rustup"
+rustup show
+```
+
+如果环境变量已经设置为其他镜像，脚本会保留现有值。
+
 ## Cloudflare Pages 部署
 
 当前 Web 侧已移除 Next 内置 API 路由和 Docker 部署配置，适合按静态站点部署到 Cloudflare Pages。
