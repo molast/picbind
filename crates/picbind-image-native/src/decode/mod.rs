@@ -1,0 +1,59 @@
+use image::{DynamicImage, GenericImageView};
+
+use crate::{
+    MAX_INPUT_BYTES, MAX_PIXELS, NativeImageError, NativeImageFormat, NativeImageMetadata,
+};
+
+pub(crate) fn decode(input: &[u8]) -> Result<(NativeImageFormat, DynamicImage), NativeImageError> {
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(NativeImageError::InputTooLarge);
+    }
+    let format = detect_format(input)?;
+    let image = match format {
+        NativeImageFormat::Avif => crate::formats::avif::decode(input)?,
+        NativeImageFormat::WebP => crate::formats::webp::decode(input)?,
+        NativeImageFormat::Jpeg => crate::formats::jpeg::decode(input)?,
+        NativeImageFormat::Png => crate::formats::png::decode(input)?,
+    };
+    ensure_pixel_limit(&image)?;
+    Ok((format, image))
+}
+
+pub(crate) fn metadata(
+    image: &DynamicImage,
+    format: NativeImageFormat,
+    size_bytes: usize,
+) -> Result<NativeImageMetadata, NativeImageError> {
+    ensure_pixel_limit(image)?;
+    let (width, height) = image.dimensions();
+    Ok(NativeImageMetadata {
+        width,
+        height,
+        format,
+        mime_type: format.mime_type(),
+        size_bytes,
+        has_alpha: image.to_rgba8().pixels().any(|pixel| pixel[3] < 255),
+    })
+}
+
+fn detect_format(input: &[u8]) -> Result<NativeImageFormat, NativeImageError> {
+    match image::guess_format(input)
+        .map_err(|error| NativeImageError::InvalidImage(error.to_string()))?
+    {
+        image::ImageFormat::Jpeg => Ok(NativeImageFormat::Jpeg),
+        image::ImageFormat::Png => Ok(NativeImageFormat::Png),
+        image::ImageFormat::WebP => Ok(NativeImageFormat::WebP),
+        image::ImageFormat::Avif => Ok(NativeImageFormat::Avif),
+        format => Err(NativeImageError::UnsupportedFormat(format!("{format:?}"))),
+    }
+}
+
+fn ensure_pixel_limit(image: &DynamicImage) -> Result<(), NativeImageError> {
+    let (width, height) = image.dimensions();
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(NativeImageError::InvalidImage(
+            "decoded pixel count exceeds the native limit".into(),
+        ));
+    }
+    Ok(())
+}

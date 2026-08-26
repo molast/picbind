@@ -1,5 +1,6 @@
 mod auth;
 mod download;
+mod image_processing;
 mod messaging;
 mod storage;
 
@@ -43,6 +44,7 @@ pub fn run() {
             auth::desktop_auth_oauth,
             auth::desktop_auth_avatar_data_url,
             download::commands::save_download,
+            image_processing::commands::image_processing_execute,
             storage::commands::storage_put_image,
             storage::commands::storage_get_image,
             storage::commands::storage_list_images,

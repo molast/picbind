@@ -1,12 +1,12 @@
 # PicBind 当前图片压缩算法说明
 
-本文档描述当前仓库中实际运行的图片压缩流程。它以代码实现为准，覆盖浏览器任务调度、PCE（PicBind Compression Engine）、各目标格式编码器、感知质量护栏、压缩增益 `K`、失败回退与内存生命周期。
+本文档描述当前仓库中实际运行的图片压缩流程。它以代码实现为准，覆盖浏览器任务调度、PCE（PicBind Compression Engine）、Desktop Native 固定格式编码、各目标格式编码器、感知质量护栏、压缩增益 `K`、失败回退与内存生命周期。
 
 ## 1. 设计目标
 
 当前压缩链路遵循以下原则：
 
-1. 压缩在浏览器本地执行，原图不会因为压缩而上传到服务端。
+1. 压缩在本地设备执行；Web 使用浏览器 Worker，Desktop 已启用的固定格式路径使用 Native Rust，原图不会因为压缩而上传到服务端。
 2. PCE 先分析图像内容并预测各格式结果，再生成格式相关的压缩计划，而不是对所有图片使用同一组质量参数。
 3. 同格式压缩必须满足“结果更小”；否则返回原图，避免出现压缩后体积反而增大。
 4. 通过感知指标保护结构、边缘、颜色、亮度和 Alpha，不只比较文件大小。
@@ -63,7 +63,9 @@ PCE 前端入口
 
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
-`interactive`。这次接口迁移没有修改 Planner、编码参数、候选选择或回退规则。
+`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的 `interactive` 固定目标且不改变
+尺寸的请求使用 Native Adapter；`planner`、`auto`、带目标尺寸的请求以及尚未迁移的参数操作由组合根显式调用 Web
+Adapter，结果中的 `engine` 保持真实值。
 
 每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，任务继续在独立 Worker 中执行，返回压缩页面后沿用原有队列和结果状态。
 
@@ -219,6 +221,21 @@ palette_colors'= palette_colors / sqrt(K)
 | WebP | `@jsquash/webp` / libwebp WASM | 有损 WebP、Sharp YUV、Alpha 单独高质量保存 | PCE 内建护栏，不走 Butteraugli |
 | AVIF | libavif + libaom WASM | 自适应质量候选、色度采样、分块和 Alpha 质量保护 | PCE 内建护栏，不走 Butteraugli |
 
+Desktop Native 固定目标格式使用另一套平台专用 codec：
+
+| 目标格式 | Native 编码器 | 当前行为 |
+|---|---|---|
+| JPEG | `mozjpeg-rs` | 渐进式、Huffman 优化，按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
+| PNG | `imagequant + lodepng + oxipng` | 在调色板候选与无损 RGBA 候选中选择较小结果；单个量化候选失败时保留无损候选 |
+| WebP | `zenwebp` | 有损 RGBA 编码，method 5，Alpha quality 100 |
+| AVIF | `image` 的 `ravif/rav1e` encoder | speed 9、单线程 RGBA 编码；使用 `zenavif` 解码 |
+
+Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP 或 AVIF，再统一转换为 RGBA。因此四种
+输入都可以输出四种目标格式，实际覆盖 4×4 共 16 条编解码路径。Native 固定格式压缩仍
+遵守同格式不增大和默认 Alpha 保护；跨格式转换使用 `forceEncode`，不套用返回源文件规则。
+Native 当前尚未接入 Web PCE 的多候选感知护栏和 `auto` Predictor，不能把固定格式 Native
+编码描述成已完成完整 Planner 迁移。
+
 ## 5. JPEG 流程
 
 ### 5.1 Alpha 规则
@@ -313,6 +330,8 @@ Oxipng 只做无损后处理：
 
 ## 8. AVIF 流程
 
+Web PCE 路径：
+
 1. 浏览器解码源图为 RGBA。
 2. WASM Feature Extractor 和 Planner 基于 RGBA 生成 `AvifEncodingPlan`。
 3. Plan 包含质量候选、编码速度、位深、色度采样、Sharp YUV、分块、Alpha 质量下限和感知阈值。
@@ -322,13 +341,16 @@ Oxipng 只做无损后处理：
    `crossOriginIsolated` 与 `SharedArrayBuffer` 时允许使用多线程编码器；不支持
    `credentialless` 或共享内存时自动使用单线程编码器。`credentialless` 会让普通
    跨域资源请求不携带凭据，因此头像等仅用于展示的第三方图片不需要提供 CORP
-   响应头。Tauri 客户端固定使用单线程编码器，避免 macOS WKWebView 在压缩 Worker
-   内创建 pthread 子 Worker 时触发资源加载失败。两条路径使用相同的 Plan、质量
-   候选和感知质量护栏。
+   响应头。Desktop 上只有回退到 Web Adapter 的 `auto`、resize 等请求会经过此路径，
+   并固定使用单线程 WASM，避免 macOS WKWebView 在压缩 Worker 内创建 pthread 子 Worker。
 5. 无真实 Alpha 时设置 `qualityAlpha = -1`，不创建无意义的 Alpha 编码负担；存在真实 Alpha 时使用 `max(candidateQuality, alphaQualityFloor)`。
 6. 将候选 AVIF 再解码为 RGBA，使用 PCE 指标与原图比较。
 7. 第一个通过护栏的候选直接返回。
 8. 超过 1200 万像素时，只尝试最多两个非 100 质量候选，控制耗时和内存。
+
+Desktop Native 固定 AVIF 请求不经过上述 Web PCE 多候选流程：Tauri 后台阻塞任务使用
+`ravif/rav1e` speed 9 单线程编码一次，并用 `zenavif` 解码输入和验证输出格式。Native PCE
+质量护栏尚未接入，属于后续阶段。
 9. AVIF 转 AVIF 若候选不小于原图或编码失败，返回原图。
 10. 跨格式转 AVIF 若没有候选通过但至少存在有效候选，返回最后一个有效候选；完全没有有效候选才报错。
 
@@ -416,8 +438,8 @@ if source_format == target_format
 - AVIF 并发：1。
 - WebP 并发：2。
 - 每个任务独立 Worker，避免编码阻塞主线程。
-- Tauri 的 AVIF 编码在该任务 Worker 内使用单线程 WASM，不再创建嵌套 Worker；
-  Web 在运行环境支持时仍可使用多线程 AVIF 编码器。
+- Tauri 固定格式 AVIF 在 Rust `spawn_blocking` 任务中单线程编码；回退到 Web Adapter 的
+  AVIF 请求使用单线程 WASM。Web 站点在运行环境支持时仍可使用多线程 AVIF 编码器。
 
 AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回解码同时存在时内存峰值最高。
 
@@ -472,6 +494,8 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PNG / Oxipng | `crates/picbind-image/src/core/png_oxipng.rs` |
 | 感知指标 | `crates/picbind-image/src/core/metrics.rs`、`crates/picbind-image/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
+| Desktop Native 四格式 codec | `crates/picbind-image-native/src/` |
+| Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
 
 ## 16. Room Image Workspace 压缩入口
 

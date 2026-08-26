@@ -27,6 +27,7 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 ├── crates/
 │   ├── picbind-core/              # 跨平台领域逻辑
 │   ├── picbind-image/             # Rust WASM 图片处理库
+│   ├── picbind-image-native/      # Desktop Native 图片编解码库
 │   ├── picbind-network/           # WebSocket、WebRTC、信令和传输
 │   ├── picbind-perceptual/        # 感知质量 Rust WASM 库
 │   ├── picbind-protocol/          # 跨端稳定协议类型

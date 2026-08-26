@@ -4,6 +4,7 @@ members = [
   "apps/desktop/src-tauri",
   "crates/picbind-core",
   "crates/picbind-image",
+  "crates/picbind-image-native",
   "crates/picbind-network",
   "crates/picbind-perceptual",
   "crates/picbind-protocol",

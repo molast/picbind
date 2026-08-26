@@ -18,6 +18,7 @@ base64 = "0.22"
 chrono = "0.4"
 ecb = { version = "0.1", features = ["alloc"] }
 md-5 = "0.10"
+picbind-image-native = { path = "../../../crates/picbind-image-native" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,6 +1,6 @@
 # PicBind Image Processing API V1
 
-> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native Adapter 尚未启用
+> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native 已启用 metadata、interactive 固定目标压缩与四格式转换
 > 适用范围：Web 与 Tauri Desktop 的图片检查、参数预览、最终物化、压缩、转换和协作派生资源
 > 最后校对：2026-08-26
 
@@ -51,18 +51,22 @@ V1 采用以下设计：
 | 协作图片容器 | `packages/ui/src/workspace/collaboration-image-container.ts` | 已具备正确源图隔离模型，应保留 |
 | Metadata、缩略图、placeholder | `crates/picbind-image` WASM + `packages/ui` 适配 | Workspace 直接调用 WASM 能力 |
 | Web 图片存储 | Dexie + OPFS Repository | 已通过统一存储接口隔离 |
-| Desktop 图片存储 | Tauri IPC + SQLite + Native Files | 已实现，但还没有 Native 图片处理命令 |
+| Desktop 图片存储 | Tauri IPC + SQLite + Native Files | 已实现；Native codec 可直接解析受控存储引用 |
 
 ### 3.2 当前 Rust 边界
 
 - `crates/picbind-core` 保存 Workspace、协作和图片领域状态，不是像素算法 crate。
 - `crates/picbind-image` 承担图片分析、压缩、格式处理、metadata、缩略图和 placeholder，
   但公开入口目前带有 `wasm_bindgen`、`JsValue` 和 `js_sys` 类型。
-- `apps/desktop/src-tauri` 当前只有认证、下载、消息和 Native Store，没有图片处理模块。
+- `crates/picbind-image-native` 是不依赖 Tauri、WASM 或 UI 类型的 Native codec，已实现
+  JPEG、PNG、WebP、AVIF 的统一解码与 4×4 编码矩阵。
+- `apps/desktop/src-tauri/src/image_processing` 已提供受控来源解析和二进制图片处理命令。
 - WebP / AVIF 的部分 Web 编码能力位于 `packages/wasm/image-codecs`，不是纯 Rust Core。
 
-因此不能把当前架构描述为“Web 和 Desktop 已经共同调用 Rust Image Core”。V1 的目标是
-先稳定业务 Port，再逐步拆出可供 WASM 与 Native 复用的纯 Rust 内核。
+当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE，Desktop `interactive`
+固定目标格式使用 Native codec。参数重放、预览、质量分析、`planner` profile 和带 resize
+的压缩尚未迁移到 Native，
+由组合根显式配置的 Web Adapter 执行，结果仍标记为 `engine: "web"`。
 
 ## 4. 目标与非目标
 
@@ -112,8 +116,9 @@ flowchart TD
 
 ### 5.1 Web 与 Desktop 目标执行差异
 
-下表描述 V1 完成后的目标执行方式，不表示 Desktop Native 图片处理当前已经实现。当前能力
-仍以第 3 节和运行时 `capabilities()` 返回值为准。
+下表描述 V1 完成后的目标执行方式。Desktop Native 当前只实现其中的受控输入解析、四格式
+解码、metadata、`interactive` 固定目标压缩和转换，其余能力仍以第 3 节和运行时
+`capabilities()` 为准。
 
 | 环节 | Web Adapter | Desktop Native Adapter | 必须共享的语义 |
 | --- | --- | --- | --- |
@@ -564,8 +569,8 @@ export type ImageProcessingCapabilities = {
 - 在迁移期由组合层决定是否允许显式 Web fallback。
 - 在日志和问题报告中记录实际引擎与能力。
 
-Adapter 不得声明尚未实现的能力。当前 Desktop Native 图片处理尚不存在，因此在对应阶段
-完成前不能报告 `desktop-native` 可用。
+Adapter 不得声明尚未实现的能力。Desktop Native 当前只报告四格式输入输出和受控存储
+来源；参数操作、质量分析、取消和临时产物在完成前不能报告可用。
 
 ## 11. 错误模型
 
@@ -726,8 +731,8 @@ export type AdoptTemporaryImageInput = {
 
 ## 15. Rust 模块边界
 
-像素算法属于 `crates/picbind-image`，不是 `picbind-core`。目标结构可以在不一次性重命名
-crate 的前提下逐步形成：
+像素算法属于图片 crate，不是 `picbind-core`。为避免 Native 接入改变已发布的 WASM 行为，
+当前先将平台无关 Native codec 放在独立 crate，后续再提取双方真正共享的 Planner 与模型：
 
 ```text
 crates/picbind-image/src/
@@ -742,6 +747,19 @@ crates/picbind-image/src/
 ├── placeholder/
 └── bindings/
     └── wasm.rs
+
+crates/picbind-image-native/src/
+├── lib.rs
+├── model.rs
+├── error.rs
+├── engine.rs
+├── decode/
+├── formats/
+│   ├── jpeg/
+│   ├── png/
+│   ├── webp/
+│   └── avif/
+└── tests/
 
 apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
@@ -841,6 +859,12 @@ crates/picbind-image/src/
 ├── ... pure Rust image modules
 └── bindings/wasm.rs
 
+crates/picbind-image-native/src/
+├── engine.rs
+├── decode/
+├── formats/
+└── tests/
+
 apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
 ├── commands.rs
@@ -883,7 +907,9 @@ Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Ad
 
 ### 阶段 4：拆分纯 Rust Core
 
-当前状态：未开始。此阶段涉及 Rust / WASM API 和生成产物，不能与 Port 迁移混为已完成。
+当前状态：部分完成。新增 `crates/picbind-image-native` 作为无 Tauri、无 `JsValue` 的纯 Rust
+Native codec，WASM crate 未改动，因此本阶段没有重新生成 WASM。现有 WASM PCE 中的共享
+Planner 和参数重放仍待提取。
 
 - 从 `crates/picbind-image/lib.rs` 移出 `JsValue` 和 `js_sys` 依赖。
 - 保留薄 WASM binding，确保 Web 输出和性能没有回归。
@@ -891,9 +917,20 @@ Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Ad
 
 ### 阶段 5：实现 Desktop Native
 
-当前状态：未开始。现有 `DesktopImageProcessingService` 只报告空 capabilities 并返回
-`capabilityUnavailable`；组合根迁移期显式使用 `WebImageProcessingService`，结果保持
-`engine: "web"`，不伪装为 Native。
+当前状态：部分完成并已按 capability 启用：
+
+- Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
+  16 条路径。
+- JPEG 使用 `mozjpeg-rs`；PNG 使用 `imagequant + lodepng + oxipng` 并保留无损候选；
+  WebP 使用 `zenwebp`；AVIF 编码使用 `image` 的 `ravif/rav1e` 后端，解码使用 `zenavif`。
+- `inspect()`、`interactive` 固定目标且不 resize 的 `compress()`、`convert()` 通过 Tauri
+  二进制 IPC 执行。
+- Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
+  传输，不使用 Base64 或 JSON 数字数组。
+- `auto` Planner、resize、参数预览、物化、质量分析和协作派生资源尚未 Native 化，当前由
+  组合根显式注入的 Web Adapter 执行，返回值继续声明实际 `engine: "web"`。
+- Native 编码当前不支持运行中的协作式取消、临时 artifact 和进度事件流；capabilities 不会
+  声明这些能力。
 
 - 增加 Tauri 图片处理模块、受控 source resolver、任务表和取消命令。
 - 优先实现 metadata、参数预览、物化、JPEG / PNG，再补 WebP / AVIF。
@@ -901,9 +938,13 @@ Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Ad
 
 ### 阶段 6：一致性验证和切换
 
+当前状态：四格式 codec 矩阵、Alpha 拒绝和同格式不增大已经通过 Rust 测试；完整 Adapter
+契约、参数操作、取消、性能和内存实机验证尚未完成。
+
 - 对 Web 和 Desktop Adapter 运行同一套契约测试。
 - 对性能、内存、取消和异常清理做 Desktop 实机测试。
-- 只有对应能力通过测试后，Desktop selector 才切换为 Native 默认实现。
+- 只有对应能力通过测试后，Desktop selector 才能把该方法切换为 Native；当前仅切换
+  `inspect`、`interactive` 固定格式无 resize 的 `compress` 和 `convert`。
 - 删除迁移期重复入口和不再需要的显式 fallback。
 
 ## 20. 测试策略

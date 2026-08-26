@@ -1,0 +1,14 @@
+[package]
+name = "picbind-image-native"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["avif", "jpeg", "png"] }
+imagequant = { version = "4.4.1", default-features = false }
+lodepng = { version = "3.12.2", default-features = false, features = ["rust_backend"] }
+mozjpeg-rs = "0.8.0"
+oxipng = { version = "10.2.0", default-features = false }
+zenavif = { version = "0.1.6", default-features = false }
+zenpixels = { version = "0.2.16", default-features = false }
+zenwebp = { version = "0.4.4", default-features = false }

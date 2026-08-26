@@ -23,6 +23,7 @@ PicBind 使用应用、可复用包、Rust crate、服务和文档五个顶层�
 
 - `crates/picbind-core`：Workspace、用户、协作、图片和任务领域逻辑。
 - `crates/picbind-image`：图片分析、编码、压缩、格式处理和共享图片 metadata。
+- `crates/picbind-image-native`：Desktop Native JPEG、PNG、WebP、AVIF 编解码和压缩。
 - `crates/picbind-network`：WebSocket、WebRTC、信令和数据传输抽象。
 - `crates/picbind-perceptual`：Butteraugli 感知质量计算。
 - `crates/picbind-protocol`：Workspace、协作、传输和事件的稳定协议类型。
