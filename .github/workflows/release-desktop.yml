@@ -53,6 +53,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Apple Silicon installer
+        env:
+          # GitHub macOS runners support Finder scripting. Without this override,
+          # Tauri skips the custom DMG background and icon positions in CI.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         run: |
           VERSION="${RELEASE_VERSION#v}"
           pnpm --dir apps/desktop exec tauri build \
@@ -60,6 +64,26 @@ jobs:
             --bundles dmg \
             --config "{\"version\":\"${VERSION}\"}" \
             --ci
+          DMG_DIR="target/aarch64-apple-darwin/release/bundle/dmg"
+          DMG_FILES=("$DMG_DIR"/*.dmg)
+          test "${#DMG_FILES[@]}" -eq 1
+          test -f "${DMG_FILES[0]}"
+          mv "${DMG_FILES[0]}" "$DMG_DIR/PicBind-v${VERSION}-macOS-aarch64.dmg"
+
+      - name: Verify custom DMG layout
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+          DMG_PATH="target/aarch64-apple-darwin/release/bundle/dmg/PicBind-v${VERSION}-macOS-aarch64.dmg"
+          test -f "$DMG_PATH"
+          MOUNT_DIR=$(mktemp -d)
+          cleanup() {
+            hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+            rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$MOUNT_DIR"
+          test -f "$MOUNT_DIR/.background/dmg-background.png"
+          test -f "$MOUNT_DIR/.DS_Store"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -118,12 +142,19 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RELEASE_VERSION -replace '^v', ''
-          $config = @{ version = $version } | ConvertTo-Json -Compress
+          $configPath = Join-Path $env:RUNNER_TEMP "tauri-release-config.json"
+          @{ version = $version } | ConvertTo-Json -Compress | Set-Content -Path $configPath -Encoding utf8
           pnpm --dir apps/desktop exec tauri build `
             --target x86_64-pc-windows-msvc `
             --bundles nsis,msi `
-            --config $config `
+            --config $configPath `
             --ci
+          $nsisFiles = @(Get-ChildItem -Path "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter "*.exe" -File)
+          $msiFiles = @(Get-ChildItem -Path "target/x86_64-pc-windows-msvc/release/bundle/msi" -Filter "*.msi" -File)
+          if ($nsisFiles.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($nsisFiles.Count)" }
+          if ($msiFiles.Count -ne 1) { throw "Expected exactly one MSI installer, found $($msiFiles.Count)" }
+          Move-Item -LiteralPath $nsisFiles[0].FullName -Destination (Join-Path $nsisFiles[0].DirectoryName "PicBind-v$version-Windows-x86_64.exe")
+          Move-Item -LiteralPath $msiFiles[0].FullName -Destination (Join-Path $msiFiles[0].DirectoryName "PicBind-v$version-Windows-x86_64.msi")
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

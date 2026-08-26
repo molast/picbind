@@ -119,7 +119,7 @@ export function WorkspaceHeader({
         title={text("enterWorkspace")}
       >
         <FiLogIn className="h-[17px] w-[17px]" />
-        <span className="hidden lg:inline">{text("enterWorkspace")}</span>
+        <span className="hidden lg:inline">{text("join")}</span>
       </button> : null}
       <WorkspaceLanguageSwitcher lang={lang} onChange={onLanguageChange} />
       <button
