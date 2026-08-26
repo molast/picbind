@@ -307,7 +307,7 @@ pub fn png_to_jpeg_quality_candidates(
         _ if analysis.noise_level >= 0.25 => 1,
         _ => 0,
     };
-    adaptive -= large_image_bias as i32;
+    adaptive -= large_image_bias;
     adaptive -= match () {
         _ if pixel_count >= 8_000_000 => 2,
         _ if pixel_count >= 5_000_000 => 1,
@@ -574,9 +574,9 @@ pub fn avif_encoding_plan(
         quality_candidates,
         speed: avif_speed_for_pixels(analysis.pixel_count),
         bit_depth: 8,
-        subsample: if analysis.gradient_coverage >= 0.25 && analysis.noise_level < 0.18 {
-            3
-        } else if ui_like && !photo_like {
+        subsample: if (analysis.gradient_coverage >= 0.25 && analysis.noise_level < 0.18)
+            || (ui_like && !photo_like)
+        {
             3
         } else if !photo_like && analysis.color_complexity >= 0.42 {
             2

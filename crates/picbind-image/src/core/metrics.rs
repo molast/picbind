@@ -143,7 +143,7 @@ fn compare_dynamic_images_internal(
         ));
     }
 
-    let aligned_compressed = align_to_dimensions(&compressed, width, height);
+    let aligned_compressed = align_to_dimensions(compressed, width, height);
     let original_rgb = original.to_rgb8();
     let compressed_rgb = aligned_compressed.to_rgb8();
     let original_rgba = original.to_rgba8();

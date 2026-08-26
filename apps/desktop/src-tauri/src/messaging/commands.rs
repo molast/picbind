@@ -1,11 +1,11 @@
 use tauri::State;
 
 use super::{
+    DesktopMessagingRepository,
     models::{
         MessagingEvent, MessagingGatewaySnapshot, MessagingImageUpload, MessagingLoginSession,
         MessagingMessage,
     },
-    DesktopMessagingRepository,
 };
 
 #[tauri::command]

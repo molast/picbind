@@ -2,14 +2,14 @@ use std::{collections::HashMap, error::Error as _};
 
 use super::models::{MessagingMessage, MessagingMessageType, MessagingPayload};
 use aes::Aes128;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use ecb::cipher::{
-    block_padding::{NoPadding, Pkcs7},
     BlockDecryptMut, BlockEncryptMut, KeyInit,
+    block_padding::{NoPadding, Pkcs7},
 };
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::Sha256;
 
 const ILINK_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
@@ -608,7 +608,7 @@ fn decode_hex_16(value: &str) -> Result<[u8; 16], String> {
         return Err("Invalid Weixin image AES key".into());
     }
     let mut out = [0; 16];
-    for (i, part) in value.as_bytes().chunks_exact(2).enumerate() {
+    for (i, part) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         out[i] = u8::from_str_radix(std::str::from_utf8(part).map_err(|e| e.to_string())?, 16)
             .map_err(|_| "Invalid Weixin image AES key")?;
     }

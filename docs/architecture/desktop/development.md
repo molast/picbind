@@ -42,7 +42,7 @@ apps/desktop/
 - macOS（Apple Silicon）
 - Node.js 24.16.0
 - pnpm 11.10.0
-- Rust 1.93.0 stable
+- Rust 1.98.0 stable
 - Xcode Command Line Tools
 
 Windows 和 Linux 尚未验证，不应标记为已支持。

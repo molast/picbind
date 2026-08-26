@@ -64,7 +64,9 @@ fn sampled_rgb(image: &DynamicImage) -> (Vec<[f64; 3]>, u32, u32) {
 }
 
 fn rgba_to_linear_pixels(rgba: &[u8]) -> Vec<[f64; 3]> {
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| {
             let alpha = f64::from(pixel[3]) / 255.0;
             [

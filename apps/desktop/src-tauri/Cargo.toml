@@ -3,7 +3,7 @@ name = "picbind-desktop"
 version = "0.1.0"
 description = "PicBind desktop application"
 authors = ["PicBind"]
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "picbind_desktop_lib"

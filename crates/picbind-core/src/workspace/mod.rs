@@ -231,8 +231,10 @@ mod tests {
     #[test]
     fn style_schema_is_restricted() {
         assert!(WorkspaceStyle::default().validate().is_ok());
-        let mut invalid = WorkspaceStyle::default();
-        invalid.text_color = "url(javascript:x)".into();
+        let invalid = WorkspaceStyle {
+            text_color: "url(javascript:x)".into(),
+            ..Default::default()
+        };
         assert!(invalid.validate().is_err());
     }
 }

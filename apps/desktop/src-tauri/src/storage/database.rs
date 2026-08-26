@@ -1,5 +1,5 @@
 use super::files;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -800,37 +800,36 @@ impl NativeImageStore {
             cleared_missing_thumbnails: 0,
         };
         for (scope, scope_key, id, file_path, thumbnail_path) in &records {
-            if let Some(path) = file_path {
-                if files::metadata(&self.root, path)?.is_none() {
-                    if scope == "room" {
-                        let connection =
-                            self.connection.lock().map_err(|error| error.to_string())?;
-                        connection
-                            .execute(
-                                "UPDATE image_cache SET file_path = NULL, byte_size = 0
-                                 WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
-                                params![scope, scope_key, id],
-                            )
-                            .map_err(|error| error.to_string())?;
-                    } else {
-                        self.delete(scope, scope_key, id)?;
-                        result.removed_missing_records += 1;
-                        continue;
-                    }
-                }
-            }
-            if let Some(path) = thumbnail_path {
-                if files::metadata(&self.root, path)?.is_none() {
+            if let Some(path) = file_path
+                && files::metadata(&self.root, path)?.is_none()
+            {
+                if scope == "room" {
                     let connection = self.connection.lock().map_err(|error| error.to_string())?;
                     connection
                         .execute(
-                            "UPDATE image_cache SET thumbnail_path = NULL
+                            "UPDATE image_cache SET file_path = NULL, byte_size = 0
                              WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
                             params![scope, scope_key, id],
                         )
                         .map_err(|error| error.to_string())?;
-                    result.cleared_missing_thumbnails += 1;
+                } else {
+                    self.delete(scope, scope_key, id)?;
+                    result.removed_missing_records += 1;
+                    continue;
                 }
+            }
+            if let Some(path) = thumbnail_path
+                && files::metadata(&self.root, path)?.is_none()
+            {
+                let connection = self.connection.lock().map_err(|error| error.to_string())?;
+                connection
+                    .execute(
+                        "UPDATE image_cache SET thumbnail_path = NULL
+                         WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
+                        params![scope, scope_key, id],
+                    )
+                    .map_err(|error| error.to_string())?;
+                result.cleared_missing_thumbnails += 1;
             }
         }
 
@@ -995,10 +994,12 @@ mod tests {
         assert_eq!(store.usage().expect("usage").total_bytes, 3);
 
         store.delete("compressed", "", "image-1").expect("delete");
-        assert!(store
-            .get("compressed", "", "image-1")
-            .expect("get")
-            .is_none());
+        assert!(
+            store
+                .get("compressed", "", "image-1")
+                .expect("get")
+                .is_none()
+        );
         fs::remove_dir_all(root).expect("remove test storage");
     }
 
@@ -1043,9 +1044,11 @@ mod tests {
         store
             .delete_variant("room", "workspace", "image", "thumbnail")
             .expect("delete thumbnail");
-        assert!(store
-            .read("room", "workspace", "image", "thumbnail")
-            .is_err());
+        assert!(
+            store
+                .read("room", "workspace", "image", "thumbnail")
+                .is_err()
+        );
         assert_eq!(
             store.read("room", "workspace", "image", "original"),
             Ok(vec![1, 2, 3])
@@ -1054,13 +1057,17 @@ mod tests {
         store
             .delete_variant("room", "workspace", "image", "original")
             .expect("delete source");
-        assert!(store
-            .read("room", "workspace", "image", "original")
-            .is_err());
-        assert!(store
-            .get("room", "workspace", "image")
-            .expect("get metadata")
-            .is_some());
+        assert!(
+            store
+                .read("room", "workspace", "image", "original")
+                .is_err()
+        );
+        assert!(
+            store
+                .get("room", "workspace", "image")
+                .expect("get metadata")
+                .is_some()
+        );
         fs::remove_dir_all(root).expect("remove test storage");
     }
 
@@ -1167,14 +1174,18 @@ mod tests {
             .expect("prune cache");
         assert_eq!(result.removed_records, 1);
         assert_eq!(result.removed_thumbnails, 1);
-        assert!(store
-            .get("compressed", "", "asset")
-            .expect("get asset")
-            .is_some());
-        assert!(store
-            .get("room", "room", "room-image")
-            .expect("get room image")
-            .is_some());
+        assert!(
+            store
+                .get("compressed", "", "asset")
+                .expect("get asset")
+                .is_some()
+        );
+        assert!(
+            store
+                .get("room", "room", "room-image")
+                .expect("get room image")
+                .is_some()
+        );
         fs::remove_dir_all(root).expect("remove test storage");
     }
 

@@ -22,7 +22,7 @@ pub fn encode_jpeg_from_rgb_image_with_subsampling(
 ) -> Result<Vec<u8>, JsValue> {
     let (width, height) = rgb_img.dimensions();
     let raw_pixels = rgb_img.as_raw();
-    let subsampling = source_subsampling.unwrap_or_else(|| {
+    let subsampling = source_subsampling.unwrap_or({
         if quality >= 96 {
             Subsampling::S444
         } else if quality >= 90 {

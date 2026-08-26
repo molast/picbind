@@ -29,7 +29,7 @@ fn validate_rgba(rgba: &[u8], width: usize, height: usize) -> Result<(), JsValue
 
 fn composite_rgb(rgba: &[u8], background: u8) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         let alpha = pixel[3] as u16;
         let inverse = 255 - alpha;
         for &channel in &pixel[..3] {
@@ -41,7 +41,7 @@ fn composite_rgb(rgba: &[u8], background: u8) -> Vec<u8> {
 }
 
 fn contains_transparency(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4).any(|pixel| pixel[3] != 255)
+    rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255)
 }
 
 #[wasm_bindgen]

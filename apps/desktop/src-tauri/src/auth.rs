@@ -1,9 +1,9 @@
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    time::{timeout, Duration},
+    time::{Duration, timeout},
 };
 
 const DEFAULT_API_BASE: &str = "https://api.picbind.com/api";

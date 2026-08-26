@@ -30,7 +30,7 @@ pub fn md5_hex(input: &[u8]) -> String {
     padded.extend_from_slice(&bit_len.to_le_bytes());
 
     let mut state = [0x67452301_u32, 0xefcdab89, 0x98badcfe, 0x10325476];
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         let mut words = [0_u32; 16];
         for (index, word) in words.iter_mut().enumerate() {
             let offset = index * 4;

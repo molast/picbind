@@ -78,6 +78,7 @@ export interface InitOutput {
     readonly calculate_image_quality_score: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compare_avif_candidate_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compare_avif_candidate_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compare_image_quality_for_guardrails: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compress_image: (a: number, b: number, c: number) => [number, number, number];
     readonly compress_image_to_format: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
@@ -104,7 +105,6 @@ export interface InitOutput {
     readonly predict_compression_rgba: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly read_image_metadata: (a: number, b: number) => [number, number, number];
     readonly resize_image_to_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly compare_image_quality: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

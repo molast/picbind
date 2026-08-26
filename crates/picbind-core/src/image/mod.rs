@@ -78,6 +78,9 @@ pub struct WorkspaceImage {
 }
 
 impl WorkspaceImage {
+    // The constructor mirrors the persisted image record; keeping the fields explicit
+    // avoids a second input type that can drift from the stored model.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         image_id: String,
         workspace_id: String,
