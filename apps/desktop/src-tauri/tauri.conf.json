@@ -32,6 +32,10 @@
     "macOS": {
       "dmg": {
         "background": "dmg-background.png",
+        "windowPosition": {
+          "x": 420,
+          "y": 240
+        },
         "windowSize": {
           "width": 660,
           "height": 400
