@@ -1,5 +1,7 @@
 "use client";
 
+import type { AdoptTemporaryImageInput } from "@picbind/shared";
+
 export type ImageStorageScope = "compressed" | "queued" | "room" | "messaging";
 export type ImageStorageVariant = "original" | "output" | "thumbnail";
 
@@ -44,6 +46,10 @@ export type ImageCachePruneResult = {
 };
 
 export interface ImageStorageRepository {
+  adoptTemporary?<T extends Record<string, unknown>>(
+    input: AdoptTemporaryImageInput,
+  ): Promise<ImageStorageRecord<T>>;
+
   put<T extends Record<string, unknown>>(
     input: PutImageStorageInput<T>,
   ): Promise<ImageStorageRecord<T>>;

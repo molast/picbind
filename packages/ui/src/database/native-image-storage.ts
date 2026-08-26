@@ -1,6 +1,7 @@
 "use client";
 
 import { invoke } from "@tauri-apps/api/core";
+import type { AdoptTemporaryImageInput } from "@picbind/shared";
 import type {
   ImageStorageRecord as NativeImageRecord,
   ImageStorageScope as NativeImageScope,
@@ -48,6 +49,12 @@ export async function putNativeImage<T extends Record<string, unknown>>(
   frame.set(data, 4 + metadata.byteLength);
   frame.set(thumbnail, 4 + metadata.byteLength + data.byteLength);
   return invoke<NativeImageRecord<T>>("storage_put_image", frame);
+}
+
+export function adoptNativeTemporaryImage<T extends Record<string, unknown>>(
+  input: AdoptTemporaryImageInput,
+) {
+  return invoke<NativeImageRecord<T>>("storage_adopt_temporary", { input });
 }
 
 export function getNativeImage<T extends Record<string, unknown>>(

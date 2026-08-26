@@ -1,8 +1,8 @@
 use image::GenericImageView;
 
 use crate::{
-    NativeImageError, NativeImageFormat, NativeImageOutput, NativeParameterDocument, decode,
-    formats, replay_parameters,
+    NativeImageError, NativeImageFormat, NativeImageOutput, NativeParameterDocument,
+    NativeTaskControl, decode, formats, replay_parameters, replay_parameters_with_control,
 };
 
 use super::metadata_for;
@@ -14,6 +14,45 @@ pub fn materialize(
     quality: u8,
     allow_alpha_loss: bool,
 ) -> Result<NativeImageOutput, NativeImageError> {
+    materialize_inner(
+        input,
+        document,
+        output_format,
+        quality,
+        allow_alpha_loss,
+        None,
+    )
+}
+
+pub fn materialize_with_control(
+    input: &[u8],
+    document: &NativeParameterDocument,
+    output_format: Option<NativeImageFormat>,
+    quality: u8,
+    allow_alpha_loss: bool,
+    control: &NativeTaskControl,
+) -> Result<NativeImageOutput, NativeImageError> {
+    materialize_inner(
+        input,
+        document,
+        output_format,
+        quality,
+        allow_alpha_loss,
+        Some(control),
+    )
+}
+
+fn materialize_inner(
+    input: &[u8],
+    document: &NativeParameterDocument,
+    output_format: Option<NativeImageFormat>,
+    quality: u8,
+    allow_alpha_loss: bool,
+    control: Option<&NativeTaskControl>,
+) -> Result<NativeImageOutput, NativeImageError> {
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     if !(1..=100).contains(&quality) {
         return Err(NativeImageError::InvalidParameters(
             "materialize quality must be between 1 and 100".into(),
@@ -33,11 +72,17 @@ pub fn materialize(
             returned_original: true,
         });
     }
-    let rendered = replay_parameters(input, document)?;
+    let rendered = match control {
+        Some(control) => replay_parameters_with_control(input, document, control)?,
+        None => replay_parameters(input, document)?,
+    };
     let image = rendered.into_image();
     let (width, height) = image.dimensions();
     let has_alpha = image.to_rgba8().pixels().any(|pixel| pixel[3] < 255);
     let bytes = formats::encode(&image, format, quality, allow_alpha_loss)?;
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     Ok(NativeImageOutput {
         metadata: metadata_for(width, height, format, bytes.len(), has_alpha),
         bytes,

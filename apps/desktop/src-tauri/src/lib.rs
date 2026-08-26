@@ -15,6 +15,11 @@ pub fn run() {
             let store =
                 storage::NativeImageStore::open(data_dir.clone()).map_err(std::io::Error::other)?;
             app.manage(store);
+            app.manage(image_processing::tasks::NativeImageTasks::default());
+            let temporary =
+                image_processing::temporary::NativeTemporaryStore::open(data_dir.clone())
+                    .map_err(std::io::Error::other)?;
+            app.manage(temporary);
 
             // iLink getupdates is a long poll and must not inherit the shorter
             // timeout used by the regular API client.
@@ -45,7 +50,10 @@ pub fn run() {
             auth::desktop_auth_avatar_data_url,
             download::commands::save_download,
             image_processing::commands::image_processing_execute,
+            image_processing::commands::image_processing_cancel,
+            image_processing::commands::image_processing_release_temporary,
             storage::commands::storage_put_image,
+            storage::commands::storage_adopt_temporary,
             storage::commands::storage_get_image,
             storage::commands::storage_list_images,
             storage::commands::storage_read_image,

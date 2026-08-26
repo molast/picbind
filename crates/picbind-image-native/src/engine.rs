@@ -1,5 +1,6 @@
 use crate::{
-    NativeEncodeOptions, NativeImageError, NativeImageMetadata, NativeImageOutput, decode, formats,
+    NativeEncodeOptions, NativeImageError, NativeImageMetadata, NativeImageOutput,
+    NativeTaskControl, decode, formats,
 };
 
 pub fn inspect(input: &[u8]) -> Result<NativeImageMetadata, NativeImageError> {
@@ -11,28 +12,84 @@ pub fn encode(
     input: &[u8],
     options: &NativeEncodeOptions,
 ) -> Result<NativeImageOutput, NativeImageError> {
-    encode_with(input, options, Target::Fixed, Strategy::Interactive)
+    encode_with(input, options, Target::Fixed, Strategy::Interactive, None)
+}
+
+pub fn encode_with_control(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+    control: &NativeTaskControl,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(
+        input,
+        options,
+        Target::Fixed,
+        Strategy::Interactive,
+        Some(control),
+    )
 }
 
 pub fn encode_auto(
     input: &[u8],
     options: &NativeEncodeOptions,
 ) -> Result<NativeImageOutput, NativeImageError> {
-    encode_with(input, options, Target::Auto, Strategy::Interactive)
+    encode_with(input, options, Target::Auto, Strategy::Interactive, None)
+}
+
+pub fn encode_auto_with_control(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+    control: &NativeTaskControl,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(
+        input,
+        options,
+        Target::Auto,
+        Strategy::Interactive,
+        Some(control),
+    )
 }
 
 pub fn encode_planned(
     input: &[u8],
     options: &NativeEncodeOptions,
 ) -> Result<NativeImageOutput, NativeImageError> {
-    encode_with(input, options, Target::Fixed, Strategy::Planner)
+    encode_with(input, options, Target::Fixed, Strategy::Planner, None)
+}
+
+pub fn encode_planned_with_control(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+    control: &NativeTaskControl,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(
+        input,
+        options,
+        Target::Fixed,
+        Strategy::Planner,
+        Some(control),
+    )
 }
 
 pub fn encode_auto_planned(
     input: &[u8],
     options: &NativeEncodeOptions,
 ) -> Result<NativeImageOutput, NativeImageError> {
-    encode_with(input, options, Target::Auto, Strategy::Planner)
+    encode_with(input, options, Target::Auto, Strategy::Planner, None)
+}
+
+pub fn encode_auto_planned_with_control(
+    input: &[u8],
+    options: &NativeEncodeOptions,
+    control: &NativeTaskControl,
+) -> Result<NativeImageOutput, NativeImageError> {
+    encode_with(
+        input,
+        options,
+        Target::Auto,
+        Strategy::Planner,
+        Some(control),
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -52,14 +109,18 @@ fn encode_with(
     options: &NativeEncodeOptions,
     target: Target,
     strategy: Strategy,
+    control: Option<&NativeTaskControl>,
 ) -> Result<NativeImageOutput, NativeImageError> {
+    checkpoint(control)?;
     if matches!(strategy, Strategy::Planner) && options.dimensions.is_some() {
         return Err(NativeImageError::InvalidDimensions(
             "planner compression does not accept resize dimensions".into(),
         ));
     }
     let (source_format, source_image) = decode::decode(input)?;
+    checkpoint(control)?;
     let (image, dimensions_changed) = crate::resize::apply(source_image, options.dimensions)?;
+    checkpoint(control)?;
     let mut selected = options.clone();
     if matches!(target, Target::Auto) {
         selected.format = crate::planner::predict_format(&image);
@@ -77,8 +138,9 @@ fn encode_with(
             selected.effective_quality(),
             selected.allow_alpha_loss,
         ),
-        Strategy::Planner => crate::planner::encode_best_candidate(&image, &selected),
+        Strategy::Planner => crate::planner::encode_best_candidate(&image, &selected, control),
     };
+    checkpoint(control)?;
     let encoded = match encoded {
         Ok(candidate) => candidate,
         Err(_)
@@ -104,6 +166,10 @@ fn encode_with(
         metadata,
         returned_original: false,
     })
+}
+
+fn checkpoint(control: Option<&NativeTaskControl>) -> Result<(), NativeImageError> {
+    control.map_or(Ok(()), NativeTaskControl::checkpoint)
 }
 
 fn original_output(

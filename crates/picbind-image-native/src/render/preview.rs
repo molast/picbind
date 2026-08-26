@@ -3,7 +3,8 @@ use serde_json::Value;
 
 use crate::{
     MAX_DIMENSION, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat,
-    NativeOperationType, NativeParameterDocument, decode, formats, parameters::replay_image,
+    NativeOperationType, NativeParameterDocument, NativeTaskControl, decode, formats,
+    parameters::{replay_image, replay_image_with_control},
 };
 
 use super::NativePreviewOutput;
@@ -14,6 +15,29 @@ pub fn render_preview(
     bounds: NativeImageDimensions,
     quality: u8,
 ) -> Result<NativePreviewOutput, NativeImageError> {
+    render_preview_inner(input, document, bounds, quality, None)
+}
+
+pub fn render_preview_with_control(
+    input: &[u8],
+    document: &NativeParameterDocument,
+    bounds: NativeImageDimensions,
+    quality: u8,
+    control: &NativeTaskControl,
+) -> Result<NativePreviewOutput, NativeImageError> {
+    render_preview_inner(input, document, bounds, quality, Some(control))
+}
+
+fn render_preview_inner(
+    input: &[u8],
+    document: &NativeParameterDocument,
+    bounds: NativeImageDimensions,
+    quality: u8,
+    control: Option<&NativeTaskControl>,
+) -> Result<NativePreviewOutput, NativeImageError> {
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     validate_bounds(bounds)?;
     if !(1..=100).contains(&quality) {
         return Err(NativeImageError::InvalidParameters(
@@ -21,6 +45,9 @@ pub fn render_preview(
         ));
     }
     let (source_format, source) = decode::decode(input)?;
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     let (logical_width, logical_height) = final_dimensions(source.dimensions(), document)?;
     let scale = (f64::from(bounds.width) / f64::from(logical_width))
         .min(f64::from(bounds.height) / f64::from(logical_height))
@@ -37,7 +64,13 @@ pub fn render_preview(
         )
     };
     let document = scaled_document(document, scale)?;
-    let mut preview = replay_image(source, source_format, &document)?.into_image();
+    let mut preview = match control {
+        Some(control) => {
+            replay_image_with_control(source, source_format, &document, Some(control))?
+        }
+        None => replay_image(source, source_format, &document)?,
+    }
+    .into_image();
     let preview_width = (f64::from(logical_width) * scale).round().max(1.0) as u32;
     let preview_height = (f64::from(logical_height) * scale).round().max(1.0) as u32;
     if preview.width() != preview_width || preview.height() != preview_height {
@@ -48,6 +81,9 @@ pub fn render_preview(
         );
     }
     let bytes = formats::encode(&preview, NativeImageFormat::WebP, quality, false)?;
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     Ok(NativePreviewOutput {
         bytes,
         width: preview_width,

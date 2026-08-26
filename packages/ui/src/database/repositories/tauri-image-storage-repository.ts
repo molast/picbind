@@ -1,6 +1,9 @@
 "use client";
 
+import type { AdoptTemporaryImageInput } from "@picbind/shared";
+
 import {
+  adoptNativeTemporaryImage,
   clearNativeImages,
   deleteNativeImage,
   deleteNativeImageVariant,
@@ -18,6 +21,10 @@ import type {
 } from "./image-storage-repository";
 
 export const tauriImageStorageRepository: ImageStorageRepository = {
+  adoptTemporary<T extends Record<string, unknown>>(input: AdoptTemporaryImageInput) {
+    return adoptNativeTemporaryImage<T>(input);
+  },
+
   put<T extends Record<string, unknown>>(input: PutImageStorageInput<T>) {
     return putNativeImage(input);
   },

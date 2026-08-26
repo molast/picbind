@@ -7,7 +7,7 @@ mod validation;
 
 use image::DynamicImage;
 
-use crate::{NativeImageError, decode};
+use crate::{NativeImageError, NativeTaskControl, decode};
 
 pub use model::{
     NativeImageOperation, NativeOperationType, NativeParameterDocument, NativeRenderedImage,
@@ -18,17 +18,43 @@ pub fn replay_parameters(
     document: &NativeParameterDocument,
 ) -> Result<NativeRenderedImage, NativeImageError> {
     let (source_format, image) = decode::decode(input)?;
-    replay_image(image, source_format, document)
+    replay_image_with_control(image, source_format, document, None)
+}
+
+pub fn replay_parameters_with_control(
+    input: &[u8],
+    document: &NativeParameterDocument,
+    control: &NativeTaskControl,
+) -> Result<NativeRenderedImage, NativeImageError> {
+    control.checkpoint()?;
+    let (source_format, image) = decode::decode(input)?;
+    control.checkpoint()?;
+    replay_image_with_control(image, source_format, document, Some(control))
 }
 
 pub(crate) fn replay_image(
-    mut image: DynamicImage,
+    image: DynamicImage,
     source_format: crate::NativeImageFormat,
     document: &NativeParameterDocument,
 ) -> Result<NativeRenderedImage, NativeImageError> {
+    replay_image_with_control(image, source_format, document, None)
+}
+
+pub(crate) fn replay_image_with_control(
+    mut image: DynamicImage,
+    source_format: crate::NativeImageFormat,
+    document: &NativeParameterDocument,
+    control: Option<&NativeTaskControl>,
+) -> Result<NativeRenderedImage, NativeImageError> {
     validation::validate_document(document)?;
     for operation in &document.operations {
+        if let Some(control) = control {
+            control.checkpoint()?;
+        }
         image = apply_operation(image, operation)?;
+    }
+    if let Some(control) = control {
+        control.checkpoint()?;
     }
     Ok(NativeRenderedImage {
         image,

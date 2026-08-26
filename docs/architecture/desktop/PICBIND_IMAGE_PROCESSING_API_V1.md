@@ -696,23 +696,18 @@ image_processing_cancel
 image_processing_release_temporary
 ```
 
-`image_processing_execute` 使用带版本号的 tagged request：
+`image_processing_execute` 使用带版本号的 tagged request。当前二进制帧的 JSON metadata
+将版本、任务身份和 V1 请求字段放在同一对象中，后面紧跟一个或两个长度已声明的原始图片
+字节区：
 
 ```rust
-struct VersionedImageProcessingRequest {
+struct VersionedImageProcessingRequestV1 {
     api_version: u8,
     request_id: String,
-    request: ImageProcessingRequestV1,
-}
-
-enum ImageProcessingRequestV1 {
-    Inspect(InspectRequest),
-    RenderPreview(RenderPreviewRequest),
-    Materialize(MaterializeRequest),
-    Compress(CompressRequest),
-    CompareQuality(CompareImageQualityRequest),
-    Convert(ConvertRequest),
-    CreateShareAssets(CreateShareAssetsRequest),
+    operation: ImageProcessingOperationV1,
+    source: NativeSource,
+    destination: MemoryOrTemporary,
+    // 对应 operation 的结构化 options/document/container/assessed 字段
 }
 ```
 
@@ -745,6 +740,13 @@ export type AdoptTemporaryImageInput = {
 接受临时 token 和结构化 target，不接受源路径或目标路径。接管成功后返回带新 `revision`
 的 `ImageAssetReference`，并使临时 token 失效；失败时临时产物保持可释放状态，不能产生
 只有数据库记录或只有文件的半成品。
+
+当前 Desktop 通过 `storage_adopt_temporary` 实现该交接。处理输出先写入应用数据目录内的
+`temp/image-processing`，执行 `write_all + sync_all` 后在同目录 rename；对 WebView 只返回
+UUID token、MIME、大小和过期时间。token 只保存在当前应用实例的内存表中，默认 15 分钟
+过期，应用启动时删除上个实例遗留的处理临时文件。显式 release 可重复调用。接管时先从表
+中独占取出 token，Storage 写入成功后使其永久失效；Storage 写入失败则把尚未过期的 token
+放回表中，供调用方重试或释放。
 
 ## 15. Rust 模块边界
 
@@ -934,7 +936,7 @@ Planner 和参数重放仍待提取。
 
 ### 阶段 5：实现 Desktop Native
 
-当前状态：部分完成并已按 capability 启用：
+当前状态：5.1 至 5.8 已完成并按 capability 启用：
 
 - Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
   16 条路径。
@@ -949,12 +951,15 @@ Planner 和参数重放仍待提取。
   感知质量护栏和最小有效候选选择。纯 Rust 参数队列重放、受限 WebP 预览、全尺寸物化、
   BlurHash/主色 placeholder、独立 WebP thumbnail 和完整质量对比均已通过二进制 Tauri IPC
   接入 Desktop Adapter；双图质量比较使用两个长度分隔的原始字节区，不使用 Base64。
-- Native 编码当前不支持运行中的协作式取消、临时 artifact 和进度事件流；capabilities 不会
-  声明这些能力。
-
-- 增加 Tauri 图片处理模块、受控 source resolver、任务表和取消命令。
-- 优先实现 metadata、参数预览、物化、JPEG / PNG，再补 WebP / AVIF。
-- 未实现能力通过 capabilities 明确报告，不能返回伪成功。
+- Native request 使用 API V1 与唯一 `requestId`；未知版本和重复活跃 ID 会被拒绝。Desktop
+  Adapter 在 invoke 前订阅按 ID 过滤的进度事件，并把 `AbortSignal` 映射到取消命令。
+- Rust 任务表在完成、失败、取消或 panic 展开时通过 registration 生命周期移除任务。取消
+  检查点覆盖来源解析、解码/缩放边界、Planner 候选之间、参数操作之间、派生资源步骤、质量
+  分析主阶段、编码前后、临时文件持久化前后和结果交付前后；第三方编码器内部不可被强制
+  中断，但取消后的结果不会继续持久化或交付。
+- `compress()`、`convert()` 和 `materialize()` 支持 `temporary` destination；临时文件使用
+  不透明、实例内、15 分钟过期的 token，支持幂等释放和由 Storage Adapter 接管。预览、
+  thumbnail 与质量结果仍走有界内存响应。
 
 #### 阶段 5 Native 子任务
 
@@ -967,14 +972,15 @@ Planner 和参数重放仍待提取。
 | 5.5 参数重放 | 已完成 | crop、rotate、resize、完整 color、几何 draw、内嵌 Noto Sans 文字和固定 Twemoji 彩色 Emoji 按序作用于同一源图 |
 | 5.6 Preview / Materialize | 已完成 | 受限 WebP 预览与全尺寸物化分离；空文档同格式可返回原文件，非空文档只在最终输出编码一次 |
 | 5.7 派生资源与质量分析 | 已完成 | 主色/BlurHash placeholder、独立 WebP thumbnail、完整质量与特征指标；内存结果随命令返回释放中间缓冲 |
-| 5.8 Native 任务治理 | 待实现 | 任务表、协作式取消、进度事件、临时 artifact 和过期清理 |
+| 5.8 Native 任务治理 | 已完成 | 任务表、协作式取消、按 requestId 过滤的进度事件、临时 artifact、过期/启动清理及 Storage 接管 |
 | 5.9 Adapter 一致性与实机验证 | 待实现 | 共享契约、性能、内存、取消和 macOS 双架构验证 |
 
 ### 阶段 6：一致性验证和切换
 
 当前状态：四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
-参数重放、预览/物化、协作派生资源、质量分析、Alpha 拒绝和同格式不增大已经通过 Rust 与
-TypeScript 检查；取消、临时 artifact、性能/内存和 macOS 双架构实机验证仍属于 5.8/5.9。
+参数重放、预览/物化、协作派生资源、质量分析、Alpha 拒绝、同格式不增大、任务取消和临时
+artifact 生命周期已经通过 Rust 与 TypeScript 检查；性能/内存和 macOS 双架构实机验证仍
+属于 5.9。
 
 - 对 Web 和 Desktop Adapter 运行同一套契约测试。
 - 对性能、内存、取消和异常清理做 Desktop 实机测试。

@@ -1,19 +1,32 @@
 use picbind_image_native::{
     NativeEncodeOptions, NativeImageDimensions, NativeImageError, NativeImageFormat,
-    NativeImageMetadata, NativeParameterDocument, compare_quality, create_share_assets, encode,
-    encode_auto, encode_auto_planned, encode_planned, inspect, materialize, render_preview,
+    NativeImageMetadata, NativeParameterDocument, NativeTaskControl, compare_quality_with_control,
+    create_share_assets_with_control, encode_auto_planned_with_control, encode_auto_with_control,
+    encode_planned_with_control, encode_with_control, inspect, materialize_with_control,
+    render_preview_with_control,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{
-    State,
+    AppHandle, Emitter, State,
     ipc::{InvokeBody, Request, Response},
 };
 
+use super::{
+    source_resolver::resolve_source,
+    tasks::NativeImageTasks,
+    temporary::{NativeTemporaryStore, TemporaryArtifactResponse},
+};
 use crate::storage::NativeImageStore;
+
+const IMAGE_PROCESSING_API_VERSION: u8 = 1;
+type NativeCommandFailure = (&'static str, String);
+type DecodedNativeRequest = (NativeProcessRequest, Vec<u8>, Vec<u8>);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeProcessRequest {
+    api_version: u8,
+    request_id: String,
     operation: NativeOperation,
     source: NativeSource,
     #[serde(default)]
@@ -31,6 +44,16 @@ struct NativeProcessRequest {
     inline_length: usize,
     #[serde(default)]
     assessed_inline_length: usize,
+    #[serde(default)]
+    destination: NativeDestination,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum NativeDestination {
+    #[default]
+    Memory,
+    Temporary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,7 +69,7 @@ enum NativeOperation {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-enum NativeSource {
+pub(super) enum NativeSource {
     Inline,
     Stored {
         scope: String,
@@ -100,6 +123,8 @@ struct NativeProcessResponse {
     returned_original: bool,
     data_length: usize,
     implementation: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temporary: Option<TemporaryArtifactResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,34 +175,101 @@ struct NativeCommandError {
     message: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeProgressEvent {
+    request_id: String,
+    stage: &'static str,
+    completed: u8,
+    total: u8,
+}
+
 #[tauri::command]
 pub async fn image_processing_execute(
-    state: State<'_, NativeImageStore>,
+    store: State<'_, NativeImageStore>,
+    tasks: State<'_, NativeImageTasks>,
+    temporary: State<'_, NativeTemporaryStore>,
+    app: AppHandle,
     request: Request<'_>,
 ) -> Result<Response, String> {
     let (request, inline, assessed_inline) =
         decode_request(request.body()).map_err(command_error)?;
-    let store = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || execute(store, request, inline, assessed_inline))
-        .await
-        .map_err(|error| command_error(("processingFailed", error.to_string())))?
-        .map(Response::new)
-        .map_err(command_error)
+    let registration = tasks
+        .start(request.request_id.clone())
+        .map_err(|error| command_error(("invalidRequest", error)))?;
+    let store = store.inner().clone();
+    let temporary = temporary.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        execute(
+            store,
+            temporary,
+            &app,
+            &registration,
+            request,
+            inline,
+            assessed_inline,
+        )
+    })
+    .await
+    .map_err(|error| command_error(("processingFailed", error.to_string())))?
+    .map(Response::new)
+    .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn image_processing_cancel(
+    tasks: State<'_, NativeImageTasks>,
+    request_id: String,
+) -> Result<bool, String> {
+    tasks
+        .cancel(&request_id)
+        .map_err(|error| command_error(("invalidRequest", error)))
+}
+
+#[tauri::command]
+pub fn image_processing_release_temporary(
+    temporary: State<'_, NativeTemporaryStore>,
+    token: String,
+) -> Result<(), String> {
+    temporary
+        .release(&token)
+        .map_err(|error| command_error(("temporaryUnavailable", error)))
 }
 
 fn execute(
     store: NativeImageStore,
+    temporary: NativeTemporaryStore,
+    app: &AppHandle,
+    registration: &super::tasks::NativeTaskRegistration,
     request: NativeProcessRequest,
     inline: Vec<u8>,
     assessed_inline: Vec<u8>,
 ) -> Result<Vec<u8>, (&'static str, String)> {
+    let control = registration.control();
+    checkpoint(control)?;
+    emit_progress(app, &request.request_id, "resolvingSource", 0);
     let source = resolve_source(&store, &request.source, inline)?;
+    checkpoint(control)?;
+    emit_progress(app, &request.request_id, "resolvingSource", 1);
     match request.operation {
         NativeOperation::Inspect => {
+            emit_progress(app, &request.request_id, "decoding", 0);
             let metadata = inspect(&source).map_err(|error| ("decodeFailed", error.to_string()))?;
-            encode_response(metadata, false, Vec::new())
+            checkpoint(control)?;
+            emit_progress(app, &request.request_id, "decoding", 1);
+            let response = encode_response(
+                metadata,
+                false,
+                Vec::new(),
+                NativeDestination::Memory,
+                &temporary,
+                control,
+            )?;
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
         NativeOperation::Encode => {
+            emit_progress(app, &request.request_id, "encoding", 0);
             let options = request.options.ok_or_else(|| {
                 (
                     "invalidParameters",
@@ -218,15 +310,34 @@ fn execute(
                 }
             };
             let output = match (automatic, planned) {
-                (true, true) => encode_auto_planned(&source, &encode_options),
-                (true, false) => encode_auto(&source, &encode_options),
-                (false, true) => encode_planned(&source, &encode_options),
-                (false, false) => encode(&source, &encode_options),
+                (true, true) => encode_auto_planned_with_control(&source, &encode_options, control),
+                (true, false) => encode_auto_with_control(&source, &encode_options, control),
+                (false, true) => encode_planned_with_control(&source, &encode_options, control),
+                (false, false) => encode_with_control(&source, &encode_options, control),
             }
             .map_err(native_error)?;
-            encode_response(output.metadata, output.returned_original, output.bytes)
+            emit_progress(app, &request.request_id, "encoding", 1);
+            checkpoint(control)?;
+            if request.destination == NativeDestination::Temporary {
+                emit_progress(app, &request.request_id, "persisting", 0);
+            }
+            let response = encode_response(
+                output.metadata,
+                output.returned_original,
+                output.bytes,
+                request.destination,
+                &temporary,
+                control,
+            )?;
+            checkpoint(control)?;
+            if request.destination == NativeDestination::Temporary {
+                emit_progress(app, &request.request_id, "persisting", 1);
+            }
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
         NativeOperation::RenderPreview => {
+            emit_progress(app, &request.request_id, "rendering", 0);
             let document = required_document(request.document)?;
             let options = request.preview.ok_or_else(|| {
                 (
@@ -234,7 +345,7 @@ fn execute(
                     "Preview options are required".to_string(),
                 )
             })?;
-            let output = render_preview(
+            let output = render_preview_with_control(
                 &source,
                 &document,
                 NativeImageDimensions {
@@ -242,9 +353,10 @@ fn execute(
                     height: options.max_height,
                 },
                 options.quality,
+                control,
             )
             .map_err(native_error)?;
-            encode_payload_response(
+            let response = encode_payload_response(
                 &NativePreviewResponse {
                     width: output.width,
                     height: output.height,
@@ -252,9 +364,13 @@ fn execute(
                     implementation: "picbind-image-native/1",
                 },
                 output.bytes,
-            )
+            )?;
+            emit_progress(app, &request.request_id, "rendering", 1);
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
         NativeOperation::Materialize => {
+            emit_progress(app, &request.request_id, "rendering", 0);
             let document = required_document(request.document)?;
             let options = request.materialize.ok_or_else(|| {
                 (
@@ -267,33 +383,54 @@ fn execute(
             } else {
                 Some(NativeImageFormat::parse(&options.format).map_err(native_error)?)
             };
-            let output = materialize(
+            let output = materialize_with_control(
                 &source,
                 &document,
                 format,
                 options.quality,
                 options.allow_alpha_loss,
+                control,
             )
             .map_err(native_error)?;
-            encode_response(output.metadata, output.returned_original, output.bytes)
+            emit_progress(app, &request.request_id, "rendering", 1);
+            if request.destination == NativeDestination::Temporary {
+                emit_progress(app, &request.request_id, "persisting", 0);
+            }
+            let response = encode_response(
+                output.metadata,
+                output.returned_original,
+                output.bytes,
+                request.destination,
+                &temporary,
+                control,
+            )?;
+            checkpoint(control)?;
+            if request.destination == NativeDestination::Temporary {
+                emit_progress(app, &request.request_id, "persisting", 1);
+            }
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
         NativeOperation::CreateShareAssets => {
+            emit_progress(app, &request.request_id, "rendering", 0);
             let container = request.container.ok_or_else(|| {
                 (
                     "invalidParameters",
                     "Share asset container is required".to_string(),
                 )
             })?;
-            let assets = create_share_assets(
+            let assets = create_share_assets_with_control(
                 &source,
                 request.document.as_ref(),
                 NativeImageDimensions {
                     width: container.width,
                     height: container.height,
                 },
+                control,
             )
             .map_err(native_error)?;
-            encode_payload_response(
+            checkpoint(control)?;
+            let response = encode_payload_response(
                 &NativeShareAssetsResponse {
                     placeholder: assets.placeholder,
                     thumbnail_mime_type: "image/webp",
@@ -301,9 +438,13 @@ fn execute(
                     implementation: "picbind-image-native/1",
                 },
                 assets.thumbnail,
-            )
+            )?;
+            emit_progress(app, &request.request_id, "rendering", 1);
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
         NativeOperation::CompareQuality => {
+            emit_progress(app, &request.request_id, "analyzing", 0);
             let assessed = request.assessed.ok_or_else(|| {
                 (
                     "invalidParameters",
@@ -311,8 +452,11 @@ fn execute(
                 )
             })?;
             let assessed = resolve_source(&store, &assessed, assessed_inline)?;
-            let analysis = compare_quality(&source, &assessed).map_err(native_error)?;
-            encode_payload_response(
+            checkpoint(control)?;
+            let analysis =
+                compare_quality_with_control(&source, &assessed, control).map_err(native_error)?;
+            checkpoint(control)?;
+            let response = encode_payload_response(
                 &NativeQualityResponse {
                     comparison: analysis.comparison,
                     source_metrics: analysis.source_metrics,
@@ -321,9 +465,28 @@ fn execute(
                     implementation: "picbind-image-native/1",
                 },
                 Vec::new(),
-            )
+            )?;
+            emit_progress(app, &request.request_id, "analyzing", 1);
+            emit_progress(app, &request.request_id, "completed", 1);
+            Ok(response)
         }
     }
+}
+
+fn checkpoint(control: &NativeTaskControl) -> Result<(), (&'static str, String)> {
+    control.checkpoint().map_err(native_error)
+}
+
+fn emit_progress(app: &AppHandle, request_id: &str, stage: &'static str, completed: u8) {
+    let _ = app.emit(
+        "image-processing-progress",
+        NativeProgressEvent {
+            request_id: request_id.to_string(),
+            stage,
+            completed,
+            total: 1,
+        },
+    );
 }
 
 fn required_document(
@@ -340,6 +503,7 @@ fn required_document(
 fn native_error(error: NativeImageError) -> (&'static str, String) {
     let code = match error {
         NativeImageError::AlphaLossDenied => "alphaLossDenied",
+        NativeImageError::Cancelled => "cancelled",
         NativeImageError::InvalidDimensions(_) | NativeImageError::InvalidParameters(_) => {
             "invalidParameters"
         }
@@ -352,57 +516,7 @@ fn native_error(error: NativeImageError) -> (&'static str, String) {
     (code, error.to_string())
 }
 
-fn resolve_source(
-    store: &NativeImageStore,
-    source: &NativeSource,
-    inline: Vec<u8>,
-) -> Result<Vec<u8>, (&'static str, String)> {
-    match source {
-        NativeSource::Inline => {
-            if inline.is_empty() {
-                Err(("invalidSource", "Inline image data is empty".to_string()))
-            } else {
-                Ok(inline)
-            }
-        }
-        NativeSource::Stored {
-            scope,
-            scope_key,
-            id,
-            variant,
-            revision,
-        } => {
-            if !inline.is_empty() {
-                return Err((
-                    "invalidSource",
-                    "Stored sources cannot contain inline data".to_string(),
-                ));
-            }
-            let record = store
-                .get(scope, scope_key, id)
-                .map_err(|error| ("sourceUnavailable", error))?
-                .ok_or_else(|| {
-                    (
-                        "sourceUnavailable",
-                        "Stored image was not found".to_string(),
-                    )
-                })?;
-            if record.revision != *revision {
-                return Err((
-                    "sourceChanged",
-                    "Stored image revision has changed".to_string(),
-                ));
-            }
-            store
-                .read(scope, scope_key, id, variant)
-                .map_err(|error| ("sourceUnavailable", error))
-        }
-    }
-}
-
-fn decode_request(
-    body: &InvokeBody,
-) -> Result<(NativeProcessRequest, Vec<u8>, Vec<u8>), (&'static str, String)> {
+fn decode_request(body: &InvokeBody) -> Result<DecodedNativeRequest, NativeCommandFailure> {
     let InvokeBody::Raw(frame) = body else {
         return Err((
             "invalidParameters",
@@ -437,6 +551,15 @@ fn decode_request(
                 format!("Invalid native image metadata: {error}"),
             )
         })?;
+    if request.api_version != IMAGE_PROCESSING_API_VERSION {
+        return Err((
+            "invalidRequest",
+            format!(
+                "Unsupported image processing API version {}",
+                request.api_version
+            ),
+        ));
+    }
     let payload_length = request
         .inline_length
         .checked_add(request.assessed_inline_length)
@@ -462,7 +585,24 @@ fn encode_response(
     metadata: NativeImageMetadata,
     returned_original: bool,
     bytes: Vec<u8>,
+    destination: NativeDestination,
+    temporary_store: &NativeTemporaryStore,
+    control: &NativeTaskControl,
 ) -> Result<Vec<u8>, (&'static str, String)> {
+    let (payload, temporary) = match destination {
+        NativeDestination::Memory => (bytes, None),
+        NativeDestination::Temporary => {
+            checkpoint(control)?;
+            let artifact = temporary_store
+                .create(metadata.mime_type, &bytes)
+                .map_err(|error| ("persistenceFailed", error))?;
+            if let Err(error) = checkpoint(control) {
+                let _ = temporary_store.release(&artifact.token);
+                return Err(error);
+            }
+            (Vec::new(), Some(artifact))
+        }
+    };
     let response = NativeProcessResponse {
         metadata: NativeMetadataResponse {
             width: metadata.width,
@@ -480,10 +620,11 @@ fn encode_response(
             orientation_applied: false,
         },
         returned_original,
-        data_length: bytes.len(),
+        data_length: payload.len(),
         implementation: "picbind-image-native/1",
+        temporary,
     };
-    encode_payload_response(&response, bytes)
+    encode_payload_response(&response, payload)
 }
 
 fn encode_payload_response<T: Serialize>(
@@ -521,7 +662,7 @@ mod tests {
 
     #[test]
     fn rejects_mismatched_inline_lengths() {
-        let metadata = br#"{"operation":"inspect","source":{"kind":"inline"},"inlineLength":2}"#;
+        let metadata = br#"{"apiVersion":1,"requestId":"test-1","operation":"inspect","source":{"kind":"inline"},"inlineLength":2}"#;
         let mut frame = Vec::new();
         frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
         frame.extend_from_slice(metadata);
@@ -532,7 +673,7 @@ mod tests {
 
     #[test]
     fn splits_two_inline_sources_without_base64() {
-        let metadata = br#"{"operation":"compareQuality","source":{"kind":"inline"},"assessed":{"kind":"inline"},"inlineLength":2,"assessedInlineLength":3}"#;
+        let metadata = br#"{"apiVersion":1,"requestId":"test-2","operation":"compareQuality","source":{"kind":"inline"},"assessed":{"kind":"inline"},"inlineLength":2,"assessedInlineLength":3}"#;
         let mut frame = Vec::new();
         frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
         frame.extend_from_slice(metadata);
@@ -540,5 +681,16 @@ mod tests {
         let (_, source, assessed) = decode_request(&InvokeBody::Raw(frame)).unwrap();
         assert_eq!(source, [1, 2]);
         assert_eq!(assessed, [3, 4, 5]);
+    }
+
+    #[test]
+    fn rejects_unknown_api_versions() {
+        let metadata = br#"{"apiVersion":2,"requestId":"test-3","operation":"inspect","source":{"kind":"inline"},"inlineLength":1}"#;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+        frame.extend_from_slice(metadata);
+        frame.push(1);
+        let error = decode_request(&InvokeBody::Raw(frame)).unwrap_err();
+        assert_eq!(error.0, "invalidRequest");
     }
 }

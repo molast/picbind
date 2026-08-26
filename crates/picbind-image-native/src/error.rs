@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum NativeImageError {
+    Cancelled,
     InputTooLarge,
     InvalidImage(String),
     UnsupportedFormat(String),
@@ -15,6 +16,7 @@ pub enum NativeImageError {
 impl Display for NativeImageError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Cancelled => formatter.write_str("Image processing was cancelled"),
             Self::InputTooLarge => formatter.write_str("Image exceeds the native input limit"),
             Self::InvalidImage(message) => write!(formatter, "Invalid image: {message}"),
             Self::UnsupportedFormat(format) => write!(formatter, "Unsupported format: {format}"),

@@ -1,6 +1,8 @@
 use image::DynamicImage;
 
-use crate::{NativeEncodeOptions, NativeImageError, NativeImageFormat, decode, formats};
+use crate::{
+    NativeEncodeOptions, NativeImageError, NativeImageFormat, NativeTaskControl, decode, formats,
+};
 
 use super::{guardrails, quality};
 
@@ -11,9 +13,13 @@ struct PassingCandidate {
 pub(crate) fn encode_best_candidate(
     source: &DynamicImage,
     options: &NativeEncodeOptions,
+    control: Option<&NativeTaskControl>,
 ) -> Result<Vec<u8>, NativeImageError> {
     let qualities = candidate_qualities(options.format, options.effective_quality());
     let candidates = collect_candidates(&qualities, |quality| {
+        if let Some(control) = control {
+            control.checkpoint()?;
+        }
         let bytes = formats::encode(source, options.format, quality, options.allow_alpha_loss)?;
         let (decoded_format, decoded) = decode::decode(&bytes)?;
         if decoded_format != options.format {
@@ -27,6 +33,9 @@ pub(crate) fn encode_best_candidate(
         }
         Ok(Some(PassingCandidate { bytes }))
     });
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
     select_smallest(candidates)
         .map(|candidate| candidate.bytes)
         .ok_or_else(|| {

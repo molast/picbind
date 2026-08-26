@@ -69,7 +69,7 @@ React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压
 协作派生资源和完整质量对比也使用 Native Adapter；包含未支持操作或未覆盖字形的参数文档
 整体调用 Web Adapter，结果中的 `engine` 保持真实值。
 
-Web 路径的每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Native 路径由 Tauri `spawn_blocking` 执行，当前只支持调用前后取消结果交付，尚未支持编码器内部协作式取消。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，返回压缩页面后沿用原有队列和结果状态。
+Web 路径的每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Native 路径由 Tauri `spawn_blocking` 执行，并为每个 `requestId` 注册取消标记；来源解析、解码和缩放边界、Planner 候选、参数操作、派生资源、质量分析主阶段、编码、临时文件持久化及结果交付之间均检查该标记。第三方编码器内部不能被强制中断，但取消后的结果不会继续持久化或交付。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，返回压缩页面后沿用原有队列和结果状态。
 
 ## 3. PCE 分层
 
@@ -496,8 +496,11 @@ if source_format == target_format
 - Desktop Native resize 与后续编码位于同一个 `spawn_blocking` 任务；缩放后的 RGBA 缓冲在
   编码任务返回时释放，不通过 IPC 往返传输。
 - Native 参数预览、物化、placeholder、thumbnail 和质量分析同样位于单个 `spawn_blocking`
-  命令中；解码图、重放容器、缩放缓冲和指标向量在命令返回后释放。5.7 只返回 Blob 内存
-  artifact，不创建临时 token；临时 artifact 的接管、过期和显式释放属于 5.8。
+  命令中；解码图、重放容器、缩放缓冲和指标向量在命令返回后释放。预览与派生资源继续
+  返回有界内存结果；压缩、转换和物化选择 `temporary` destination 时，输出写入应用受控的
+  `temp/image-processing`，`sync_all` 后同目录 rename，并只向 WebView 返回实例内 UUID
+  token。token 默认 15 分钟过期，支持幂等释放；Storage 接管成功后 token 失效，接管失败
+  时仍可重试或释放，应用重启会清理上个实例遗留文件。
 
 AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回解码同时存在时内存峰值最高。
 
@@ -558,6 +561,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |
 | Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |
+| Desktop Native 取消控制 | `crates/picbind-image-native/src/task.rs` |
 | Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
 
 ## 16. Room Image Workspace 压缩入口

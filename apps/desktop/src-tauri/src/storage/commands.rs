@@ -2,6 +2,9 @@ use super::NativeImageStore;
 use super::database::{
     NativeImageRecord, PruneCachePolicy, PruneResult, PutImageRequest, RecoveryResult, StorageUsage,
 };
+use crate::image_processing::temporary::NativeTemporaryStore;
+use serde::Deserialize;
+use serde_json::Value;
 use tauri::{
     State,
     ipc::{InvokeBody, Request, Response},
@@ -17,6 +20,60 @@ pub async fn storage_put_image(
     tauri::async_runtime::spawn_blocking(move || store.put(request))
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptTemporaryRequest {
+    token: String,
+    target: AdoptTemporaryTarget,
+    metadata: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdoptTemporaryTarget {
+    scope: String,
+    scope_key: String,
+    id: String,
+    variant: String,
+}
+
+#[tauri::command]
+pub async fn storage_adopt_temporary(
+    store: State<'_, NativeImageStore>,
+    temporary: State<'_, NativeTemporaryStore>,
+    input: AdoptTemporaryRequest,
+) -> Result<NativeImageRecord, String> {
+    if !matches!(input.target.variant.as_str(), "original" | "output") {
+        return Err("Temporary images can only be adopted as original or output data".to_string());
+    }
+    let store = store.inner().clone();
+    let temporary = temporary.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let checkout = temporary.checkout(&input.token)?;
+        let bytes = checkout.read()?;
+        if bytes.len() != checkout.size_bytes() {
+            return Err("Temporary image size changed before adoption".to_string());
+        }
+        let record = store.put(PutImageRequest {
+            scope: input.target.scope,
+            scope_key: input.target.scope_key,
+            id: input.target.id,
+            metadata: input.metadata,
+            mime_type: checkout.mime_type().to_string(),
+            data_length: bytes.len(),
+            thumbnail_length: 0,
+            data: Some(bytes),
+            thumbnail: None,
+            thumbnail_mime_type: None,
+            created_at: chrono::Utc::now().timestamp_millis(),
+        })?;
+        let _ = checkout.complete();
+        Ok(record)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
