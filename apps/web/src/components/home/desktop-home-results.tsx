@@ -11,7 +11,7 @@ import {
 } from "react-icons/fi";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import SystemManager from "@/utils/System";
-import type { OutputFormat } from "@/utils/wasm";
+import type { OutputFormat } from "@/utils/compress-shared";
 import {
   formatDeltaPercent,
   formatSize,

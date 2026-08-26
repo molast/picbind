@@ -8,7 +8,7 @@ import { FiPlus } from "react-icons/fi";
 import { WorkspaceLanguageSwitcher, WorkspaceShareIdEntryDialog } from "@picbind/ui/source";
 import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
-import type { OutputFormat } from "@/utils/wasm";
+import type { OutputFormat } from "@/utils/compress-shared";
 import AccountControl from "@/components/auth/account-control";
 
 type HomeHeroProps = {

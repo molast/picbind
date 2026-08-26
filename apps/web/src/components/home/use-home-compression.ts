@@ -1,6 +1,8 @@
 ﻿"use client";
 
 import React from "react";
+import { useImageProcessing } from "@picbind/ui/source";
+import type { ImageQualityComparison } from "@picbind/shared";
 import {
   formatSize,
   getBestDoneVariant,
@@ -24,7 +26,7 @@ import {
   reportCompressedCount,
 } from "@/utils/compression-metrics";
 import { reportPageViewOnce } from "@/utils/page-view";
-import { buildZipEntryFileName } from "@/utils/compress-shared";
+import { buildZipEntryFileName, type OutputFormat } from "@/utils/compress-shared";
 import SystemManager from "@/utils/System";
 import {
   COMPRESSION_QUALITY_METRICS_ENABLED,
@@ -42,12 +44,6 @@ import {
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
 import { storeCompressedImage } from "@/utils/compressed-image-store";
-import { compressWithWasmWorker } from "@/utils/wasm-worker";
-import { analyzeCompressionInWorker } from "@/utils/analysis-worker";
-import {
-  type ImageQualityComparison,
-  type OutputFormat,
-} from "@/utils/wasm";
 
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -303,6 +299,7 @@ export function useHomeCompression({
   initialLang = "en",
   showCompressedCount = false,
 }: UseHomeCompressionOptions) {
+  const imageProcessing = useImageProcessing();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const itemsRef = React.useRef<HomeItem[]>([]);
   const displayedCountRef = React.useRef(0);
@@ -402,10 +399,10 @@ export function useHomeCompression({
         }
         const compressedResponse = await fetch(variant.outputUrl);
         const compressedBlob = await compressedResponse.blob();
-        const analysis = await analyzeCompressionInWorker(
-          sourceFile,
-          compressedBlob,
-        );
+        const analysis = await imageProcessing.compareQuality({
+          source: { kind: "blob", blob: sourceFile, name: sourceFile.name, mimeType: sourceFile.type },
+          assessed: { kind: "blob", blob: compressedBlob, name: variant.outputName || "compressed-image", mimeType: compressedBlob.type },
+        }, { requestId: `home-quality:${requestKey}` });
 
         if (isUnmountedRef.current) {
           return;
@@ -434,7 +431,7 @@ export function useHomeCompression({
             sourceFile,
             variant.format,
             analysis.sourceMetrics,
-            analysis.compressedMetrics,
+            analysis.assessedMetrics,
             analysis.comparison,
           );
         }
@@ -453,7 +450,7 @@ export function useHomeCompression({
         }
       }
     },
-    [homeShowQualityMetrics],
+    [homeShowQualityMetrics, imageProcessing],
   );
 
   React.useEffect(() => {
@@ -595,12 +592,15 @@ export function useHomeCompression({
         const sourceFile = new File([originBlob], COMPARE_IMAGE_SOURCE_NAME, {
           type: "image/png",
         });
-        const compressed = await compressWithWasmWorker(
-          sourceFile,
-          80,
-          "jpeg",
-          false,
-        );
+        const compressedResult = await imageProcessing.compress({
+          source: { kind: "blob", blob: sourceFile, name: sourceFile.name, mimeType: sourceFile.type },
+          options: { format: "jpeg", profile: "planner", quality: 80 },
+          destination: "memory",
+        }, { requestId: `home-compare:${crypto.randomUUID()}` });
+        if (compressedResult.artifact.kind !== "blob") {
+          throw new Error("Web compression did not return a Blob");
+        }
+        const compressed = { blob: compressedResult.artifact.blob };
 
         if (cancelled) {
           return;
@@ -632,7 +632,7 @@ export function useHomeCompression({
         compareCompressedUrlRef.current = null;
       }
     };
-  }, [compareSectionReady, homeShowCompareSection]);
+  }, [compareSectionReady, homeShowCompareSection, imageProcessing]);
 
   React.useEffect(() => {
     itemsRef.current = items;
@@ -899,13 +899,28 @@ export function useHomeCompression({
             throw new Error("Source image is no longer available");
           }
 
-          const compressed = await compressWithWasmWorker(
-            sourceFile,
-            80,
-            currentVariant.format,
-            Boolean(currentVariant.allowAlphaLoss),
-            Boolean(currentVariant.automatic),
-          );
+          const compressedResult = await imageProcessing.compress({
+            source: { kind: "blob", blob: sourceFile, name: sourceFile.name, mimeType: sourceFile.type },
+            options: {
+              format: currentVariant.automatic ? "auto" : currentVariant.format,
+              profile: "planner",
+              quality: 80,
+              allowAlphaLoss: Boolean(currentVariant.allowAlphaLoss),
+            },
+            destination: "memory",
+          }, { requestId: `home-compress:${currentItem.id}:${currentVariant.id}` });
+          if (compressedResult.artifact.kind !== "blob") {
+            throw new Error("Web compression did not return a Blob");
+          }
+          const outputFormat = compressedResult.metadata.format;
+          if (outputFormat === "unknown" || outputFormat === "gif" || outputFormat === "bmp" || outputFormat === "ico") {
+            throw new Error("Compression returned an unsupported output format");
+          }
+          const compressed = {
+            blob: compressedResult.artifact.blob,
+            ext: outputFormat === "jpeg" ? "jpg" : outputFormat,
+            fileName: compressedResult.name,
+          };
           if (isUnmountedRef.current) {
             return;
           }
@@ -1085,7 +1100,7 @@ export function useHomeCompression({
         setIsCompressing(false);
       }
     }
-  }, [isCompressing, startFakeProgress, stopFakeProgress]);
+  }, [imageProcessing, isCompressing, startFakeProgress, stopFakeProgress]);
 
   React.useEffect(() => {
     if (

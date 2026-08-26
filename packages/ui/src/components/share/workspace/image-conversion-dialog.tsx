@@ -2,13 +2,11 @@
 
 import React from "react";
 import { FiCheck, FiLoader, FiX } from "react-icons/fi";
+import { useImageProcessing } from "../../../image-processing";
 import type { RoomImage } from "../share-room-types";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes } from "../share-room-formatters";
-import {
-  convertRoomImageTask,
-  type RoomConversionFormat,
-} from "../../../utils/room-image-conversion";
+import { type RoomConversionFormat } from "../../../utils/room-image-conversion";
 import type { RoomImageEditResult } from "../../../utils/room-image-editing";
 
 type ImageConversionDialogProps = {
@@ -37,6 +35,7 @@ function defaultTarget(source: RoomConversionFormat): RoomConversionFormat {
 }
 
 export default function ImageConversionDialog({ image, labels, onClose, onSave }: ImageConversionDialogProps) {
+  const imageProcessing = useImageProcessing();
   const sourceFormat = image ? formatFromMime(image.type) : "jpeg";
   const [format, setFormat] = React.useState<RoomConversionFormat>("webp");
   const [result, setResult] = React.useState<RoomImageEditResult | null>(null);
@@ -84,14 +83,26 @@ export default function ImageConversionDialog({ image, labels, onClose, onSave }
     setWorking(true);
     setResult(null);
     setError(null);
-    void convertRoomImageTask(
-      new File([image.blob], image.name, { type: image.type }),
+    void imageProcessing.convert({
+      source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
       format,
-      abortController.signal,
-    ).then((nextResult) => {
-      if (generationRef.current === generation) setResult(nextResult);
+      allowAlphaLoss: format === "jpeg",
+      destination: "memory",
+    }, {
+      requestId: `room-convert:${crypto.randomUUID()}`,
+      signal: abortController.signal,
+    }).then((nextResult) => {
+      if (generationRef.current !== generation || nextResult.artifact.kind !== "blob") return;
+      setResult({
+        blob: nextResult.artifact.blob,
+        name: nextResult.name,
+        width: nextResult.metadata.width,
+        height: nextResult.metadata.height,
+        operation: "convert",
+        parameters: { format },
+      });
     }).catch((reason) => {
-      if (generationRef.current === generation && (!(reason instanceof DOMException) || reason.name !== "AbortError")) {
+      if (generationRef.current === generation && !abortController.signal.aborted) {
         setError(reason instanceof Error ? reason.message : labels.conversionFailed);
       }
     }).finally(() => {

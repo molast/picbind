@@ -25,6 +25,9 @@ importers:
       '@picbind/perceptual-wasm':
         specifier: workspace:*
         version: link:../../packages/wasm/perceptual-wasm
+      '@picbind/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@picbind/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -173,6 +176,12 @@ importers:
 
   packages/shared:
     devDependencies:
+      '@types/node':
+        specifier: ^22.12.0
+        version: 22.20.1
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -188,6 +197,9 @@ importers:
       '@picbind/image-wasm':
         specifier: workspace:*
         version: link:../wasm/image-wasm
+      '@picbind/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.23(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

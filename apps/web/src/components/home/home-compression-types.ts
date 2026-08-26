@@ -1,4 +1,5 @@
-import type { ImageQualityComparison, OutputFormat } from "@/utils/wasm";
+import type { ImageQualityComparison } from "@picbind/shared";
+import type { OutputFormat } from "@/utils/compress-shared";
 
 export type VariantStatus = "queued" | "processing" | "done" | "error";
 

@@ -49,6 +49,7 @@ function storageRecord<T extends Record<string, unknown>>(input: {
   createdAt: number;
   updatedAt?: number;
 }): ImageStorageRecord<T> {
+  const updatedAt = input.updatedAt ?? input.createdAt;
   return {
     scope: input.scope,
     scopeKey: input.scopeKey ?? "",
@@ -56,9 +57,10 @@ function storageRecord<T extends Record<string, unknown>>(input: {
     metadata: input.metadata,
     mimeType: input.mimeType,
     byteSize: input.byteSize,
+    revision: `${updatedAt}:${input.byteSize}:${input.mimeType}`,
     thumbnailAvailable: input.thumbnailAvailable ?? false,
     createdAt: input.createdAt,
-    updatedAt: input.updatedAt ?? input.createdAt,
+    updatedAt,
   };
 }
 

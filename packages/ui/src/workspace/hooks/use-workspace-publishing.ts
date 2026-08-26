@@ -1,7 +1,6 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImageSource } from "../repository";
-import { generateSharePlaceholder } from "../../utils/share-placeholder";
-import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import { canStartImageCollaboration } from "../image-flow";
 import { emptyImageParameterDocument } from "../image-protocol";
 import { createCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
@@ -20,12 +19,16 @@ export function useWorkspacePublishing({ workspace, imagesRef, collaborationCont
   sendRealtime: (type: string, payload: Record<string, unknown>, options?: Record<string, unknown>) => void;
   sendRealtimeBinary: (type: string, payload: Record<string, unknown>, bytes: ArrayBuffer, options?: Record<string, unknown>) => void;
 }) {
+  const imageProcessing = useImageProcessing();
   const publishPreview = React.useCallback(async (image: WorkspaceImage, source: Blob, targetUserId?: string) => {
     const revision = image.previewRevision + 1;
-    const [placeholder, thumbnail] = await Promise.all([
-      generateSharePlaceholder(source), generateShareThumbnail(source, 640, 480),
-    ]);
-    const preview = new Blob([thumbnail.slice().buffer as ArrayBuffer], { type: "image/webp" });
+    const assets = await imageProcessing.createShareAssets({
+      source: { kind: "blob", blob: source, name: image.name, mimeType: source.type || image.mimeType },
+      container: { width: 640, height: 480 },
+    }, { requestId: `workspace-share-assets:${image.imageId}:${revision}` });
+    const placeholder = assets.placeholder;
+    const preview = assets.thumbnail.blob;
+    const thumbnail = await preview.arrayBuffer();
     if (!imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.shared)) return;
     await updateImage(image.imageId, { placeholder, preview, previewRevision: revision });
     if (!imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.shared)) return;
@@ -38,8 +41,8 @@ export function useWorkspacePublishing({ workspace, imagesRef, collaborationCont
     sendRealtimeBinary("previewUpsert", {
       image: { imageId: image.imageId, imageName: image.name, mimeType: "image/webp", sourceMimeType: image.mimeType,
         width: image.width, height: image.height, placeholder, version: revision, currentCommitId: image.currentCommitId },
-    }, thumbnail.slice().buffer as ArrayBuffer, { ...options, delivery: "bulk" });
-  }, [imagesRef, sendRealtime, sendRealtimeBinary, updateImage]);
+    }, thumbnail, { ...options, delivery: "bulk" });
+  }, [imageProcessing, imagesRef, sendRealtime, sendRealtimeBinary, updateImage]);
 
   const publishImage = React.useCallback(async (image: WorkspaceImage) => {
     if (!workspace || !image.sourceCached) return;

@@ -2,12 +2,11 @@
 
 import React from "react";
 import { FiLink, FiLoader, FiUnlock, FiX } from "react-icons/fi";
+import { emptyImageParameterDocument, setImageOperation } from "@picbind/shared";
+import { useImageProcessing } from "../../../image-processing";
 import type { RoomImage } from "../share-room-types";
 import type { ShareRoomLabels } from "../share-room-labels";
-import {
-  resizeRoomImage,
-  type RoomImageEditResult,
-} from "../../../utils/room-image-editing";
+import { type RoomImageEditResult } from "../../../utils/room-image-editing";
 
 type ImageResizeDialogProps = {
   image: RoomImage | null;
@@ -26,6 +25,7 @@ function validDimension(value: number) {
 }
 
 export default function ImageResizeDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialSize }: ImageResizeDialogProps) {
+  const imageProcessing = useImageProcessing();
   const [width, setWidth] = React.useState(1);
   const [height, setHeight] = React.useState(1);
   const [locked, setLocked] = React.useState(true);
@@ -97,7 +97,28 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave, para
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
-          <button type="button" disabled={!valid || working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters({width,height})):resizeRoomImage(new File([image.blob], image.name, { type: image.type }), width, height).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+          <button type="button" disabled={!valid || working} onClick={() => {
+            setWorking(true);
+            setError(null);
+            const size = { width, height };
+            const task = parameterAction && onApplyParameters
+              ? Promise.resolve().then(() => onApplyParameters(size))
+              : imageProcessing.materialize({
+                  source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
+                  document: setImageOperation(emptyImageParameterDocument(), {
+                    id: crypto.randomUUID(), userId: "local", time: Date.now(), type: "resize", params: size,
+                  }),
+                  output: { format: "source" },
+                  destination: "memory",
+                }, { requestId: `room-resize:${crypto.randomUUID()}` }).then((result) => {
+                  if (result.artifact.kind !== "blob") throw new Error(labels.resizeFailed);
+                  return onSave(image, {
+                    blob: result.artifact.blob, name: result.name, width: result.metadata.width,
+                    height: result.metadata.height, operation: "resize", parameters: size,
+                  });
+                });
+            void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.resizeFailed)).finally(() => setWorking(false));
+          }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {working?(parameterAction==="proposal"?labels.submittingProposal:parameterAction?labels.applyingChanges:labels.processing):parameterAction==="proposal"?labels.submitProposal:parameterAction?labels.applyChanges:labels.generateResult}
           </button>

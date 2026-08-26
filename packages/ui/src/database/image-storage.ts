@@ -19,3 +19,4 @@ export type {
   ImageStorageVariant,
   PutImageStorageInput,
 } from "./repositories/image-storage-repository";
+export { getImageStorageRepository } from "./repositories/image-storage-repository-selector";

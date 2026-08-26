@@ -12,6 +12,7 @@ export type ImageStorageRecord<
   metadata: T;
   mimeType: string;
   byteSize: number;
+  revision: string;
   thumbnailAvailable: boolean;
   createdAt: number;
   updatedAt: number;

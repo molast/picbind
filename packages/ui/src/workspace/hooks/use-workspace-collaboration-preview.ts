@@ -1,14 +1,13 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImagePreview, readWorkspaceImageSource } from "../repository";
 import { emptyImageParameterDocument, imageParameterDocumentsEqual, type ImageParameterDocument } from "../image-protocol";
 import {
   adoptCollaborationPreview, createCollaborationImageContainer, replaceCollaborationDocument,
   type CollaborationImageContainer,
 } from "../collaboration-image-container";
-import { renderWorkspaceParameterPreview } from "../parameter-preview";
 import { parameterDocumentOperations } from "../utils/workspace-operation-mapping";
 import { dimensions } from "../utils/workspace-image-display";
-import { replayOperations } from "../utils/workspace-operation-replay";
 import type { WorkspaceImage } from "../types";
 
 export function useWorkspaceCollaborationPreview({ imagesRef, collaborationContainers, refresh, processingSource, }: {
@@ -17,6 +16,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
   refresh: () => void;
   processingSource: { imageId: string; blob: Blob } | null;
 }) {
+  const imageProcessing = useImageProcessing();
   const renderSequence = React.useRef(0);
   const latestRenders = React.useRef(new Map<string, number>());
 
@@ -49,18 +49,29 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       if (created) refresh();
       return container;
     }
-    const result = await renderWorkspaceParameterPreview(container.source, { width: container.sourceWidth, height: container.sourceHeight }, parameterDocumentOperations({ ...image, parameterDocument }));
+    const result = await imageProcessing.renderPreview({
+      source: { kind: "blob", blob: container.source, name: container.name, mimeType: container.mimeType },
+      document: parameterDocument,
+      maxWidth: 960,
+      maxHeight: 720,
+      mimeType: "image/webp",
+      quality: 0.86,
+    }, { requestId: `workspace-preview:${image.imageId}:${requestSequence}` });
     if (latestRenders.current.get(image.imageId) !== requestSequence) return collaborationContainers.current.get(image.imageId) || null;
     if (!imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.workspaceLocation === "working")) {
       collaborationContainers.current.delete(image.imageId);
       latestRenders.current.delete(image.imageId);
       return null;
     }
-    const previewed = adoptCollaborationPreview(container, parameterDocument, result);
+    const previewed = adoptCollaborationPreview(container, parameterDocument, {
+      blob: result.artifact.blob,
+      width: result.width,
+      height: result.height,
+    });
     collaborationContainers.current.set(image.imageId, previewed);
     refresh();
     return previewed;
-  }, [collaborationContainers, imagesRef, refresh]);
+  }, [collaborationContainers, imageProcessing, imagesRef, refresh]);
 
   const renderCollaborationPreviewSnapshot = React.useCallback(async (image: WorkspaceImage, parameterDocument: ImageParameterDocument) => {
     const container = collaborationContainers.current.get(image.imageId);
@@ -76,8 +87,16 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       source ||= await readWorkspaceImagePreview(image);
     }
     if (!source) return null;
-    return renderWorkspaceParameterPreview(source, { width, height }, parameterDocumentOperations({ ...image, parameterDocument }));
-  }, [collaborationContainers]);
+    const result = await imageProcessing.renderPreview({
+      source: { kind: "blob", blob: source, name: image.name, mimeType: image.mimeType },
+      document: parameterDocument,
+      maxWidth: 960,
+      maxHeight: 720,
+      mimeType: "image/webp",
+      quality: 0.86,
+    }, { requestId: `workspace-snapshot:${image.imageId}:${++renderSequence.current}` });
+    return { blob: result.artifact.blob, width: result.width, height: result.height };
+  }, [collaborationContainers, imageProcessing]);
 
   const syncCollaborationContainer = React.useCallback(async (image: WorkspaceImage, parameterDocument = image.parameterDocument || emptyImageParameterDocument()) => {
     let container = collaborationContainers.current.get(image.imageId);
@@ -88,11 +107,30 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       container = createCollaborationImageContainer({ imageId: image.imageId, source, sourceKind: "source", name: image.name, mimeType: image.mimeType,
         width: sourceSize.width, height: sourceSize.height, parameterDocument: emptyImageParameterDocument() });
     }
-    const rendered = await replaceCollaborationDocument(container, parameterDocument, parameterDocumentOperations({ ...image, parameterDocument }),
-      (source, operations) => replayOperations({ ...image, source, width: container!.sourceWidth, height: container!.sourceHeight }, operations));
+    const rendered = await replaceCollaborationDocument(
+      container,
+      parameterDocument,
+      parameterDocumentOperations({ ...image, parameterDocument }),
+      async (source) => {
+        const result = await imageProcessing.materialize({
+          source: { kind: "blob", blob: source, name: image.name, mimeType: image.mimeType },
+          document: parameterDocument,
+          output: { format: "source" },
+          destination: "memory",
+        }, { requestId: `workspace-materialize:${image.imageId}:${++renderSequence.current}` });
+        if (result.artifact.kind !== "blob") throw new Error("Web materialization did not return a Blob");
+        return {
+          blob: result.artifact.blob,
+          name: result.name,
+          mimeType: result.metadata.mimeType,
+          width: result.metadata.width,
+          height: result.metadata.height,
+        };
+      },
+    );
     collaborationContainers.current.set(image.imageId, rendered);
     return rendered;
-  }, [collaborationContainers]);
+  }, [collaborationContainers, imageProcessing]);
 
   const loadSource = React.useCallback(async (image: WorkspaceImage, materialize = false) => {
     if (processingSource?.imageId === image.imageId) return processingSource.blob;

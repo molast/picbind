@@ -52,6 +52,7 @@ pub struct NativeImageRecord {
     pub metadata: Value,
     pub mime_type: String,
     pub byte_size: i64,
+    pub revision: String,
     pub thumbnail_available: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -370,6 +371,7 @@ impl NativeImageStore {
         rows.map(|row| {
             let (scope, scope_key, id, metadata, mime_type, byte_size, thumbnail, created, updated) =
                 row.map_err(|error| error.to_string())?;
+            let revision = format!("{updated}:{byte_size}:{mime_type}");
             Ok(NativeImageRecord {
                 scope,
                 scope_key,
@@ -377,6 +379,7 @@ impl NativeImageStore {
                 metadata: serde_json::from_str(&metadata).map_err(|error| error.to_string())?,
                 mime_type,
                 byte_size,
+                revision,
                 thumbnail_available: thumbnail,
                 created_at: created,
                 updated_at: updated,
@@ -429,6 +432,7 @@ impl NativeImageStore {
                 created,
                 updated,
             )| {
+                let revision = format!("{updated}:{byte_size}:{mime_type}");
                 Ok(NativeImageRecord {
                     scope,
                     scope_key,
@@ -436,6 +440,7 @@ impl NativeImageStore {
                     metadata: serde_json::from_str(&metadata).map_err(|error| error.to_string())?,
                     mime_type,
                     byte_size,
+                    revision,
                     thumbnail_available: thumbnail,
                     created_at: created,
                     updated_at: updated,

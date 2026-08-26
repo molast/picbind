@@ -1,6 +1,6 @@
 # PicBind Image Processing API V1
 
-> 文档状态：架构设计，尚未完成实现
+> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native Adapter 尚未启用
 > 适用范围：Web 与 Tauri Desktop 的图片检查、参数预览、最终物化、压缩、转换和协作派生资源
 > 最后校对：2026-08-26
 
@@ -352,6 +352,11 @@ export interface ImageProcessingService {
     context?: ImageTaskContext,
   ): Promise<ImageProcessingResult>;
 
+  compareQuality(
+    request: CompareImageQualityRequest,
+    context?: ImageTaskContext,
+  ): Promise<ImageQualityAnalysisResult>;
+
   convert(
     request: ConvertImageRequest,
     context?: ImageTaskContext,
@@ -438,6 +443,7 @@ export type CompressImageRequest = {
   source: ImageProcessingSource;
   options: {
     format: "auto" | ImageOutputFormat;
+    profile?: "planner" | "interactive";
     quality?: number;
     compressionGain?: number;
     allowAlphaLoss?: boolean;
@@ -447,6 +453,16 @@ export type CompressImageRequest = {
   destination: "memory" | "temporary";
 };
 ```
+
+`profile` 用于保留两条已经存在且产品语义不同的 Web 压缩链路：
+
+- `planner` 是首页 PCE / Predictor、多候选与质量护栏链路；`format: "auto"` 表示由
+  Predictor 选择最终格式。
+- `interactive` 是 Room / Workspace 的单次交互式压缩和目标尺寸链路，不启用首页的
+  Butteraugli 外层多候选校验。
+- 未传入时 Web Adapter 使用 `interactive`，调用方必须在需要首页 Planner 时显式选择
+  `planner`。Desktop Native 实现必须保持这两个 profile 的产品语义，但不要求复用 Web
+  Worker 或相同编码器。
 
 压缩规则继续遵循现有算法文档，包括：
 
@@ -501,6 +517,26 @@ placeholder 与 thumbnail 是两个独立结果，不能用缩略图替代颜色
 当前 realtime 大小限制。thumbnail 属于可直接发送的小型派生数据，Desktop Adapter 应在
 IPC 边界包装为 Blob，不能为 realtime 消费方返回 Native 临时 token。
 
+### 9.6 质量对比分析
+
+```ts
+export type CompareImageQualityRequest = {
+  source: ImageProcessingSource;
+  assessed: ImageProcessingSource;
+};
+
+export type ImageQualityAnalysisResult = {
+  comparison: ImageQualityComparison;
+  sourceMetrics: ImageAnalysisMetrics;
+  assessedMetrics: ImageAnalysisMetrics;
+  engine: ImageProcessingEngine;
+};
+```
+
+质量对比是首页压缩结果指标的正式 Port 能力，UI 不直接创建 Analysis Worker，也不直接
+导入 WASM 指标类型。该能力不改变压缩结果，只读取源图和待评估图并返回结构化指标。
+Adapter 不支持时通过 `supportsQualityAnalysis: false` 和 `capabilityUnavailable` 明确表达。
+
 ## 10. 能力发现
 
 ```ts
@@ -513,6 +549,7 @@ export type ImageProcessingCapabilities = {
   supportsStoredSources: boolean;
   supportsProgress: boolean;
   supportsCancellation: boolean;
+  supportsQualityAnalysis: boolean;
   maxInputBytes?: number;
   maxPixels?: number;
   maxInlineBytes?: number;
@@ -651,6 +688,7 @@ enum ImageProcessingRequestV1 {
     RenderPreview(RenderPreviewRequest),
     Materialize(MaterializeRequest),
     Compress(CompressRequest),
+    CompareQuality(CompareImageQualityRequest),
     Convert(ConvertRequest),
     CreateShareAssets(CreateShareAssetsRequest),
 }
@@ -817,6 +855,8 @@ apps/desktop/src-tauri/src/image_processing/
 
 ### 阶段 1：冻结契约和行为
 
+当前状态：已完成 TypeScript V1 契约、稳定错误、参数校验、opaque revision 和基础契约测试。
+
 - 在 `packages/shared` 落地公共类型、错误和 Service Port。
 - 为存储引用增加 opaque revision，并定义 Native 临时 token 的原子接管与释放契约。
 - 为当前参数文档、压缩规则、Alpha 和同格式回退建立契约测试。
@@ -824,11 +864,17 @@ apps/desktop/src-tauri/src/image_processing/
 
 ### 阶段 2：包装现有 Web 实现
 
+当前状态：已完成。Web Adapter 保留首页 `planner` 与 Room / Workspace `interactive` 两条
+既有压缩链路，并包装预览、物化、转换、质量分析和协作派生资源。
+
 - 实现 `WebImageProcessingService`，只做适配，不改变算法。
 - 把现有 Worker 取消和资源释放映射到 `ImageTaskContext`。
 - 让首页、Room 和 Workspace 逐步通过 Service 调用现有实现。
 
 ### 阶段 3：从 UI 移除执行细节
+
+当前状态：已完成当前 Web UI 调用迁移。首页、Room 与 Workspace 通过 Provider 获取
+Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Adapter 内部实现保留。
 
 - Workspace 参数预览改用 `renderPreview()`。
 - 保存、另存、覆盖和下载改用 `materialize()`。
@@ -837,11 +883,17 @@ apps/desktop/src-tauri/src/image_processing/
 
 ### 阶段 4：拆分纯 Rust Core
 
+当前状态：未开始。此阶段涉及 Rust / WASM API 和生成产物，不能与 Port 迁移混为已完成。
+
 - 从 `crates/picbind-image/lib.rs` 移出 `JsValue` 和 `js_sys` 依赖。
 - 保留薄 WASM binding，确保 Web 输出和性能没有回归。
 - 为纯 Rust metadata、参数重放和编码入口增加 Native 测试。
 
 ### 阶段 5：实现 Desktop Native
+
+当前状态：未开始。现有 `DesktopImageProcessingService` 只报告空 capabilities 并返回
+`capabilityUnavailable`；组合根迁移期显式使用 `WebImageProcessingService`，结果保持
+`engine: "web"`，不伪装为 Native。
 
 - 增加 Tauri 图片处理模块、受控 source resolver、任务表和取消命令。
 - 优先实现 metadata、参数预览、物化、JPEG / PNG，再补 WebP / AVIF。

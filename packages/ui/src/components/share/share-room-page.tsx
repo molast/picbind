@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { getRoomSdkConfig, getRoomShareUrl } from "../../config";
 import CreatedRoomDialog from "./created-room-dialog";
 import FloatingEmojiLayer from "./floating-emoji-layer";
@@ -78,8 +79,6 @@ import {
   createPeerMessageId,
   sendPeerMessage,
 } from "../../utils/realtime-peer-messages";
-import { generateSharePlaceholder } from "../../utils/share-placeholder";
-import { initWasm } from "../../utils/wasm-runtime";
 import { identifyImage } from "../../utils/image-object";
 import {
   sendImageWorkspaceMessage,
@@ -161,6 +160,13 @@ export default function ShareRoomPage({
   onMinimize,
   onRestore,
 }: ShareRoomPageProps) {
+  const imageProcessing = useImageProcessing();
+  const createRoomPlaceholder = React.useCallback(async (blob: Blob, name = "image") => (
+    await imageProcessing.createShareAssets({
+      source: { kind: "blob", blob, name, mimeType: blob.type || "application/octet-stream" },
+      container: { width: 320, height: 240 },
+    }, { requestId: `room-placeholder:${crypto.randomUUID()}` })
+  ).placeholder, [imageProcessing]);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const activityListRef = React.useRef<HTMLDivElement | null>(null);
   const emojiScrollerRef = React.useRef<HTMLDivElement | null>(null);
@@ -1077,7 +1083,6 @@ export default function ShareRoomPage({
     const deletedImageIds = deletedImageIdsRef.current;
     const placeholderAckDimensions = placeholderAckDimensionsRef.current;
     const transferAbortControllers = transferAbortControllersRef.current;
-    void initWasm().catch(() => undefined);
     setLang(getLang());
     setRoomId(readRoomId());
     return () => {
@@ -1285,7 +1290,7 @@ export default function ShareRoomPage({
               !restoredImage.placeholderOnly &&
               !restoredImage.previewOnly
             ) {
-              void generateSharePlaceholder(restoredImage.blob)
+              void createRoomPlaceholder(restoredImage.blob, restoredImage.name)
                 .then((placeholder) => {
                   if (!disposed) {
                     updateRoomImage(restoredImage.id, { placeholder }, true);
@@ -1315,7 +1320,7 @@ export default function ShareRoomPage({
     return () => {
       disposed = true;
     };
-  }, [addRoomImage, labels.transferInterrupted, roomId, updateRoomImage, upsertActivity]);
+  }, [addRoomImage, createRoomPlaceholder, labels.transferInterrupted, roomId, updateRoomImage, upsertActivity]);
 
   const handleImageShareRequest = React.useCallback((message: ImageShareRequest) => {
     if (seenShareRequestsRef.current.has(message.payload.requestId)) return;
@@ -1734,7 +1739,7 @@ export default function ShareRoomPage({
       true,
     );
     try {
-      const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
+      const placeholder = image.placeholder || (await createRoomPlaceholder(image.blob, image.name));
       updateRoomImage(image.id, { placeholder }, true);
       const activeChannel = instructionChannelRef.current;
       if (connection === "connected" && activeChannel?.readyState === "open") {
@@ -1873,7 +1878,7 @@ export default function ShareRoomPage({
     const id = crypto.randomUUID().replace(/-/g, "");
     const createdAt = Date.now();
     const placeholder = workspaceLocation === "outbox"
-      ? await generateSharePlaceholder(result.blob)
+      ? await createRoomPlaceholder(result.blob, result.name)
       : undefined;
     const image: CachedRoomImage = {
       id,
@@ -2067,7 +2072,7 @@ export default function ShareRoomPage({
     const id = crypto.randomUUID().replace(/-/g, "");
     const createdAt = Date.now();
     const placeholder = share
-      ? await generateSharePlaceholder(result.blob)
+      ? await createRoomPlaceholder(result.blob, result.name)
       : undefined;
     const stored: CachedRoomImage = {
       id,
@@ -2434,7 +2439,7 @@ export default function ShareRoomPage({
     let preparedImage = image;
     if (!preparedImage.placeholder) {
       try {
-        const placeholder = await generateSharePlaceholder(preparedImage.blob);
+        const placeholder = await createRoomPlaceholder(preparedImage.blob, preparedImage.name);
         preparedImage = { ...preparedImage, placeholder };
         updateRoomImage(preparedImage.id, { placeholder }, true);
       } catch (error) {
@@ -2644,7 +2649,7 @@ export default function ShareRoomPage({
     ) {
       return false;
     }
-    const placeholder = image.placeholder || (await generateSharePlaceholder(image.blob));
+    const placeholder = image.placeholder || (await createRoomPlaceholder(image.blob, image.name));
     if (!image.placeholder) updateRoomImage(image.id, { placeholder }, true);
     const delivery = beginImageDelivery(image, recipient, "pending");
     if (!delivery) return false;

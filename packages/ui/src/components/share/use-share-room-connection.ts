@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { formatBytes } from "./share-room-formatters";
 import type { ShareRoomLabels } from "./share-room-labels";
 import type {
@@ -50,11 +51,9 @@ import {
   sendPeerMessage,
 } from "../../utils/realtime-peer-messages";
 import {
-  generateSharePlaceholder,
   PENDING_SHARE_PLACEHOLDER,
   type ImagePlaceholderMetadata,
 } from "../../utils/share-placeholder";
-import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import { downloadFileFromR2 } from "../../utils/realtime-r2-transfer";
 import { clearRoomPageState } from "../../utils/realtime-room-page-store";
 import {
@@ -204,6 +203,7 @@ export function useShareRoomConnection({
   setMaxImageTransferSize,
   setRole,
 }: UseShareRoomConnectionOptions) {
+  const imageProcessing = useImageProcessing();
   const onTransferSuccessRef = React.useRef(onTransferSuccess);
   React.useEffect(() => {
     onTransferSuccessRef.current = onTransferSuccess;
@@ -451,11 +451,11 @@ export function useShareRoomConnection({
             ) {
               return;
             }
-            const thumbnail = await generateShareThumbnail(
-              image.blob,
-              width,
-              height,
-            );
+            const assets = await imageProcessing.createShareAssets({
+              source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
+              container: { width, height },
+            }, { requestId: `room-thumbnail:${id}:${requestKey}` });
+            const thumbnail = new Uint8Array(await assets.thumbnail.blob.arrayBuffer());
             if (thumbnailRequests.get(id) !== requestKey) return;
             for (let attempt = 0; attempt < 100; attempt += 1) {
               if (adaptiveThumbnail?.readyState === "open") {
@@ -789,8 +789,10 @@ export function useShareRoomConnection({
             image,
           );
           sendImagePlaceholderPending(activeChannel, meta);
-          const placeholder =
-            image.placeholder || (await generateSharePlaceholder(file));
+          const placeholder = image.placeholder || (await imageProcessing.createShareAssets({
+            source: { kind: "blob", blob: file, name: file.name, mimeType: file.type },
+            container: { width: 320, height: 240 },
+          }, { requestId: `room-placeholder:${image.id}:${crypto.randomUUID()}` })).placeholder;
           if (!image.placeholder) {
             updateRoomImage(image.id, { placeholder }, true);
           }
@@ -1680,6 +1682,7 @@ export function useShareRoomConnection({
     instructionChannelRef,
     deletedImageIdsRef,
     imageReadyWaitersRef,
+    imageProcessing,
     imagesRef,
     pendingShareImagesRef,
     maxImageTransferSizeRef,

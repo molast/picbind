@@ -2,6 +2,7 @@
 
 import React from "react";
 import { FiCheck, FiLink, FiLoader, FiX } from "react-icons/fi";
+import { useImageProcessing } from "../../../image-processing";
 import type { RoomImage } from "../share-room-types";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { formatBytes } from "../share-room-formatters";
@@ -9,7 +10,6 @@ import {
   type RoomCompressionFormat,
   type RoomCompressionResult,
 } from "../../../utils/room-image-compression";
-import { compressRoomImageTask } from "../../../utils/room-image-compression-task";
 
 type ImageCompressionDialogProps = {
   image: RoomImage | null;
@@ -30,6 +30,7 @@ export default function ImageCompressionDialog({
   onClose,
   onSave,
 }: ImageCompressionDialogProps) {
+  const imageProcessing = useImageProcessing();
   const [format, setFormat] = React.useState<RoomCompressionFormat>("auto");
   const [result, setResult] = React.useState<RoomCompressionResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -195,7 +196,48 @@ export default function ImageCompressionDialog({
               <FiCheck className="h-4 w-4" aria-hidden="true" />{labels.continue}
             </button>
           ) : (
-            <button type="button" disabled={working || !validSize} onClick={() => { const generation = ++compressionGenerationRef.current; compressionAbortRef.current?.abort(); const abortController = new AbortController(); compressionAbortRef.current = abortController; setWorking(true); setError(null); void compressRoomImageTask(new File([image.blob], image.name, { type: image.type }), format, abortController.signal, { width, height }).then((nextResult) => { if (compressionGenerationRef.current === generation) setResult(nextResult); }).catch((reason) => { if (compressionGenerationRef.current === generation && (!(reason instanceof DOMException) || reason.name !== "AbortError")) setError(reason instanceof Error ? reason.message : labels.compressionFailed); }).finally(() => { if (compressionGenerationRef.current === generation) { compressionAbortRef.current = null; setWorking(false); } }); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+            <button type="button" disabled={working || !validSize} onClick={() => {
+              const generation = ++compressionGenerationRef.current;
+              compressionAbortRef.current?.abort();
+              const abortController = new AbortController();
+              compressionAbortRef.current = abortController;
+              setWorking(true);
+              setError(null);
+              void imageProcessing.compress({
+                source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
+                options: { format, profile: "interactive", dimensions: { width, height } },
+                destination: "memory",
+              }, {
+                requestId: `room-compress:${crypto.randomUUID()}`,
+                signal: abortController.signal,
+              }).then((nextResult) => {
+                if (compressionGenerationRef.current !== generation || nextResult.artifact.kind !== "blob") return;
+                const resultFormat = nextResult.metadata.format === "unknown"
+                  ? format === "auto" ? "jpeg" : format
+                  : nextResult.metadata.format;
+                if (resultFormat === "gif" || resultFormat === "bmp" || resultFormat === "ico") {
+                  throw new Error(labels.compressionFailed);
+                }
+                setResult({
+                  blob: nextResult.artifact.blob,
+                  format: resultFormat,
+                  name: nextResult.name,
+                  width: nextResult.metadata.width,
+                  height: nextResult.metadata.height,
+                  operation: "compress",
+                  parameters: { format, width, height },
+                });
+              }).catch((reason) => {
+                if (compressionGenerationRef.current === generation && !abortController.signal.aborted) {
+                  setError(reason instanceof Error ? reason.message : labels.compressionFailed);
+                }
+              }).finally(() => {
+                if (compressionGenerationRef.current === generation) {
+                  compressionAbortRef.current = null;
+                  setWorking(false);
+                }
+              });
+            }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
               {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working ? labels.compressing : labels.startCompression}
             </button>
           )}

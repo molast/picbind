@@ -1,6 +1,6 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { saveCommit, saveWorkspaceImage } from "../repository";
-import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import { dimensions } from "../utils/workspace-image-display";
 import { cachedCommit } from "../utils/workspace-page-utils";
 import type { WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
@@ -17,14 +17,21 @@ export function useWorkspaceFileCommands({ workspace, inputRef, setImages, setCo
   loadSource: (image: WorkspaceImage, materialize?: boolean) => Promise<Blob | null>;
   setNotice: (message: string) => void;
 }) {
+  const imageProcessing = useImageProcessing();
   const addFiles = React.useCallback(async (files: FileList | File[]) => {
     if (!workspace || workspace.role !== "owner") return;
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      const [size, thumbnail] = await Promise.all([dimensions(file), generateShareThumbnail(file, 320, 240)]);
+      const [size, assets] = await Promise.all([
+        dimensions(file),
+        imageProcessing.createShareAssets({
+          source: { kind: "blob", blob: file, name: file.name, mimeType: file.type },
+          container: { width: 320, height: 240 },
+        }, { requestId: `workspace-import:${crypto.randomUUID()}` }),
+      ]);
       const imageId = id("image");
       const initialCommitId = `initial_${imageId}`;
-      const preview = new Blob([thumbnail.slice().buffer as ArrayBuffer], { type: "image/webp" });
+      const preview = assets.thumbnail.blob;
       const image: WorkspaceImage = { imageId, workspaceId: workspace.workspaceId, name: file.name, mimeType: file.type,
         size: file.size, ...size, workspaceLocation: "library", state: "private", shared: false,
         currentCommitId: initialCommitId, previewRevision: 0, createdAt: Date.now(), updatedAt: Date.now(),
@@ -39,7 +46,7 @@ export function useWorkspaceFileCommands({ workspace, inputRef, setImages, setCo
       await persistWorkspaceLog(workspace.workspaceId, "imageAdded", imageId);
     }
     if (inputRef.current) inputRef.current.value = "";
-  }, [inputRef, persistWorkspaceLog, setCommits, setImages, setSelectedId, workspace]);
+  }, [imageProcessing, inputRef, persistWorkspaceLog, setCommits, setImages, setSelectedId, workspace]);
 
   const downloadImage = React.useCallback(async (image: WorkspaceImage) => {
     const source = await loadSource(image, image.workspaceLocation === "working");

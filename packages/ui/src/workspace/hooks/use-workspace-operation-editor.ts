@@ -1,9 +1,8 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImageSource } from "../repository";
 import { type ImageOperationType, type ImageParameterDocument } from "../image-protocol";
 import { dimensions } from "../utils/workspace-image-display";
-import { parameterDocumentOperations } from "../utils/workspace-operation-mapping";
-import { renderWorkspaceParameterPreview } from "../parameter-preview";
 import type { WorkspaceImage } from "../types";
 import type { WorkspaceCardOperation } from "../components/workspace-gallery-card";
 
@@ -18,6 +17,7 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
   setEditorPreparing: React.Dispatch<React.SetStateAction<boolean>>;
   setNotice: (message: string) => void;
 }) {
+  const imageProcessing = useImageProcessing();
   const openSequence = React.useRef(0);
   const openImageOperation = React.useCallback(async (image: WorkspaceImage, operation: WorkspaceCardOperation) => {
     const parameterType: Partial<Record<WorkspaceCardOperation, ImageOperationType>> = { crop: "crop", resize: "resize", adjust: "color", review: "draw" };
@@ -45,10 +45,17 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
     if (usesParameterDocument) {
       const parameterDocument = container?.parameterDocument || image.parameterDocument || { version: 1 as const, operations: [] };
       const baseDocument = { ...parameterDocument, operations: parameterDocument.operations.filter((candidate) => candidate.type !== editableParameterType) };
-      void renderWorkspaceParameterPreview(source, sourceSize, parameterDocumentOperations({ ...image, parameterDocument: baseDocument })).then((result) => {
+      void imageProcessing.renderPreview({
+        source: { kind: "blob", blob: source, name: image.name, mimeType: image.mimeType },
+        document: baseDocument,
+        maxWidth: 960,
+        maxHeight: 720,
+        mimeType: "image/webp",
+        quality: 0.86,
+      }, { requestId: `workspace-editor:${image.imageId}:${requestSequence}` }).then((result) => {
         if (openSequence.current !== requestSequence) return;
         setEditorPreparing(false);
-        setProcessingSource({ imageId: image.imageId, blob: result.blob, width: result.width, height: result.height });
+        setProcessingSource({ imageId: image.imageId, blob: result.artifact.blob, width: result.width, height: result.height });
       }).catch((error) => {
         if (openSequence.current !== requestSequence) return;
         setEditorPreparing(false);
@@ -57,7 +64,7 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
     } else {
       setEditorPreparing(false);
     }
-  }, [collaborationContainers, loadSource, setEditing, setEditorPreparing, setNotice, setProcessingSource, setReviewOpen, setSelectedId]);
+  }, [collaborationContainers, imageProcessing, loadSource, setEditing, setEditorPreparing, setNotice, setProcessingSource, setReviewOpen, setSelectedId]);
   const releaseProcessingSource = React.useCallback(() => {
     openSequence.current += 1;
     setEditorPreparing(false);

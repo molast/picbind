@@ -28,7 +28,9 @@ export type CompressionAnalysisResult = {
 export async function analyzeCompressionInWorker(
   source: File,
   compressed: Blob,
+  signal?: AbortSignal,
 ): Promise<CompressionAnalysisResult> {
+  signal?.throwIfAborted();
   if (typeof window === "undefined") {
     throw new Error("Analysis worker is unavailable on the server");
   }
@@ -39,6 +41,13 @@ export async function analyzeCompressionInWorker(
 
   return new Promise<CompressionAnalysisResult>((resolve, reject) => {
     const id = createUuid();
+    const cleanup = () => signal?.removeEventListener("abort", handleAbort);
+    const handleAbort = () => {
+      cleanup();
+      worker.terminate();
+      reject(new DOMException("Image analysis was cancelled", "AbortError"));
+    };
+    signal?.addEventListener("abort", handleAbort, { once: true });
 
     worker.onmessage = (event: MessageEvent<AnalysisMessage>) => {
       const message = event.data;
@@ -47,6 +56,7 @@ export async function analyzeCompressionInWorker(
       }
 
       worker.terminate();
+      cleanup();
 
       if (!message.ok) {
         reject(new Error(message.error));
@@ -62,6 +72,7 @@ export async function analyzeCompressionInWorker(
 
     worker.onerror = (event) => {
       worker.terminate();
+      cleanup();
       reject(event.error || new Error(event.message || "Analysis worker failed"));
     };
 

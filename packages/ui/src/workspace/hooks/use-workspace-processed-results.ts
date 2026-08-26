@@ -1,6 +1,6 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import { saveCommit, saveWorkspaceImage } from "../repository";
-import { generateShareThumbnail } from "../../utils/share-thumbnail";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
 import { cachedCommit } from "../utils/workspace-page-utils";
@@ -26,6 +26,7 @@ export function useWorkspaceProcessedResults({
   releaseProcessingSource: () => void;
   setNotice: (message: string) => void;
 }) {
+  const imageProcessing = useImageProcessing();
   const saveProcessedCopy = React.useCallback(async (
     source: WorkspaceImage,
     result: ProcessedImageResult,
@@ -35,8 +36,16 @@ export function useWorkspaceProcessedResults({
     const imageId = `image_${crypto.randomUUID()}`;
     const initialCommitId = `initial_${imageId}`;
     const createdAt = Date.now();
-    const thumbnail = await generateShareThumbnail(result.blob, 320, 240);
-    const preview = new Blob([thumbnail.slice().buffer as ArrayBuffer], { type: "image/webp" });
+    const assets = await imageProcessing.createShareAssets({
+      source: {
+        kind: "blob",
+        blob: result.blob,
+        name: result.name,
+        mimeType: result.blob.type || source.mimeType,
+      },
+      container: { width: 320, height: 240 },
+    }, { requestId: `workspace-processed-thumbnail:${imageId}` });
+    const preview = assets.thumbnail.blob;
     const image: WorkspaceImage = {
       imageId, workspaceId: workspace.workspaceId, name: result.name,
       mimeType: result.blob.type || source.mimeType, size: result.blob.size,
@@ -61,7 +70,7 @@ export function useWorkspaceProcessedResults({
       sourceImageId: source.imageId, operation: result.operation, destination,
     });
     return imageId;
-  }, [persistWorkspaceLog, setCommits, setCompressingToWorkingImageId, setEditing, setImages, setSelectedId, workspace]);
+  }, [imageProcessing, persistWorkspaceLog, setCommits, setCompressingToWorkingImageId, setEditing, setImages, setSelectedId, workspace]);
 
   const queueProcessedResult = React.useCallback((source: WorkspaceImage, result: ProcessedImageResult) => {
     setEditing(null);

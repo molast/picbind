@@ -53,7 +53,8 @@ test("truncates parameter history to operations retained by a Commit", () => {
 
 test("parameter operations remain an insertion-ordered queue", () => {
   const first = appendImageOperation(emptyImageParameterDocument(), {
-    id: "first", userId: "owner", time: 20, type: "crop", params: {},
+    id: "first", userId: "owner", time: 20, type: "crop",
+    params: { x: 0, y: 0, width: 1, height: 1 },
   });
   const second = appendImageOperation(first, {
     id: "second", userId: "guest", time: 10, type: "color", params: {},
@@ -63,16 +64,18 @@ test("parameter operations remain an insertion-ordered queue", () => {
 
 test("current parameter JSON keeps one entry per operation type", () => {
   const first = appendImageOperation(emptyImageParameterDocument(), {
-    id: "crop-1", userId: "owner", time: 1, type: "crop", params: { x: 0.1 },
+    id: "crop-1", userId: "owner", time: 1, type: "crop",
+    params: { x: 0.1, y: 0, width: 0.9, height: 1 },
   });
   const withColor = setImageOperation(first, {
     id: "color-1", userId: "owner", time: 2, type: "color", params: { brightness: 10 },
   });
   const updated = setImageOperation(withColor, {
-    id: "crop-2", userId: "owner", time: 3, type: "crop", params: { x: 0.2 },
+    id: "crop-2", userId: "owner", time: 3, type: "crop",
+    params: { x: 0.2, y: 0, width: 0.8, height: 1 },
   });
   assert.deepEqual(updated.operations.map(({id})=>id), ["crop-2", "color-1"]);
-  assert.deepEqual(updated.operations[0].params, {x:0.2});
+  assert.deepEqual(updated.operations[0].params, { x: 0.2, y: 0, width: 0.8, height: 1 });
 });
 
 test("image protocol rejects malformed or oversized documents", () => {

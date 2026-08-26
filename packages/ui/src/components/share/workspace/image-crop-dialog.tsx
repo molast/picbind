@@ -2,13 +2,11 @@
 
 import React from "react";
 import { FiLoader, FiX } from "react-icons/fi";
+import { emptyImageParameterDocument, setImageOperation } from "@picbind/shared";
+import { useImageProcessing } from "../../../image-processing";
 import type { RoomImage } from "../share-room-types";
 import type { ShareRoomLabels } from "../share-room-labels";
-import {
-  cropRoomImage,
-  type NormalizedCrop,
-  type RoomImageEditResult,
-} from "../../../utils/room-image-editing";
+import { type NormalizedCrop, type RoomImageEditResult } from "../../../utils/room-image-editing";
 import KonvaCropEditor from "./konva-crop-editor";
 
 type ImageCropDialogProps = {
@@ -26,6 +24,7 @@ type RatioValue = "free" | "original" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 const INITIAL_CROP: NormalizedCrop = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
 export default function ImageCropDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialCrop }: ImageCropDialogProps) {
+  const imageProcessing = useImageProcessing();
   const [ratioValue, setRatioValue] = React.useState<RatioValue>("free");
   const [crop, setCrop] = React.useState<NormalizedCrop>(INITIAL_CROP);
   const [working, setWorking] = React.useState(false);
@@ -98,7 +97,27 @@ export default function ImageCropDialog({ image, labels, onClose, onSave, parame
 
         <footer className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
           <button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button>
-          <button type="button" disabled={working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters(crop)):cropRoomImage(new File([image.blob], image.name, { type: image.type }), crop).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.cropFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
+          <button type="button" disabled={working} onClick={() => {
+            setWorking(true);
+            setError(null);
+            const task = parameterAction && onApplyParameters
+              ? Promise.resolve().then(() => onApplyParameters(crop))
+              : imageProcessing.materialize({
+                  source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
+                  document: setImageOperation(emptyImageParameterDocument(), {
+                    id: crypto.randomUUID(), userId: "local", time: Date.now(), type: "crop", params: crop,
+                  }),
+                  output: { format: "source" },
+                  destination: "memory",
+                }, { requestId: `room-crop:${crypto.randomUUID()}` }).then((result) => {
+                  if (result.artifact.kind !== "blob") throw new Error(labels.cropFailed);
+                  return onSave(image, {
+                    blob: result.artifact.blob, name: result.name, width: result.metadata.width,
+                    height: result.metadata.height, operation: "crop", parameters: crop,
+                  });
+                });
+            void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.cropFailed)).finally(() => setWorking(false));
+          }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">
             {working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {working?(parameterAction==="proposal"?labels.submittingProposal:parameterAction?labels.applyingChanges:labels.processing):parameterAction==="proposal"?labels.submitProposal:parameterAction?labels.applyChanges:labels.generateResult}
           </button>

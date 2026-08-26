@@ -31,6 +31,7 @@ type PendingTask = {
   }) => void;
   reject: (reason?: unknown) => void;
   worker: Worker;
+  cleanup(): void;
 };
 
 const pendingTasks = new Map<string, PendingTask>();
@@ -48,6 +49,7 @@ function createCompressionWorker() {
     }
 
     pendingTasks.delete(message.id);
+    task.cleanup();
 
     if (!message.ok) {
       task.reject(new Error(message.error));
@@ -74,6 +76,7 @@ function createCompressionWorker() {
     pendingTasks.forEach((task, id) => {
       if (task.worker === worker) {
         pendingTasks.delete(id);
+        task.cleanup();
         task.reject(error);
       }
     });
@@ -89,15 +92,19 @@ export async function compressWithWasmWorker(
   targetFormat: OutputFormat,
   allowAlphaLoss = false,
   automatic = false,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   if (typeof window === "undefined") {
-    return compressWithWasm(
+    const result = await compressWithWasm(
       file,
       quality,
       targetFormat,
       allowAlphaLoss,
       automatic,
     );
+    signal?.throwIfAborted();
+    return result;
   }
 
   const worker = createCompressionWorker();
@@ -109,7 +116,17 @@ export async function compressWithWasmWorker(
     fileName: string;
   }>((resolve, reject) => {
     const id = createUuid();
-    pendingTasks.set(id, { resolve, reject, worker });
+    const handleAbort = () => {
+      const task = pendingTasks.get(id);
+      if (!task) return;
+      pendingTasks.delete(id);
+      task.cleanup();
+      worker.terminate();
+      reject(new DOMException("Image compression was cancelled", "AbortError"));
+    };
+    const cleanup = () => signal?.removeEventListener("abort", handleAbort);
+    pendingTasks.set(id, { resolve, reject, worker, cleanup });
+    signal?.addEventListener("abort", handleAbort, { once: true });
 
     try {
       worker.postMessage({
@@ -123,6 +140,7 @@ export async function compressWithWasmWorker(
       });
     } catch (error) {
       pendingTasks.delete(id);
+      cleanup();
       worker.terminate();
       reject(error);
     }

@@ -23,6 +23,11 @@
   |-- 立即加入 UI 队列
   |-- 本地持久化异步执行，不阻塞压缩
   v
+ImageProcessingService
+  |-- 首页使用 planner profile
+  |-- Room / Workspace 使用 interactive profile
+  |-- Web Adapter 选择对应的既有 Worker 链路
+  v
 压缩调度器
   |-- 全局最多同时执行 2 个任务
   |-- AVIF 最多同时执行 1 个
@@ -56,7 +61,11 @@ PCE 前端入口
 传回主线程并释放 Worker
 ```
 
-每个压缩任务创建一个独立 Worker。任务完成、失败或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，任务继续在独立 Worker 中执行，返回压缩页面后沿用原有队列和结果状态。
+React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
+按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
+`interactive`。这次接口迁移没有修改 Planner、编码参数、候选选择或回退规则。
+
+每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，任务继续在独立 Worker 中执行，返回压缩页面后沿用原有队列和结果状态。
 
 ## 3. PCE 分层
 
@@ -416,7 +425,7 @@ AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回
 
 - `ImageBitmap` 在 `finally` 中执行 `close()`。
 - Worker 输出使用 transferable `ArrayBuffer` 传回主线程，避免额外复制。
-- 每个任务完成、失败或发送任务失败后立即 `worker.terminate()`，只释放该任务的 Worker。
+- 每个任务完成、失败、取消或发送任务失败后立即 `worker.terminate()`，只释放该任务的 Worker。
 - Desktop 的压缩、Favicon 和 Workspace 页面使用持久路由栈；站内切换只隐藏非当前页面，不卸载压缩页面，也不会批量终止活跃 Worker。
 - Blob URL 在替换、删除或页面卸载时调用 `URL.revokeObjectURL()`。
 - 原始 `File` 在该图片所有格式均不再处于 queued/processing 后，从 staged 内存缓存释放。
@@ -450,6 +459,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PCE 前端 Plan、编码器选择和 Butteraugli 调度 | `apps/web/src/utils/compression-engine.ts` |
 | Gain 环境变量和前端公式 | `apps/web/src/utils/compression-gain.ts` |
 | Worker 生命周期 | `apps/web/src/utils/wasm-worker.ts`、`apps/web/src/workers/compress.worker.ts` |
+| 跨平台图片处理 Port 与 Web Adapter | `packages/shared/src/image-processing/`、`apps/web/src/image-processing/` |
 | 页面队列、并发和 5 MiB 限制 | `apps/web/src/components/home/use-home-compression.ts` |
 | WASM Feature Extractor | `crates/picbind-image/src/core/feature.rs` |
 | WASM Analyzer | `crates/picbind-image/src/core/analysis.rs` |

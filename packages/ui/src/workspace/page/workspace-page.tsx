@@ -19,6 +19,7 @@ import {
   type WorkspaceOperation, type WorkspaceProposal, type WorkspaceStyle,
 } from "../types";
 import { getLang, getWorkspaceLabels, setLang as persistLang, type Lang } from "../../locales";
+import { useImageProcessing } from "../../image-processing";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import ReviewWorkspace from "../../components/share/workspace/review-workspace";
 import type { ReviewCollaborationMessage } from "../../utils/review-collaboration";
@@ -34,13 +35,12 @@ import {
   type ImageParameterDocument,
 } from "../image-protocol";
 import { disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
-import { renderWorkspaceParameterPreview } from "../parameter-preview";
 import { WorkspaceGallery } from "../components/workspace-gallery";
 import { WorkspaceProcessingCanvas } from "../components/workspace-processing-canvas";
 import { WorkspaceHeader } from "../components/workspace-header";
 import { WorkspaceEditorDialogs } from "../components/workspace-editor-dialogs";
 import { blobFromBytes, collaborationPreviewFor, placeholderFrom } from "../utils/workspace-image-display";
-import { parameterDocumentOperations, protocolOperationType } from "../utils/workspace-operation-mapping";
+import { protocolOperationType } from "../utils/workspace-operation-mapping";
 import { cachedCommit, digestBlob } from "../utils/workspace-page-utils";
 import { useWorkspaceSelection } from "../hooks/use-workspace-selection";
 import { useWorkspaceDialogs } from "../hooks/use-workspace-dialogs";
@@ -82,6 +82,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, publicSite
   initialWorkspace?: WorkspaceIdentity;
   publicSiteUrl?: string;
 }) {
+  const imageProcessing = useImageProcessing();
   const [lang, setLanguage] = React.useState<Lang>("en");
   const [shareIdEntryOpen, setShareIdEntryOpen] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -701,12 +702,15 @@ export default function WorkspacePage({ shareToken, initialWorkspace, publicSite
         type: protocolOperationType(operation.type, operation.parameters),
         params: { ...operation.parameters, workspaceOperationType: operation.type },
       }), baseDocument);
-      const result = await renderWorkspaceParameterPreview(
-        original,
-        { width: input.width, height: input.height },
-        parameterDocumentOperations({ ...input, parameterDocument }),
-      );
-      setProposalPreview({ proposalId: proposal.proposalId, imageId: proposal.imageId, original, result: result.blob });
+      const result = await imageProcessing.renderPreview({
+        source: { kind: "blob", blob: original, name: image.name, mimeType: original.type || image.mimeType },
+        document: parameterDocument,
+        maxWidth: 960,
+        maxHeight: 720,
+        mimeType: "image/webp",
+        quality: 0.86,
+      }, { requestId: `workspace-proposal-preview:${proposal.proposalId}` });
+      setProposalPreview({ proposalId: proposal.proposalId, imageId: proposal.imageId, original, result: result.artifact.blob });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Proposal preview is unavailable");
     }
@@ -758,13 +762,16 @@ export default function WorkspacePage({ shareToken, initialWorkspace, publicSite
           type: protocolOperationType(operation.type, operation.parameters),
           params: { ...operation.parameters, workspaceOperationType: operation.type },
         }), containerDocument || image.parameterDocument || emptyImageParameterDocument());
-        const rendered = await renderWorkspaceParameterPreview(
-          input.source,
-          { width: input.width, height: input.height },
-          parameterDocumentOperations({ ...input, parameterDocument }),
-        );
-        setProposalPreview({ proposalId: proposal.proposalId, imageId: proposal.imageId, original: input.source, result: rendered.blob });
-        setActivityPreview({ activity, parameterDocument, preview: rendered.blob });
+        const rendered = await imageProcessing.renderPreview({
+          source: { kind: "blob", blob: input.source, name: image.name, mimeType: input.source.type || image.mimeType },
+          document: parameterDocument,
+          maxWidth: 960,
+          maxHeight: 720,
+          mimeType: "image/webp",
+          quality: 0.86,
+        }, { requestId: `workspace-activity-proposal-preview:${proposal.proposalId}` });
+        setProposalPreview({ proposalId: proposal.proposalId, imageId: proposal.imageId, original: input.source, result: rendered.artifact.blob });
+        setActivityPreview({ activity, parameterDocument, preview: rendered.artifact.blob });
         return;
       }
       if (workspace?.role === "collaborator" && activity.actorId === "local") {

@@ -1,7 +1,7 @@
 import React from "react";
 import { FiImage, FiRefreshCw } from "react-icons/fi";
 import RoomImageMedia from "../../components/share/room-image-media";
-import { generateShareThumbnail } from "../../utils/share-thumbnail";
+import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImagePreview, readWorkspaceImageSource, saveWorkspaceImage } from "../repository";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
@@ -22,6 +22,7 @@ export function BlobImageMedia({ blob, alt, fit = "cover" }: { blob: Blob; alt: 
 }
 
 export function WorkspaceImageMedia({ image, role, fit = "cover", controls = false, preferOriginal = false }: { image: WorkspaceImage; role: WorkspaceIdentity["role"]; fit?: "cover" | "contain"; controls?: boolean; preferOriginal?: boolean }) {
+  const imageProcessing = useImageProcessing();
   const [showPreview, setShowPreview] = React.useState(false);
   const [preview, setPreview] = React.useState<Blob>();
   const [original, setOriginal] = React.useState<Blob>();
@@ -35,8 +36,11 @@ export function WorkspaceImageMedia({ image, role, fit = "cover", controls = fal
         if (!value && image.sourceCached) {
           const source = await readWorkspaceImageSource(image);
           if (source) {
-            const thumbnail = await generateShareThumbnail(source, 320, 240);
-            value = new Blob([thumbnail.slice().buffer as ArrayBuffer], { type: "image/webp" });
+            const assets = await imageProcessing.createShareAssets({
+              source: { kind: "blob", blob: source, name: image.name, mimeType: source.type || image.mimeType },
+              container: { width: 320, height: 240 },
+            }, { requestId: `workspace-media-thumbnail:${image.imageId}:${image.previewRevision}` });
+            value = assets.thumbnail.blob;
             await saveWorkspaceImage({ ...image, preview: value, previewCached: true });
           }
         }
@@ -44,7 +48,7 @@ export function WorkspaceImageMedia({ image, role, fit = "cover", controls = fal
       } catch { /* Keep the placeholder when this browser cannot decode the source. */ }
     })();
     return () => { active = false; };
-  }, [image.imageId, image.previewCached, image.previewRevision, image.sourceCached, preferOriginal]);
+  }, [image.imageId, image.name, image.mimeType, image.previewCached, image.previewRevision, image.sourceCached, imageProcessing, preferOriginal]);
   React.useEffect(() => {
     let active = true;
     setOriginal(undefined);

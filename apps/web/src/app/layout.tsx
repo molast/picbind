@@ -7,6 +7,7 @@ import { getSiteUrl } from "@/server/site-config";
 import AuthProvider from "@/components/auth/auth-provider";
 import PageZoomLock from "@/components/page-zoom-lock";
 import DesktopRouteStack from "@/components/desktop/desktop-route-stack";
+import ImageProcessingProviderRoot from "@/image-processing/image-processing-provider-root";
 
 const siteUrl = getSiteUrl();
 const siteName = "PicBind";
@@ -145,7 +146,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 })();`}
         </Script>
         <AuthProvider>
-          <DesktopRouteStack>{children}</DesktopRouteStack>
+          <ImageProcessingProviderRoot>
+            <DesktopRouteStack>{children}</DesktopRouteStack>
+          </ImageProcessingProviderRoot>
         </AuthProvider>
       </body>
     </html>

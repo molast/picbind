@@ -13,8 +13,8 @@ function parameterNumber(parameters: Record<string, unknown>, key: string) {
   return value;
 }
 
-function fittedSize(width: number, height: number) {
-  const ratio = Math.min(1, MAX_PREVIEW_WIDTH / width, MAX_PREVIEW_HEIGHT / height);
+function fittedSize(width: number, height: number, maxWidth: number, maxHeight: number) {
+  const ratio = Math.min(1, maxWidth / width, maxHeight / height);
   return {
     width: Math.max(1, Math.round(width * ratio)),
     height: Math.max(1, Math.round(height * ratio)),
@@ -35,11 +35,15 @@ export async function renderWorkspaceParameterPreview(
   source: Blob,
   image: Pick<WorkspaceImage, "width" | "height">,
   operations: WorkspaceOperation[],
+  options: { maxWidth?: number; maxHeight?: number; quality?: number } = {},
 ) {
+  const maxWidth = Math.max(1, Math.min(MAX_PREVIEW_WIDTH, Math.round(options.maxWidth ?? MAX_PREVIEW_WIDTH)));
+  const maxHeight = Math.max(1, Math.min(MAX_PREVIEW_HEIGHT, Math.round(options.maxHeight ?? MAX_PREVIEW_HEIGHT)));
+  const quality = Math.max(0, Math.min(1, options.quality ?? 0.86));
   const decoded = await decodeWorkspaceImage(source);
   let logicalWidth = image.width || decoded.width;
   let logicalHeight = image.height || decoded.height;
-  const initialSize = fittedSize(decoded.width, decoded.height);
+  const initialSize = fittedSize(decoded.width, decoded.height, maxWidth, maxHeight);
   let canvas = new OffscreenCanvas(initialSize.width, initialSize.height);
   const initialContext = canvas.getContext("2d", { alpha: true });
   if (!initialContext) {
@@ -80,7 +84,7 @@ export async function renderWorkspaceParameterPreview(
       if (logicalWidth < 1 || logicalHeight < 1 || logicalWidth > 16384 || logicalHeight > 16384) {
         throw new Error("Invalid resize operation");
       }
-      const size = fittedSize(logicalWidth, logicalHeight);
+      const size = fittedSize(logicalWidth, logicalHeight, maxWidth, maxHeight);
       canvas = resizedCanvas(canvas, size.width, size.height);
     } else if (operation.type === "rotate") {
       const degrees = parameterNumber(operation.parameters, "degrees");
@@ -117,7 +121,7 @@ export async function renderWorkspaceParameterPreview(
   }
 
   return {
-    blob: await canvas.convertToBlob({ type: "image/webp", quality: 0.86 }),
+    blob: await canvas.convertToBlob({ type: "image/webp", quality }),
     width: Math.round(logicalWidth),
     height: Math.round(logicalHeight),
   };

@@ -1,6 +1,8 @@
 "use client";
 
 import React from "react";
+import { emptyImageParameterDocument, setImageOperation } from "@picbind/shared";
+import { useImageProcessing } from "../../../image-processing";
 import {
   FiAperture,
   FiAlignJustify,
@@ -22,7 +24,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import type { RoomImage } from "../share-room-types";
-import { adjustRoomImage, type RoomImageEditResult } from "../../../utils/room-image-editing";
+import { type RoomImageEditResult } from "../../../utils/room-image-editing";
 import {
   DEFAULT_COLOR_ADJUSTMENTS,
   type ColorToneRange,
@@ -75,6 +77,7 @@ function SliderRow({ label, value, min = -100, max = 100, suffix = "%", resetVal
 }
 
 export default function ImageColorAdjustmentDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialAdjustments }: ImageColorAdjustmentDialogProps) {
+  const imageProcessing = useImageProcessing();
   const [category, setCategory] = React.useState<Category>("light");
   const [submenu, setSubmenu] = React.useState<Submenu>("tone");
   const [comparisonMode, setComparisonMode] = React.useState<ColorComparisonMode>("in-place");
@@ -184,7 +187,28 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
           </div>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => setAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => { setWorking(true); setError(null); const task=parameterAction&&onApplyParameters?Promise.resolve().then(()=>onApplyParameters(adjustments)):adjustRoomImage(new File([image.blob], image.name, { type: image.type }), adjustments).then((result) => onSave(image, result)); void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.colorAdjustmentFailed)).finally(() => setWorking(false)); }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working?(parameterAction==="proposal"?labels.submittingProposal:parameterAction?labels.applyingChanges:labels.processing):parameterAction==="proposal"?labels.submitProposal:parameterAction?labels.applyChanges:labels.generateResult}</button></div></footer>
+        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => setAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => {
+          setWorking(true);
+          setError(null);
+          const task = parameterAction && onApplyParameters
+            ? Promise.resolve().then(() => onApplyParameters(adjustments))
+            : imageProcessing.materialize({
+                source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
+                document: setImageOperation(emptyImageParameterDocument(), {
+                  id: crypto.randomUUID(), userId: "local", time: Date.now(), type: "color",
+                  params: { ...adjustments, workspaceOperationType: "brightness" },
+                }),
+                output: { format: "source" },
+                destination: "memory",
+              }, { requestId: `room-adjust:${crypto.randomUUID()}` }).then((result) => {
+                if (result.artifact.kind !== "blob") throw new Error(labels.colorAdjustmentFailed);
+                return onSave(image, {
+                  blob: result.artifact.blob, name: result.name, width: result.metadata.width,
+                  height: result.metadata.height, operation: "adjust", parameters: adjustments,
+                });
+              });
+          void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.colorAdjustmentFailed)).finally(() => setWorking(false));
+        }} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white hover:bg-[#2457bd] disabled:opacity-50">{working ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{working?(parameterAction==="proposal"?labels.submittingProposal:parameterAction?labels.applyingChanges:labels.processing):parameterAction==="proposal"?labels.submitProposal:parameterAction?labels.applyChanges:labels.generateResult}</button></div></footer>
         {error ? <p className="border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</p> : null}
       </section>
     </div>
