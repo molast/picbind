@@ -3,6 +3,7 @@
 import React from "react";
 import HomeFooter from "./home-footer";
 import HomeComparePanel from "./home-compare-panel";
+import DesktopHome from "./desktop-home";
 import HomeHero from "./home-hero";
 import HomeInfoSection from "./home-info-section";
 import HomeResults from "./home-results";
@@ -12,6 +13,7 @@ import RoomUnavailableDialog, {
 import { useHomeCompression } from "./use-home-compression";
 import type { Lang } from "@/locales";
 import type { ShareRoom } from "@picbind/ui/source/types";
+import { isTauri } from "@tauri-apps/api/core";
 
 type HomeCompressLandingProps = {
   initialLang: Lang;
@@ -27,8 +29,13 @@ export default function HomeCompressLanding({
   onRestoreActiveRoom,
 }: HomeCompressLandingProps) {
   const home = useHomeCompression({ initialLang });
+  const [desktop, setDesktop] = React.useState<boolean | null>(null);
   const [roomUnavailableReason, setRoomUnavailableReason] =
     React.useState<RoomUnavailableReason | null>(null);
+
+  React.useEffect(() => {
+    setDesktop(isTauri());
+  }, []);
 
   React.useEffect(() => {
     const url = new URL(window.location.href);
@@ -48,8 +55,18 @@ export default function HomeCompressLanding({
     );
   }, []);
 
-  if (!home.langReady) {
+  if (!home.langReady || desktop === null) {
     return <main className="min-h-screen w-full bg-[#ececec]" />;
+  }
+
+  if (desktop) {
+    return (
+      <DesktopHome
+        home={home}
+        roomUnavailableReason={roomUnavailableReason}
+        onRoomUnavailableClose={() => setRoomUnavailableReason(null)}
+      />
+    );
   }
 
   return (

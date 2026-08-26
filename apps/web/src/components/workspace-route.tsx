@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useSearchParams } from "next/navigation";
 import { defaultWorkspaceStyle, WorkspacePage, type WorkspaceIdentity } from "@picbind/ui/source";
 import { useAuth } from "./auth/auth-provider";
 
@@ -10,11 +11,8 @@ const PUBLIC_WORKSPACE_SITE_URL = process.env.NODE_ENV === "production"
 
 export default function WorkspaceRoute() {
   const auth = useAuth();
-  const [shareToken, setShareToken] = React.useState<string | null | undefined>(undefined);
-  React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setShareToken(params.get("share"));
-  }, []);
+  const searchParams = useSearchParams();
+  const shareToken = searchParams.get("share");
   const initialWorkspace = React.useMemo<WorkspaceIdentity | undefined>(() => {
     const workspace = auth.state.workspaces[0];
     if (!auth.state.authenticated || !workspace) return undefined;
@@ -32,7 +30,7 @@ export default function WorkspaceRoute() {
   const guestShareToken = shareToken === initialWorkspace?.shareToken
     ? undefined
     : shareToken || undefined;
-  if (shareToken === undefined || (auth.checking && !shareToken && !initialWorkspace)) {
+  if (auth.checking && !shareToken && !initialWorkspace) {
     return <main className="min-h-screen bg-slate-50"/>;
   }
   return <WorkspacePage

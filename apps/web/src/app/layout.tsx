@@ -6,6 +6,7 @@ import WorkerVersionWarning from "@picbind/ui/source/worker-version-warning";
 import { getSiteUrl } from "@/server/site-config";
 import AuthProvider from "@/components/auth/auth-provider";
 import PageZoomLock from "@/components/page-zoom-lock";
+import DesktopRouteStack from "@/components/desktop/desktop-route-stack";
 
 const siteUrl = getSiteUrl();
 const siteName = "PicBind";
@@ -104,6 +105,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <PageZoomLock />
         <WorkerVersionWarning />
+        <Script id="desktop-text-selection-lock" strategy="beforeInteractive">
+          {`if (window.__TAURI_INTERNALS__) {
+  document.documentElement.classList.add("desktop-text-selection-disabled");
+}`}
+        </Script>
         <Script id="lang-title-bootstrap" strategy="beforeInteractive">
           {`(() => {
   try {
@@ -138,7 +144,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   } catch (_) {}
 })();`}
         </Script>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <DesktopRouteStack>{children}</DesktopRouteStack>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -381,15 +381,17 @@ export function createPreviewDataUrl(options: {
 export function ColorPalette({
   value,
   onChange,
+  compact = false,
 }: {
   value: string;
   onChange: (color: string) => void;
+  compact?: boolean;
 }) {
   const selected = normalizeHexForCompare(resolveCssColor(value, ""));
   const matrixRows = COLOR_SWATCHES.rows;
 
   return (
-    <div className="mt-3 rounded-xl bg-[#e8e8ea] p-3">
+    <div className={compact ? "mt-2 rounded-md bg-slate-100 p-2" : "mt-3 rounded-xl bg-[#e8e8ea] p-3"}>
       <div
         className="grid gap-0 overflow-hidden rounded-md"
         style={{

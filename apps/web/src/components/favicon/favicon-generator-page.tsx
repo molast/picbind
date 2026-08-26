@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import React from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import HomeFooter from "@/components/home/home-footer";
 import { getHomeCompressLandingCopy } from "@/locales";
 import {
@@ -15,11 +17,17 @@ import {
 import { useFaviconGenerator } from "./use-favicon-generator";
 import FaviconPageLoading from "./favicon-page-loading";
 
+const DesktopFaviconGeneratorPage = React.lazy(
+  () => import("./desktop-favicon-generator-page"),
+);
+
 export default function FaviconGeneratorPage({
   initialMode = "text",
 }: {
   initialMode?: GeneratorMode;
 }) {
+  const faviconGenerator = useFaviconGenerator({ initialMode });
+  const [desktop, setDesktop] = React.useState(false);
   const {
     mode,
     lang,
@@ -60,10 +68,22 @@ export default function FaviconGeneratorPage({
     onDrop,
     onDownload,
     onCopyHtml,
-  } = useFaviconGenerator({ initialMode });
+  } = faviconGenerator;
+
+  React.useEffect(() => {
+    setDesktop(isTauri());
+  }, []);
 
   if (!langReady) {
     return <FaviconPageLoading />;
+  }
+
+  if (desktop) {
+    return (
+      <React.Suspense fallback={<FaviconPageLoading />}>
+        <DesktopFaviconGeneratorPage generator={faviconGenerator} />
+      </React.Suspense>
+    );
   }
 
   const homeCopy = getHomeCompressLandingCopy(lang);

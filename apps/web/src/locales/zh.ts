@@ -19,6 +19,27 @@ export type HomeCompressLandingCopy = {
     fileTooLargeDescription: string;
   };
   downloadZip: string;
+  desktop: {
+    title: string;
+    subtitle: string;
+    compress: string;
+    favicon: string;
+    workspace: string;
+    enterWorkspace: string;
+    addImages: string;
+    outputFormat: string;
+    auto: string;
+    results: string;
+    best: string;
+    all: string;
+    totalSaved: string;
+    filterByFormat: string;
+    processing: string;
+    downloadResult: string;
+    resultCount: (images: number, outputs: number) => string;
+    completed: (count: number) => string;
+    page: (current: number, total: number) => string;
+  };
   cards: Array<{ title: string; desc: string }>;
   errorOverlay: {
     failed: string;
@@ -144,6 +165,27 @@ const zh = {
       fileTooLargeDescription: "该图片超过当前压缩大小限制",
     },
     downloadZip: "打包下载 ZIP",
+    desktop: {
+      title: "图片压缩",
+      subtitle: "选择图片，PicBind 会在本机完成处理",
+      compress: "压缩",
+      favicon: "Favicon",
+      workspace: "工作区",
+      enterWorkspace: "进入工作区",
+      addImages: "添加更多图片",
+      outputFormat: "输出格式",
+      auto: "自动",
+      results: "压缩结果",
+      best: "推荐",
+      all: "全部",
+      totalSaved: "累计节省",
+      filterByFormat: "按格式筛选",
+      processing: "正在处理",
+      downloadResult: "下载结果",
+      resultCount: (images: number, outputs: number) => `${images} 张图片 · ${outputs} 个输出`,
+      completed: (count: number) => `已完成 ${count} 张`,
+      page: (current: number, total: number) => `第 ${current} / ${total} 页`,
+    },
     cards: [
       {
         title: "更轻的页面资源",

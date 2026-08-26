@@ -56,7 +56,7 @@ PCE 前端入口
 传回主线程并释放 Worker
 ```
 
-每个压缩任务创建一个独立 Worker。任务完成或失败后 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。
+每个压缩任务创建一个独立 Worker。任务完成、失败或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，任务继续在独立 Worker 中执行，返回压缩页面后沿用原有队列和结果状态。
 
 ## 3. PCE 分层
 
@@ -416,8 +416,8 @@ AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回
 
 - `ImageBitmap` 在 `finally` 中执行 `close()`。
 - Worker 输出使用 transferable `ArrayBuffer` 传回主线程，避免额外复制。
-- 每个任务完成后立即 `worker.terminate()`。
-- 页面卸载会终止全部活跃 Worker。
+- 每个任务完成、失败或发送任务失败后立即 `worker.terminate()`，只释放该任务的 Worker。
+- Desktop 的压缩、Favicon 和 Workspace 页面使用持久路由栈；站内切换只隐藏非当前页面，不卸载压缩页面，也不会批量终止活跃 Worker。
 - Blob URL 在替换、删除或页面卸载时调用 `URL.revokeObjectURL()`。
 - 原始 `File` 在该图片所有格式均不再处于 queued/processing 后，从 staged 内存缓存释放。
 - Dexie / IndexedDB 负责关联数据和必要的文件队列元数据持久化，OPFS 负责图片文件；压缩算法不会把图片 Blob 存入 Dexie 表。

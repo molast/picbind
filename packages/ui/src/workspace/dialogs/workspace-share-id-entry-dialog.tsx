@@ -2,6 +2,7 @@
 
 import React from "react";
 import { FiArrowRight, FiHash, FiX } from "react-icons/fi";
+import { isTauri } from "@tauri-apps/api/core";
 import type { Lang } from "../../locales";
 
 export default function WorkspaceShareIdEntryDialog({
@@ -51,6 +52,13 @@ export default function WorkspaceShareIdEntryDialog({
     }
     const destination = new URL("/workspace", window.location.origin);
     destination.searchParams.set("share", value);
+    if (isTauri()) {
+      onClose();
+      window.dispatchEvent(new CustomEvent("picbind:navigate", {
+        detail: { href: `${destination.pathname}${destination.search}` },
+      }));
+      return;
+    }
     window.location.assign(destination.toString());
   };
 

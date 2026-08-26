@@ -42,10 +42,7 @@ import {
   storeQueuedImageFile,
 } from "@/utils/image-file-store";
 import { storeCompressedImage } from "@/utils/compressed-image-store";
-import {
-  compressWithWasmWorker,
-  terminateCompressionWorker,
-} from "@/utils/wasm-worker";
+import { compressWithWasmWorker } from "@/utils/wasm-worker";
 import { analyzeCompressionInWorker } from "@/utils/analysis-worker";
 import {
   type ImageQualityComparison,
@@ -686,7 +683,6 @@ export function useHomeCompression({
       releasedSourceFilesRef.current.clear();
       void flushCompressedCountNow();
       Object.values(timerMap).forEach((timer) => window.clearInterval(timer));
-      terminateCompressionWorker();
       Object.values(compareSourceUrlsRef.current).forEach((url) =>
         URL.revokeObjectURL(url),
       );
@@ -1180,6 +1176,11 @@ export function useHomeCompression({
     );
   };
 
+  const handleUseAutomaticFormat = () => {
+    setShowFormatOptions(false);
+    setSelectedFormats([]);
+  };
+
   const handleSelectAllFormats = () => {
     setSelectedFormats((prev) =>
       prev.length === formatOptions.length
@@ -1286,6 +1287,7 @@ export function useHomeCompression({
     handleSwitchLang,
     handleDrop,
     handleToggleFormat,
+    handleUseAutomaticFormat,
     handleSelectAllFormats,
     enqueueFiles,
     sortedItems,

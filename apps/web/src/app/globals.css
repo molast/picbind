@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+.desktop-text-selection-disabled,
+.desktop-text-selection-disabled * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 @keyframes workspace-reaction-float {
   from { opacity: 0; transform: translate(-50%, 20px) scale(.7); }
   20% { opacity: 1; }

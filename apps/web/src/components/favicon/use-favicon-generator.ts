@@ -2,7 +2,12 @@
 
 import React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getFaviconGeneratorCopy, getLang, type Lang } from "@/locales";
+import {
+  getFaviconGeneratorCopy,
+  getLang,
+  setLang as persistLang,
+  type Lang,
+} from "@/locales";
 import {
   downloadFaviconZip,
   generateFaviconFromImage,
@@ -106,6 +111,12 @@ export function useFaviconGenerator({
     },
     [pathname, router],
   );
+
+  const handleSwitchLang = React.useCallback((nextLang: Lang) => {
+    if (nextLang === lang) return;
+    setLang(nextLang);
+    persistLang(nextLang);
+  }, [lang]);
 
   React.useEffect(() => {
     document.title = pageTitle;
@@ -357,6 +368,7 @@ export function useFaviconGenerator({
     fontColor,
     backgroundColor,
     handleModeSwitch,
+    handleSwitchLang,
     onFileSelected,
     onDrop,
     onDownload,

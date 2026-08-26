@@ -34,20 +34,16 @@ type PendingTask = {
 };
 
 const pendingTasks = new Map<string, PendingTask>();
-const activeWorkers = new Set<Worker>();
 
 function createCompressionWorker() {
   const worker = new Worker(new URL("../workers/compress.worker.ts", import.meta.url), {
     type: "module",
   });
-  activeWorkers.add(worker);
-
   worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
     const message = event.data;
     const task = pendingTasks.get(message.id);
     if (!task) {
       worker.terminate();
-      activeWorkers.delete(worker);
       return;
     }
 
@@ -65,7 +61,6 @@ function createCompressionWorker() {
     }
 
     worker.terminate();
-    activeWorkers.delete(worker);
   };
 
   worker.onerror = (event) => {
@@ -83,7 +78,6 @@ function createCompressionWorker() {
       }
     });
     worker.terminate();
-    activeWorkers.delete(worker);
   };
 
   return worker;
@@ -130,17 +124,9 @@ export async function compressWithWasmWorker(
     } catch (error) {
       pendingTasks.delete(id);
       worker.terminate();
-      activeWorkers.delete(worker);
       reject(error);
     }
   });
-}
-
-export function terminateCompressionWorker() {
-  pendingTasks.forEach((task) => task.reject(new Error("Compression worker terminated")));
-  pendingTasks.clear();
-  activeWorkers.forEach((worker) => worker.terminate());
-  activeWorkers.clear();
 }
 
 export { buildCompressedFileName };
