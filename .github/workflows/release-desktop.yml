@@ -74,8 +74,10 @@ jobs:
           test "${#DMG_FILES[@]}" -eq 1
           test -f "${DMG_FILES[0]}"
           DMG_PATH="$DMG_DIR/PicBind-v${VERSION}-macOS-aarch64.dmg"
-          mv "${DMG_FILES[0]}" "$DMG_PATH"
-          codesign --force --sign - "$DMG_PATH"
+          # Tauri applies the app signing identity to the DMG too. Re-encoding
+          # removes that outer ad-hoc signature while preserving the signed app.
+          hdiutil convert "${DMG_FILES[0]}" -format UDZO -o "$DMG_PATH"
+          rm "${DMG_FILES[0]}"
 
       - name: Verify custom DMG layout
         run: |
@@ -92,7 +94,10 @@ jobs:
           test -f "$MOUNT_DIR/.background/dmg-background.png"
           test -f "$MOUNT_DIR/.DS_Store"
           codesign --verify --deep --strict --verbose=2 "$MOUNT_DIR/PicBind.app"
-          codesign --verify --strict --verbose=2 "$DMG_PATH"
+          if codesign -dv "$DMG_PATH" >/dev/null 2>&1; then
+            echo "DMG must remain unsigned; only PicBind.app is ad-hoc signed."
+            exit 1
+          fi
           codesign -dv --verbose=4 "$MOUNT_DIR/PicBind.app" 2>&1 | grep -q 'Signature=adhoc'
           codesign -dv --verbose=4 "$MOUNT_DIR/PicBind.app" 2>&1 | grep -q 'Sealed Resources'
 
