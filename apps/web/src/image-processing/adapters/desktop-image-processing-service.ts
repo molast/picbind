@@ -4,16 +4,24 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   IMAGE_PROCESSING_API_VERSION,
   ImageProcessingError,
+  validateImageParameterDocument,
   validateImageProcessingSource,
   type CompressImageRequest,
+  type CompareImageQualityRequest,
   type ConvertImageRequest,
+  type CreateShareAssetsRequest,
+  type ImageAnalysisMetrics,
   type ImageMetadata,
   type ImageOutputFormat,
+  type ImageParameterDocument,
   type ImageProcessingCapabilities,
   type ImageProcessingResult,
   type ImageProcessingService,
   type ImageProcessingSource,
+  type ImageQualityComparison,
   type ImageTaskContext,
+  type MaterializeImageRequest,
+  type RenderPreviewRequest,
 } from "@picbind/shared";
 
 const encoder = new TextEncoder();
@@ -24,11 +32,11 @@ const capabilities: ImageProcessingCapabilities = {
   engine: "desktop-native",
   inputFormats: ["jpeg", "png", "webp", "avif"],
   outputFormats: ["jpeg", "png", "webp", "avif"],
-  parameterOperations: [],
+  parameterOperations: ["crop", "resize", "rotate", "color", "draw"],
   supportsStoredSources: true,
   supportsProgress: true,
   supportsCancellation: false,
-  supportsQualityAnalysis: false,
+  supportsQualityAnalysis: true,
   maxInputBytes: 50 * 1024 * 1024,
   maxPixels: 100_000_000,
   implementation: "picbind-image-native/1",
@@ -39,6 +47,32 @@ type NativeResponse = {
   returnedOriginal: boolean;
   dataLength: number;
   implementation: string;
+};
+
+type NativeBinaryResponse = {
+  dataLength: number;
+  implementation: string;
+};
+
+type NativePreviewResponse = NativeBinaryResponse & {
+  width: number;
+  height: number;
+};
+
+type NativeShareAssetsResponse = NativeBinaryResponse & {
+  placeholder: {
+    width: number;
+    height: number;
+    dominantColor: string;
+    blurHash: string;
+  };
+  thumbnailMimeType: "image/webp";
+};
+
+type NativeQualityResponse = NativeBinaryResponse & {
+  comparison: ImageQualityComparison;
+  sourceMetrics: ImageAnalysisMetrics;
+  assessedMetrics: ImageAnalysisMetrics;
 };
 
 type NativeCommandError = {
@@ -112,6 +146,7 @@ function parseNativeError(error: unknown): ImageProcessingError {
       case "decodeFailed": return "decodeFailed" as const;
       case "encodeFailed": return "encodeFailed" as const;
       case "alphaLossDenied": return "alphaLossForbidden" as const;
+      case "unsupportedOperation": return "unsupportedOperation" as const;
       case "invalidParameters":
       case "invalidSource": return "invalidRequest" as const;
       default: return "internal" as const;
@@ -125,25 +160,38 @@ function parseNativeError(error: unknown): ImageProcessingError {
   );
 }
 
-async function executeNative(
+async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
   metadata: Record<string, unknown>,
   source: ImageProcessingSource,
   context?: ImageTaskContext,
+  assessed?: ImageProcessingSource,
 ) {
   checkContext(context);
   report(context, "resolvingSource");
   const encodedSource = await encodeSource(source);
+  const encodedAssessed = assessed ? await encodeSource(assessed) : undefined;
   checkContext(context);
   report(context, metadata.operation === "inspect" ? "decoding" : "encoding");
   const metadataBytes = encoder.encode(JSON.stringify({
     ...metadata,
     source: encodedSource.source,
+    assessed: encodedAssessed?.source,
     inlineLength: encodedSource.bytes.byteLength,
+    assessedInlineLength: encodedAssessed?.bytes.byteLength ?? 0,
   }));
-  const frame = new Uint8Array(4 + metadataBytes.byteLength + encodedSource.bytes.byteLength);
+  const frame = new Uint8Array(
+    4 + metadataBytes.byteLength + encodedSource.bytes.byteLength
+      + (encodedAssessed?.bytes.byteLength ?? 0),
+  );
   new DataView(frame.buffer).setUint32(0, metadataBytes.byteLength, true);
   frame.set(metadataBytes, 4);
   frame.set(encodedSource.bytes, 4 + metadataBytes.byteLength);
+  if (encodedAssessed) {
+    frame.set(
+      encodedAssessed.bytes,
+      4 + metadataBytes.byteLength + encodedSource.bytes.byteLength,
+    );
+  }
 
   let raw: ArrayBuffer | Uint8Array | number[];
   try {
@@ -165,12 +213,17 @@ async function executeNative(
   if (metadataEnd > response.byteLength) {
     throw new ImageProcessingError("internal", "Native image response metadata is invalid");
   }
-  const result = JSON.parse(decoder.decode(response.subarray(4, metadataEnd))) as NativeResponse;
+  const result = JSON.parse(decoder.decode(response.subarray(4, metadataEnd))) as T;
   const bytes = response.slice(metadataEnd);
   if (bytes.byteLength !== result.dataLength) {
     throw new ImageProcessingError("internal", "Native image response data is incomplete");
   }
   return { result, bytes };
+}
+
+function supportsNativeDocument(document: ImageParameterDocument) {
+  return document.operations.every((operation) =>
+    ["crop", "resize", "rotate", "color", "draw"].includes(operation.type));
 }
 
 export class DesktopImageProcessingService implements ImageProcessingService {
@@ -188,10 +241,144 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     return result.metadata;
   }
 
-  renderPreview = this.webFallback.renderPreview.bind(this.webFallback);
-  materialize = this.webFallback.materialize.bind(this.webFallback);
-  compareQuality = this.webFallback.compareQuality.bind(this.webFallback);
-  createShareAssets = this.webFallback.createShareAssets.bind(this.webFallback);
+  async renderPreview(request: RenderPreviewRequest, context?: ImageTaskContext) {
+    validateImageParameterDocument(request.document);
+    if (!supportsNativeDocument(request.document)) {
+      return this.webFallback.renderPreview(request, context);
+    }
+    if (request.mimeType !== "image/webp"
+      || !Number.isInteger(request.maxWidth) || request.maxWidth < 1
+      || !Number.isInteger(request.maxHeight) || request.maxHeight < 1
+      || !Number.isFinite(request.quality) || request.quality < 0 || request.quality > 1) {
+      throw new ImageProcessingError("invalidRequest", "Preview dimensions, quality or mimeType are invalid");
+    }
+    try {
+      report(context, "rendering");
+      const { result, bytes } = await executeNative<NativePreviewResponse>({
+        operation: "renderPreview",
+        document: request.document,
+        preview: {
+          maxWidth: request.maxWidth,
+          maxHeight: request.maxHeight,
+          quality: Math.max(1, Math.round(request.quality * 100)),
+        },
+      }, request.source, context);
+      report(context, "completed");
+      return {
+        artifact: { kind: "blob" as const, blob: new Blob([bytes], { type: "image/webp" }) },
+        width: result.width,
+        height: result.height,
+        engine: this.engine,
+        documentVersion: 1 as const,
+      };
+    } catch (error) {
+      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
+        return this.webFallback.renderPreview(request, context);
+      }
+      throw error;
+    }
+  }
+
+  async materialize(
+    request: MaterializeImageRequest,
+    context?: ImageTaskContext,
+  ): Promise<ImageProcessingResult> {
+    if (request.destination !== "memory") {
+      throw new ImageProcessingError(
+        "capabilityUnavailable",
+        "Desktop native temporary artifacts are not implemented",
+      );
+    }
+    validateImageParameterDocument(request.document);
+    if (!supportsNativeDocument(request.document)) {
+      return this.webFallback.materialize(request, context);
+    }
+    const quality = request.output.quality ?? 92;
+    if (!Number.isFinite(quality) || quality < 1 || quality > 100) {
+      throw new ImageProcessingError("invalidRequest", "Materialize quality must be between 1 and 100");
+    }
+    try {
+      report(context, "rendering");
+      const { result, bytes } = await executeNative<NativeResponse>({
+        operation: "materialize",
+        document: request.document,
+        materialize: {
+          format: request.output.format,
+          quality: Math.round(quality),
+          allowAlphaLoss: request.output.allowAlphaLoss ?? false,
+        },
+      }, request.source, context);
+      report(context, "completed");
+      return {
+        artifact: { kind: "blob", blob: new Blob([bytes], { type: result.metadata.mimeType }) },
+        name: outputName(request.source.name, result.metadata.format),
+        metadata: result.metadata,
+        engine: this.engine,
+        sourceUnchanged: true,
+        returnedOriginal: result.returnedOriginal,
+        implementation: result.implementation,
+      };
+    } catch (error) {
+      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
+        return this.webFallback.materialize(request, context);
+      }
+      throw error;
+    }
+  }
+
+  async compareQuality(request: CompareImageQualityRequest, context?: ImageTaskContext) {
+    report(context, "analyzing");
+    const { result } = await executeNative<NativeQualityResponse>(
+      { operation: "compareQuality" },
+      request.source,
+      context,
+      request.assessed,
+    );
+    report(context, "completed");
+    return {
+      comparison: result.comparison,
+      sourceMetrics: result.sourceMetrics,
+      assessedMetrics: result.assessedMetrics,
+      engine: this.engine,
+    };
+  }
+
+  async createShareAssets(request: CreateShareAssetsRequest, context?: ImageTaskContext) {
+    if (request.document) {
+      validateImageParameterDocument(request.document);
+      if (!supportsNativeDocument(request.document)) {
+        return this.webFallback.createShareAssets(request, context);
+      }
+    }
+    if (!Number.isInteger(request.container.width) || request.container.width < 1
+      || !Number.isInteger(request.container.height) || request.container.height < 1) {
+      throw new ImageProcessingError("invalidRequest", "Share asset container is invalid");
+    }
+    try {
+      report(context, "rendering");
+      const { result, bytes } = await executeNative<NativeShareAssetsResponse>({
+        operation: "createShareAssets",
+        document: request.document,
+        container: request.container,
+      }, request.source, context);
+      report(context, "completed");
+      return {
+        placeholder: result.placeholder,
+        thumbnail: {
+          kind: "blob" as const,
+          blob: new Blob([bytes], { type: result.thumbnailMimeType }),
+        },
+        thumbnailMimeType: result.thumbnailMimeType,
+        engine: this.engine,
+      };
+    } catch (error) {
+      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
+        return this.webFallback.createShareAssets(request, context);
+      }
+      throw error;
+    }
+  }
+
   releaseTemporary = this.webFallback.releaseTemporary.bind(this.webFallback);
 
   async compress(

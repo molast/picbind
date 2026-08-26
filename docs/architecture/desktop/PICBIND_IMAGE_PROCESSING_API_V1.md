@@ -65,8 +65,8 @@ V1 采用以下设计：
 
 当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE，Desktop `auto`、
 支持目标尺寸的 `interactive` 固定目标格式以及无 resize 的 `planner` 使用 Native codec。
-参数重放、预览和质量分析尚未迁移到 Native，由组合根显式配置的 Web Adapter 执行，结果仍
-标记为 `engine: "web"`。
+受支持参数的纯 Rust 重放 Core 已实现；预览、物化和质量分析尚未接入 Native Adapter，由
+组合根显式配置的 Web Adapter 执行，结果仍标记为 `engine: "web"`。
 
 ## 4. 目标与非目标
 
@@ -307,6 +307,23 @@ export type ImageOperation = {
 - 源图保持不可变，Commit 和 Activity 只保存参数文档历史，不保存每一步完整图片。
 - 历史预览使用同一个源图和目标步骤的参数文档重新渲染。
 - `compression` 和格式转换不进入该文档；它们生成独立输出。
+
+Desktop Native Core 已提供 `replay_parameters()`，直接消费上述 V1 文档并在同一解码后的
+`DynamicImage` 上按队列顺序执行，不会为每一步编码中间文件。当前实现范围：
+
+- `crop`：当前图像坐标系内的归一化裁剪。
+- `resize`：Lanczos3 精确尺寸调整，沿用单边和总像素上限。
+- `rotate`：90、180、270 度旋转。
+- `color`：与现有编辑器一致的通道、亮度、对比度、色阶、曲线、HSL、自然饱和度、色温、
+  色彩平衡、照片滤镜、选择性色彩、颜色替换和重着色顺序；Alpha 原值不变。
+- `draw`：线、箭头、矩形、椭圆、自由笔迹、文字和 Emoji，支持缩放、旋转、实线/虚线/
+  点线、填充和 Alpha 合成。文字使用 crate 内嵌 Noto Sans，彩色 Emoji 使用固定版本
+  Twemoji PNG，不读取操作系统字体；画布外几何会先裁到图片边界，避免异常坐标造成无界
+  光栅循环。内嵌字体没有的字符或 Twemoji 不认识的序列会明确返回 `unsupportedOperation`，
+  Adapter 将整份参数文档交给 Web fallback，不能只跳过该标注。
+
+Native Core 对 `filter`、`annotation` 和 `ai` 继续明确拒绝，包含这些操作的完整文档整体走
+Web Adapter。Desktop capability 只声明 `crop`、`resize`、`rotate`、`color` 和 `draw`。
 
 ## 8. ImageProcessingService V1
 
@@ -929,9 +946,9 @@ Planner 和参数重放仍待提取。
 - Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
   传输，不使用 Base64 或 JSON 数字数组。
 - 固定目标和 `auto` 的 `planner` profile 已使用 Native 多质量候选、候选失败隔离、轻量
-  感知质量护栏和最小有效候选选择。参数预览、物化、质量分析和协作派生资源尚未 Native 化，
-  当前由组合根显式注入的 Web Adapter 执行，返回值继续声明实际
-  `engine: "web"`。
+  感知质量护栏和最小有效候选选择。纯 Rust 参数队列重放、受限 WebP 预览、全尺寸物化、
+  BlurHash/主色 placeholder、独立 WebP thumbnail 和完整质量对比均已通过二进制 Tauri IPC
+  接入 Desktop Adapter；双图质量比较使用两个长度分隔的原始字节区，不使用 Base64。
 - Native 编码当前不支持运行中的协作式取消、临时 artifact 和进度事件流；capabilities 不会
   声明这些能力。
 
@@ -947,23 +964,24 @@ Planner 和参数重放仍待提取。
 | 5.2 Auto Predictor | 已完成 | Native 像素特征提取；透明图不选 JPEG；自动结果可重新解码且格式与预测一致 |
 | 5.3 Planner 质量护栏 | 已完成 | 固定目标与 auto 的多质量候选、候选失败隔离、SSIM / PSNR / 边缘 / Alpha 阈值和最小有效候选选择 |
 | 5.4 Native Resize | 已完成 | interactive 在 Rust 内使用 Lanczos3 缩放后编码；尺寸、像素上限和同格式回退语义正确 |
-| 5.5 参数重放 | 待实现 | crop、rotate、resize、color、draw 等有序参数应用于同一源图 |
-| 5.6 Preview / Materialize | 待实现 | 受限预览与全尺寸物化分离，不在参数提交时编码全图 |
-| 5.7 派生资源与质量分析 | 待实现 | placeholder、WebP thumbnail、质量对比及资源释放 |
+| 5.5 参数重放 | 已完成 | crop、rotate、resize、完整 color、几何 draw、内嵌 Noto Sans 文字和固定 Twemoji 彩色 Emoji 按序作用于同一源图 |
+| 5.6 Preview / Materialize | 已完成 | 受限 WebP 预览与全尺寸物化分离；空文档同格式可返回原文件，非空文档只在最终输出编码一次 |
+| 5.7 派生资源与质量分析 | 已完成 | 主色/BlurHash placeholder、独立 WebP thumbnail、完整质量与特征指标；内存结果随命令返回释放中间缓冲 |
 | 5.8 Native 任务治理 | 待实现 | 任务表、协作式取消、进度事件、临时 artifact 和过期清理 |
 | 5.9 Adapter 一致性与实机验证 | 待实现 | 共享契约、性能、内存、取消和 macOS 双架构验证 |
 
 ### 阶段 6：一致性验证和切换
 
 当前状态：四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
-Alpha 拒绝和同格式不增大已经通过 Rust 测试；完整 Adapter 契约、参数操作、取消、性能和
-内存实机验证尚未完成。
+参数重放、预览/物化、协作派生资源、质量分析、Alpha 拒绝和同格式不增大已经通过 Rust 与
+TypeScript 检查；取消、临时 artifact、性能/内存和 macOS 双架构实机验证仍属于 5.8/5.9。
 
 - 对 Web 和 Desktop Adapter 运行同一套契约测试。
 - 对性能、内存、取消和异常清理做 Desktop 实机测试。
 - 只有对应能力通过测试后，Desktop selector 才能把该方法切换为 Native；当前切换
   `inspect`、无 resize 的 `planner`、支持 resize 的 `interactive` 固定格式与 `auto`
-  `compress`，以及 `convert`。
+  `compress`、`convert`、`renderPreview`、`materialize`、`createShareAssets` 和
+  `compareQuality`；Native 不支持的参数文档整体回退 Web Adapter。
 - 删除迁移期重复入口和不再需要的显式 fallback。
 
 ## 20. 测试策略

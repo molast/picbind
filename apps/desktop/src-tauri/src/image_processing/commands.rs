@@ -1,6 +1,7 @@
 use picbind_image_native::{
-    NativeEncodeOptions, NativeImageDimensions, NativeImageFormat, NativeImageMetadata, encode,
-    encode_auto, encode_auto_planned, encode_planned, inspect,
+    NativeEncodeOptions, NativeImageDimensions, NativeImageError, NativeImageFormat,
+    NativeImageMetadata, NativeParameterDocument, compare_quality, create_share_assets, encode,
+    encode_auto, encode_auto_planned, encode_planned, inspect, materialize, render_preview,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -17,7 +18,19 @@ struct NativeProcessRequest {
     source: NativeSource,
     #[serde(default)]
     options: Option<NativeTransformOptions>,
+    #[serde(default)]
+    document: Option<NativeParameterDocument>,
+    #[serde(default)]
+    preview: Option<NativePreviewOptions>,
+    #[serde(default)]
+    materialize: Option<NativeMaterializeOptions>,
+    #[serde(default)]
+    container: Option<NativeDimensions>,
+    #[serde(default)]
+    assessed: Option<NativeSource>,
     inline_length: usize,
+    #[serde(default)]
+    assessed_inline_length: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,6 +38,10 @@ struct NativeProcessRequest {
 enum NativeOperation {
     Inspect,
     Encode,
+    RenderPreview,
+    Materialize,
+    CreateShareAssets,
+    CompareQuality,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,11 +77,55 @@ struct NativeDimensions {
     height: u32,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativePreviewOptions {
+    max_width: u32,
+    max_height: u32,
+    quality: u8,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeMaterializeOptions {
+    format: String,
+    quality: u8,
+    allow_alpha_loss: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeProcessResponse {
     metadata: NativeMetadataResponse,
     returned_original: bool,
+    data_length: usize,
+    implementation: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativePreviewResponse {
+    width: u32,
+    height: u32,
+    data_length: usize,
+    implementation: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeShareAssetsResponse {
+    placeholder: picbind_image_native::NativeSharePlaceholder,
+    thumbnail_mime_type: &'static str,
+    data_length: usize,
+    implementation: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeQualityResponse {
+    comparison: picbind_image_native::NativeImageQualityComparison,
+    source_metrics: picbind_image_native::NativeImageAnalysis,
+    assessed_metrics: picbind_image_native::NativeImageAnalysis,
     data_length: usize,
     implementation: &'static str,
 }
@@ -94,9 +155,10 @@ pub async fn image_processing_execute(
     state: State<'_, NativeImageStore>,
     request: Request<'_>,
 ) -> Result<Response, String> {
-    let (request, inline) = decode_request(request.body()).map_err(command_error)?;
+    let (request, inline, assessed_inline) =
+        decode_request(request.body()).map_err(command_error)?;
     let store = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || execute(store, request, inline))
+    tauri::async_runtime::spawn_blocking(move || execute(store, request, inline, assessed_inline))
         .await
         .map_err(|error| command_error(("processingFailed", error.to_string())))?
         .map(Response::new)
@@ -107,6 +169,7 @@ fn execute(
     store: NativeImageStore,
     request: NativeProcessRequest,
     inline: Vec<u8>,
+    assessed_inline: Vec<u8>,
 ) -> Result<Vec<u8>, (&'static str, String)> {
     let source = resolve_source(&store, &request.source, inline)?;
     match request.operation {
@@ -160,24 +223,133 @@ fn execute(
                 (false, true) => encode_planned(&source, &encode_options),
                 (false, false) => encode(&source, &encode_options),
             }
-            .map_err(|error| {
-                let code = match error {
-                    picbind_image_native::NativeImageError::AlphaLossDenied => "alphaLossDenied",
-                    picbind_image_native::NativeImageError::InvalidDimensions(_) => {
-                        "invalidParameters"
-                    }
-                    picbind_image_native::NativeImageError::UnsupportedFormat(_) => {
-                        "unsupportedFormat"
-                    }
-                    picbind_image_native::NativeImageError::InputTooLarge => "inputTooLarge",
-                    picbind_image_native::NativeImageError::InvalidImage(_) => "decodeFailed",
-                    picbind_image_native::NativeImageError::EncodeFailed(_) => "encodeFailed",
-                };
-                (code, error.to_string())
-            })?;
+            .map_err(native_error)?;
             encode_response(output.metadata, output.returned_original, output.bytes)
         }
+        NativeOperation::RenderPreview => {
+            let document = required_document(request.document)?;
+            let options = request.preview.ok_or_else(|| {
+                (
+                    "invalidParameters",
+                    "Preview options are required".to_string(),
+                )
+            })?;
+            let output = render_preview(
+                &source,
+                &document,
+                NativeImageDimensions {
+                    width: options.max_width,
+                    height: options.max_height,
+                },
+                options.quality,
+            )
+            .map_err(native_error)?;
+            encode_payload_response(
+                &NativePreviewResponse {
+                    width: output.width,
+                    height: output.height,
+                    data_length: output.bytes.len(),
+                    implementation: "picbind-image-native/1",
+                },
+                output.bytes,
+            )
+        }
+        NativeOperation::Materialize => {
+            let document = required_document(request.document)?;
+            let options = request.materialize.ok_or_else(|| {
+                (
+                    "invalidParameters",
+                    "Materialize options are required".to_string(),
+                )
+            })?;
+            let format = if options.format.eq_ignore_ascii_case("source") {
+                None
+            } else {
+                Some(NativeImageFormat::parse(&options.format).map_err(native_error)?)
+            };
+            let output = materialize(
+                &source,
+                &document,
+                format,
+                options.quality,
+                options.allow_alpha_loss,
+            )
+            .map_err(native_error)?;
+            encode_response(output.metadata, output.returned_original, output.bytes)
+        }
+        NativeOperation::CreateShareAssets => {
+            let container = request.container.ok_or_else(|| {
+                (
+                    "invalidParameters",
+                    "Share asset container is required".to_string(),
+                )
+            })?;
+            let assets = create_share_assets(
+                &source,
+                request.document.as_ref(),
+                NativeImageDimensions {
+                    width: container.width,
+                    height: container.height,
+                },
+            )
+            .map_err(native_error)?;
+            encode_payload_response(
+                &NativeShareAssetsResponse {
+                    placeholder: assets.placeholder,
+                    thumbnail_mime_type: "image/webp",
+                    data_length: assets.thumbnail.len(),
+                    implementation: "picbind-image-native/1",
+                },
+                assets.thumbnail,
+            )
+        }
+        NativeOperation::CompareQuality => {
+            let assessed = request.assessed.ok_or_else(|| {
+                (
+                    "invalidParameters",
+                    "Assessed image source is required".to_string(),
+                )
+            })?;
+            let assessed = resolve_source(&store, &assessed, assessed_inline)?;
+            let analysis = compare_quality(&source, &assessed).map_err(native_error)?;
+            encode_payload_response(
+                &NativeQualityResponse {
+                    comparison: analysis.comparison,
+                    source_metrics: analysis.source_metrics,
+                    assessed_metrics: analysis.assessed_metrics,
+                    data_length: 0,
+                    implementation: "picbind-image-native/1",
+                },
+                Vec::new(),
+            )
+        }
     }
+}
+
+fn required_document(
+    document: Option<NativeParameterDocument>,
+) -> Result<NativeParameterDocument, (&'static str, String)> {
+    document.ok_or_else(|| {
+        (
+            "invalidParameters",
+            "Parameter document is required".to_string(),
+        )
+    })
+}
+
+fn native_error(error: NativeImageError) -> (&'static str, String) {
+    let code = match error {
+        NativeImageError::AlphaLossDenied => "alphaLossDenied",
+        NativeImageError::InvalidDimensions(_) | NativeImageError::InvalidParameters(_) => {
+            "invalidParameters"
+        }
+        NativeImageError::UnsupportedOperation(_) => "unsupportedOperation",
+        NativeImageError::UnsupportedFormat(_) => "unsupportedFormat",
+        NativeImageError::InputTooLarge => "inputTooLarge",
+        NativeImageError::InvalidImage(_) => "decodeFailed",
+        NativeImageError::EncodeFailed(_) => "encodeFailed",
+    };
+    (code, error.to_string())
 }
 
 fn resolve_source(
@@ -230,7 +402,7 @@ fn resolve_source(
 
 fn decode_request(
     body: &InvokeBody,
-) -> Result<(NativeProcessRequest, Vec<u8>), (&'static str, String)> {
+) -> Result<(NativeProcessRequest, Vec<u8>, Vec<u8>), (&'static str, String)> {
     let InvokeBody::Raw(frame) = body else {
         return Err((
             "invalidParameters",
@@ -265,13 +437,25 @@ fn decode_request(
                 format!("Invalid native image metadata: {error}"),
             )
         })?;
-    if request.inline_length != frame.len() - metadata_end {
+    let payload_length = request
+        .inline_length
+        .checked_add(request.assessed_inline_length)
+        .ok_or_else(|| {
+            (
+                "invalidParameters",
+                "Native image data length is invalid".to_string(),
+            )
+        })?;
+    if payload_length != frame.len() - metadata_end {
         return Err((
             "invalidParameters",
             "Native image data length is invalid".to_string(),
         ));
     }
-    Ok((request, frame[metadata_end..].to_vec()))
+    let source_end = metadata_end + request.inline_length;
+    let inline = frame[metadata_end..source_end].to_vec();
+    let assessed_inline = frame[source_end..].to_vec();
+    Ok((request, inline, assessed_inline))
 }
 
 fn encode_response(
@@ -299,8 +483,15 @@ fn encode_response(
         data_length: bytes.len(),
         implementation: "picbind-image-native/1",
     };
+    encode_payload_response(&response, bytes)
+}
+
+fn encode_payload_response<T: Serialize>(
+    response: &T,
+    bytes: Vec<u8>,
+) -> Result<Vec<u8>, (&'static str, String)> {
     let metadata =
-        serde_json::to_vec(&response).map_err(|error| ("processingFailed", error.to_string()))?;
+        serde_json::to_vec(response).map_err(|error| ("processingFailed", error.to_string()))?;
     let metadata_length = u32::try_from(metadata.len()).map_err(|_| {
         (
             "processingFailed",
@@ -337,5 +528,17 @@ mod tests {
         frame.push(1);
         let error = decode_request(&InvokeBody::Raw(frame)).unwrap_err();
         assert_eq!(error.0, "invalidParameters");
+    }
+
+    #[test]
+    fn splits_two_inline_sources_without_base64() {
+        let metadata = br#"{"operation":"compareQuality","source":{"kind":"inline"},"assessed":{"kind":"inline"},"inlineLength":2,"assessedInlineLength":3}"#;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+        frame.extend_from_slice(metadata);
+        frame.extend_from_slice(&[1, 2, 3, 4, 5]);
+        let (_, source, assessed) = decode_request(&InvokeBody::Raw(frame)).unwrap();
+        assert_eq!(source, [1, 2]);
+        assert_eq!(assessed, [3, 4, 5]);
     }
 }

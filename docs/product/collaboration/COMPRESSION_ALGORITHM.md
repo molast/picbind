@@ -65,8 +65,9 @@ React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
 `interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的固定目标和 `auto` 且不改变
 尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放，`planner` 执行
-多候选编码与 Native 质量护栏但按现有契约不接受目标尺寸。尚未迁移的参数操作由组合根显式
-调用 Web Adapter，结果中的 `engine` 保持真实值。
+多候选编码与 Native 质量护栏但按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
+协作派生资源和完整质量对比也使用 Native Adapter；包含未支持操作或未覆盖字形的参数文档
+整体调用 Web Adapter，结果中的 `engine` 保持真实值。
 
 Web 路径的每个压缩任务创建一个独立 Worker。任务完成、失败、取消或向 Worker 发送任务失败后，该任务自己的 Worker 会被终止，因此 WASM 线性内存、解码后的像素缓冲和编码过程中的临时对象会随 Worker 一起释放。`AbortSignal` 现在由 Service 上下文传入首页 Worker 包装器；取消时会移除待处理任务、解绑监听器并立即终止对应 Worker。Native 路径由 Tauri `spawn_blocking` 执行，当前只支持调用前后取消结果交付，尚未支持编码器内部协作式取消。Desktop 使用持久路由栈保持压缩页面挂载；切换到 Favicon 或 Workspace 时不会终止正在运行的压缩任务，返回压缩页面后沿用原有队列和结果状态。
 
@@ -259,6 +260,31 @@ Desktop Native `interactive` 收到目标尺寸时，在统一 RGBA 解码后使
 `1..=16384`，且总像素不能超过 `100,000,000`；校验在目标缓冲分配前执行。目标尺寸等于源图
 尺寸时视为未缩放，继续应用同格式不增大规则；目标尺寸发生变化时禁止返回原文件，否则会把
 原始宽高错误地伪装成缩放结果。Native Auto Predictor 使用缩放后的像素特征选择格式。
+
+Desktop Native Core 现已实现 `ImageParameterDocument` V1 的有序参数重放。源文件只解码
+一次，crop、resize、rotate、color 和 draw 依次作用于同一个 RGBA 容器，不为中间步骤
+创建编码文件。Color 顺序与 Web 编辑器保持一致并保留 Alpha；draw 支持线、箭头、矩形、
+椭圆、自由笔迹、缩放、旋转、线型、填充、内嵌 Noto Sans 文字和固定 Twemoji 彩色 Emoji。
+文字与 Emoji 不读取操作系统字体，保证 Desktop 平台间使用相同资源。文档版本、操作数量、唯一 ID、嵌套
+深度、集合大小、有限数值、尺寸和颜色范围均在 Rust 边界重新校验。异常画布外坐标先裁剪到
+实际图像范围。
+
+`renderPreview()` 先计算有序参数队列的最终几何尺寸，再按请求边界统一缩小源缓冲以及
+resize/draw 的绝对坐标；归一化 crop 与操作顺序不变，最终只编码一个受限 WebP且不放大；
+`materialize()` 在完整分辨率重放并只在最终输出编码一次。空参数文档且输出格式为源格式时可
+直接返回原文件，存在任意操作时不得返回原文件。`filter`、`annotation`、`ai`、内嵌字体未覆盖
+的字符或未知 Emoji 会返回明确的 unsupported operation，Adapter 对完整文档使用 Web fallback，
+不能静默忽略或混合两端渲染。参数重放本身不改变压缩候选和同格式不增大规则。
+
+Native `createShareAssets()` 对同一个解码/参数重放结果分别生成两类派生资源：placeholder
+包含原渲染尺寸、线性 RGB 主色和 4×3 BlurHash；thumbnail 独立按容器等比缩小、不放大并
+编码为 WebP。thumbnail 不会写入 `blurHash` 字段，也不能代替颜色 Hash。Native
+`compareQuality()` 接收两个独立二进制输入，计算完整 source/assessed 特征、MSE、RMSE、
+PSNR、SSIM、MS-SSIM、边缘保留、拉普拉斯方差、Delta E 分位数、亮度/色度误差、感知距离和
+Alpha 误差。完全一致图片的 PSNR 在 JSON IPC 中报告为 100 dB 上限，避免非有限数值无法
+序列化；其 MSE、Delta E 和 Alpha 误差仍为 0，SSIM/MS-SSIM 为 1。质量像素运算和完整特征
+提取使用最长边 1600 的等比采样图，结果中的宽高和文件大小仍记录原输入；这避免最大尺寸
+图片为多个指标向量分配数 GB 内存。
 
 ## 5. JPEG 流程
 
@@ -469,6 +495,9 @@ if source_format == target_format
   AVIF 请求使用单线程 WASM。Web 站点在运行环境支持时仍可使用多线程 AVIF 编码器。
 - Desktop Native resize 与后续编码位于同一个 `spawn_blocking` 任务；缩放后的 RGBA 缓冲在
   编码任务返回时释放，不通过 IPC 往返传输。
+- Native 参数预览、物化、placeholder、thumbnail 和质量分析同样位于单个 `spawn_blocking`
+  命令中；解码图、重放容器、缩放缓冲和指标向量在命令返回后释放。5.7 只返回 Blob 内存
+  artifact，不创建临时 token；临时 artifact 的接管、过期和显式释放属于 5.8。
 
 AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回解码同时存在时内存峰值最高。
 
@@ -525,6 +554,10 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
 | Desktop Native 四格式 codec | `crates/picbind-image-native/src/` |
 | Desktop Native resize | `crates/picbind-image-native/src/resize/` |
+| Desktop Native 参数重放 | `crates/picbind-image-native/src/parameters/` |
+| Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
+| Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |
+| Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |
 | Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
 
 ## 16. Room Image Workspace 压缩入口
