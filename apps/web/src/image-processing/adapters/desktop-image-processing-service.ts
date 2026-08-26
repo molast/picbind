@@ -94,6 +94,21 @@ type NativeProgressEvent = {
   total: number;
 };
 
+export type DesktopNativeBridge = {
+  invoke<T>(command: string, args?: unknown): Promise<T>;
+  listen<T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ): Promise<() => void>;
+  randomUUID(): string;
+};
+
+const defaultNativeBridge: DesktopNativeBridge = {
+  invoke: (command, args) => invoke(command, args as never),
+  listen: (event, handler) => listen(event, handler),
+  randomUUID: () => crypto.randomUUID(),
+};
+
 function checkContext(context?: ImageTaskContext) {
   if (context?.signal?.aborted) {
     throw new ImageProcessingError("cancelled", "Image processing was cancelled");
@@ -184,13 +199,14 @@ function parseNativeError(error: unknown): ImageProcessingError {
 }
 
 async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
+  bridge: DesktopNativeBridge,
   metadata: Record<string, unknown>,
   source: ImageProcessingSource,
   context?: ImageTaskContext,
   assessed?: ImageProcessingSource,
 ) {
   checkContext(context);
-  const requestId = context?.requestId || crypto.randomUUID();
+  const requestId = context?.requestId || bridge.randomUUID();
   const encodedSource = await encodeSource(source);
   const encodedAssessed = assessed ? await encodeSource(assessed) : undefined;
   checkContext(context);
@@ -218,7 +234,7 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
   }
 
   let raw: ArrayBuffer | Uint8Array | number[];
-  const unlisten = await listen<NativeProgressEvent>("image-processing-progress", ({ payload }) => {
+  const unlisten = await bridge.listen<NativeProgressEvent>("image-processing-progress", ({ payload }) => {
     if (payload.requestId === requestId) {
       context?.onProgress?.({
         stage: payload.stage,
@@ -228,12 +244,12 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
     }
   });
   const cancel = () => {
-    void invoke("image_processing_cancel", { requestId }).catch(() => undefined);
+    void bridge.invoke("image_processing_cancel", { requestId }).catch(() => undefined);
   };
   context?.signal?.addEventListener("abort", cancel, { once: true });
   try {
     checkContext(context);
-    raw = await invoke<ArrayBuffer | Uint8Array | number[]>("image_processing_execute", frame);
+    raw = await bridge.invoke<ArrayBuffer | Uint8Array | number[]>("image_processing_execute", frame);
   } catch (error) {
     throw parseNativeError(error);
   } finally {
@@ -261,59 +277,46 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
   return { result, bytes };
 }
 
-function supportsNativeDocument(document: ImageParameterDocument) {
-  return document.operations.every((operation) =>
-    ["crop", "resize", "rotate", "color", "draw"].includes(operation.type));
-}
-
 export class DesktopImageProcessingService implements ImageProcessingService {
   readonly engine = "desktop-native" as const;
 
-  constructor(private readonly webFallback: ImageProcessingService) {}
+  constructor(
+    private readonly bridge: DesktopNativeBridge = defaultNativeBridge,
+  ) {}
 
   async capabilities() {
     return capabilities;
   }
 
   async inspect(source: ImageProcessingSource, context?: ImageTaskContext) {
-    const { result } = await executeNative({ operation: "inspect" }, source, context);
+    const { result } = await executeNative(this.bridge, { operation: "inspect" }, source, context);
     return result.metadata;
   }
 
   async renderPreview(request: RenderPreviewRequest, context?: ImageTaskContext) {
     validateImageParameterDocument(request.document);
-    if (!supportsNativeDocument(request.document)) {
-      return this.webFallback.renderPreview(request, context);
-    }
     if (request.mimeType !== "image/webp"
       || !Number.isInteger(request.maxWidth) || request.maxWidth < 1
       || !Number.isInteger(request.maxHeight) || request.maxHeight < 1
       || !Number.isFinite(request.quality) || request.quality < 0 || request.quality > 1) {
       throw new ImageProcessingError("invalidRequest", "Preview dimensions, quality or mimeType are invalid");
     }
-    try {
-      const { result, bytes } = await executeNative<NativePreviewResponse>({
-        operation: "renderPreview",
-        document: request.document,
-        preview: {
-          maxWidth: request.maxWidth,
-          maxHeight: request.maxHeight,
-          quality: Math.max(1, Math.round(request.quality * 100)),
-        },
-      }, request.source, context);
-      return {
-        artifact: { kind: "blob" as const, blob: new Blob([bytes], { type: "image/webp" }) },
-        width: result.width,
-        height: result.height,
-        engine: this.engine,
-        documentVersion: 1 as const,
-      };
-    } catch (error) {
-      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
-        return this.webFallback.renderPreview(request, context);
-      }
-      throw error;
-    }
+    const { result, bytes } = await executeNative<NativePreviewResponse>(this.bridge, {
+      operation: "renderPreview",
+      document: request.document,
+      preview: {
+        maxWidth: request.maxWidth,
+        maxHeight: request.maxHeight,
+        quality: Math.max(1, Math.round(request.quality * 100)),
+      },
+    }, request.source, context);
+    return {
+      artifact: { kind: "blob" as const, blob: new Blob([bytes], { type: "image/webp" }) },
+      width: result.width,
+      height: result.height,
+      engine: this.engine,
+      documentVersion: 1 as const,
+    };
   }
 
   async materialize(
@@ -321,43 +324,34 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     context?: ImageTaskContext,
   ): Promise<ImageProcessingResult> {
     validateImageParameterDocument(request.document);
-    if (!supportsNativeDocument(request.document)) {
-      return this.webFallback.materialize(request, context);
-    }
     const quality = request.output.quality ?? 92;
     if (!Number.isFinite(quality) || quality < 1 || quality > 100) {
       throw new ImageProcessingError("invalidRequest", "Materialize quality must be between 1 and 100");
     }
-    try {
-      const { result, bytes } = await executeNative<NativeResponse>({
-        operation: "materialize",
-        destination: request.destination,
-        document: request.document,
-        materialize: {
-          format: request.output.format,
-          quality: Math.round(quality),
-          allowAlphaLoss: request.output.allowAlphaLoss ?? false,
-        },
-      }, request.source, context);
-      return {
-        artifact: artifactFromNative(result, bytes),
-        name: outputName(request.source.name, result.metadata.format),
-        metadata: result.metadata,
-        engine: this.engine,
-        sourceUnchanged: true,
-        returnedOriginal: result.returnedOriginal,
-        implementation: result.implementation,
-      };
-    } catch (error) {
-      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
-        return this.webFallback.materialize(request, context);
-      }
-      throw error;
-    }
+    const { result, bytes } = await executeNative<NativeResponse>(this.bridge, {
+      operation: "materialize",
+      destination: request.destination,
+      document: request.document,
+      materialize: {
+        format: request.output.format,
+        quality: Math.round(quality),
+        allowAlphaLoss: request.output.allowAlphaLoss ?? false,
+      },
+    }, request.source, context);
+    return {
+      artifact: artifactFromNative(result, bytes),
+      name: outputName(request.source.name, result.metadata.format),
+      metadata: result.metadata,
+      engine: this.engine,
+      sourceUnchanged: true,
+      returnedOriginal: result.returnedOriginal,
+      implementation: result.implementation,
+    };
   }
 
   async compareQuality(request: CompareImageQualityRequest, context?: ImageTaskContext) {
     const { result } = await executeNative<NativeQualityResponse>(
+      this.bridge,
       { operation: "compareQuality" },
       request.source,
       context,
@@ -374,39 +368,29 @@ export class DesktopImageProcessingService implements ImageProcessingService {
   async createShareAssets(request: CreateShareAssetsRequest, context?: ImageTaskContext) {
     if (request.document) {
       validateImageParameterDocument(request.document);
-      if (!supportsNativeDocument(request.document)) {
-        return this.webFallback.createShareAssets(request, context);
-      }
     }
     if (!Number.isInteger(request.container.width) || request.container.width < 1
       || !Number.isInteger(request.container.height) || request.container.height < 1) {
       throw new ImageProcessingError("invalidRequest", "Share asset container is invalid");
     }
-    try {
-      const { result, bytes } = await executeNative<NativeShareAssetsResponse>({
-        operation: "createShareAssets",
-        document: request.document,
-        container: request.container,
-      }, request.source, context);
-      return {
-        placeholder: result.placeholder,
-        thumbnail: {
-          kind: "blob" as const,
-          blob: new Blob([bytes], { type: result.thumbnailMimeType }),
-        },
-        thumbnailMimeType: result.thumbnailMimeType,
-        engine: this.engine,
-      };
-    } catch (error) {
-      if (error instanceof ImageProcessingError && error.code === "unsupportedOperation") {
-        return this.webFallback.createShareAssets(request, context);
-      }
-      throw error;
-    }
+    const { result, bytes } = await executeNative<NativeShareAssetsResponse>(this.bridge, {
+      operation: "createShareAssets",
+      document: request.document,
+      container: request.container,
+    }, request.source, context);
+    return {
+      placeholder: result.placeholder,
+      thumbnail: {
+        kind: "blob" as const,
+        blob: new Blob([bytes], { type: result.thumbnailMimeType }),
+      },
+      thumbnailMimeType: result.thumbnailMimeType,
+      engine: this.engine,
+    };
   }
 
   async releaseTemporary(artifact: Parameters<ImageProcessingService["releaseTemporary"]>[0]) {
-    await invoke("image_processing_release_temporary", { token: artifact.token });
+    await this.bridge.invoke("image_processing_release_temporary", { token: artifact.token });
   }
 
   async compress(
@@ -446,7 +430,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     if (!Number.isFinite(gain) || gain < 0.5 || gain > 2) {
       throw new ImageProcessingError("invalidRequest", "Compression gain must be between 0.5 and 2.0");
     }
-    const { result, bytes } = await executeNative({
+    const { result, bytes } = await executeNative(this.bridge, {
       operation: "encode",
       destination: request.destination,
       options: {
@@ -478,7 +462,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     if (!Number.isFinite(quality) || quality < 1 || quality > 100) {
       throw new ImageProcessingError("invalidRequest", "Conversion quality must be between 1 and 100");
     }
-    const { result, bytes } = await executeNative({
+    const { result, bytes } = await executeNative(this.bridge, {
       operation: "encode",
       destination: request.destination,
       options: {

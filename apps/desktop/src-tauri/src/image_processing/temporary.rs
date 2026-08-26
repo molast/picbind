@@ -226,4 +226,26 @@ mod tests {
         checkout.complete().unwrap();
         assert!(store.checkout(&artifact.token).is_err());
     }
+
+    #[test]
+    fn startup_and_expiry_cleanup_remove_unmanaged_files() {
+        let root = std::env::temp_dir().join(format!("picbind-native-test-{}", Uuid::new_v4()));
+        let artifact_root = root.join("temp/image-processing");
+        fs::create_dir_all(&artifact_root).unwrap();
+        fs::write(artifact_root.join("abandoned.tmp"), [1, 2, 3]).unwrap();
+        let store = NativeTemporaryStore::open(root.clone()).unwrap();
+        assert!(!artifact_root.join("abandoned.tmp").exists());
+
+        let artifact = store.create("image/png", &[1, 2, 3]).unwrap();
+        store
+            .artifacts
+            .lock()
+            .unwrap()
+            .get_mut(&artifact.token)
+            .unwrap()
+            .expires_at = 0;
+        assert_eq!(store.cleanup_expired().unwrap(), 1);
+        assert!(store.checkout(&artifact.token).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -586,8 +586,9 @@ export type ImageProcessingCapabilities = {
 - 在迁移期由组合层决定是否允许显式 Web fallback。
 - 在日志和问题报告中记录实际引擎与能力。
 
-Adapter 不得声明尚未实现的能力。Desktop Native 当前只报告四格式输入输出和受控存储
-来源；参数操作、质量分析、取消和临时产物在完成前不能报告可用。
+Adapter 不得声明尚未实现的能力。Desktop Native 当前报告四格式输入输出、受控存储来源、
+crop / resize / rotate / color / draw 参数操作、质量分析、进度与取消；临时产物通过
+`destination: "temporary"` 和 Storage Adapter 接管，不作为独立 capability 布尔值。
 
 ## 11. 错误模型
 
@@ -784,8 +785,14 @@ apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
 ├── commands.rs
 ├── tasks.rs
-└── source_resolver.rs
+├── source_resolver.rs
+└── temporary.rs
 ```
+
+Web 应用组合层位于 `apps/web/src/image-processing/`。`DesktopImageProcessingService` 只负责
+Native IPC 和稳定错误映射，不依赖 Web Adapter；`DesktopImageProcessingSelector` 根据来源
+格式、参数操作和 destination 选择 Native 或 Web。已选择 Native 的任务失败后不会静默用
+Web 重试；只有调用前即可确认不属于 Native capability 的请求才允许兼容回退。
 
 Rust 重构约束：
 
@@ -973,14 +980,15 @@ Planner 和参数重放仍待提取。
 | 5.6 Preview / Materialize | 已完成 | 受限 WebP 预览与全尺寸物化分离；空文档同格式可返回原文件，非空文档只在最终输出编码一次 |
 | 5.7 派生资源与质量分析 | 已完成 | 主色/BlurHash placeholder、独立 WebP thumbnail、完整质量与特征指标；内存结果随命令返回释放中间缓冲 |
 | 5.8 Native 任务治理 | 已完成 | 任务表、协作式取消、按 requestId 过滤的进度事件、临时 artifact、过期/启动清理及 Storage 接管 |
-| 5.9 Adapter 一致性与实机验证 | 待实现 | 共享契约、性能、内存、取消和 macOS 双架构验证 |
+| 5.9 Adapter 一致性与实机验证 | 已完成 | Adapter/Native 契约、取消、临时资源与 Apple Silicon 性能/内存已验证；x86_64 兼容验证列入后续补充项，不阻塞本阶段 |
 
 ### 阶段 6：一致性验证和切换
 
-当前状态：四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
+当前状态：已完成。四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
 参数重放、预览/物化、协作派生资源、质量分析、Alpha 拒绝、同格式不增大、任务取消和临时
-artifact 生命周期已经通过 Rust 与 TypeScript 检查；性能/内存和 macOS 双架构实机验证仍
-属于 5.9。
+artifact 生命周期已经通过 Rust 与 TypeScript 检查；Apple Silicon 性能与峰值内存已有可
+重复实测。macOS x86_64 因 Rust target 下载受阻列为后续兼容验证，不阻塞阶段 5.9，详见
+`PICBIND_IMAGE_PROCESSING_VALIDATION.md`。
 
 - 对 Web 和 Desktop Adapter 运行同一套契约测试。
 - 对性能、内存、取消和异常清理做 Desktop 实机测试。
@@ -988,7 +996,9 @@ artifact 生命周期已经通过 Rust 与 TypeScript 检查；性能/内存和 
   `inspect`、无 resize 的 `planner`、支持 resize 的 `interactive` 固定格式与 `auto`
   `compress`、`convert`、`renderPreview`、`materialize`、`createShareAssets` 和
   `compareQuality`；Native 不支持的参数文档整体回退 Web Adapter。
-- 删除迁移期重复入口和不再需要的显式 fallback。
+- Native Adapter 内部不保留 Web 依赖或运行时重试；格式、参数和 destination 路由集中在
+  Desktop selector。需要 Web 执行但要求 `temporary` 输出的请求明确返回
+  `capabilityUnavailable`，不会把临时产物语义降级为内存 Blob。
 
 ## 20. 测试策略
 
@@ -1048,6 +1058,7 @@ V1 完成必须同时满足：
 - `docs/architecture/REPOSITORY_STRUCTURE.md`
 - `docs/architecture/desktop/tauri-storage-architecture-v2.md`
 - `docs/architecture/desktop/AI_CODING_GUIDELINES.md`
+- `docs/architecture/desktop/PICBIND_IMAGE_PROCESSING_VALIDATION.md`
 - `docs/product/collaboration/COMPRESSION_ALGORITHM.md`
 
 本设计的核心不是让两端强行使用同一个编码器，而是让相同业务意图通过一个稳定 Port

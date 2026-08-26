@@ -562,7 +562,9 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |
 | Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |
 | Desktop Native 取消控制 | `crates/picbind-image-native/src/task.rs` |
+| Desktop Native 契约与实机验证 | `crates/picbind-image-native/tests/adapter_contract.rs`、`crates/picbind-image-native/examples/native_validation.rs` |
 | Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
+| Desktop Native / Web 能力路由 | `apps/web/src/image-processing/adapters/desktop-image-processing-selector.ts` |
 
 ## 16. Room Image Workspace 压缩入口
 
