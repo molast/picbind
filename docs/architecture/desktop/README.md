@@ -125,6 +125,8 @@ Tauri 只提供桌面窗口和运行容器，不创建另一套前端实现。
 docs/architecture/desktop/
 ├── README.md                 # 版本入口与阶段边界
 ├── AI_CODING_GUIDELINES.md   # 后续 AI Coding 实施规范
+├── PICBIND_IMAGE_PROCESSING_API_V1.md # Web/Desktop 图片处理统一接口
+├── PICBIND_REALTIME_TRANSPORT_API_V1.md # Workspace 实时传输迁移计划
 ├── development.md            # 已验证的本地开发和构建说明
 └── tauri-storage-architecture-v2.md # 图片存储 V2 当前实现与后续路线
 ```
