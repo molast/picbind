@@ -60,7 +60,7 @@ fn materialize_inner(
     }
     let (source_format, source) = decode::decode(input)?;
     let format = output_format.unwrap_or(source_format);
-    let source_has_alpha = source.to_rgba8().pixels().any(|pixel| pixel[3] < 255);
+    let source_has_alpha = decode::has_transparency(&source);
     if format == NativeImageFormat::Jpeg && source_has_alpha && !allow_alpha_loss {
         return Err(NativeImageError::AlphaLossDenied);
     }
@@ -78,7 +78,7 @@ fn materialize_inner(
     };
     let image = rendered.into_image();
     let (width, height) = image.dimensions();
-    let has_alpha = image.to_rgba8().pixels().any(|pixel| pixel[3] < 255);
+    let has_alpha = decode::has_transparency(&image);
     let bytes = formats::encode(&image, format, quality, allow_alpha_loss)?;
     if let Some(control) = control {
         control.checkpoint()?;

@@ -64,9 +64,9 @@ PCE 前端入口
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
 `interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的固定目标和 `auto` 且不改变
-尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放，`planner` 对
-JPEG、PNG、WebP 及同格式 AVIF 执行 Native 质量护栏，但按现有契约不接受目标尺寸。非 AVIF
-源转 AVIF 使用单候选快速路径。Desktop 的参数预览、物化、
+尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放；`planner` 只对
+同格式 JPEG、PNG 和 AVIF 执行有界质量候选与 Native 质量护栏，WebP 和所有跨格式输出使用
+单候选快速路径。`planner` 按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
 协作派生资源和完整质量对比也使用 Native Adapter；包含未支持操作或未覆盖字形的参数文档
 整体调用 Web Adapter，结果中的 `engine` 保持真实值。
 
@@ -229,7 +229,7 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 | 目标格式 | Native 编码器 | 当前行为 |
 |---|---|---|
 | JPEG | `mozjpeg-rs` | 渐进式、Huffman 优化，按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
-| PNG | `imagequant + lodepng + oxipng` | 在调色板候选与无损 RGBA 候选中选择较小结果；单个量化候选失败时保留无损候选 |
+| PNG | `imagequant + lodepng + oxipng` | `interactive` 在调色板与无损 RGBA 结果中选择较小者；`planner` 使用量化候选和 Native preset 1，不重复生成无损候选 |
 | WebP | `zenwebp` | 有损 RGBA 编码，method 5，Alpha quality 100 |
 | AVIF | `image` 的 `ravif/rav1e` encoder | speed 9、单线程 RGBA 编码；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
 
@@ -240,21 +240,24 @@ Native `auto` Predictor 对解码后的 RGBA 进行有界采样，提取真实 A
 平坦区域覆盖：平坦低熵图优先 PNG，透明细节图优先 WebP，其他透明图和高细节不透明图优先
 AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG。
 
-Native `planner` 围绕 Gain 计算后的有效质量生成 `+8 / 0 / -8` 三档去重候选；PNG 最低质量
-限制为 50，其他格式为 45。JPEG、PNG 和 WebP 会独立编码、重新解码并校验全部候选，单个
-候选失败不影响其他候选，最后选择通过护栏的最小文件。AVIF 按 `dev_dioxus` 的纯 Rust
-路径分流：非 AVIF 源转 AVIF 使用 Gain 调整后的有效质量、speed 9 和单线程编码一次，不执行
-候选质量回读；输出 metadata 直接使用已知尺寸、格式和 Alpha 状态，不再额外解码刚生成的
-AVIF。`AVIF -> AVIF` 只转换一次 RGBA，三档候选按质量升序编码、回读并校验，返回
-第一个通过护栏的候选，单个候选失败时继续尝试下一档。Native 质量比较最多均匀采样 16 万像素，
-计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95 误差。当前
-阈值如下：
+Native `planner` 按 `dev_dioxus` 的格式专用纯 Rust 路径执行。WebP 以及源格式与目标格式不同的
+JPEG、PNG、WebP、AVIF 请求只使用 Gain 调整后的有效质量编码一次，不做候选回读。只有
+`JPEG -> JPEG`、`PNG -> PNG` 和 `AVIF -> AVIF` 围绕有效质量生成 `-8 / 0 / +8` 三档升序去重
+候选；PNG 最低质量为 50，JPEG/AVIF 最低质量为 45。每个候选编码、回读并通过护栏后立即
+返回，不再为了寻找最小文件无条件执行剩余候选。单个候选编码或解码失败时继续下一档，取消
+错误会立即向上传播。PNG Planner 候选只执行 imagequant/lodepng 和一次 Oxipng preset 1，
+不会在每一档重复生成、优化无损 RGBA PNG。候选循环外复用已解码的 RGBA/RGB 缓冲；Alpha
+扫描、Auto Predictor 和质量比较遇到现成 RGBA8 时直接借用，不复制整张图片。
+
+AVIF 固定使用 speed 9 和单编码线程。编码结果 metadata 直接使用已知尺寸、格式和 Alpha 状态，
+不额外解码刚生成的 AVIF；只有同格式候选需要 `zenavif` 回读。Native 质量比较最多均匀采样
+16 万像素，计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95
+误差。当前同格式候选阈值如下：
 
 | 格式 | 最低 SSIM | 最低 PSNR | 最低边缘保留率 | Alpha 护栏 |
 |---|---:|---:|---:|---|
 | JPEG | 0.955 | 28.0 dB | 0.72 | 透明输入仍由显式 Alpha loss 规则控制 |
 | PNG | 0.985 | 32.0 dB | 0.86 | 平均误差 <= 0.1，P95 <= 1 |
-| WebP | 0.960 | 29.0 dB | 0.74 | 平均误差 <= 1，P95 <= 3 |
 | AVIF（同格式） | 0.955 | 22.5 dB | 0.72 | 平均误差 <= 1，P95 <= 3 |
 
 Native 护栏是平台专用的轻量实现，不包含 Web PCE 的 MS-SSIM、Delta E 或 Butteraugli，不能
@@ -327,6 +330,9 @@ MozJPEG 固定启用：
 - 其他跨格式路径按请求质量编码；若外层 Butteraugli 开启，可用更高质量候选重试。
 - WASM JPEG 编码出现内存、格式支持或编码器错误时，浏览器使用 `OffscreenCanvas` JPEG 作为回退。
 
+Desktop Native Planner 的跨格式 JPEG 使用 Gain 调整后的请求质量编码一次；`JPEG -> JPEG`
+才按升序质量候选执行 Native SSIM、PSNR、边缘与 Alpha 护栏，并复用一次准备好的 RGB 缓冲。
+
 ## 6. PNG 流程
 
 PNG 的核心不是简单 Deflate，而是“感知量化为索引色 + 无损后优化”。
@@ -360,9 +366,16 @@ Oxipng 只做无损后处理：
 
 - 普通图片使用 preset 3。
 - 超过 800 万像素使用较轻的 preset 1。
+- 上述两档是 Web/WASM 行为；Desktop Native 固定使用 preset 1，并设置 `force=true`，避免
+  小于 800 万像素的本地图片重新进入高耗时 preset 3 搜索。
 - 优化失败或结果不更小时，保留优化前 PNG。
 
 当前主 PNG 管线没有使用 Zopfli。代码保留了 lodepng Deflate 编码入口，但 PCE 的量化 PNG 路径使用 imagequant、lodepng 和 Oxipng。
+
+Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 才按升序质量候选回读
+并在首个通过 Native 护栏时停止。同格式最终候选不小于源文件或全部候选失败时，由统一规则
+返回原 PNG，因此 Planner 不需要为每档额外生成无损候选。`interactive` 仍会在单次调用内
+比较量化结果与无损 RGBA 结果。
 
 ## 7. WebP 流程
 
@@ -382,6 +395,9 @@ Oxipng 只做无损后处理：
 8. 某个质量候选失败不会使整个 WebP 任务失败，其他候选仍会继续执行。
 
 当前 WebP 不启用 Butteraugli 外层校验，避免额外解码和多轮编码造成明显耗时。
+
+Desktop Native WebP 使用 `zenwebp` 的 method 5、Alpha quality 100，并在 `interactive` 与
+`planner` 中都只编码一次；同格式结果不更小时仍由统一规则返回原 WebP。
 
 ## 8. AVIF 流程
 
@@ -482,9 +498,9 @@ if source_format == target_format
 | WebP 同格式无有效候选 | 返回原 WebP |
 | AVIF 同格式无更小候选或失败 | 返回原 AVIF |
 | AVIF 跨格式无任何有效候选 | 抛出明确错误，由 UI 标记该格式失败 |
-| Native Planner 单个候选失败或未通过护栏 | 忽略该候选并继续其余候选 |
-| Native Planner 同格式无通过护栏的更小候选 | 返回原图 |
-| Native Planner 跨格式无候选通过护栏 | 抛出明确编码错误，不返回错误格式或低质量候选 |
+| Native Planner 同格式 JPEG/PNG/AVIF 单个候选失败或未通过护栏 | 忽略该候选并继续下一档；取消错误立即返回 |
+| Native Planner 同格式 JPEG/PNG/AVIF 无通过护栏的更小候选 | 返回原图 |
+| Native Planner WebP 或跨格式单候选失败 | 抛出明确编码错误；同格式 WebP 失败时返回原图 |
 | JPEG 目标遇到真实 Alpha 且不允许丢失 | 拒绝压缩，不静默破坏透明区域 |
 | Room 中显式执行其他格式转 JPEG | 视为用户明确允许 JPEG 丢失 Alpha，先与白色背景合成再编码 |
 

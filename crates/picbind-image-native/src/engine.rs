@@ -125,7 +125,7 @@ fn encode_with(
     if matches!(target, Target::Auto) {
         selected.format = crate::planner::predict_format(&image);
     }
-    let has_alpha = image.to_rgba8().pixels().any(|pixel| pixel[3] < 255);
+    let has_alpha = decode::has_transparency(&image);
     if selected.format == crate::NativeImageFormat::Jpeg && has_alpha && !selected.allow_alpha_loss
     {
         return Err(NativeImageError::AlphaLossDenied);

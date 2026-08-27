@@ -32,8 +32,10 @@ pub(crate) fn decode(input: &[u8]) -> Result<DynamicImage, NativeImageError> {
 }
 
 pub(crate) fn encode(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
-    let rgba = image.to_rgba8();
-    encode_rgba(&rgba, quality)
+    match image.as_rgba8() {
+        Some(rgba) => encode_rgba(rgba, quality),
+        None => encode_rgba(&image.to_rgba8(), quality),
+    }
 }
 
 pub(crate) fn encode_rgba(rgba: &RgbaImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {

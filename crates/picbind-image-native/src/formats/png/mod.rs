@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use image::{DynamicImage, ExtendedColorType, ImageEncoder, RgbaImage};
 
 use crate::NativeImageError;
@@ -8,14 +10,23 @@ pub(crate) fn decode(input: &[u8]) -> Result<DynamicImage, NativeImageError> {
 }
 
 pub(crate) fn encode(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
-    let rgba = image.to_rgba8();
-    let lossless = optimize(encode_lossless(&rgba)?, rgba.width(), rgba.height());
-    let quantized =
-        encode_quantized(&rgba, quality).map(|bytes| optimize(bytes, rgba.width(), rgba.height()));
+    let rgba: Cow<'_, RgbaImage> = match image.as_rgba8() {
+        Some(rgba) => Cow::Borrowed(rgba),
+        None => Cow::Owned(image.to_rgba8()),
+    };
+    let lossless = optimize(encode_lossless(rgba.as_ref())?);
+    let quantized = encode_quantized_rgba(rgba.as_ref(), quality);
     Ok(match quantized {
         Ok(candidate) if candidate.len() < lossless.len() => candidate,
         _ => lossless,
     })
+}
+
+pub(crate) fn encode_quantized_rgba(
+    image: &RgbaImage,
+    quality: u8,
+) -> Result<Vec<u8>, NativeImageError> {
+    encode_quantized(image, quality).map(optimize)
 }
 
 fn encode_lossless(image: &RgbaImage) -> Result<Vec<u8>, NativeImageError> {
@@ -81,13 +92,10 @@ fn encode_quantized(image: &RgbaImage, quality: u8) -> Result<Vec<u8>, NativeIma
         .map_err(|error| NativeImageError::EncodeFailed(format!("PNG palette encode: {error}")))
 }
 
-fn optimize(bytes: Vec<u8>, width: u32, height: u32) -> Vec<u8> {
-    let preset = if u64::from(width) * u64::from(height) > 8_000_000 {
-        1
-    } else {
-        3
-    };
-    match oxipng::optimize_from_memory(&bytes, &oxipng::Options::from_preset(preset)) {
+fn optimize(bytes: Vec<u8>) -> Vec<u8> {
+    let mut options = oxipng::Options::from_preset(1);
+    options.force = true;
+    match oxipng::optimize_from_memory(&bytes, &options) {
         Ok(optimized) if optimized.len() < bytes.len() => optimized,
         _ => bytes,
     }

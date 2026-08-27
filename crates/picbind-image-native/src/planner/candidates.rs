@@ -1,8 +1,8 @@
-use image::DynamicImage;
+use std::borrow::Cow;
 
-use crate::{
-    NativeEncodeOptions, NativeImageError, NativeImageFormat, NativeTaskControl, decode, formats,
-};
+use image::{DynamicImage, RgbaImage};
+
+use crate::{NativeEncodeOptions, NativeImageError, NativeImageFormat, NativeTaskControl, decode};
 
 use super::{guardrails, quality};
 
@@ -16,102 +16,109 @@ pub(crate) fn encode_best_candidate(
     options: &NativeEncodeOptions,
     control: Option<&NativeTaskControl>,
 ) -> Result<Vec<u8>, NativeImageError> {
-    if options.format == NativeImageFormat::Avif {
-        let rgba = source.to_rgba8();
-        if source_format != NativeImageFormat::Avif {
-            if let Some(control) = control {
-                control.checkpoint()?;
-            }
-            return crate::formats::avif::encode_rgba(&rgba, options.effective_quality());
-        }
-
-        let mut qualities = candidate_qualities(options.format, options.effective_quality());
-        qualities.sort_unstable();
-        return first_passing_candidate(&qualities, |quality| {
-            encode_avif_candidate(source, &rgba, quality, control)
-        })
-        .map(|candidate| candidate.bytes)
-        .ok_or_else(|| no_passing_candidate(options.format));
+    if source_format != options.format || options.format == NativeImageFormat::WebP {
+        return encode_single_candidate(source, options, control);
     }
 
     let qualities = candidate_qualities(options.format, options.effective_quality());
-    let candidates = collect_candidates(&qualities, |quality| {
-        encode_candidate(source, options, quality, control)
-    });
-    if let Some(control) = control {
-        control.checkpoint()?;
-    }
-    select_smallest(candidates)
+    let candidate = match options.format {
+        NativeImageFormat::Jpeg => {
+            let rgb = crate::formats::jpeg::prepare_rgb(source, options.allow_alpha_loss);
+            first_passing_candidate(&qualities, |quality| {
+                checkpoint(control)?;
+                let bytes = crate::formats::jpeg::encode_rgb(&rgb, quality)?;
+                evaluate_candidate(source, options.format, bytes)
+            })?
+        }
+        NativeImageFormat::Png => {
+            let rgba = rgba_pixels(source);
+            first_passing_candidate(&qualities, |quality| {
+                checkpoint(control)?;
+                let bytes = crate::formats::png::encode_quantized_rgba(rgba.as_ref(), quality)?;
+                evaluate_candidate(source, options.format, bytes)
+            })?
+        }
+        NativeImageFormat::Avif => {
+            let rgba = rgba_pixels(source);
+            first_passing_candidate(&qualities, |quality| {
+                checkpoint(control)?;
+                let bytes = crate::formats::avif::encode_rgba(rgba.as_ref(), quality)?;
+                evaluate_candidate(source, options.format, bytes)
+            })?
+        }
+        NativeImageFormat::WebP => unreachable!("WebP planner uses the single-candidate path"),
+    };
+    checkpoint(control)?;
+    candidate
         .map(|candidate| candidate.bytes)
         .ok_or_else(|| no_passing_candidate(options.format))
 }
 
-fn encode_candidate(
+fn encode_single_candidate(
     source: &DynamicImage,
     options: &NativeEncodeOptions,
-    quality: u8,
     control: Option<&NativeTaskControl>,
-) -> Result<Option<PassingCandidate>, NativeImageError> {
-    if let Some(control) = control {
-        control.checkpoint()?;
+) -> Result<Vec<u8>, NativeImageError> {
+    checkpoint(control)?;
+    let quality = options.effective_quality();
+    match options.format {
+        NativeImageFormat::Jpeg => {
+            let rgb = crate::formats::jpeg::prepare_rgb(source, options.allow_alpha_loss);
+            crate::formats::jpeg::encode_rgb(&rgb, quality)
+        }
+        NativeImageFormat::Png => {
+            let rgba = rgba_pixels(source);
+            crate::formats::png::encode_quantized_rgba(rgba.as_ref(), quality)
+        }
+        NativeImageFormat::WebP => {
+            let rgba = rgba_pixels(source);
+            crate::formats::webp::encode_rgba(rgba.as_ref(), quality)
+        }
+        NativeImageFormat::Avif => {
+            let rgba = rgba_pixels(source);
+            crate::formats::avif::encode_rgba(rgba.as_ref(), quality)
+        }
     }
-    let bytes = formats::encode(source, options.format, quality, options.allow_alpha_loss)?;
-    let (decoded_format, decoded) = decode::decode(&bytes)?;
-    if decoded_format != options.format {
-        return Err(NativeImageError::EncodeFailed(
-            "candidate output format does not match the requested format".into(),
-        ));
-    }
-    let metrics = quality::compare(source, &decoded)?;
-    if !guardrails::passes(options.format, metrics) {
-        return Ok(None);
-    }
-    Ok(Some(PassingCandidate { bytes }))
 }
 
-fn encode_avif_candidate(
+fn evaluate_candidate(
     source: &DynamicImage,
-    rgba: &image::RgbaImage,
-    quality: u8,
-    control: Option<&NativeTaskControl>,
+    format: NativeImageFormat,
+    bytes: Vec<u8>,
 ) -> Result<Option<PassingCandidate>, NativeImageError> {
-    if let Some(control) = control {
-        control.checkpoint()?;
-    }
-    let bytes = crate::formats::avif::encode_rgba(rgba, quality)?;
-    let decoded = std::panic::catch_unwind(|| decode::decode(&bytes))
-        .map_err(|_| NativeImageError::InvalidImage("AVIF decoder panicked".into()))??;
-    if decoded.0 != NativeImageFormat::Avif {
+    let decoded = if format == NativeImageFormat::Avif {
+        std::panic::catch_unwind(|| decode::decode(&bytes))
+            .map_err(|_| NativeImageError::InvalidImage("AVIF decoder panicked".into()))??
+    } else {
+        decode::decode(&bytes)?
+    };
+    if decoded.0 != format {
         return Err(NativeImageError::EncodeFailed(
             "candidate output format does not match the requested format".into(),
         ));
     }
     let metrics = quality::compare(source, &decoded.1)?;
-    if !guardrails::passes(NativeImageFormat::Avif, metrics) {
+    if !guardrails::passes(format, metrics) {
         return Ok(None);
     }
     Ok(Some(PassingCandidate { bytes }))
+}
+
+fn rgba_pixels(source: &DynamicImage) -> Cow<'_, RgbaImage> {
+    match source.as_rgba8() {
+        Some(rgba) => Cow::Borrowed(rgba),
+        None => Cow::Owned(source.to_rgba8()),
+    }
+}
+
+fn checkpoint(control: Option<&NativeTaskControl>) -> Result<(), NativeImageError> {
+    control.map_or(Ok(()), NativeTaskControl::checkpoint)
 }
 
 fn no_passing_candidate(format: NativeImageFormat) -> NativeImageError {
     NativeImageError::EncodeFailed(format!(
         "no {format:?} candidate passed the native quality guardrails"
     ))
-}
-
-fn select_smallest<T>(candidates: Vec<T>) -> Option<T>
-where
-    T: AsRef<[u8]>,
-{
-    candidates
-        .into_iter()
-        .min_by_key(|candidate| candidate.as_ref().len())
-}
-
-impl AsRef<[u8]> for PassingCandidate {
-    fn as_ref(&self) -> &[u8] {
-        &self.bytes
-    }
 }
 
 fn candidate_qualities(format: NativeImageFormat, base: u8) -> Vec<u8> {
@@ -123,55 +130,58 @@ fn candidate_qualities(format: NativeImageFormat, base: u8) -> Vec<u8> {
         .into_iter()
         .map(|quality| quality.clamp(minimum, 100))
         .collect::<Vec<_>>();
+    qualities.sort_unstable();
     qualities.dedup();
     qualities
 }
 
-fn collect_candidates<T, F>(qualities: &[u8], mut encode: F) -> Vec<T>
+fn first_passing_candidate<T, F>(
+    qualities: &[u8],
+    mut encode: F,
+) -> Result<Option<T>, NativeImageError>
 where
     F: FnMut(u8) -> Result<Option<T>, NativeImageError>,
 {
-    qualities
-        .iter()
-        .filter_map(|quality| encode(*quality).ok().flatten())
-        .collect()
-}
-
-fn first_passing_candidate<T, F>(qualities: &[u8], mut encode: F) -> Option<T>
-where
-    F: FnMut(u8) -> Result<Option<T>, NativeImageError>,
-{
-    qualities
-        .iter()
-        .find_map(|quality| encode(*quality).ok().flatten())
+    for quality in qualities {
+        match encode(*quality) {
+            Ok(Some(candidate)) => return Ok(Some(candidate)),
+            Ok(None)
+            | Err(NativeImageError::EncodeFailed(_))
+            | Err(NativeImageError::InvalidImage(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::NativeImageError;
 
-    use super::{PassingCandidate, collect_candidates, first_passing_candidate, select_smallest};
+    use super::{PassingCandidate, candidate_qualities, first_passing_candidate};
 
     #[test]
     fn a_failed_candidate_does_not_discard_later_successes() {
-        let candidates = collect_candidates(&[90, 80, 70], |quality| match quality {
+        let selected = first_passing_candidate(&[90, 80, 70], |quality| match quality {
             90 => Err(NativeImageError::EncodeFailed("expected failure".into())),
             80 => Ok(None),
             _ => Ok(Some(PassingCandidate { bytes: vec![1] })),
-        });
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].bytes, vec![1]);
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(selected.bytes, vec![1]);
     }
 
     #[test]
-    fn the_smallest_passing_candidate_wins() {
-        let selected = select_smallest(vec![
-            PassingCandidate { bytes: vec![1; 9] },
-            PassingCandidate { bytes: vec![2; 4] },
-            PassingCandidate { bytes: vec![3; 7] },
-        ])
-        .unwrap();
-        assert_eq!(selected.bytes, vec![2; 4]);
+    fn candidate_qualities_are_lowest_first_and_unique() {
+        assert_eq!(
+            candidate_qualities(crate::NativeImageFormat::Png, 80),
+            [72, 80, 88]
+        );
+        assert_eq!(
+            candidate_qualities(crate::NativeImageFormat::Avif, 100),
+            [92, 100]
+        );
     }
 
     #[test]
@@ -185,8 +195,20 @@ mod tests {
                 _ => panic!("search continued after a passing AVIF candidate"),
             }
         })
+        .unwrap()
         .unwrap();
         assert_eq!(visited, vec![72, 80]);
         assert_eq!(selected.bytes, vec![2]);
+    }
+
+    #[test]
+    fn cancellation_is_not_treated_as_a_failed_candidate() {
+        let mut visited = Vec::new();
+        let result = first_passing_candidate::<PassingCandidate, _>(&[72, 80], |quality| {
+            visited.push(quality);
+            Err(NativeImageError::Cancelled)
+        });
+        assert!(matches!(result, Err(NativeImageError::Cancelled)));
+        assert_eq!(visited, vec![72]);
     }
 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use image::{DynamicImage, RgbaImage};
 
 use crate::NativeImageError;
@@ -17,8 +19,14 @@ pub(crate) fn compare(
     source: &DynamicImage,
     candidate: &DynamicImage,
 ) -> Result<QualityMetrics, NativeImageError> {
-    let source = source.to_rgba8();
-    let candidate = candidate.to_rgba8();
+    let source: Cow<'_, RgbaImage> = match source.as_rgba8() {
+        Some(source) => Cow::Borrowed(source),
+        None => Cow::Owned(source.to_rgba8()),
+    };
+    let candidate: Cow<'_, RgbaImage> = match candidate.as_rgba8() {
+        Some(candidate) => Cow::Borrowed(candidate),
+        None => Cow::Owned(candidate.to_rgba8()),
+    };
     if source.dimensions() != candidate.dimensions() {
         return Err(NativeImageError::EncodeFailed(
             "candidate dimensions differ from the source".into(),
@@ -88,7 +96,7 @@ pub(crate) fn compare(
     Ok(QualityMetrics {
         ssim,
         psnr,
-        edge_retention: edge_retention(&source, &candidate),
+        edge_retention: edge_retention(source.as_ref(), candidate.as_ref()),
         alpha_mean_error,
         alpha_p95_error: f64::from(alpha_errors[p95_index]),
     })

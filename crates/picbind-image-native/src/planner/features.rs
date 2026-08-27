@@ -1,4 +1,6 @@
-use image::DynamicImage;
+use std::borrow::Cow;
+
+use image::{DynamicImage, RgbaImage};
 
 const HISTOGRAM_BINS: usize = 16 * 16 * 16;
 
@@ -13,7 +15,10 @@ pub struct NativeImageFeatures {
 
 impl NativeImageFeatures {
     pub fn extract(image: &DynamicImage) -> Self {
-        let rgba = image.to_rgba8();
+        let rgba: Cow<'_, RgbaImage> = match image.as_rgba8() {
+            Some(rgba) => Cow::Borrowed(rgba),
+            None => Cow::Owned(image.to_rgba8()),
+        };
         let width = rgba.width();
         let height = rgba.height();
         let stride = (width.max(height) / 320).max(1);

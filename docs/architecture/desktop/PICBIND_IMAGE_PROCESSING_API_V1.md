@@ -981,16 +981,18 @@ Planner 和参数重放仍待提取。
 
 - Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
   16 条路径。
-- JPEG 使用 `mozjpeg-rs`；PNG 使用 `imagequant + lodepng + oxipng` 并保留无损候选；
+- JPEG 使用 `mozjpeg-rs`；PNG 使用 `imagequant + lodepng + oxipng`，Native Oxipng 固定
+  preset 1；`interactive` 保留无损候选，`planner` 的 PNG 质量候选不重复生成无损候选；
   WebP 使用 `zenwebp`；AVIF 编码使用 `image` 的 `ravif/rav1e` 后端，解码使用 `zenavif`。
 - `inspect()`、支持目标尺寸的 `interactive` 固定目标 `compress()`、`auto` 和 `convert()`
   通过 Tauri 二进制 IPC 执行。Native resize 使用 Lanczos3，单边限制 16384 且总像素限制
   100,000,000。
 - Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
   传输，不使用 Base64 或 JSON 数字数组。
-- 固定目标和 `auto` 的 `planner` profile 已使用 Native 质量策略：JPEG、PNG、WebP 使用
-  多质量候选、候选失败隔离、轻量感知质量护栏和最小有效候选选择；非 AVIF 源转 AVIF 使用
-  单候选快速路径，`AVIF -> AVIF` 按质量升序返回首个通过护栏的候选。纯 Rust 参数队列重放、受限 WebP 预览、全尺寸物化、
+- 固定目标和 `auto` 的 `planner` profile 已使用格式专用 Native 质量策略：WebP 和所有跨格式
+  输出使用单候选；同格式 JPEG、PNG、AVIF 按质量升序尝试有界候选，并在首个通过轻量感知
+  护栏的候选处停止。候选循环外复用 RGB/RGBA 缓冲，取消错误不会被当成候选失败吞掉。纯 Rust
+  参数队列重放、受限 WebP 预览、全尺寸物化、
   BlurHash/主色 placeholder、独立 WebP thumbnail 和完整质量对比均已通过二进制 Tauri IPC
   接入 Desktop Adapter；双图质量比较使用两个长度分隔的原始字节区，不使用 Base64。
 - Native request 使用 API V1 与唯一 `requestId`；未知版本和重复活跃 ID 会被拒绝。Desktop
@@ -1009,7 +1011,7 @@ Planner 和参数重放仍待提取。
 | --- | --- | --- |
 | 5.1 四格式 Codec | 已完成 | 四种输入到四种输出的 4×4 矩阵、Alpha 保护、同格式不增大 |
 | 5.2 Auto Predictor | 已完成 | Native 像素特征提取；透明图不选 JPEG；自动结果可重新解码且格式与预测一致 |
-| 5.3 Planner 质量护栏 | 已完成 | 固定目标与 auto 的多质量候选、候选失败隔离、SSIM / PSNR / 边缘 / Alpha 阈值和最小有效候选选择 |
+| 5.3 Planner 质量护栏 | 已完成 | WebP/跨格式单候选；同格式 JPEG/PNG/AVIF 升序早停；候选失败隔离、取消传播和 SSIM / PSNR / 边缘 / Alpha 阈值 |
 | 5.4 Native Resize | 已完成 | interactive 在 Rust 内使用 Lanczos3 缩放后编码；尺寸、像素上限和同格式回退语义正确 |
 | 5.5 参数重放 | 已完成 | crop、rotate、resize、完整 color、几何 draw、内嵌 Noto Sans 文字和固定 Twemoji 彩色 Emoji 按序作用于同一源图 |
 | 5.6 Preview / Materialize | 已完成 | 受限 WebP 预览与全尺寸物化分离；空文档同格式可返回原文件，非空文档只在最终输出编码一次 |

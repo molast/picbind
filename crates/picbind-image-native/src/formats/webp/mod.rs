@@ -13,7 +13,13 @@ pub(crate) fn decode(input: &[u8]) -> Result<DynamicImage, NativeImageError> {
 }
 
 pub(crate) fn encode(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
-    let rgba = image.to_rgba8();
+    match image.as_rgba8() {
+        Some(rgba) => encode_rgba(rgba, quality),
+        None => encode_rgba(&image.to_rgba8(), quality),
+    }
+}
+
+pub(crate) fn encode_rgba(rgba: &RgbaImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
     let config = zenwebp::LossyConfig::new()
         .with_quality(f32::from(quality))
         .with_method(5)

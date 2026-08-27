@@ -32,8 +32,18 @@ pub(crate) fn metadata(
         format,
         mime_type: format.mime_type(),
         size_bytes,
-        has_alpha: image.to_rgba8().pixels().any(|pixel| pixel[3] < 255),
+        has_alpha: has_transparency(image),
     })
+}
+
+pub(crate) fn has_transparency(image: &DynamicImage) -> bool {
+    if let Some(rgba) = image.as_rgba8() {
+        return rgba.pixels().any(|pixel| pixel[3] < 255);
+    }
+    if !image.color().has_alpha() {
+        return false;
+    }
+    image.to_rgba8().pixels().any(|pixel| pixel[3] < 255)
 }
 
 fn detect_format(input: &[u8]) -> Result<NativeImageFormat, NativeImageError> {
@@ -56,4 +66,23 @@ fn ensure_pixel_limit(image: &DynamicImage) -> Result<(), NativeImageError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{DynamicImage, RgbImage, Rgba, RgbaImage};
+
+    use super::has_transparency;
+
+    #[test]
+    fn transparency_detection_handles_rgb_and_rgba_without_conversion() {
+        let rgb = DynamicImage::ImageRgb8(RgbImage::new(2, 2));
+        let opaque = DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 255])));
+        let transparent =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 128])));
+
+        assert!(!has_transparency(&rgb));
+        assert!(!has_transparency(&opaque));
+        assert!(has_transparency(&transparent));
+    }
 }

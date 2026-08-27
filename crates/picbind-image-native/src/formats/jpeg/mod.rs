@@ -13,6 +13,11 @@ pub(crate) fn encode(
     quality: u8,
     allow_alpha_loss: bool,
 ) -> Result<Vec<u8>, NativeImageError> {
+    let rgb = prepare_rgb(image, allow_alpha_loss);
+    encode_rgb(&rgb, quality)
+}
+
+pub(crate) fn prepare_rgb(image: &DynamicImage, allow_alpha_loss: bool) -> RgbImage {
     let rgba = image.to_rgba8();
     let mut rgb = RgbImage::new(rgba.width(), rgba.height());
     for (source, destination) in rgba.pixels().zip(rgb.pixels_mut()) {
@@ -23,6 +28,10 @@ pub(crate) fn encode(
                 ((u16::from(source[channel]) * alpha + background * (255 - alpha)) / 255) as u8;
         }
     }
+    rgb
+}
+
+pub(crate) fn encode_rgb(image: &RgbImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
     let subsampling = if quality >= 96 {
         Subsampling::S444
     } else if quality >= 90 {
@@ -35,7 +44,7 @@ pub(crate) fn encode(
         .progressive(true)
         .subsampling(subsampling)
         .optimize_huffman(true)
-        .encode_rgb(rgb.as_raw(), rgb.width(), rgb.height())
+        .encode_rgb(image.as_raw(), image.width(), image.height())
         .map_err(|error| NativeImageError::EncodeFailed(format!("JPEG: {error}")))
 }
 
