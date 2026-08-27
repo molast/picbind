@@ -789,9 +789,17 @@ crates/picbind-image-native/src/
 ├── decode/
 ├── codecs/
 │   ├── jpeg/
+│   │   ├── decoder/
+│   │   └── encoder/
 │   ├── png/
+│   │   ├── decoder/
+│   │   └── encoder/
 │   ├── webp/
+│   │   ├── decoder/
+│   │   └── encoder/
 │   └── avif/
+│       ├── decoder/
+│       └── encoder/
 ├── operations/
 │   ├── crop.rs
 │   ├── resize/
@@ -935,8 +943,17 @@ apps/desktop/src-tauri/src/image_processing/
 ```
 
 上述目录反映当前所有权。`codecs/` 只负责 JPEG、PNG、WebP、AVIF 编解码与统一分发；
+四种格式内部统一按 `decoder/`、`encoder/` 分层，encoder 参数分别由
+`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`
+承载，AVIF decoder 额外使用 `AvifDecoderOptions`。现有 crate 调用入口保留默认 Options
+包装，Options 当前不是 API V1 对 Web Adapter 开放的新字段。
 `operations/` 是 Workspace 参数操作层，负责参数文档重放以及 crop、resize、rotate、color、
 draw。压缩入口允许复用其中的 resize，但不会把 Planner 或 codec 规则放入操作层。
+Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。`zune_core/zune_image` 已完成
+替换可行性评估，但未引入当前实现：`zune_image` 不直接覆盖这里的纯 Rust AVIF 解码链，且
+Workspace 操作、绘制、质量分析和 Planner 都依赖现有交错 RGBA 模型，整体替换会扩大为跨模块
+重写并增加无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再在模型边界采用
+`zune_core` 类型，不能把该评估描述成当前已实现能力。
 `crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
 的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
 Port 与 Adapter 边界。
@@ -991,9 +1008,18 @@ Planner 和参数重放仍待提取。
 
 - Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
   16 条路径。
-- JPEG 使用 `mozjpeg-rs`；PNG 使用 `imagequant + lodepng + oxipng`，Native Oxipng 固定
-  preset 1；`interactive` 保留无损候选，`planner` 的 PNG 质量候选不重复生成无损候选；
-  WebP 使用 `zenwebp`；AVIF 编码使用 `image` 的 `ravif/rav1e` 后端，解码使用 `zenavif`。
+- JPEG 使用 `mozjpeg-rs`，默认 `ProgressiveBalanced`、Progressive、Huffman 优化和质量分档
+  色度采样；PNG 使用 `imagequant + lodepng + oxipng`，默认 256 色、imagequant speed 5、
+  无抖动和 Native OxiPNG preset 1，并通过 `rgb::FromSlice` 将现有 RGBA 缓冲零拷贝借给
+  imagequant；`interactive` 保留无损候选，`planner` 的 PNG 质量候选不重复生成无损候选；
+  WebP 使用 `zenwebp`，默认 method 5、Alpha quality 100；AVIF 编码直接使用启用 threading
+  的 `ravif 0.13 / rav1e`，默认 speed
+  9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池，解码使用
+  `zenavif 0.1.6`。因 `rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下会触发 tile threading
+  panic，`AvifDecoderOptions` 当前默认固定 1 个解码线程；该限制与多线程 `ravif` 编码相互
+  独立。四种 codec 都按 `decoder/encoder` 分层，JPEG、PNG、WebP、AVIF encoder 分别使用
+  对应的 `XxxEncoderOptions`，AVIF decoder 使用 `AvifDecoderOptions`；现有调用入口保留默认
+  Options 包装。
 - `inspect()`、支持目标尺寸的 `interactive` 固定目标 `compress()`、`auto` 和 `convert()`
   通过 Tauri 二进制 IPC 执行。Native resize 使用 Lanczos3，单边限制 16384 且总像素限制
   100,000,000。

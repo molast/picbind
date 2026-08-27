@@ -6,6 +6,7 @@
   "packageManager": "pnpm@11.10.0",
   "scripts": {
     "sync:worker-version": "node ../../packages/ui/scripts/sync-worker-version.mjs",
+    "predev": "pnpm --dir ../../packages/shared build:sdk",
     "dev": "node ../../packages/ui/scripts/sync-worker-version.mjs && next dev -p 3000",
     "prebuild": "pnpm --dir ../../packages/shared build:sdk",
     "build": "node ../../packages/ui/scripts/sync-worker-version.mjs && next build",

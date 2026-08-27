@@ -228,10 +228,10 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 
 | 目标格式 | Native 编码器 | 当前行为 |
 |---|---|---|
-| JPEG | `mozjpeg-rs` | 渐进式、Huffman 优化，按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
-| PNG | `imagequant + lodepng + oxipng` | `interactive` 在调色板与无损 RGBA 结果中选择较小者；`planner` 使用量化候选和 Native preset 1，不重复生成无损候选 |
-| WebP | `zenwebp` | 有损 RGBA 编码，method 5，Alpha quality 100 |
-| AVIF | `image` 的 `ravif/rav1e` encoder | speed 9、单线程 RGBA 编码；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
+| JPEG | `mozjpeg-rs` | `JpegEncoderOptions` 默认使用 `ProgressiveBalanced`、Progressive、Huffman 优化，并按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
+| PNG | `imagequant + lodepng + oxipng` | `PngEncoderOptions` 默认使用 256 色、imagequant speed 5、无抖动和 OxiPNG preset 1；`interactive` 在调色板与无损 RGBA 结果中选择较小者；`planner` 不重复生成无损候选 |
+| WebP | `zenwebp` | `WebPEncoderOptions` 默认使用有损 RGBA、method 5、Alpha quality 100 |
+| AVIF | `ravif 0.13 / rav1e` | `AvifEncoderOptions` 默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
 
 Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP 或 AVIF，再统一转换为 RGBA。因此四种
 输入都可以输出四种目标格式，实际覆盖 4×4 共 16 条编解码路径。Native 固定格式压缩仍
@@ -247,10 +247,22 @@ JPEG、PNG、WebP、AVIF 请求只使用 Gain 调整后的有效质量编码一�
 返回，不再为了寻找最小文件无条件执行剩余候选。单个候选编码或解码失败时继续下一档，取消
 错误会立即向上传播。PNG Planner 候选只执行 imagequant/lodepng 和一次 Oxipng preset 1，
 不会在每一档重复生成、优化无损 RGBA PNG。候选循环外复用已解码的 RGBA/RGB 缓冲；Alpha
-扫描、Auto Predictor 和质量比较遇到现成 RGBA8 时直接借用，不复制整张图片。
+扫描、Auto Predictor 和质量比较遇到现成 RGBA8 时直接借用，不复制整张图片。PNG 量化也
+通过 `rgb::FromSlice` 将同一块交错 RGBA 缓冲借给 imagequant，不再为每个像素重建一份
+`imagequant::RGBA` 向量。
 
-AVIF 固定使用 speed 9 和单编码线程。编码结果 metadata 直接使用已知尺寸、格式和 Alpha 状态，
-不额外解码刚生成的 AVIF；只有同格式候选需要 `zenavif` 回读。Native 质量比较最多均匀采样
+Native 四种 codec 都按 `decoder/`、`encoder/` 分层。JPEG、PNG、WebP、AVIF 编码参数分别由
+`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`
+承载，默认 `encode` / `encode_rgb` / `encode_rgba` 入口只是构造默认 Options 的兼容包装。
+这些 Options 当前属于 Native codec 内部扩展点，不是 API V1 新增的公开压缩配置。
+
+AVIF 编解码按 `decoder/`、`encoder/` 拆分，并由 `AvifDecoderOptions`、`AvifEncoderOptions`
+集中管理可扩展参数。编码默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、
+`UnassociatedClean` 和 `ravif` 全局 Rayon 线程池；解码使用 `zenavif` 并将高位深输入规范为
+RGBA8。当前 `zenavif 0.1.6 / rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下存在
+tile threading panic，因此 `AvifDecoderOptions` 默认固定为 1 个解码线程；该限制不影响
+`ravif` 编码线程。编码结果 metadata 直接使用已知尺寸、格式和 Alpha 状态，不额外解码刚
+生成的 AVIF；只有同格式候选需要 `zenavif` 回读。Native 质量比较最多均匀采样
 16 万像素，计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95
 误差。当前同格式候选阈值如下：
 
@@ -332,6 +344,8 @@ MozJPEG 固定启用：
 
 Desktop Native Planner 的跨格式 JPEG 使用 Gain 调整后的请求质量编码一次；`JPEG -> JPEG`
 才按升序质量候选执行 Native SSIM、PSNR、边缘与 Alpha 护栏，并复用一次准备好的 RGB 缓冲。
+Native `JpegEncoderOptions` 还允许 codec 内部显式覆盖 preset、Progressive、Huffman、色度采样
+和 Alpha 合成背景；默认值保持上述现有策略。
 
 ## 6. PNG 流程
 
@@ -375,7 +389,9 @@ Oxipng 只做无损后处理：
 Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 才按升序质量候选回读
 并在首个通过 Native 护栏时停止。同格式最终候选不小于源文件或全部候选失败时，由统一规则
 返回原 PNG，因此 Planner 不需要为每档额外生成无损候选。`interactive` 仍会在单次调用内
-比较量化结果与无损 RGBA 结果。
+比较量化结果与无损 RGBA 结果。`PngEncoderOptions` 承载量化开关、是否比较无损候选、质量、
+调色板颜色数、imagequant speed、抖动强度和完整 `oxipng::Options`；默认量化输入直接借用
+现有 RGBA 缓冲，不分配第二份逐像素颜色数组。
 
 ## 7. WebP 流程
 
@@ -396,8 +412,9 @@ Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 
 
 当前 WebP 不启用 Butteraugli 外层校验，避免额外解码和多轮编码造成明显耗时。
 
-Desktop Native WebP 使用 `zenwebp` 的 method 5、Alpha quality 100，并在 `interactive` 与
-`planner` 中都只编码一次；同格式结果不更小时仍由统一规则返回原 WebP。
+Desktop Native WebP 由 `WebPEncoderOptions` 配置 `zenwebp` 的质量、method 和 Alpha quality，
+默认值为 method 5、Alpha quality 100；`interactive` 与 `planner` 都只编码一次，同格式结果
+不更小时仍由统一规则返回原 WebP。
 
 ## 8. AVIF 流程
 
@@ -420,8 +437,10 @@ Web PCE 路径：
 8. 超过 1200 万像素时，只尝试最多两个非 100 质量候选，控制耗时和内存。
 
 Desktop Native `interactive` AVIF 请求不经过上述 Web PCE 多候选流程：Tauri 后台阻塞任务
-使用 `ravif/rav1e` speed 9 单线程编码一次；`zenavif` 用于 AVIF 输入和同格式候选的质量回读，
-编码结果的 metadata 由已知尺寸、格式和 Alpha 状态直接构造，不额外解码刚生成的 AVIF。
+使用 `ravif 0.13 / rav1e` speed 9 和默认 Rayon 线程池编码一次；`zenavif` 使用 1 个安全线程
+处理 AVIF 输入和同格式候选的质量回读。编解码参数分别由 `AvifEncoderOptions` 和
+`AvifDecoderOptions` 承载，编码结果的 metadata 由已知尺寸、格式和 Alpha 状态直接构造，
+不额外解码刚生成的 AVIF。
 `planner` 对非 AVIF 源使用相同的单候选快速路径；只有 `AVIF -> AVIF` 才生成三档升序候选，
 逐个执行 Native 质量护栏并在首个候选通过时停止。AVIF 候选循环外只创建一次 RGBA 缓冲。
 9. AVIF 转 AVIF 若候选不小于原图或编码失败，返回原图。
@@ -514,8 +533,10 @@ if source_format == target_format
 - AVIF 并发：1。
 - WebP 并发：2。
 - 每个任务独立 Worker，避免编码阻塞主线程。
-- Tauri 固定格式 AVIF 在 Rust `spawn_blocking` 任务中单线程编码；回退到 Web Adapter 的
-  AVIF 请求使用单线程 WASM。Web 站点在运行环境支持时仍可使用多线程 AVIF 编码器。
+- Tauri 固定格式 AVIF 在 Rust `spawn_blocking` 任务中执行，单个任务内部由 `ravif` 默认
+  Rayon 线程池编码；`zenavif` 解码因当前 `rav1d-safe` ARM tile threading panic 固定为 1
+  线程，AVIF 任务级并发仍限制为 1。回退到 Web Adapter 的 AVIF 请求使用单线程 WASM。
+  Web 站点在运行环境支持时仍可使用多线程 AVIF 编码器。
 - Desktop Native resize 与后续编码位于同一个 `spawn_blocking` 任务；缩放后的 RGBA 缓冲在
   编码任务返回时释放，不通过 IPC 往返传输。
 - Native 参数预览、物化、placeholder、thumbnail 和质量分析同样位于单个 `spawn_blocking`

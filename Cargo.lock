@@ -2370,8 +2370,6 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png 0.18.1",
- "ravif",
- "rgb",
  "zune-core",
  "zune-jpeg",
 ]
@@ -2914,6 +2912,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
 dependencies = [
  "cfg-if 1.0.4",
+ "rayon",
 ]
 
 [[package]]
@@ -3682,6 +3681,8 @@ dependencies = [
  "lodepng",
  "mozjpeg-rs",
  "oxipng 10.2.0",
+ "ravif",
+ "rgb",
  "serde",
  "serde_json",
  "twemoji-assets",
@@ -4158,6 +4159,7 @@ dependencies = [
  "loop9",
  "quick-error",
  "rav1e",
+ "rayon",
  "rgb",
 ]
 

@@ -64,12 +64,14 @@ function VariantResult({
     : variant.format.toUpperCase();
 
   return (
-    <div className="min-w-0 border-l border-slate-200 pl-3 first:border-l-0 first:pl-0">
-      <div className="flex items-center gap-2">
+    <div className="min-w-0 overflow-hidden border-l border-slate-200 pl-2.5 first:border-l-0 first:pl-0">
+      <div className="flex h-4 min-w-0 items-center gap-1.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${variantAccent(variant.format)}`} />
-        <span className="truncate text-[11px] font-semibold text-slate-600">{label}</span>
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[10px] font-semibold text-slate-600" title={label}>
+          {label}
+        </span>
         {best ? (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600">
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] font-semibold text-emerald-600">
             <FiCheck className="h-3 w-3" aria-hidden="true" />
             {copy.desktop.best}
           </span>
@@ -77,24 +79,20 @@ function VariantResult({
       </div>
 
       {variant.status === "done" && variant.outputUrl ? (
-        <div className="mt-1.5 flex min-w-0 items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm font-semibold text-slate-800">
-                {formatSize(variant.outputSize || 0)}
-              </span>
-              <span className={`text-[11px] font-medium ${(variant.percent || 0) <= 0 ? "text-emerald-600" : "text-amber-600"}`}>
-                {formatDeltaPercent(variant.percent)}
-              </span>
-            </div>
-          </div>
+        <div className="mt-1 flex h-7 min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate whitespace-nowrap text-[13px] font-semibold text-slate-800">
+            {formatSize(variant.outputSize || 0)}
+          </span>
+          <span className={`shrink-0 whitespace-nowrap text-[10px] font-medium ${(variant.percent || 0) <= 0 ? "text-emerald-600" : "text-amber-600"}`}>
+            {formatDeltaPercent(variant.percent)}
+          </span>
           <button
             type="button"
             onClick={() => void SystemManager.downloadImage(
               variant.outputUrl!,
               variant.outputName || item.fileName,
             )}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#2f65cf] transition hover:bg-blue-50"
+            className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#2f65cf] transition hover:bg-blue-50"
             aria-label={copy.desktop.downloadResult}
             title={copy.desktop.downloadResult}
           >
@@ -102,9 +100,9 @@ function VariantResult({
           </button>
         </div>
       ) : variant.status === "error" ? (
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-red-600">
+        <div className="mt-1 flex h-7 min-w-0 items-center gap-1.5 text-[10px] text-red-600">
           <FiAlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap">
             {isTransparencyBlocked(variant.errorMessage)
               ? copy.transparencyBlocked
               : variant.errorMessage || copy.unsupportedFormat}
@@ -120,14 +118,16 @@ function VariantResult({
           ) : null}
         </div>
       ) : (
-        <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
+        <div className="mt-1 flex h-7 min-w-0 items-center gap-1.5 text-[10px] text-slate-500">
           {variant.status === "processing" ? (
-            <FiLoader className="h-3.5 w-3.5 animate-spin text-[#2f65cf]" aria-hidden="true" />
+            <FiLoader className="h-3.5 w-3.5 shrink-0 animate-spin text-[#2f65cf]" aria-hidden="true" />
           ) : (
-            <span className="h-2 w-2 rounded-full bg-slate-300" />
+            <span className="h-2 w-2 shrink-0 rounded-full bg-slate-300" />
           )}
-          <span>{variant.status === "processing" ? copy.optimizing : copy.queued}</span>
-          <span className="ml-auto tabular-nums">{Math.round(variant.progress)}%</span>
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+            {variant.status === "processing" ? copy.optimizing : copy.queued}
+          </span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{Math.round(variant.progress)}%</span>
         </div>
       )}
     </div>
@@ -235,7 +235,7 @@ export default function DesktopHomeResults({
         </span>
       </div>
 
-      <div className="grid min-h-0 flex-1 auto-rows-[58px] content-start overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         {visibleItems.map((item) => {
           const variants = filter === "all"
             ? item.variants
@@ -243,21 +243,28 @@ export default function DesktopHomeResults({
           const bestVariant = getBestDoneVariant(item);
 
           return (
-            <article key={item.id} className="flex min-h-0 items-center gap-4 border-b border-slate-100 px-5 last:border-b-0">
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
-                {item.rejection ? (
-                  <span className="flex h-full w-full items-center justify-center text-red-500">
-                    <FiAlertCircle className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                ) : (
-                  <img src={item.previewUrl} alt={item.fileName} className="h-full w-full object-cover" />
-                )}
-              </div>
-              <div className="w-[190px] min-w-0 shrink-0">
-                <h3 className="truncate text-sm font-semibold text-slate-800">{item.fileName}</h3>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  {item.sourceFormat.toUpperCase()} · {formatSize(item.fileSize)}
-                </p>
+            <article
+              key={item.id}
+              className="grid min-h-16 grid-cols-1 gap-2 border-b border-slate-100 px-4 py-2 last:border-b-0 md:grid-cols-[180px_minmax(0,1fr)] md:items-center md:gap-3 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)]"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-slate-100 ring-1 ring-slate-200">
+                  {item.rejection ? (
+                    <span className="flex h-full w-full items-center justify-center text-red-500">
+                      <FiAlertCircle className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <img src={item.previewUrl} alt={item.fileName} className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-[13px] font-semibold text-slate-800" title={item.fileName}>
+                    {item.fileName}
+                  </h3>
+                  <p className="mt-0.5 truncate whitespace-nowrap text-[10px] text-slate-500">
+                    {item.sourceFormat.toUpperCase()} · {formatSize(item.fileSize)}
+                  </p>
+                </div>
               </div>
 
               {item.rejection ? (
@@ -266,7 +273,7 @@ export default function DesktopHomeResults({
                   <span>{copy.uploadNotice.fileTooLargeTitle}</span>
                 </div>
               ) : (
-                <div className={`grid min-w-0 flex-1 gap-3 ${variants.length >= 4 ? "grid-cols-4" : variants.length === 3 ? "grid-cols-3" : variants.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-x-2 gap-y-2">
                   {variants.map((variant) => (
                     <VariantResult
                       key={variant.id}
