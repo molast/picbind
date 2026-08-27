@@ -9,6 +9,7 @@ import {
   type CompareAsset,
   type HomeCompareCopy,
   type HomeItem,
+  type HomeOutputFormat,
   type MetricsRequestState,
   type OutputVariant,
 } from "./home-compression-types";
@@ -75,7 +76,7 @@ function normalizeSourceFormat(file: File): OutputFormat {
   return "jpeg";
 }
 
-function normalizeOutputFormat(ext?: string): OutputFormat {
+function normalizeOutputFormat(ext?: string): HomeOutputFormat {
   if (ext === "png") {
     return "png";
   }
@@ -85,11 +86,14 @@ function normalizeOutputFormat(ext?: string): OutputFormat {
   if (ext === "avif") {
     return "avif";
   }
+  if (ext === "jxl") {
+    return "jxl";
+  }
   return "jpeg";
 }
 
 function createVariant(
-  format: OutputFormat,
+  format: HomeOutputFormat,
   automatic = false,
 ): OutputVariant {
   return {
@@ -101,7 +105,7 @@ function createVariant(
   };
 }
 
-function ensureVariants(item: HomeItem, selectedFormats: OutputFormat[]) {
+function ensureVariants(item: HomeItem, selectedFormats: HomeOutputFormat[]) {
   if (item.rejection) {
     return item;
   }
@@ -203,7 +207,7 @@ async function createPreviewUrl(file: File) {
 
 function createItem(
   file: File,
-  selectedFormats: OutputFormat[],
+  selectedFormats: HomeOutputFormat[],
 ): HomeItem {
   const now = Date.now();
   const fileId = `${file.name}-${file.size}-${file.lastModified}-${createUuid()}`;
@@ -244,7 +248,7 @@ function createItem(
 
 function logCompressionFailure(
   sourceFile: File,
-  format: OutputFormat,
+  format: HomeOutputFormat,
   error: unknown,
 ) {
   if (!IS_DEV) {
@@ -266,7 +270,7 @@ function logCompressionFailure(
 
 async function logCompressionAnalysis(
   sourceFile: File,
-  format: OutputFormat,
+  format: HomeOutputFormat,
   sourceMetrics: unknown,
   compressedMetrics: unknown,
   compareMetrics: ImageQualityComparison,
@@ -335,7 +339,7 @@ export function useHomeCompression({
   const [lang, setLang] = React.useState<Lang>(initialLang);
   const [langReady, setLangReady] = React.useState(false);
   const [showFormatOptions, setShowFormatOptions] = React.useState(false);
-  const [selectedFormats, setSelectedFormats] = React.useState<OutputFormat[]>(
+  const [selectedFormats, setSelectedFormats] = React.useState<HomeOutputFormat[]>(
     [],
   );
   const [whyVariantId, setWhyVariantId] = React.useState<string | null>(null);
@@ -1174,7 +1178,7 @@ export function useHomeCompression({
   };
 
   const formatOptions = React.useMemo(
-    (): Array<{ key: OutputFormat; label: string }> => [
+    (): Array<{ key: HomeOutputFormat; label: string }> => [
       { key: "avif", label: "AVIF" },
       { key: "jpeg", label: "JPEG" },
       { key: "png", label: "PNG" },
@@ -1183,7 +1187,15 @@ export function useHomeCompression({
     [],
   );
 
-  const handleToggleFormat = (formatKey: OutputFormat) => {
+  const desktopFormatOptions = React.useMemo(
+    (): Array<{ key: HomeOutputFormat; label: string }> => [
+      ...formatOptions,
+      { key: "jxl", label: "JXL" },
+    ],
+    [formatOptions],
+  );
+
+  const handleToggleFormat = (formatKey: HomeOutputFormat) => {
     setSelectedFormats((prev) =>
       prev.includes(formatKey)
         ? prev.filter((item) => item !== formatKey)
@@ -1299,6 +1311,7 @@ export function useHomeCompression({
     setShowFormatOptions,
     selectedFormats,
     formatOptions,
+    desktopFormatOptions,
     handleSwitchLang,
     handleDrop,
     handleToggleFormat,

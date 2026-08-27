@@ -41,7 +41,7 @@ import {
 } from "./workspace-collaboration";
 import { WorkspaceRealtimeObject } from "./realtime/workspace-object";
 
-type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
+type CompressionFormat = "jpeg" | "png" | "webp" | "avif" | "jxl";
 
 type FormatMetrics = {
   count: number;
@@ -139,6 +139,7 @@ function createInitialCounterState(): MetricsCounterState {
       png: { count: 0, totalSavedBytes: 0 },
       webp: { count: 0, totalSavedBytes: 0 },
       avif: { count: 0, totalSavedBytes: 0 },
+      jxl: { count: 0, totalSavedBytes: 0 },
     },
     updatedAt: new Date(0).toISOString(),
   };
@@ -167,6 +168,10 @@ function normalizeCounterState(input: Partial<MetricsCounterState> | null): Metr
       avif: {
         count: Number(stats.avif?.count || 0),
         totalSavedBytes: Number(stats.avif?.totalSavedBytes || 0),
+      },
+      jxl: {
+        count: Number(stats.jxl?.count || 0),
+        totalSavedBytes: Number(stats.jxl?.totalSavedBytes || 0),
       },
     },
     updatedAt: input?.updatedAt || initial.updatedAt,
@@ -245,6 +250,13 @@ function mergeCounterState(
         totalSavedBytes: Math.max(
           base.formatStats.avif.totalSavedBytes,
           incoming.formatStats.avif.totalSavedBytes,
+        ),
+      },
+      jxl: {
+        count: Math.max(base.formatStats.jxl.count, incoming.formatStats.jxl.count),
+        totalSavedBytes: Math.max(
+          base.formatStats.jxl.totalSavedBytes,
+          incoming.formatStats.jxl.totalSavedBytes,
         ),
       },
     },

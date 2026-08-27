@@ -45,7 +45,7 @@ V1 采用以下设计：
 
 | 能力 | Web 当前实现 | Desktop 当前实现 |
 | --- | --- | --- |
-| 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF、JPEG XL 由 Native Planner / Encoder 执行；当前格式按钮仍只展示浏览器可预览的四种格式 |
+| 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF、JPEG XL 由 Native Planner / Encoder 执行；Desktop 格式选择器显式提供 JXL |
 | Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 五格式输入、固定格式与 `auto`、可选 resize 均可走 Native Rust；JPEG XL 仅由显式 API 请求输出 |
 | 参数实时预览 | Web Adapter 使用受限 Canvas / OffscreenCanvas | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
 | 最终参数重放 | Web Adapter 从不可变源图重放完整文档 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
@@ -946,16 +946,22 @@ apps/desktop/src-tauri/src/image_processing/
 上述目录反映当前所有权。`codecs/` 只负责 JPEG、PNG、WebP、AVIF、JPEG XL 编解码与统一分发；
 五种格式内部统一按 `decoder/`、`encoder/` 分层，encoder 参数分别由
 `JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`、
-`JpegXlEncoderOptions` 承载，AVIF 与 JPEG XL decoder 分别使用 `AvifDecoderOptions` 和
-`JpegXlDecoderOptions`。现有 crate 调用入口保留默认 Options
-包装，Options 当前不是 API V1 对 Web Adapter 开放的新字段。
+`JpegXlEncoderOptions` 承载；JPEG、PNG、WebP、AVIF 与 JPEG XL decoder 分别使用
+`JpegDecoderOptions`、`PngDecoderOptions`、`WebPDecoderOptions`、`AvifDecoderOptions` 和
+`JpegXlDecoderOptions`。现有 crate 调用入口保留默认 Options 包装，Options 当前不是 API V1
+对 Web Adapter 开放的新字段。完整 codec 与参数矩阵位于
+`crates/picbind-image-native/src/codecs/README.md`。
 `operations/` 是 Workspace 参数操作层，负责参数文档重放以及 crop、resize、rotate、color、
 draw。压缩入口允许复用其中的 resize，但不会把 Planner 或 codec 规则放入操作层。
-Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。`zune-core` 只在 JPEG XL
-encoder 边界用于构造颜色空间、位深和线程选项，`zune_image` 没有替换主像素体系：它不直接覆盖这里的纯 Rust AVIF 解码链，且
-Workspace 操作、绘制、质量分析和 Planner 都依赖现有交错 RGBA 模型，整体替换会扩大为跨模块
-重写并增加无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再扩大
-`zune-core` 在模型边界的使用，不能把 JPEG XL codec 内部依赖描述成当前主体系已经替换。
+Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。JPEG 使用
+`zune-jpeg 0.5.15` 解码到 RGB8；PNG 使用 `zune-png 0.5.2` 解码 Luma/LumaA/RGB/RGBA 与
+透明调色板，并把高位深输入规范到 8-bit。两者通过 `zune-core` 配置严格校验、平台 SIMD、
+尺寸限制和格式专用参数。WebP 直接使用 `image-webp 0.2.4` 解码，通过
+`WebPDecoderOptions` 配置内存上限和 Bilinear/Simple 有损色度上采样；无 Alpha 输出 RGB8，
+含 Alpha 输出 RGBA8，动画只读取首帧。zune 与 image-webp 都只位于 codec 边界，没有替换主
+像素体系：Workspace 操作、绘制、质量分析和 Planner 都继续依赖现有交错 RGBA 模型，避免
+跨模块重写和无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再扩大
+`zune-core` 在模型边界的使用。
 `crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
 的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
 Port 与 Adapter 边界。
@@ -1011,6 +1017,12 @@ Planner 和参数重放仍待提取。
 - Native codec 使用统一像素模型覆盖 JPEG、PNG、WebP、AVIF、JPEG XL 五种输入到五种输出的
   25 条路径。JPEG XL 同时识别 codestream 与 container signature，固定目标 MIME 为
   `image/jxl`、扩展名为 `.jxl`；Auto Predictor 当前不会主动选择 JPEG XL。
+- JPEG 输入由 `zune-jpeg 0.5.15` 解码为 RGB8；PNG 输入由 `zune-png 0.5.2` 解码并保留
+  Luma/LumaA/RGB/RGBA 和调色板 Alpha，高位深 PNG 规范到 8-bit，APNG 只取首帧。两者默认
+  启用平台 SIMD/unsafe 快速路径和严格格式校验，并分别使用 `JpegDecoderOptions` 与
+  `PngDecoderOptions`。WebP 输入由 `image-webp 0.2.4` 解码，默认 Bilinear 色度上采样、
+  400,000,000 bytes 内存上限，按 Alpha 状态输出 RGB8/RGBA8，并通过 `WebPDecoderOptions`
+  保留后续扩展点。
 - JPEG 使用 `mozjpeg-rs`，默认 `ProgressiveBalanced`、Progressive、Huffman 优化和质量分档
   色度采样；PNG 使用 `imagequant + lodepng + oxipng`，默认 256 色、imagequant speed 5、
   无抖动和 Native OxiPNG preset 1，并通过 `rgb::FromSlice` 将现有 RGBA 缓冲零拷贝借给
@@ -1023,8 +1035,8 @@ Planner 和参数重放仍待提取。
   独立。JPEG XL 使用 `jxl-oxide 0.12.6` 解码和 `zune-jpegxl 0.5.2` 编码，当前只输出静态、
   无损、8-bit RGB/RGBA codestream；默认 effort 4、4 个 encoder worker threads，decoder
   使用全局 Rayon 池。五种 codec 都按 `decoder/encoder` 分层，各 encoder 使用对应的
-  `XxxEncoderOptions`，AVIF/JPEG XL decoder 也分别使用 Options；现有调用入口保留默认
-  Options 包装。JPEG XL 的公开 `quality` / Compression Gain 当前不改变无损编码参数。
+  `XxxEncoderOptions`，五种 decoder 也分别使用 Options；现有调用入口保留默认 Options
+  包装。JPEG XL 的公开 `quality` / Compression Gain 当前不改变无损编码参数。
 - `inspect()`、支持目标尺寸的 `interactive` 固定目标 `compress()`、`auto` 和 `convert()`
   通过 Tauri 二进制 IPC 执行。Native resize 使用 Lanczos3，单边限制 16384 且总像素限制
   100,000,000。

@@ -234,15 +234,22 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 | AVIF | `ravif 0.13 / rav1e` | `AvifEncoderOptions` 默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
 | JPEG XL | `zune-jpegxl 0.5.2` | `JpegXlEncoderOptions` 默认 effort 4、4 个 scoped worker threads、8-bit RGB/RGBA、去除元数据；当前只编码静态无损 JXL codestream，完整保留 Alpha |
 
-Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP、AVIF 或 JPEG XL；JPEG XL 同时识别
-`FF 0A` codestream 与 12-byte container signature，并使用 `jxl-oxide 0.12.6` 解码，随后与
-其他格式一样进入统一 `DynamicImage` 像素模型。因此五种输入都可以输出五种目标格式，
-实际覆盖 5×5 共 25 条编解码路径。Native 固定格式压缩仍
+Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP、AVIF 或 JPEG XL。JPEG 使用
+`zune-jpeg 0.5.15` 解码为 RGB8；PNG 使用 `zune-png 0.5.2`，保留 Luma、LumaA、RGB、RGBA
+布局与调色板透明度，并把 16-bit 输入规范到当前 Native 的 8-bit 像素模型。两者默认启用
+平台 SIMD/unsafe 快速路径，同时保留严格格式校验、16384 单边限制和可扩展 decoder Options。
+PNG 当前只解码首帧。WebP 直接使用 `image-webp 0.2.4` 解码，无 Alpha 输入输出 RGB8，含
+Alpha 输入输出 RGBA8；`WebPDecoderOptions` 默认使用 Bilinear 有损色度上采样和
+400,000,000 bytes 内存上限，在分配像素缓冲前执行 16384 单边与 100,000,000 总像素检查，
+动画 WebP 当前只读取首帧。JPEG XL 同时识别 `FF 0A` codestream 与 12-byte container
+signature，并使用 `jxl-oxide 0.12.6` 解码。所有格式随后进入统一 `DynamicImage` 像素模型，
+因此五种输入都可以输出五种目标格式，实际覆盖 5×5 共 25 条编解码路径。Native 固定格式压缩仍
 遵守同格式不增大和默认 Alpha 保护；跨格式转换使用 `forceEncode`，不套用返回源文件规则。
 Native `auto` Predictor 对解码后的 RGBA 进行有界采样，提取真实 Alpha、颜色熵、细节覆盖和
 平坦区域覆盖：平坦低熵图优先 PNG，透明细节图优先 WebP，其他透明图和高细节不透明图优先
 AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG，Auto 当前也不会选择 JPEG XL；生成
-JPEG XL 必须显式指定目标格式。
+JPEG XL 必须显式指定目标格式。Desktop 首页格式选择器提供 JXL，选择后通过 Native
+`planner` 生成 `.jxl` 结果；Web 首页仍只展示 JPEG、PNG、WebP、AVIF。
 
 Native `planner` 按 `dev_dioxus` 的格式专用纯 Rust 路径执行。WebP、JPEG XL，以及源格式与目标格式不同的
 JPEG、PNG、WebP、AVIF 请求只编码一次，不做候选回读。JPEG XL 当前是无损编码，公开请求中的
@@ -258,9 +265,12 @@ JPEG、PNG、WebP、AVIF 请求只编码一次，不做候选回读。JPEG XL �
 
 Native 五种 codec 都按 `decoder/`、`encoder/` 分层。JPEG、PNG、WebP、AVIF、JPEG XL 编码参数分别由
 `JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`、
-`JpegXlEncoderOptions`
-承载，默认 `encode` / `encode_rgb` / `encode_rgba` 入口只是构造默认 Options 的兼容包装。
-这些 Options 当前属于 Native codec 内部扩展点，不是 API V1 新增的公开压缩配置。
+`JpegXlEncoderOptions` 承载；JPEG、PNG、WebP、AVIF、JPEG XL 解码参数分别由
+`JpegDecoderOptions`、`PngDecoderOptions`、`WebPDecoderOptions`、`AvifDecoderOptions`、
+`JpegXlDecoderOptions` 承载。默认 `decode` / `encode` / `encode_rgb` / `encode_rgba` 入口
+只是构造默认 Options 的兼容包装。这些 Options 当前属于 Native codec 内部扩展点，不是
+API V1 新增的公开压缩配置。各格式算法和参数矩阵记录在
+`crates/picbind-image-native/src/codecs/README.md`。
 
 AVIF 编解码按 `decoder/`、`encoder/` 拆分，并由 `AvifDecoderOptions`、`AvifEncoderOptions`
 集中管理可扩展参数。编码默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、
@@ -429,7 +439,9 @@ Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 
 
 Desktop Native WebP 由 `WebPEncoderOptions` 配置 `zenwebp` 的质量、method 和 Alpha quality，
 默认值为 method 5、Alpha quality 100；`interactive` 与 `planner` 都只编码一次，同格式结果
-不更小时仍由统一规则返回原 WebP。
+不更小时仍由统一规则返回原 WebP。Native WebP 回读与普通输入解码均直接使用
+`image-webp 0.2.4`；`WebPDecoderOptions` 可配置内存上限和 Bilinear/Simple 有损色度上采样，
+默认使用 Bilinear，并按文件 Alpha 状态保留 RGB8 或 RGBA8。
 
 ## 8. AVIF 流程
 
@@ -614,7 +626,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PNG / Oxipng | `crates/picbind-image/src/core/png_oxipng.rs` |
 | 感知指标 | `crates/picbind-image/src/core/metrics.rs`、`crates/picbind-image/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
-| Desktop Native 五格式 codec | `crates/picbind-image-native/src/codecs/` |
+| Desktop Native 五格式 codec 与参数矩阵 | `crates/picbind-image-native/src/codecs/`、`crates/picbind-image-native/src/codecs/README.md` |
 | Desktop Native Workspace 参数操作与重放（含 resize） | `crates/picbind-image-native/src/operations/` |
 | Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |

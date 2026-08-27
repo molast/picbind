@@ -1,4 +1,4 @@
-type CompressionFormat = "jpeg" | "png" | "webp" | "avif";
+type CompressionFormat = "jpeg" | "png" | "webp" | "avif" | "jxl";
 
 type FormatMetrics = {
   count: number;
@@ -44,6 +44,7 @@ function createInitialFormatStats(): Record<CompressionFormat, FormatMetrics> {
     png: { count: 0, totalSavedBytes: 0 },
     webp: { count: 0, totalSavedBytes: 0 },
     avif: { count: 0, totalSavedBytes: 0 },
+    jxl: { count: 0, totalSavedBytes: 0 },
   };
 }
 
@@ -80,6 +81,10 @@ function normalizeState(input: Partial<MetricsCounterState> | null): MetricsCoun
       avif: {
         count: Number(stats.avif?.count || 0),
         totalSavedBytes: Number(stats.avif?.totalSavedBytes || 0),
+      },
+      jxl: {
+        count: Number(stats.jxl?.count || 0),
+        totalSavedBytes: Number(stats.jxl?.totalSavedBytes || 0),
       },
     },
     updatedAt: input?.updatedAt || initial.updatedAt,
@@ -162,7 +167,7 @@ export class MetricsCounter {
 
       let totalSavedBytesDelta = 0;
       for (const event of body.events) {
-        if (!event.format || !["jpeg", "png", "webp", "avif"].includes(event.format)) {
+        if (!event.format || !["jpeg", "png", "webp", "avif", "jxl"].includes(event.format)) {
           continue;
         }
         const savedBytes = Math.round(Number(event.savedBytes || 0));

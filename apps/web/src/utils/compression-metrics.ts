@@ -28,7 +28,7 @@ type LocalMetricsState = {
 
 let pendingCount = 0;
 let pendingEvents: Array<{
-  format: "jpeg" | "png" | "webp" | "avif";
+  format: "jpeg" | "png" | "webp" | "avif" | "jxl";
   savedBytes: number;
 }> = [];
 let flushTimer: number | null = null;
@@ -173,7 +173,7 @@ async function writeMetrics(
     | { delta: number }
     | {
         events: Array<{
-          format: "jpeg" | "png" | "webp" | "avif";
+          format: "jpeg" | "png" | "webp" | "avif" | "jxl";
           savedBytes: number;
         }>;
       },
@@ -284,7 +284,7 @@ export function reportCompressedCount(delta = 1) {
 }
 
 export function reportCompressionResult(
-  format: "jpeg" | "png" | "webp" | "avif",
+  format: "jpeg" | "png" | "webp" | "avif" | "jxl",
   sourceSize: number,
   outputSize: number,
 ) {

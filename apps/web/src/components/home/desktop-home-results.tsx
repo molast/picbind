@@ -11,17 +11,17 @@ import {
 } from "react-icons/fi";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import SystemManager from "@/utils/System";
-import type { OutputFormat } from "@/utils/compress-shared";
 import {
   formatDeltaPercent,
   formatSize,
   getBestDoneVariant,
+  type HomeOutputFormat,
   isTransparencyBlocked,
   type HomeItem,
   type OutputVariant,
 } from "./home-compression-types";
 
-type FormatFilter = "all" | OutputFormat;
+type FormatFilter = "all" | HomeOutputFormat;
 
 type DesktopHomeResultsProps = {
   copy: HomeCompressLandingCopy;
@@ -37,12 +37,13 @@ type DesktopHomeResultsProps = {
 };
 
 const PAGE_SIZE = 10;
-const FILTERS: FormatFilter[] = ["all", "jpeg", "png", "webp", "avif"];
+const FILTERS: FormatFilter[] = ["all", "jpeg", "png", "webp", "avif", "jxl"];
 
-function variantAccent(format: OutputFormat) {
+function variantAccent(format: HomeOutputFormat) {
   if (format === "jpeg") return "bg-blue-500";
   if (format === "png") return "bg-emerald-500";
   if (format === "webp") return "bg-violet-500";
+  if (format === "jxl") return "bg-cyan-500";
   return "bg-amber-500";
 }
 

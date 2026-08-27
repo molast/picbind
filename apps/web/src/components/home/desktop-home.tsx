@@ -162,7 +162,7 @@ export default function DesktopHome({
               >
                 {desktopCopy.auto}
               </button>
-              {home.formatOptions.map((format) => {
+              {home.desktopFormatOptions.map((format) => {
                 const selected = home.showFormatOptions && home.selectedFormats.includes(format.key);
                 return (
                   <button

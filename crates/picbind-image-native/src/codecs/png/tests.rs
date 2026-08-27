@@ -1,4 +1,4 @@
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, GrayImage, ImageEncoder, RgbaImage};
 
 #[test]
 fn png_preserves_transparency() {
@@ -35,4 +35,41 @@ fn custom_options_encode_a_transparent_palette_png() {
     assert_eq!(bytes[25], 3, "custom options should emit palette PNG");
     assert_eq!(decoded.dimensions(), (16, 12));
     assert!(decoded.pixels().any(|pixel| pixel[3] < 255));
+}
+
+#[test]
+fn png_decoder_preserves_grayscale_layout() {
+    let image = GrayImage::from_fn(9, 7, |x, y| image::Luma([((x + y) * 11) as u8]));
+    let mut bytes = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut bytes)
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::L8,
+        )
+        .unwrap();
+
+    let decoded =
+        super::decoder::decode_with_options(&bytes, &super::decoder::PngDecoderOptions::default())
+            .unwrap();
+
+    assert_eq!(decoded.to_luma8(), image);
+}
+
+#[test]
+fn png_decoder_normalizes_sixteen_bit_samples_to_eight_bit() {
+    let samples = [0x0000_u16, 0x1234, 0xabcd, 0xffff];
+    let pixels = samples
+        .into_iter()
+        .flat_map(u16::to_ne_bytes)
+        .collect::<Vec<_>>();
+    let mut bytes = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut bytes)
+        .write_image(&pixels, 2, 2, image::ExtendedColorType::L16)
+        .unwrap();
+
+    let decoded = super::decode(&bytes).unwrap().to_luma8();
+
+    assert_eq!(decoded.as_raw(), &[0x00, 0x12, 0xab, 0xff]);
 }

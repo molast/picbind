@@ -1,11 +1,13 @@
-import type { ImageQualityComparison } from "@picbind/shared";
+import type { ImageOutputFormat, ImageQualityComparison } from "@picbind/shared";
 import type { OutputFormat } from "@/utils/compress-shared";
+
+export type HomeOutputFormat = ImageOutputFormat;
 
 export type VariantStatus = "queued" | "processing" | "done" | "error";
 
 export type OutputVariant = {
   id: string;
-  format: OutputFormat;
+  format: HomeOutputFormat;
   allowAlphaLoss?: boolean;
   automatic?: boolean;
   outputUrl?: string;

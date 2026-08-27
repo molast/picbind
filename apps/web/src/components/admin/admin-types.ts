@@ -3,7 +3,7 @@ export type AdminDashboardState = {
   totalViews: number;
   totalSavedBytes: number;
   formatStats: Record<
-    "jpeg" | "png" | "webp" | "avif",
+    "jpeg" | "png" | "webp" | "avif" | "jxl",
     { count: number; totalSavedBytes: number }
   >;
   showCompressedCount: boolean;
@@ -19,6 +19,7 @@ export const EMPTY_ADMIN_STATE: AdminDashboardState = {
     png: { count: 0, totalSavedBytes: 0 },
     webp: { count: 0, totalSavedBytes: 0 },
     avif: { count: 0, totalSavedBytes: 0 },
+    jxl: { count: 0, totalSavedBytes: 0 },
   },
   showCompressedCount: true,
   updatedAt: new Date(0).toISOString(),

@@ -8,7 +8,7 @@ import { FiPlus } from "react-icons/fi";
 import { WorkspaceLanguageSwitcher, WorkspaceShareIdEntryDialog } from "@picbind/ui/source";
 import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
-import type { OutputFormat } from "@/utils/compress-shared";
+import type { HomeOutputFormat } from "./home-compression-types";
 import AccountControl from "@/components/auth/account-control";
 
 type HomeHeroProps = {
@@ -17,13 +17,13 @@ type HomeHeroProps = {
   inputRef: React.RefObject<HTMLInputElement>;
   isDragging: boolean;
   showFormatOptions: boolean;
-  selectedFormats: OutputFormat[];
-  formatOptions: Array<{ key: OutputFormat; label: string }>;
+  selectedFormats: HomeOutputFormat[];
+  formatOptions: Array<{ key: HomeOutputFormat; label: string }>;
   onSwitchLang(lang: Lang): void;
   onDraggingChange(dragging: boolean): void;
   onDrop(event: React.DragEvent<HTMLDivElement>): void;
   onFormatOptionsChange(open: boolean): void;
-  onToggleFormat(format: OutputFormat): void;
+  onToggleFormat(format: HomeOutputFormat): void;
   onSelectAllFormats(): void;
   onRoomCreated?(room: ShareRoom): void;
   hasActiveRoom?: boolean;

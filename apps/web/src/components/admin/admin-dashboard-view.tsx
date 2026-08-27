@@ -68,7 +68,7 @@ export default function AdminDashboardView({
                 </tr>
               </thead>
               <tbody>
-                {(["jpeg", "png", "webp", "avif"] as const).map((format) => (
+                {(["jpeg", "png", "webp", "avif", "jxl"] as const).map((format) => (
                   <tr key={format} className="border-b border-slate-100 last:border-b-0">
                     <td className="py-4 pr-6 font-semibold uppercase text-slate-900">{format}</td>
                     <td className="py-4 pr-6 text-slate-700">
