@@ -5,7 +5,6 @@ mod messaging;
 mod storage;
 
 use tauri::Manager;
-use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,24 +18,8 @@ pub fn run() {
                 }
             },
         ))
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            app.manage(auth::OAuthDeepLinkState::default());
-            let app_handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    auth::handle_oauth_deep_link(&app_handle, url.as_str());
-                }
-            });
-            if let Some(urls) = app.deep_link().get_current()? {
-                for url in urls {
-                    auth::handle_oauth_deep_link(app.handle(), url.as_str());
-                }
-            }
-            #[cfg(any(windows, target_os = "linux"))]
-            app.deep_link().register_all()?;
-
             let data_dir = app.path().app_data_dir()?;
             let store =
                 storage::NativeImageStore::open(data_dir.clone()).map_err(std::io::Error::other)?;
@@ -73,8 +56,6 @@ pub fn run() {
             auth::desktop_auth_login,
             auth::desktop_auth_register,
             auth::desktop_auth_oauth,
-            auth::desktop_auth_exchange,
-            auth::desktop_auth_take_deep_link,
             auth::desktop_auth_avatar_data_url,
             download::commands::save_download,
             image_processing::commands::image_processing_execute,

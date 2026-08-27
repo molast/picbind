@@ -1,13 +1,15 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.picbind.com")
   .replace(/\/+$/, "");
 const AUTH_CACHE_KEY = "picbind:auth-cache:v1";
 const AVATAR_CACHE_KEY = "picbind:auth-avatar-cache:v1";
 const LAST_PROVIDER_KEY = "picbind:last-oauth-provider";
-const DESKTOP_OAUTH_EVENT = "picbind:auth-deep-link";
-const DESKTOP_OAUTH_TIMEOUT_MS = 10 * 60 * 1000;
+const OAUTH_TIMEOUT_MS = 10 * 60 * 1000;
+const WEB_OAUTH_CALLBACK_PATH = "/auth-callback.html";
+const WEB_OAUTH_CHANNEL_PREFIX = "picbind:oauth:";
+const WEB_OAUTH_WINDOW_PREFIX = "picbind-oauth:";
+const WEB_OAUTH_MESSAGE_TYPE = "picbind:oauth-callback";
 
 export type OAuthProvider = "google" | "github";
 
@@ -136,65 +138,121 @@ function tauriError(error: unknown) {
   );
 }
 
-type DesktopOAuthObserver = {
-  authenticated(state: AuthState): void;
-  failed(error: AuthServiceError): void;
+type WebOAuthCallback = {
+  type: typeof WEB_OAUTH_MESSAGE_TYPE;
+  result: string;
+  code: string | null;
 };
 
-type DesktopOAuthWaiter = {
-  resolve(state: AuthState): void;
-  reject(error: AuthServiceError): void;
-  timeout: ReturnType<typeof setTimeout>;
-};
-
-const desktopOAuthObservers = new Set<DesktopOAuthObserver>();
-let desktopOAuthReady: Promise<void> | null = null;
-let desktopOAuthWaiter: DesktopOAuthWaiter | null = null;
-let desktopOAuthCallback: { url: string; result: Promise<AuthState> } | null = null;
-
-function settleDesktopOAuth(state: AuthState | null, error: AuthServiceError | null) {
-  const waiter = desktopOAuthWaiter;
-  desktopOAuthWaiter = null;
-  if (waiter) {
-    clearTimeout(waiter.timeout);
-    if (state) waiter.resolve(state);
-    else waiter.reject(error || new AuthServiceError("oauth_failed"));
-  }
-  for (const observer of desktopOAuthObservers) {
-    if (state) observer.authenticated(state);
-    else observer.failed(error || new AuthServiceError("oauth_failed"));
-  }
+function webOAuthRequestIdFromWindow() {
+  return window.name.startsWith(WEB_OAUTH_WINDOW_PREFIX)
+    ? window.name.slice(WEB_OAUTH_WINDOW_PREFIX.length)
+    : null;
 }
 
-function completeDesktopOAuth(url: string) {
-  if (desktopOAuthCallback?.url === url) return desktopOAuthCallback.result;
-  const result = invoke<AuthState>("desktop_auth_exchange", { callbackUrl: url })
-    .then((value) => {
-      const state = normalizeState(value);
-      writeCache(state);
-      settleDesktopOAuth(state, null);
-      return state;
-    })
-    .catch((error: unknown) => {
-      const normalized = tauriError(error);
-      settleDesktopOAuth(null, normalized);
-      throw normalized;
-    });
-  desktopOAuthCallback = { url, result };
-  void result.finally(() => {
-    if (desktopOAuthCallback?.result === result) desktopOAuthCallback = null;
-  }).catch(() => {});
-  return result;
+function validWebOAuthRequestId(value: string | null) {
+  return value !== null && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-async function ensureDesktopOAuthListener() {
-  if (!desktopOAuthReady) {
-    desktopOAuthReady = listen<string>(DESKTOP_OAUTH_EVENT, (event) => {
-      void invoke<string | null>("desktop_auth_take_deep_link").catch(() => null);
-      void completeDesktopOAuth(event.payload).catch(() => {});
-    }).then(() => undefined);
+function relayWebOAuthCallback(url: URL) {
+  const requestId = webOAuthRequestIdFromWindow();
+  const result = url.searchParams.get("auth_result");
+  if (!validWebOAuthRequestId(requestId) || !result) return false;
+  const channel = new BroadcastChannel(`${WEB_OAUTH_CHANNEL_PREFIX}${requestId}`);
+  channel.postMessage({
+    type: WEB_OAUTH_MESSAGE_TYPE,
+    result,
+    code: url.searchParams.get("auth_code"),
+  } satisfies WebOAuthCallback);
+  url.searchParams.delete("auth_result");
+  url.searchParams.delete("auth_code");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  window.setTimeout(() => {
+    channel.close();
+    window.close();
+  }, 100);
+  return true;
+}
+
+function webOAuth(provider: OAuthProvider) {
+  if (typeof BroadcastChannel === "undefined") {
+    throw new AuthServiceError("oauth_unavailable", "OAuth popups are not supported");
   }
-  await desktopOAuthReady;
+  const requestId = crypto.randomUUID();
+  const channel = new BroadcastChannel(`${WEB_OAUTH_CHANNEL_PREFIX}${requestId}`);
+  const returnTo = new URL(WEB_OAUTH_CALLBACK_PATH, window.location.origin);
+  returnTo.searchParams.set("request_id", requestId);
+  const destination = new URL(`${API_BASE}/api/auth/oauth/${provider}/start`);
+  destination.searchParams.set("return_to", returnTo.href);
+
+  const width = 520;
+  const height = 720;
+  const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+  const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+  const popup = window.open(
+    "about:blank",
+    `${WEB_OAUTH_WINDOW_PREFIX}${requestId}`,
+    `popup=yes,width=${width},height=${height},left=${left},top=${top}`,
+  );
+  if (!popup) {
+    channel.close();
+    throw new AuthServiceError("oauth_popup_blocked", "OAuth popup was blocked");
+  }
+  try {
+    popup.opener = null;
+  } catch {}
+
+  return new Promise<AuthState>((resolve, reject) => {
+    let exchanging = false;
+    let settled = false;
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      channel.close();
+    };
+    const fail = (error: AuthServiceError) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      try {
+        popup.close();
+      } catch {}
+      reject(error);
+    };
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      if (settled || exchanging || !event.data || typeof event.data !== "object") return;
+      const callback = event.data as Partial<WebOAuthCallback>;
+      if (callback.type !== WEB_OAUTH_MESSAGE_TYPE || typeof callback.result !== "string") return;
+      if (callback.result !== "success") {
+        fail(new AuthServiceError(
+          callback.result.replace(/^error:/, "") || "oauth_failed",
+        ));
+        return;
+      }
+      if (typeof callback.code !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(callback.code)) {
+        fail(new AuthServiceError("oauth_invalid_state", "OAuth callback did not include a valid code"));
+        return;
+      }
+      exchanging = true;
+      try {
+        popup.close();
+      } catch {}
+      void webRequest("auth/exchange", "POST", { code: callback.code })
+        .then((state) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          writeCache(state);
+          resolve(state);
+        })
+        .catch((error) => fail(error instanceof AuthServiceError
+          ? error
+          : new AuthServiceError("oauth_failed", String(error))));
+    };
+    const timeout = window.setTimeout(() => {
+      fail(new AuthServiceError("oauth_cancelled", "OAuth login timed out"));
+    }, OAUTH_TIMEOUT_MS);
+    popup.location.replace(destination.href);
+  });
 }
 
 export const authService = {
@@ -220,16 +278,14 @@ export const authService = {
   },
   async restore() {
     if (isTauri()) {
-      await ensureDesktopOAuthListener();
-      const callback = await invoke<string | null>("desktop_auth_take_deep_link")
-        .catch(() => null);
-      return callback
-        ? await completeDesktopOAuth(callback)
-        : readCache() || anonymousAuthState();
+      return readCache() || anonymousAuthState();
     }
     const url = new URL(window.location.href);
     const result = url.searchParams.get("auth_result");
     const code = url.searchParams.get("auth_code");
+    if (result && relayWebOAuthCallback(url)) {
+      return readCache() || anonymousAuthState();
+    }
     if (result) {
       url.searchParams.delete("auth_result");
       url.searchParams.delete("auth_code");
@@ -274,42 +330,14 @@ export const authService = {
   async oauth(provider: OAuthProvider) {
     this.rememberProvider(provider);
     if (isTauri()) {
-      await ensureDesktopOAuthListener();
-      await invoke<string | null>("desktop_auth_take_deep_link").catch(() => null);
-      if (desktopOAuthWaiter) {
-        clearTimeout(desktopOAuthWaiter.timeout);
-        desktopOAuthWaiter.reject(new AuthServiceError(
-          "oauth_cancelled",
-          "A newer OAuth login replaced this request",
-        ));
-      }
-      const state = new Promise<AuthState>((resolve, reject) => {
-        desktopOAuthWaiter = {
-          resolve,
-          reject,
-          timeout: setTimeout(() => {
-            if (!desktopOAuthWaiter) return;
-            desktopOAuthWaiter = null;
-            reject(new AuthServiceError("oauth_cancelled", "OAuth login timed out"));
-          }, DESKTOP_OAUTH_TIMEOUT_MS),
-        };
+      const state = await invoke<AuthState>("desktop_auth_oauth", { provider }).catch((error) => {
+        throw tauriError(error);
       });
-      try {
-        await invoke<void>("desktop_auth_oauth", { provider });
-      } catch (error) {
-        const normalized = tauriError(error);
-        settleDesktopOAuth(null, normalized);
-        return await state;
-      }
-      return await state;
+      const normalized = normalizeState(state);
+      writeCache(normalized);
+      return normalized;
     }
-    const returnTo = new URL(window.location.href);
-    returnTo.searchParams.delete("auth_result");
-    returnTo.searchParams.delete("auth_code");
-    const destination = new URL(`${API_BASE}/api/auth/oauth/${provider}/start`);
-    destination.searchParams.set("return_to", returnTo.href);
-    window.location.assign(destination.href);
-    return new Promise<AuthState>(() => {});
+    return await webOAuth(provider);
   },
   async logout() {
     if (!isTauri()) {
@@ -323,9 +351,5 @@ export const authService = {
       localStorage.removeItem(AVATAR_CACHE_KEY);
     } catch {}
     return state;
-  },
-  observeDesktopOAuth(observer: DesktopOAuthObserver) {
-    desktopOAuthObservers.add(observer);
-    return () => desktopOAuthObservers.delete(observer);
   },
 };

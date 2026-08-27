@@ -13,7 +13,6 @@ import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 import type { QiniuStorageEnv } from "./qiniu-storage";
 import workerPackage from "../package.json";
 import {
-  DESKTOP_AUTH_ORIGIN,
   handleAuthExchange,
   handleLogin,
   handleLogout,
@@ -348,7 +347,6 @@ function hasMissingOrInvalidOrigin(env: Env, request: Request) {
 function isDesktopAuthExchangeOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return false;
-  if (origin === DESKTOP_AUTH_ORIGIN) return true;
   try {
     const url = new URL(origin);
     return url.protocol === "http:"

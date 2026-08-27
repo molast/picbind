@@ -26,6 +26,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
   const user = auth.state.user;
   const avatar = !avatarFailed ? avatarSource : null;
   const label = initials(user?.name, user?.email);
+  const loading = auth.checking || auth.authenticating;
 
   React.useEffect(() => {
     let active = true;
@@ -46,8 +47,8 @@ export default function AccountControl({ lang }: { lang: Lang }) {
 
   if (!auth.state.authenticated || !user) {
     return (
-      <button type="button" aria-label={lang === "zh" ? "登录" : "Log in"} disabled={auth.checking} onClick={() => auth.openDialog("login", lang)} className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md bg-slate-900 text-[13px] font-bold text-white shadow-sm transition hover:bg-black disabled:cursor-wait disabled:opacity-70 sm:w-auto sm:px-3.5">
-        {auth.checking ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FiLogIn className="h-4 w-4" aria-hidden="true" />}
+      <button type="button" aria-label={loading ? (lang === "zh" ? "正在登录" : "Logging in") : (lang === "zh" ? "登录" : "Log in")} aria-busy={loading} disabled={loading} onClick={() => auth.openDialog("login", lang)} className="inline-flex h-9 w-9 items-center justify-center gap-2 rounded-md bg-slate-900 text-[13px] font-bold text-white shadow-sm transition hover:bg-black disabled:cursor-wait disabled:opacity-70 sm:w-auto sm:px-3.5">
+        {loading ? <FiLoader className="h-4 w-4 animate-spin" aria-hidden="true" /> : <FiLogIn className="h-4 w-4" aria-hidden="true" />}
         <span className="hidden sm:inline">{lang === "zh" ? "登录" : "Log in"}</span>
       </button>
     );

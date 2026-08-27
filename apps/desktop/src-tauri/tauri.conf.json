@@ -20,13 +20,6 @@
       }
     ]
   },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["picbind"]
-      }
-    }
-  },
   "bundle": {
     "active": true,
     "icon": [

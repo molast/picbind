@@ -36,7 +36,7 @@ type DesktopHomeResultsProps = {
   onConvertAnyway(itemId: string, variantId: string): void;
 };
 
-const PAGE_SIZE = 4;
+const PAGE_SIZE = 10;
 const FILTERS: FormatFilter[] = ["all", "jpeg", "png", "webp", "avif"];
 
 function variantAccent(format: OutputFormat) {
@@ -235,7 +235,7 @@ export default function DesktopHomeResults({
         </span>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-4">
+      <div className="grid min-h-0 flex-1 auto-rows-[58px] content-start overflow-y-auto">
         {visibleItems.map((item) => {
           const variants = filter === "all"
             ? item.variants

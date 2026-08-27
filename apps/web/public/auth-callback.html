@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <title>PicBind</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { display: grid; place-items: center; background: #f8fafc; color: #334155; font: 14px system-ui, sans-serif; }
+      .status { display: flex; align-items: center; gap: 10px; }
+      .spinner { width: 18px; height: 18px; border: 2px solid #cbd5e1; border-top-color: #0f172a; border-radius: 50%; animation: spin 0.8s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="status">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="status">Returning to PicBind...</span>
+    </div>
+    <script>
+      (() => {
+        const url = new URL(window.location.href);
+        const requestId = url.searchParams.get("request_id");
+        const result = url.searchParams.get("auth_result");
+        const code = url.searchParams.get("auth_code");
+        const validRequestId = requestId && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId);
+        if (!validRequestId || !result || typeof BroadcastChannel === "undefined") {
+          document.getElementById("status").textContent = "Unable to return to PicBind.";
+          return;
+        }
+        const channel = new BroadcastChannel(`picbind:oauth:${requestId}`);
+        channel.postMessage({ type: "picbind:oauth-callback", result, code });
+        window.history.replaceState(null, "", url.pathname);
+        window.setTimeout(() => {
+          channel.close();
+          window.close();
+        }, 100);
+      })();
+    </script>
+  </body>
+</html>

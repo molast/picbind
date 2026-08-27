@@ -1,8 +1,8 @@
 # PicBind Image Processing API V1
 
-> 文档状态：V1 Port、Web Adapter 和 UI 迁移已实现；Desktop Native 已启用 metadata、auto、interactive 固定目标压缩与四格式转换
+> 文档状态：V1 Port、Web Adapter、UI 迁移和 Desktop Native capability 切换已完成；共享 Rust Core 提取与 macOS x86_64 补测仍为后续项
 > 适用范围：Web 与 Tauri Desktop 的图片检查、参数预览、最终物化、压缩、转换和协作派生资源
-> 最后校对：2026-08-26
+> 最后校对：2026-08-27
 
 ## 1. 文档目的
 
@@ -33,25 +33,31 @@ V1 采用以下设计：
    给 UI，也不强制 Desktop 通过 IPC 传输整张图片。
 8. 两端不要求生成逐字节相同的文件；必须满足相同的格式、Alpha、尺寸、源图不可变、
    取消和质量护栏语义。
-9. Desktop 功能不允许静默回退到 Web 算法。迁移期需要回退时，由显式组合层决定，并在
-   结果中保留实际 `engine`。
+9. Desktop 功能不允许在 Native 执行失败后静默回退到 Web 算法。Native capability 以外的
+   输入或参数文档只能由显式组合层在调用前路由，并在结果中保留实际 `engine`。
 
 ## 3. 当前实现基线
 
 ### 3.1 当前调用链
 
-当前图片处理能力分散在多个边界中：
+当前 UI 已统一通过 `ImageProcessingProvider` 获取 `ImageProcessingService`，平台选择只发生在
+`apps/web/src/image-processing/create-image-processing-service.ts`。实际执行边界如下：
 
-| 能力 | 当前实现 | 当前问题 |
+| 能力 | Web 当前实现 | Desktop 当前实现 |
 | --- | --- | --- |
-| 首页压缩 | `apps/web/src/utils/compress-algorithms.ts`、Web Worker、WASM 和浏览器编码器 | 应用代码直接拥有算法编排 |
-| Room / Workspace 压缩与转换 | `packages/ui/src/utils/room-image-*.ts` 和 Worker | UI 包直接依赖 Web 执行环境 |
-| 参数实时预览 | `packages/ui/src/workspace/parameter-preview.ts` | 直接使用 `OffscreenCanvas` |
-| 最终参数重放 | `packages/ui/src/workspace/utils/workspace-operation-replay.ts` | 裁剪、调色、编码职责混合 |
-| 协作图片容器 | `packages/ui/src/workspace/collaboration-image-container.ts` | 已具备正确源图隔离模型，应保留 |
-| Metadata、缩略图、placeholder | `crates/picbind-image` WASM + `packages/ui` 适配 | Workspace 直接调用 WASM 能力 |
-| Web 图片存储 | Dexie + OPFS Repository | 已通过统一存储接口隔离 |
-| Desktop 图片存储 | Tauri IPC + SQLite + Native Files | 已实现；Native codec 可直接解析受控存储引用 |
+| 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF 由 Native Planner / Encoder 执行 |
+| Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 四格式输入、固定格式与 `auto`、可选 resize 均走 Native Rust |
+| 参数实时预览 | Web Adapter 使用受限 Canvas / OffscreenCanvas | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
+| 最终参数重放 | Web Adapter 从不可变源图重放完整文档 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
+| Metadata 与质量分析 | Web Adapter 调用 WASM / Analysis Worker | 四格式输入使用 Native Rust 分析与双图质量比较 |
+| placeholder / thumbnail | Web Adapter 调用现有 WASM 派生能力 | Native Rust 生成主色、BlurHash 和独立 WebP thumbnail |
+| 图片存储 | Dexie + OPFS Repository | Tauri IPC + SQLite + Native Files；Native codec 可直接解析受控存储引用 |
+
+Desktop 不是无条件禁用 Web Adapter。`DesktopImageProcessingSelector` 只把 JPEG、PNG、WebP、
+AVIF 和 `crop`、`resize`、`rotate`、`color`、`draw` 路由到 Native；GIF 等兼容输入以及
+`filter`、`annotation`、`ai` 参数文档在 `destination: "memory"` 时显式走 Web Adapter。
+需要 `temporary` 输出但不属于 Native capability 的请求返回 `capabilityUnavailable`。一旦
+任务已选择 Native，执行失败后不会再用 Web 重试。
 
 ### 3.2 当前 Rust 边界
 
@@ -63,10 +69,11 @@ V1 采用以下设计：
 - `apps/desktop/src-tauri/src/image_processing` 已提供受控来源解析和二进制图片处理命令。
 - WebP / AVIF 的部分 Web 编码能力位于 `packages/wasm/image-codecs`，不是纯 Rust Core。
 
-当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE，Desktop `auto`、
-支持目标尺寸的 `interactive` 固定目标格式以及无 resize 的 `planner` 使用 Native codec。
-受支持参数的纯 Rust 重放 Core 已实现；预览、物化和质量分析尚未接入 Native Adapter，由
-组合根显式配置的 Web Adapter 执行，结果仍标记为 `engine: "web"`。
+当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE；Desktop 对四种受支持
+格式使用 Native codec 执行 metadata、`interactive` / `planner` 压缩、`auto`、转换、参数
+预览、最终物化、派生资源和质量分析。受支持参数的纯 Rust 重放 Core 已实现并接入 Native
+Adapter。Web PCE 中可复用的 Planner 与参数重放模块尚未提取到双方共享 Core，这不影响
+Desktop 当前调用 Native Rust，但意味着阶段 4 的代码共享重构仍未全部完成。
 
 ## 4. 目标与非目标
 
@@ -90,7 +97,7 @@ V1 采用以下设计：
 - V1 不改变现有压缩质量、同格式不增大和 Alpha 保护规则。
 - V1 不承诺 AI、动画图片、多帧导出或 HDR 已受支持。
 
-## 5. 目标架构
+## 5. V1 架构
 
 ```mermaid
 flowchart TD
@@ -114,15 +121,17 @@ flowchart TD
 
 > 共享的是业务语义和可复用的纯 Rust 模块，不是平台绑定层，也不是输出字节。
 
-### 5.1 Web 与 Desktop 目标执行差异
+图中的共享 Rust Core 虚线表示允许的提取方向；当前 Web PCE 与 Native codec 尚未完成该部分
+合并，实际运行时不会在两端之间跨引擎调用。
 
-下表描述 V1 完成后的目标执行方式。Desktop Native 当前只实现其中的受控输入解析、四格式
-解码、metadata、`interactive` 固定目标压缩和转换，其余能力仍以第 3 节和运行时
-`capabilities()` 为准。
+### 5.1 Web 与 Desktop 当前执行差异
+
+下表描述当前 V1 执行方式。Desktop Native 已实现表内能力；具体格式、参数操作和显式 Web
+兼容路由以第 3 节及运行时 `capabilities()` 为准。
 
 | 环节 | Web Adapter | Desktop Native Adapter | 必须共享的语义 |
 | --- | --- | --- | --- |
-| 输入解析 | 从 `Blob` 或 Web Storage Repository 读取 | 优先由 Rust 解析 Native Store 引用；临时 Blob 先进入受控临时区 | 不接受任意绝对路径，处理期间源资产不可变 |
+| 输入解析 | 从 `Blob` 或 Web Storage Repository 读取 | Rust 直接解析 Native Store 引用；未落盘 Blob 使用原始二进制 IPC | 不接受任意绝对路径，处理期间源资产不可变 |
 | 解码与 metadata | 浏览器解码能力与 `picbind-image` WASM | Native Rust 解码器 | 方向修正、尺寸、格式和 Alpha 判定语义一致 |
 | 参数预览 | 受限尺寸 Canvas / OffscreenCanvas，必要时使用 WASM | 受限尺寸 Native 缓冲区，通过临时产物或小型二进制结果交给 WebView | 使用同一参数文档和操作顺序，不执行全尺寸压缩 Planner |
 | 最终物化 | 从源 Blob 全尺寸重放参数，再由 Web 编码器输出 | Rust 直接从 Native Store 源文件全尺寸重放参数并写受控输出 | 只在保存、覆盖、导出或下载时编码 |
@@ -151,8 +160,8 @@ Web Adapter 可以包装当前实现，Desktop Adapter 必须在对应 Native ca
 
 ## 7. 公共数据模型
 
-公共类型建议放入 `packages/shared/src/image-processing/`。以下代码是目标契约，不表示已经
-实现。
+公共类型已落在 `packages/shared/src/image-processing/`。以下代码用于说明当前 V1 契约；
+实现与校验逻辑以该目录源码为准。
 
 ### 7.1 格式与 Metadata
 
@@ -654,17 +663,18 @@ export class ImageProcessingError extends Error {
 
 ## 13. Web Adapter
 
-目标位置：
+当前位置：
 
 ```text
 apps/web/src/image-processing/
 ├── create-image-processing-service.ts
 └── adapters/
+    ├── desktop-image-processing-selector.ts
     ├── web-image-processing-service.ts
     └── desktop-image-processing-service.ts
 ```
 
-Web Adapter 第一阶段只包装现有行为，不重写算法：
+Web Adapter 包装现有行为，不重写算法：
 
 - 首页压缩继续调用当前 Planner、WASM、WebP / AVIF 编码器和质量护栏。
 - Workspace 预览继续使用受限尺寸 Canvas 路径。
@@ -672,7 +682,8 @@ Web Adapter 第一阶段只包装现有行为，不重写算法：
 - placeholder 与 thumbnail 继续调用现有 WASM 导出。
 - Adapter 负责把现有不同结果类型统一为 `ImageProcessingResult`。
 
-Web Adapter 完成后，原实现可以暂时保留为内部模块，但 UI 不再直接导入它们。
+原 Worker、WASM、Canvas 编码和参数重放实现保留为 Web Adapter 内部模块，UI 不再直接导入
+它们。
 
 ## 14. Desktop Adapter 与 Tauri IPC
 
@@ -681,21 +692,23 @@ Web Adapter 完成后，原实现可以暂时保留为内部模块，但 UI 不�
 Desktop Adapter 负责：
 
 - 把 `stored` 引用传给 Native command。
-- 必要时把短生命周期 Blob 暂存到 Native Store。
+- 把尚未落盘的短生命周期 Blob 作为原始字节写入版本化二进制 IPC 帧。
 - 订阅 task progress，映射取消命令。
 - 把 Native 返回的临时资产转换为 `ImageProcessingArtifact`。
 - 映射 Rust 错误码，不实现像素算法。
 
 ### 14.2 Tauri 命令
 
-建议保持少量类型化命令，而不是为每个参数操作增加命令：
+当前保持少量类型化命令，而不是为每个参数操作增加命令：
 
 ```text
-image_processing_capabilities
 image_processing_execute
 image_processing_cancel
 image_processing_release_temporary
 ```
+
+Native capability 当前由 TypeScript Adapter 的版本化常量返回，不额外跨 IPC 查询；命令层
+仍会校验 API 版本、操作、格式、尺寸和参数，不能依赖前端 capability 代替边界校验。
 
 `image_processing_execute` 使用带版本号的 tagged request。当前二进制帧的 JSON metadata
 将版本、任务身份和 V1 请求字段放在同一对象中，后面紧跟一个或两个长度已声明的原始图片
@@ -836,12 +849,13 @@ Web 和 Desktop 算法可以不同，但以下行为必须一致：
 
 ## 17. 组合与依赖注入
 
-平台选择只发生在 `apps/web` 组合根：
+平台选择只发生在 `apps/web` 组合根。当前组合方式为：
 
 ```ts
+const web = new WebImageProcessingService();
 const imageProcessingService = isTauri()
-  ? createDesktopImageProcessingService(dependencies)
-  : createWebImageProcessingService(dependencies);
+  ? new DesktopImageProcessingSelector(new DesktopImageProcessingService(), web)
+  : web;
 ```
 
 `packages/ui` 通过 Provider、显式 props 或 Port 参数获得 Service：
@@ -859,33 +873,47 @@ const imageProcessingService = isTauri()
 - 在业务 hook 中直接 `invoke("image_processing_...")`。
 - Native 失败后由 Adapter 静默改用 Web 算法。
 
-迁移期确实需要回退时，应使用显式 `FallbackImageProcessingService`，按 capabilities 选择
-引擎，并让结果中的 `engine` 反映实际执行者。
+需要兼容回退时，当前由 `DesktopImageProcessingSelector` 在调用 Native 前按格式、参数操作
+和 destination 选择引擎，并让结果中的 `engine` 反映实际执行者。
 
-## 18. 目标目录
+## 18. 当前目录
 
 ```text
 packages/shared/src/image-processing/
 ├── contract.ts
 ├── types.ts
 ├── errors.ts
+├── validation.ts
+├── contract.test.ts
 └── index.ts
 
 packages/ui/src/image-processing/
 ├── image-processing-context.tsx
-└── use-image-processing.ts
+├── web-runtime.ts
+└── index.ts
 
 apps/web/src/image-processing/
+├── image-processing-provider-root.tsx
 ├── create-image-processing-service.ts
 └── adapters/
+    ├── desktop-image-processing-selector.ts
     ├── web-image-processing-service.ts
-    └── desktop-image-processing-service.ts
+    ├── desktop-image-processing-service.ts
+    └── *.test.ts
 
 crates/picbind-image/src/
-├── ... pure Rust image modules
-└── bindings/wasm.rs
+├── core/
+├── content_identity.rs
+├── share_placeholder.rs
+└── lib.rs
 
 crates/picbind-image-native/src/
+├── analysis/
+├── derived/
+├── parameters/
+├── planner/
+├── render/
+├── resize/
 ├── engine.rs
 ├── decode/
 ├── formats/
@@ -895,13 +923,19 @@ apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
 ├── commands.rs
 ├── tasks.rs
-└── source_resolver.rs
+├── source_resolver.rs
+└── temporary.rs
 ```
 
-目录是目标所有权，不要求第一阶段一次移动全部现有文件。迁移中优先建立 Port 和测试，
-再逐个移动实现，避免同时重写算法和业务调用。
+上述目录反映当前所有权。`crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与
+Native codec 也仍保留各自的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust
+模块，不改变已经生效的平台 Port 与 Adapter 边界。
 
 ## 19. 分阶段实施
+
+总体状态：Desktop Native 的实现、Adapter 接入和 capability 切换已经完成，满足 V1 当前
+产品范围。阶段 4 的 Web / Desktop 共享 Rust Core 提取仍部分完成，macOS x86_64 实机验证
+仍待补充；两者不改变 Desktop 已启用能力的执行引擎。
 
 ### 阶段 1：冻结契约和行为
 
@@ -943,7 +977,7 @@ Planner 和参数重放仍待提取。
 
 ### 阶段 5：实现 Desktop Native
 
-当前状态：5.1 至 5.8 已完成并按 capability 启用：
+当前状态：5.1 至 5.9 已完成并按 capability 启用：
 
 - Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
   16 条路径。
@@ -1052,6 +1086,11 @@ V1 完成必须同时满足：
 8. 所有任务具备稳定错误码、取消和资源清理。
 9. 修改压缩行为时已同步 `COMPRESSION_ALGORITHM.md` 和生成的 WASM 文件。
 10. Desktop 临时产物可被 Storage Adapter 原子接管或幂等释放，且不会暴露文件路径。
+
+当前验收结论：上述 V1 产品与运行时迁移项已经完成。Desktop 对已声明 capability 使用
+Native Rust；兼容输入和未支持参数操作仍按第 3 节由 selector 显式路由到 Web，并不属于
+Native 失败后的静默降级。共享 Rust Core 的进一步提取和 macOS x86_64 补测作为后续工程项
+继续跟踪。
 
 ## 22. 相关文档
 

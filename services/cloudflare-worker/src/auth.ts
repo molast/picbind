@@ -50,7 +50,6 @@ const SESSION_COOKIE = "__Host-picbind_session";
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const SESSION_TOUCH_INTERVAL_MS = 15 * 60 * 1000;
 export const MAX_SESSIONS_PER_USER = 20;
-export const DESKTOP_AUTH_ORIGIN = "picbind://auth";
 const MAX_JSON_BODY_BYTES = 16_384;
 const PASSWORD_ITERATIONS = 600_000;
 const PASSWORD_ALGORITHM = "pbkdf2-sha256-v1";
@@ -299,7 +298,6 @@ export async function createSessionStatement(env: AuthEnv, userId: string, now: 
 function requestOrigin(request: Request) {
   const value = request.headers.get("origin");
   if (!value) return null;
-  if (value === DESKTOP_AUTH_ORIGIN) return value;
   try {
     const url = new URL(value);
     return ["http:", "https:"].includes(url.protocol) ? url.origin : null;
@@ -501,10 +499,7 @@ export async function handleAuthExchange(request: Request, env: AuthEnv) {
     "SELECT code_hash, user_id, session_id, return_origin, expires_at, consumed_at FROM auth_handoff_codes WHERE code_hash = ?",
   ).bind(codeHash).first<AuthHandoffRow>();
   if (!stored) return failure("auth_code_invalid", "Authentication code is invalid", 401);
-  if (
-    !(origin === DESKTOP_AUTH_ORIGIN && stored.return_origin === DESKTOP_AUTH_ORIGIN)
-    && !isOriginBound(origin, stored.return_origin)
-  ) {
+  if (!isOriginBound(origin, stored.return_origin)) {
     return failure("auth_origin_mismatch", "Authentication origin does not match", 403);
   }
   if (stored.consumed_at !== null) {

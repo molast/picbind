@@ -38,6 +38,7 @@ const COPY = {
       oauth_invalid_state: "本次登录请求已过期，请重新开始。",
       oauth_failed: "第三方登录失败，请重试。",
       oauth_unavailable: "该登录方式暂时不可用。",
+      oauth_popup_blocked: "登录弹窗被浏览器拦截，请允许弹窗后重试。",
       invalid_response: "登录服务暂时不可用。",
     },
   },
@@ -71,37 +72,38 @@ const COPY = {
       oauth_invalid_state: "This login request expired. Please start again.",
       oauth_failed: "Third-party login failed. Please try again.",
       oauth_unavailable: "This login provider is temporarily unavailable.",
+      oauth_popup_blocked: "The login popup was blocked. Allow popups and try again.",
       invalid_response: "Authentication is temporarily unavailable.",
     },
   },
 } as const;
 
-function errorCode(error: unknown) {
-  return error instanceof Error && "code" in error
-    ? String((error as Error & { code: string }).code)
-    : "invalid_response";
-}
-
 type Props = {
   initialMode: AuthMode;
   lang: Lang;
   lastProvider: OAuthProvider | null;
+  initialEmailExpanded: boolean;
   initialError: string | null;
   onClose(): void;
-  onAuthenticated(state: AuthState): void;
+  onAuthenticate(attempt: {
+    mode: AuthMode;
+    method: "email" | "oauth";
+    request(): Promise<AuthState>;
+  }): void;
 };
 
 export default function AuthDialog({
   initialMode,
   lang,
   lastProvider,
+  initialEmailExpanded,
   initialError,
   onClose,
-  onAuthenticated,
+  onAuthenticate,
 }: Props) {
   const copy = COPY[lang];
   const [mode, setMode] = React.useState(initialMode);
-  const [emailExpanded, setEmailExpanded] = React.useState(false);
+  const [emailExpanded, setEmailExpanded] = React.useState(initialEmailExpanded);
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -123,7 +125,7 @@ export default function AuthDialog({
     ? copy.errors[error as keyof typeof copy.errors] || copy.errors.invalid_response
     : null;
 
-  async function submitEmail(event: React.FormEvent) {
+  function submitEmail(event: React.FormEvent) {
     event.preventDefault();
     if (submitting) return;
     if (!email.trim() || password.length < 8 || (isRegister && !name.trim())) {
@@ -136,27 +138,24 @@ export default function AuthDialog({
     }
     setSubmitting(true);
     setError(null);
-    try {
-      const state = isRegister
-        ? await authService.register(name, email, password)
-        : await authService.login(email, password);
-      onAuthenticated(state);
-    } catch (requestError) {
-      setError(errorCode(requestError));
-      setSubmitting(false);
-    }
+    onAuthenticate({
+      mode,
+      method: "email",
+      request: () => isRegister
+        ? authService.register(name, email, password)
+        : authService.login(email, password),
+    });
   }
 
-  async function submitOAuth(provider: OAuthProvider) {
+  function submitOAuth(provider: OAuthProvider) {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    try {
-      onAuthenticated(await authService.oauth(provider));
-    } catch (requestError) {
-      setError(errorCode(requestError));
-      setSubmitting(false);
-    }
+    onAuthenticate({
+      mode,
+      method: "oauth",
+      request: () => authService.oauth(provider),
+    });
   }
 
   return (

@@ -213,18 +213,23 @@ Migration `0004_provider_isolated_users.sql` separates previously linked
 provider identities and invalidates existing Sessions before Worker `3.4.0` is
 deployed.
 
-The Tauri client starts OAuth with `return_to=picbind://auth/callback`. After
-provider authorization, the Worker redirects the system browser to
-`picbind://auth/callback?auth_result=success&auth_code=...`. The custom scheme
-is accepted only for the exact `auth` host and `/callback` path. The Handoff
-Code is bound to the `picbind://auth` native exchange origin, expires after 60
-seconds, and can be consumed once by `POST /api/auth/exchange`; Session tokens
-are never placed in the deep link. The previous random-port IPv4 loopback
-return URL remains accepted for compatibility with older Desktop clients.
+The Web client opens provider authorization in a separate popup and uses
+`/auth-callback.html` as its same-origin return page. The callback publishes the
+one-time Handoff Code over a request-scoped `BroadcastChannel`, closes the
+popup, and lets the unchanged main page exchange the code. The main page does
+not navigate or reload when OAuth completes; only its account control updates.
 
-Deploy the Worker support before distributing a Desktop build that starts the
-custom-scheme flow. No OAuth provider callback registration changes are needed:
-Google and GitHub still return to the HTTPS Worker callback URLs listed above.
+The Tauri client binds a random IPv4 loopback port for each OAuth request and
+starts OAuth with
+`return_to=http://127.0.0.1:<port>/picbind/oauth/callback`. After provider
+authorization, the Worker redirects the system browser to that exact callback
+with a 60-second, one-time Handoff Code. The code is bound to the exact loopback
+origin, including its port, and can be consumed once by
+`POST /api/auth/exchange`; Session tokens are never placed in the callback URL.
+The Desktop application does not register or accept a custom URL scheme.
+
+No OAuth provider callback registration changes are needed: Google and GitHub
+still return to the HTTPS Worker callback URLs listed above.
 
 Migration `0005_auth_handoff_codes.sql` must be applied before deploying OAuth
 handoff routes. Handoff rows contain only hashed one-time
