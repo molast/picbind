@@ -228,10 +228,10 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 
 | 目标格式 | Native 编码器 | 当前行为 |
 |---|---|---|
-| JPEG | `mozjpeg-rs` | `JpegEncoderOptions` 默认使用 `ProgressiveBalanced`、Progressive、Huffman 优化，并按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
-| PNG | `imagequant + lodepng + oxipng` | `PngEncoderOptions` 默认使用 256 色、imagequant speed 5、无抖动和 OxiPNG preset 1；`interactive` 在调色板与无损 RGBA 结果中选择较小者；`planner` 不重复生成无损候选 |
-| WebP | `zenwebp` | `WebPEncoderOptions` 默认使用有损 RGBA、method 5、Alpha quality 100 |
-| AVIF | `ravif 0.13 / rav1e` | `AvifEncoderOptions` 默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
+| JPEG | `mozjpeg-rs` | `JpegEncoderOptions` 默认使用 `ProgressiveBalanced`、Progressive、Huffman 优化、trellis、overshoot deringing，并按质量选择 4:4:4 / 4:2:2 / 4:2:0；支持 smoothing、内建/自定义量化表、scan 优化、快速颜色转换和 restart interval；透明源在 codec 边界默认拒绝，明确允许后与背景色合成 |
+| PNG | `imagequant + lodepng + oxipng` | `PngEncoderOptions` 默认使用 256 色、imagequant speed 5、无抖动和 OxiPNG preset 1；`interactive` 在调色板与保留原颜色布局/位深的无损结果中选择较小者；任一候选失败时保留另一个有效结果，`planner` 不重复生成无损候选 |
+| WebP | `webp 0.3.1` / libwebp | `WebPEncoderOptions` 默认使用有损编码、quality 80、method 5、Alpha quality 100；RGB/RGBA 分流，并保留完整 `WebPConfig` 扩展点 |
+| AVIF | `ravif 0.13 / rav1e` | `AvifEncoderOptions` 默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池；RGB/RGBA 分别调用 `encode_rgb` / `encode_rgba`；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
 | JPEG XL | `zune-jpegxl 0.5.2` | `JpegXlEncoderOptions` 默认 effort 4、4 个 scoped worker threads、8-bit RGB/RGBA、去除元数据；当前只编码静态无损 JXL codestream，完整保留 Alpha |
 
 Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP、AVIF 或 JPEG XL。JPEG 使用
@@ -251,17 +251,37 @@ AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG，Auto 当前�
 JPEG XL 必须显式指定目标格式。Desktop 首页格式选择器提供 JXL，选择后通过 Native
 `planner` 生成 `.jxl` 结果；Web 首页仍只展示 JPEG、PNG、WebP、AVIF。
 
-Native `planner` 按 `dev_dioxus` 的格式专用纯 Rust 路径执行。WebP、JPEG XL，以及源格式与目标格式不同的
+Native `planner` 按 `dev_dioxus` 的格式专用 Native codec 路径执行。WebP、JPEG XL，以及源格式与目标格式不同的
 JPEG、PNG、WebP、AVIF 请求只编码一次，不做候选回读。JPEG XL 当前是无损编码，公开请求中的
 `quality` 与 Compression Gain 不改变其码流参数。只有
 `JPEG -> JPEG`、`PNG -> PNG` 和 `AVIF -> AVIF` 围绕有效质量生成 `-8 / 0 / +8` 三档升序去重
 候选；PNG 最低质量为 50，JPEG/AVIF 最低质量为 45。每个候选编码、回读并通过护栏后立即
 返回，不再为了寻找最小文件无条件执行剩余候选。单个候选编码或解码失败时继续下一档，取消
-错误会立即向上传播。PNG Planner 候选只执行 imagequant/lodepng 和一次 Oxipng preset 1，
-不会在每一档重复生成、优化无损 RGBA PNG。候选循环外复用已解码的 RGBA/RGB 缓冲；Alpha
-扫描、Auto Predictor 和质量比较遇到现成 RGBA8 时直接借用，不复制整张图片。PNG 量化也
+错误会立即向上传播。JPEG 在候选循环外按灰度/RGB 准备一次像素：现成 Luma8/RGB8 直接
+借用，其他布局只转换一次，灰度使用单分量编码；透明像素仍受显式 Alpha 丢失授权约束。PNG
+Planner 候选只执行 imagequant/lodepng 和一次 Oxipng preset 1，
+不会在每一档重复生成、优化无损 PNG。候选循环外复用已解码的 RGBA/RGB 缓冲；AVIF
+对现成 RGB8/RGBA8 直接借用，其他布局按 Alpha 通道只物化一次 RGB8 或 RGBA8，并在全部质量
+候选间复用。Alpha 扫描、Auto Predictor 和质量比较遇到现成 RGBA8 时直接借用，不复制整张
+图片。PNG 量化也
 通过 `rgb::FromSlice` 将同一块交错 RGBA 缓冲借给 imagequant，不再为每个像素重建一份
 `imagequant::RGBA` 向量。
+
+Native JPEG 的自定义 luma/chroma 量化表每项必须大于 0；当自定义量化表与高于 80 的质量一起
+使用时，会按质量自动提高 smoothing 下限以避免 DCT 系数溢出。`mozjpeg-rs 0.8.0` 的
+`TrellisConfig` 可配置已实现的 AC/DC trellis 等参数，但其中 `use_scans_in_trellis` 与 `q_opt`
+尚未实现；当前也不提供 rimage/C MozJPEG 的输出 colorspace 切换，因此不会宣称支持 trellis
+multipass 或可配置输出 colorspace。Native PNG 无损分支直接构造 `oxipng::RawImage`，保留
+Luma/LumaA/RGB/RGBA 和 8/16-bit 布局，16-bit 使用网络字节序，Float32 规范为 16-bit。
+`oxipng::Options` 作为完整内部扩展参数保留；默认仍为 preset 1 的 libdeflater level 10，编译时
+提供 Zopfli 选项但不默认启用，避免增加常规压缩耗时。
+
+Native WebP encoder 使用 `webp 0.3.1` 的安全 Rust wrapper 和 `libwebp-sys 0.9.6`。后者从 vendored
+C libwebp 源码静态编译，因此 Native codec crate 整体不再声明为纯 Rust。`WebPEncoderOptions`
+直接包装完整 `WebPConfig`，默认覆盖为 quality 80、method 5、Alpha quality 100，其余字段保持
+libwebp 默认值；可扩展 lossless、target size / PSNR、SNS、filter、pass、thread、near-lossless、
+Sharp YUV 和 qmin/qmax 等参数。无效配置映射为 `InvalidParameters`。现成 RGB8/RGBA8 缓冲直接
+借用，其他布局按 Alpha 状态只转换一次；空图在进入 libwebp 前返回明确错误。
 
 Native 五种 codec 都按 `decoder/`、`encoder/` 分层。JPEG、PNG、WebP、AVIF、JPEG XL 编码参数分别由
 `JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`、
@@ -275,7 +295,9 @@ API V1 新增的公开压缩配置。各格式算法和参数矩阵记录在
 AVIF 编解码按 `decoder/`、`encoder/` 拆分，并由 `AvifDecoderOptions`、`AvifEncoderOptions`
 集中管理可扩展参数。编码默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、
 `UnassociatedClean` 和 `ravif` 全局 Rayon 线程池；解码使用 `zenavif` 并将高位深输入规范为
-RGBA8。当前 `zenavif 0.1.6 / rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下存在
+RGBA8。Native encoder 输入是当前统一像素模型中的单帧，零尺寸图片会在调用 `ravif` 前被
+拒绝；RGB8 使用 `encode_rgb`，RGBA8 使用 `encode_rgba`，全不透明 RGBA 由 `ravif` 自动省略
+Alpha 平面。当前 `zenavif 0.1.6 / rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下存在
 tile threading panic，因此 `AvifDecoderOptions` 默认固定为 1 个解码线程；该限制不影响
 `ravif` 编码线程。编码结果 metadata 直接使用已知尺寸、格式和 Alpha 状态，不额外解码刚
 生成的 AVIF；只有同格式候选需要 `zenavif` 回读。Native 质量比较最多均匀采样
@@ -368,9 +390,10 @@ MozJPEG 固定启用：
 - WASM JPEG 编码出现内存、格式支持或编码器错误时，浏览器使用 `OffscreenCanvas` JPEG 作为回退。
 
 Desktop Native Planner 的跨格式 JPEG 使用 Gain 调整后的请求质量编码一次；`JPEG -> JPEG`
-才按升序质量候选执行 Native SSIM、PSNR、边缘与 Alpha 护栏，并复用一次准备好的 RGB 缓冲。
-Native `JpegEncoderOptions` 还允许 codec 内部显式覆盖 preset、Progressive、Huffman、色度采样
-和 Alpha 合成背景；默认值保持上述现有策略。
+才按升序质量候选执行 Native SSIM、PSNR、边缘与 Alpha 护栏，并复用一次准备好的灰度或 RGB
+缓冲。Native `JpegEncoderOptions` 还允许 codec 内部显式覆盖 preset、Progressive、Huffman、
+色度采样、smoothing、量化表、trellis、scan 优化、overshoot deringing、快速颜色转换、restart
+interval 和 Alpha 合成背景；默认值保持上述现有策略。
 
 ## 6. PNG 流程
 
@@ -409,14 +432,18 @@ Oxipng 只做无损后处理：
   小于 800 万像素的本地图片重新进入高耗时 preset 3 搜索。
 - 优化失败或结果不更小时，保留优化前 PNG。
 
-当前主 PNG 管线没有使用 Zopfli。代码保留了 lodepng Deflate 编码入口，但 PCE 的量化 PNG 路径使用 imagequant、lodepng 和 Oxipng。
+Desktop Native 默认 PNG 管线不使用 Zopfli，仍使用 OxiPNG preset 1 的 libdeflater level 10；
+`oxipng::Options` 可以显式选择已编译的 Zopfli，但这不是 Planner 默认行为。PCE 的量化 PNG
+路径继续使用 imagequant、lodepng 和 Oxipng。
 
 Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 才按升序质量候选回读
 并在首个通过 Native 护栏时停止。同格式最终候选不小于源文件或全部候选失败时，由统一规则
 返回原 PNG，因此 Planner 不需要为每档额外生成无损候选。`interactive` 仍会在单次调用内
-比较量化结果与无损 RGBA 结果。`PngEncoderOptions` 承载量化开关、是否比较无损候选、质量、
-调色板颜色数、imagequant speed、抖动强度和完整 `oxipng::Options`；默认量化输入直接借用
-现有 RGBA 缓冲，不分配第二份逐像素颜色数组。
+比较量化结果与保留原颜色布局和位深的无损结果；任一候选失败时保留另一个有效结果。
+`PngEncoderOptions` 承载量化开关、是否比较无损候选、质量、调色板颜色数、imagequant speed、
+抖动强度和完整 `oxipng::Options`；默认量化输入直接借用现有 RGBA 缓冲，不分配第二份逐像素
+颜色数组。无损输入直接构造 `RawImage`，保留 Luma/LumaA/RGB/RGBA 和 8/16-bit；Float32
+规范为 16-bit。
 
 ## 7. WebP 流程
 
@@ -437,9 +464,11 @@ Desktop Native Planner 的跨格式 PNG 使用单个量化候选；`PNG -> PNG` 
 
 当前 WebP 不启用 Butteraugli 外层校验，避免额外解码和多轮编码造成明显耗时。
 
-Desktop Native WebP 由 `WebPEncoderOptions` 配置 `zenwebp` 的质量、method 和 Alpha quality，
-默认值为 method 5、Alpha quality 100；`interactive` 与 `planner` 都只编码一次，同格式结果
-不更小时仍由统一规则返回原 WebP。Native WebP 回读与普通输入解码均直接使用
+Desktop Native WebP 由 `WebPEncoderOptions` 包装 `webp 0.3.1` 的完整 `WebPConfig`，通过
+`libwebp-sys 0.9.6` 静态编译 vendored C libwebp。默认使用有损模式、quality 80、method 5、
+Alpha quality 100，其余字段使用 libwebp 默认值；内部 Options 同时支持 lossless 和高级参数。
+RGB8/RGBA8 分别进入对应 encoder，不再把不透明输入统一扩展为 RGBA；`interactive` 与 `planner`
+都只编码一次，同格式结果不更小时仍由统一规则返回原 WebP。Native WebP 回读与普通输入解码均直接使用
 `image-webp 0.2.4`；`WebPDecoderOptions` 可配置内存上限和 Bilinear/Simple 有损色度上采样，
 默认使用 Bilinear，并按文件 Alpha 状态保留 RGB8 或 RGBA8。
 
@@ -469,7 +498,8 @@ Desktop Native `interactive` AVIF 请求不经过上述 Web PCE 多候选流程�
 `AvifDecoderOptions` 承载，编码结果的 metadata 由已知尺寸、格式和 Alpha 状态直接构造，
 不额外解码刚生成的 AVIF。
 `planner` 对非 AVIF 源使用相同的单候选快速路径；只有 `AVIF -> AVIF` 才生成三档升序候选，
-逐个执行 Native 质量护栏并在首个候选通过时停止。AVIF 候选循环外只创建一次 RGBA 缓冲。
+逐个执行 Native 质量护栏并在首个候选通过时停止。AVIF 候选循环外只准备一次 RGB 或 RGBA
+缓冲；现成布局直接借用，其他布局只执行一次 8-bit 物化。
 9. AVIF 转 AVIF 若候选不小于原图或编码失败，返回原图。
 10. 跨格式转 AVIF 的单次编码失败时直接返回编码错误。
 

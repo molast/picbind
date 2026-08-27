@@ -32,8 +32,9 @@ apps/desktop/
     └── tauri.conf.json
 ```
 
-客户端不包含独立业务页面。开发模式由 Tauri 启动 `apps/web/` 的 Next.js 开发服务，先加载
-`http://localhost:3000/tauri-dev.html` 等待首页及其脚本完成编译，再进入现有 Web 首页。
+客户端不包含独立业务页面。开发模式由根进程管理器复用或启动 `apps/web/` 的 Next.js 开发
+服务，确认 `http://localhost:3000/tauri-dev.html` 可访问后再启动 Tauri；WebView 通过该页面
+等待首页及其脚本完成编译，再进入现有 Web 首页。
 
 ## 2. 环境要求
 
@@ -68,12 +69,12 @@ pnpm dev:desktop
 
 该命令会依次执行：
 
-1. 启动现有 Web 开发服务，监听 `http://localhost:3000`。
-2. 编译 Tauri Rust 工程。
-3. 启动 PicBind 桌面窗口，通过开发启动页确认 Next.js 资源可用后加载现有 Web 首页。
+1. 检查 `http://localhost:3000`；端口已占用时复用现有 Web 开发服务，否则启动一个新服务。
+2. 等待 `http://localhost:3000/tauri-dev.html` 可访问，避免 Tauri 自己进入 dev server 轮询。
+3. 编译 Tauri Rust 工程并启动 PicBind 桌面窗口，由开发启动页确认 Next.js 首页及脚本可用。
 
 首次启动需要编译 Tauri 及其 Rust 依赖，耗时会明显高于后续启动。按 `Ctrl+C` 可
-同时停止 Tauri 客户端和由其启动的 Web 开发服务。
+停止 Tauri 客户端和本次命令启动的 Web 开发服务；复用的已有 Web 服务不会被停止。
 
 客户端启动时不会自动打开 Web Inspector。debug 模式下可按 `Command + Option + I`
 手动切换；`capabilities/default.json` 仅为 `main` 窗口授予
@@ -153,7 +154,9 @@ Windows 与 Linux 均使用相同流程，也不注册自定义 URL scheme。
 ### 端口被占用
 
 Tauri 开发模式固定使用 3000 端口。如果该端口已有开发服务，应直接复用
-`http://localhost:3000`，不要终止、替换或重复启动该服务。
+`http://localhost:3000`，不要终止、替换或重复启动该服务。根进程管理器会自动执行该检查；
+只有 `/tauri-dev.html` 可访问后才会启动 Tauri，因此正常启动不再显示持续等待 frontend dev
+server 的提示。若等待超时，直接检查现有 3000 服务是否来自本仓库且能访问该路径。
 
 ### 首次启动较慢
 

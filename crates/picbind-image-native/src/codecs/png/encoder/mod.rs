@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 
-use image::{DynamicImage, ExtendedColorType, ImageEncoder, RgbaImage};
+use image::{DynamicImage, GenericImageView, RgbaImage};
 use rgb::FromSlice;
 
 use crate::NativeImageError;
+
+pub(crate) type OxiPngOptions = oxipng::Options;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PngEncoderOptions {
@@ -13,7 +15,7 @@ pub(crate) struct PngEncoderOptions {
     pub max_colors: u32,
     pub quantization_speed: i32,
     pub dithering_level: f32,
-    pub oxipng_options: oxipng::Options,
+    pub oxipng_options: OxiPngOptions,
 }
 
 impl PngEncoderOptions {
@@ -74,23 +76,21 @@ pub(crate) fn encode_with_options(
     options: &PngEncoderOptions,
 ) -> Result<Vec<u8>, NativeImageError> {
     options.validate()?;
+    if !options.quantize {
+        return encode_lossless(image, options);
+    }
+
     let rgba: Cow<'_, RgbaImage> = match image.as_rgba8() {
         Some(rgba) => Cow::Borrowed(rgba),
         None => Cow::Owned(image.to_rgba8()),
     };
-    if !options.quantize {
-        return Ok(optimize(encode_lossless(rgba.as_ref())?, options));
-    }
     if !options.compare_lossless {
         return encode_quantized_rgba_with_options(rgba.as_ref(), options);
     }
 
-    let lossless = optimize(encode_lossless(rgba.as_ref())?, options);
+    let lossless = encode_lossless(image, options);
     let quantized = encode_quantized_rgba_with_options(rgba.as_ref(), options);
-    Ok(match quantized {
-        Ok(candidate) if candidate.len() < lossless.len() => candidate,
-        _ => lossless,
-    })
+    select_smaller_valid(lossless, quantized)
 }
 
 pub(crate) fn encode_quantized_rgba(
@@ -105,24 +105,98 @@ pub(crate) fn encode_quantized_rgba_with_options(
     options: &PngEncoderOptions,
 ) -> Result<Vec<u8>, NativeImageError> {
     options.validate()?;
+    ensure_dimensions(image.width(), image.height())?;
     encode_quantized(image, options).map(|bytes| optimize(bytes, options))
 }
 
-fn encode_lossless(image: &RgbaImage) -> Result<Vec<u8>, NativeImageError> {
-    let mut bytes = Vec::new();
-    image::codecs::png::PngEncoder::new_with_quality(
-        &mut bytes,
-        image::codecs::png::CompressionType::Best,
-        image::codecs::png::FilterType::Adaptive,
-    )
-    .write_image(
-        image,
-        image.width(),
-        image.height(),
-        ExtendedColorType::Rgba8,
-    )
-    .map_err(|error| NativeImageError::EncodeFailed(format!("PNG: {error}")))?;
-    Ok(bytes)
+fn encode_lossless(
+    image: &DynamicImage,
+    options: &PngEncoderOptions,
+) -> Result<Vec<u8>, NativeImageError> {
+    use image::DynamicImage::{
+        ImageLuma8, ImageLuma16, ImageLumaA8, ImageLumaA16, ImageRgb8, ImageRgb16, ImageRgb32F,
+        ImageRgba8, ImageRgba16, ImageRgba32F,
+    };
+    use oxipng::{BitDepth, ColorType, RawImage};
+
+    let (width, height) = image.dimensions();
+    ensure_dimensions(width, height)?;
+    let (color_type, bit_depth, data) = match image {
+        ImageLuma8(image) => (
+            ColorType::Grayscale {
+                transparent_shade: None,
+            },
+            BitDepth::Eight,
+            image.as_raw().clone(),
+        ),
+        ImageLumaA8(image) => (
+            ColorType::GrayscaleAlpha,
+            BitDepth::Eight,
+            image.as_raw().clone(),
+        ),
+        ImageRgb8(image) => (
+            ColorType::RGB {
+                transparent_color: None,
+            },
+            BitDepth::Eight,
+            image.as_raw().clone(),
+        ),
+        ImageRgba8(image) => (ColorType::RGBA, BitDepth::Eight, image.as_raw().clone()),
+        ImageLuma16(image) => (
+            ColorType::Grayscale {
+                transparent_shade: None,
+            },
+            BitDepth::Sixteen,
+            samples_to_big_endian(image.as_raw()),
+        ),
+        ImageLumaA16(image) => (
+            ColorType::GrayscaleAlpha,
+            BitDepth::Sixteen,
+            samples_to_big_endian(image.as_raw()),
+        ),
+        ImageRgb16(image) => (
+            ColorType::RGB {
+                transparent_color: None,
+            },
+            BitDepth::Sixteen,
+            samples_to_big_endian(image.as_raw()),
+        ),
+        ImageRgba16(image) => (
+            ColorType::RGBA,
+            BitDepth::Sixteen,
+            samples_to_big_endian(image.as_raw()),
+        ),
+        ImageRgb32F(_) => {
+            let image = image.to_rgb16();
+            (
+                ColorType::RGB {
+                    transparent_color: None,
+                },
+                BitDepth::Sixteen,
+                samples_to_big_endian(image.as_raw()),
+            )
+        }
+        ImageRgba32F(_) => {
+            let image = image.to_rgba16();
+            (
+                ColorType::RGBA,
+                BitDepth::Sixteen,
+                samples_to_big_endian(image.as_raw()),
+            )
+        }
+        _ => {
+            let image = image.to_rgba16();
+            (
+                ColorType::RGBA,
+                BitDepth::Sixteen,
+                samples_to_big_endian(image.as_raw()),
+            )
+        }
+    };
+    let raw = RawImage::new(width, height, color_type, bit_depth, data)
+        .map_err(|error| NativeImageError::EncodeFailed(format!("PNG raw image: {error}")))?;
+    raw.create_optimized_png(&options.oxipng_options)
+        .map_err(|error| NativeImageError::EncodeFailed(format!("PNG optimization: {error}")))
 }
 
 fn encode_quantized(
@@ -176,4 +250,37 @@ fn optimize(bytes: Vec<u8>, options: &PngEncoderOptions) -> Vec<u8> {
         Ok(optimized) if optimized.len() < bytes.len() => optimized,
         _ => bytes,
     }
+}
+
+pub(super) fn select_smaller_valid(
+    lossless: Result<Vec<u8>, NativeImageError>,
+    quantized: Result<Vec<u8>, NativeImageError>,
+) -> Result<Vec<u8>, NativeImageError> {
+    match (lossless, quantized) {
+        (Ok(lossless), Ok(quantized)) => Ok(if quantized.len() < lossless.len() {
+            quantized
+        } else {
+            lossless
+        }),
+        (Ok(lossless), Err(_)) => Ok(lossless),
+        (Err(_), Ok(quantized)) => Ok(quantized),
+        (Err(lossless_error), Err(_)) => Err(lossless_error),
+    }
+}
+
+fn samples_to_big_endian(samples: &[u16]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_be_bytes());
+    }
+    bytes
+}
+
+fn ensure_dimensions(width: u32, height: u32) -> Result<(), NativeImageError> {
+    if width == 0 || height == 0 {
+        return Err(NativeImageError::InvalidImage(
+            "PNG encoder cannot encode an empty image".into(),
+        ));
+    }
+    Ok(())
 }

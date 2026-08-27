@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
+import { get } from "node:http";
+import { createConnection } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +9,9 @@ const webDir = join(rootDir, "apps", "web");
 const desktopDir = join(rootDir, "apps", "desktop");
 const isWindows = process.platform === "win32";
 const packageManager = "pnpm";
+const webPort = 3000;
+const desktopDevUrl = `http://localhost:${webPort}/tauri-dev.html`;
+const webStartupTimeoutMs = 180_000;
 const children = new Map();
 let shuttingDown = false;
 
@@ -46,6 +51,77 @@ function start(name, cwd, args) {
     console.error(`${name} stopped unexpectedly (${reason}).`);
     void shutdown(code && code > 0 ? code : 1);
   });
+}
+
+function canConnect(host) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port: webPort });
+    let settled = false;
+    const finish = (connected) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(connected);
+    };
+
+    socket.setTimeout(500, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+async function isWebPortInUse() {
+  const results = await Promise.all([
+    canConnect("127.0.0.1"),
+    canConnect("::1"),
+  ]);
+  return results.some(Boolean);
+}
+
+function probeDesktopDevUrl() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const request = get(
+      desktopDevUrl,
+      { headers: { accept: "text/html", "cache-control": "no-cache" } },
+      (response) => {
+        response.resume();
+        const statusCode = response.statusCode ?? 0;
+        finish({
+          reachable: true,
+          ready: statusCode >= 200 && statusCode < 400,
+          statusCode,
+        });
+      },
+    );
+    request.setTimeout(1_000, () => request.destroy());
+    request.once("error", () =>
+      finish({ reachable: false, ready: false, statusCode: 0 }),
+    );
+  });
+}
+
+async function waitForDesktopDevUrl() {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < webStartupTimeoutMs) {
+    const probe = await probeDesktopDevUrl();
+    if (probe.ready) return;
+    if (probe.reachable && probe.statusCode >= 400 && probe.statusCode < 500) {
+      throw new Error(
+        `The service on port ${webPort} returned HTTP ${probe.statusCode} for ${desktopDevUrl}. ` +
+          "Make sure the existing service is this repository's Web app.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(
+    `Web app did not become ready at ${desktopDevUrl} within ${webStartupTimeoutMs / 1_000} seconds.`,
+  );
 }
 
 function processGroupExists(pid) {
@@ -112,14 +188,32 @@ process.once("SIGINT", () => void shutdown(130));
 process.once("SIGTERM", () => void shutdown(143));
 process.once("SIGHUP", () => void shutdown(129));
 
-ensurePnpm();
-const mode = process.argv[2] || "desktop";
-if (mode === "desktop") {
-  start("Web app", webDir, ["run", "dev"]);
+async function main() {
+  ensurePnpm();
+  const mode = process.argv[2] || "desktop";
+  if (mode !== "desktop" && mode !== "web") {
+    console.error(`Unknown local development mode: ${mode}`);
+    process.exit(2);
+  }
+
+  const reuseWebApp = await isWebPortInUse();
+  if (reuseWebApp) {
+    console.log(`Reusing Web app at http://localhost:${webPort}.`);
+  } else {
+    start("Web app", webDir, ["run", "dev"]);
+  }
+
+  if (mode === "web") return;
+
+  try {
+    await waitForDesktopDevUrl();
+  } catch (error) {
+    console.error(error.message);
+    await shutdown(1);
+    return;
+  }
+
   start("Desktop app", desktopDir, ["run", "dev:tauri"]);
-} else if (mode === "web") {
-  start("Web app", webDir, ["run", "dev"]);
-} else {
-  console.error(`Unknown local development mode: ${mode}`);
-  process.exit(2);
 }
+
+await main();

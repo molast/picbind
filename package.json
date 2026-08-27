@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "dev:web": "pnpm --dir apps/web dev",
+    "dev:web": "node ./dev-local.mjs web",
     "dev:desktop": "pnpm --dir apps/desktop dev",
     "build:web": "pnpm --dir apps/web build",
     "build:desktop": "pnpm --dir apps/desktop build",

@@ -962,6 +962,18 @@ Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。JP
 像素体系：Workspace 操作、绘制、质量分析和 Planner 都继续依赖现有交错 RGBA 模型，避免
 跨模块重写和无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再扩大
 `zune-core` 在模型边界的使用。
+JPEG encoder 通过 `JpegEncoderOptions` 配置 Progressive、Huffman、质量分档色度采样、
+smoothing、量化表、trellis、scan 优化、overshoot deringing、快速颜色转换和 restart interval；
+灰度/RGB 分开编码并在 Planner 候选间复用准备后的像素，透明像素在 codec 边界执行显式授权与
+背景合成。当前纯 Rust `mozjpeg-rs` 不提供 rimage/C MozJPEG 的输出 colorspace 切换，且
+`use_scans_in_trellis` / `q_opt` 尚未实现，因此不声明 trellis multipass 能力。PNG encoder 的
+无损分支直接构造 `oxipng::RawImage`，保留 Luma/LumaA/RGB/RGBA 和 8/16-bit，Float32 规范为
+16-bit；完整 `oxipng::Options` 可配置 filters、缩减、strip、timeout 与 deflater，Zopfli 已作为
+可选能力编译但默认 preset 1 仍使用 libdeflater。量化与无损候选相互隔离，一个失败不会丢弃
+另一个有效结果。WebP encoder 使用 `webp 0.3.1` / `libwebp-sys 0.9.6` 静态编译 vendored C
+libwebp；`WebPEncoderOptions` 包装完整 `WebPConfig`，默认有损 quality 80、method 5、Alpha
+quality 100，同时保留 lossless 和高级参数扩展点。现成 RGB8/RGBA8 缓冲直接借用，其他布局按
+Alpha 状态只转换一次；空图和无效配置分别映射为明确的输入或参数错误。
 `crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
 的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
 Port 与 Adapter 边界。
@@ -1002,9 +1014,10 @@ Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Ad
 
 ### 阶段 4：拆分纯 Rust Core
 
-当前状态：部分完成。新增 `crates/picbind-image-native` 作为无 Tauri、无 `JsValue` 的纯 Rust
-Native codec，WASM crate 未改动，因此本阶段没有重新生成 WASM。现有 WASM PCE 中的共享
-Planner 和参数重放仍待提取。
+当前状态：部分完成。新增 `crates/picbind-image-native` 作为无 Tauri、无 `JsValue` 或 UI 类型的
+Native codec crate；其中 WebP encoder 通过 Rust wrapper 静态编译 vendored C libwebp，因此不把
+整个 crate 描述为纯 Rust。WASM crate 未改动，本阶段没有重新生成 WASM。现有 WASM PCE 中的
+共享 Planner 和参数重放仍待提取。
 
 - 从 `crates/picbind-image/lib.rs` 移出 `JsValue` 和 `js_sys` 依赖。
 - 保留薄 WASM binding，确保 Web 输出和性能没有回归。
@@ -1023,13 +1036,22 @@ Planner 和参数重放仍待提取。
   `PngDecoderOptions`。WebP 输入由 `image-webp 0.2.4` 解码，默认 Bilinear 色度上采样、
   400,000,000 bytes 内存上限，按 Alpha 状态输出 RGB8/RGBA8，并通过 `WebPDecoderOptions`
   保留后续扩展点。
-- JPEG 使用 `mozjpeg-rs`，默认 `ProgressiveBalanced`、Progressive、Huffman 优化和质量分档
-  色度采样；PNG 使用 `imagequant + lodepng + oxipng`，默认 256 色、imagequant speed 5、
-  无抖动和 Native OxiPNG preset 1，并通过 `rgb::FromSlice` 将现有 RGBA 缓冲零拷贝借给
-  imagequant；`interactive` 保留无损候选，`planner` 的 PNG 质量候选不重复生成无损候选；
-  WebP 使用 `zenwebp`，默认 method 5、Alpha quality 100；AVIF 编码直接使用启用 threading
+- JPEG 使用 `mozjpeg-rs`，默认 `ProgressiveBalanced`、Progressive、Huffman 优化、trellis、
+  overshoot deringing 和质量分档色度采样；可配置 smoothing、量化表、scan 优化、快速颜色
+  转换和 restart interval，灰度/RGB 分流并在 Planner 候选间复用像素。PNG 使用
+  `imagequant + lodepng + oxipng`，默认 256 色、imagequant speed 5、无抖动和 Native OxiPNG
+  preset 1，并通过 `rgb::FromSlice` 将现有 RGBA 缓冲零拷贝借给 imagequant；无损分支通过
+  `RawImage` 保留 Luma/LumaA/RGB/RGBA 和 8/16-bit，Float32 规范为 16-bit，Zopfli 可选但
+  默认仍使用 libdeflater；`interactive` 保留无损候选，`planner` 的 PNG 质量候选不重复生成
+  无损候选；
+  WebP 使用 `webp 0.3.1` / `libwebp-sys 0.9.6` 静态编译 vendored C libwebp，默认有损 quality
+  80、method 5、Alpha quality 100；`WebPEncoderOptions` 包装完整 `WebPConfig`，RGB/RGBA 分流，
+  并支持 lossless 与高级参数；AVIF 编码直接使用启用 threading
   的 `ravif 0.13 / rav1e`，默认 speed
-  9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池，解码使用
+  9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池。AVIF
+  encoder 拒绝零尺寸单帧输入，现成 RGB8/RGBA8 直接借用，其他布局按 Alpha 通道只物化一次
+  RGB8 或 RGBA8；两种布局分别调用 `encode_rgb` / `encode_rgba`，Planner 候选复用准备后的
+  缓冲。解码使用
   `zenavif 0.1.6`。因 `rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下会触发 tile threading
   panic，`AvifDecoderOptions` 当前默认固定 1 个解码线程；该限制与多线程 `ravif` 编码相互
   独立。JPEG XL 使用 `jxl-oxide 0.12.6` 解码和 `zune-jpegxl 0.5.2` 编码，当前只输出静态、

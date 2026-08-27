@@ -28,10 +28,16 @@ pub(crate) fn encode_best_candidate(
     let qualities = candidate_qualities(options.format, options.effective_quality());
     let candidate = match options.format {
         NativeImageFormat::Jpeg => {
-            let rgb = crate::codecs::jpeg::prepare_rgb(source, options.allow_alpha_loss);
+            let pixels = crate::codecs::jpeg::PreparedJpegPixels::from_image(
+                source,
+                &crate::codecs::jpeg::encoder::JpegEncoderOptions::new(
+                    options.effective_quality(),
+                    options.allow_alpha_loss,
+                ),
+            )?;
             first_passing_candidate(&qualities, |quality| {
                 checkpoint(control)?;
-                let bytes = crate::codecs::jpeg::encode_rgb(&rgb, quality)?;
+                let bytes = pixels.encode(quality)?;
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
@@ -45,10 +51,10 @@ pub(crate) fn encode_best_candidate(
             })?
         }
         NativeImageFormat::Avif => {
-            let rgba = rgba_pixels(source);
+            let pixels = crate::codecs::avif::PreparedAvifPixels::from_image(source)?;
             first_passing_candidate(&qualities, |quality| {
                 checkpoint(control)?;
-                let bytes = crate::codecs::avif::encode_rgba(rgba.as_ref(), quality)?;
+                let bytes = pixels.encode(quality)?;
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
@@ -69,21 +75,23 @@ fn encode_single_candidate(
     let quality = options.effective_quality();
     match options.format {
         NativeImageFormat::Jpeg => {
-            let rgb = crate::codecs::jpeg::prepare_rgb(source, options.allow_alpha_loss);
-            crate::codecs::jpeg::encode_rgb(&rgb, quality)
+            let pixels = crate::codecs::jpeg::PreparedJpegPixels::from_image(
+                source,
+                &crate::codecs::jpeg::encoder::JpegEncoderOptions::new(
+                    quality,
+                    options.allow_alpha_loss,
+                ),
+            )?;
+            pixels.encode(quality)
         }
         NativeImageFormat::JpegXl => crate::codecs::jpeg_xl::encode(source, quality),
         NativeImageFormat::Png => {
             let rgba = rgba_pixels(source);
             crate::codecs::png::encode_quantized_rgba(rgba.as_ref(), quality)
         }
-        NativeImageFormat::WebP => {
-            let rgba = rgba_pixels(source);
-            crate::codecs::webp::encode_rgba(rgba.as_ref(), quality)
-        }
+        NativeImageFormat::WebP => crate::codecs::webp::encode(source, quality),
         NativeImageFormat::Avif => {
-            let rgba = rgba_pixels(source);
-            crate::codecs::avif::encode_rgba(rgba.as_ref(), quality)
+            crate::codecs::avif::PreparedAvifPixels::from_image(source)?.encode(quality)
         }
     }
 }
