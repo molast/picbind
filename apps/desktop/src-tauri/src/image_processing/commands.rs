@@ -609,6 +609,7 @@ fn encode_response(
             height: metadata.height,
             format: match metadata.format {
                 NativeImageFormat::Jpeg => "jpeg",
+                NativeImageFormat::JpegXl => "jxl",
                 NativeImageFormat::Png => "png",
                 NativeImageFormat::WebP => "webp",
                 NativeImageFormat::Avif => "avif",

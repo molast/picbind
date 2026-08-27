@@ -113,6 +113,7 @@ pub(super) fn analyze(
         source_size_mb,
         source_format: match format {
             NativeImageFormat::Jpeg => "jpeg",
+            NativeImageFormat::JpegXl => "jxl",
             NativeImageFormat::Png => "png",
             NativeImageFormat::WebP => "webp",
             NativeImageFormat::Avif => "avif",

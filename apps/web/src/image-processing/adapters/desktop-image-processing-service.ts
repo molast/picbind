@@ -31,8 +31,8 @@ const decoder = new TextDecoder();
 const capabilities: ImageProcessingCapabilities = {
   apiVersion: IMAGE_PROCESSING_API_VERSION,
   engine: "desktop-native",
-  inputFormats: ["jpeg", "png", "webp", "avif"],
-  outputFormats: ["jpeg", "png", "webp", "avif"],
+  inputFormats: ["jpeg", "png", "webp", "avif", "jxl"],
+  outputFormats: ["jpeg", "png", "webp", "avif", "jxl"],
   parameterOperations: ["crop", "resize", "rotate", "color", "draw"],
   supportsStoredSources: true,
   supportsProgress: true,

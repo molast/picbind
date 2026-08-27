@@ -142,6 +142,12 @@ export class WebImageProcessingService implements ImageProcessingService {
     if (request.destination !== "memory") {
       throw new ImageProcessingError("capabilityUnavailable", "Web image processing only supports memory output");
     }
+    if (request.output.format === "jxl") {
+      throw new ImageProcessingError(
+        "unsupportedOutputFormat",
+        "JPEG XL encoding is only available in the Desktop Native engine",
+      );
+    }
     validateImageParameterDocument(request.document);
     const resolved = await resolveSource(request.source, context);
     report(context, "decoding");
@@ -196,6 +202,12 @@ export class WebImageProcessingService implements ImageProcessingService {
     if (request.destination !== "memory") {
       throw new ImageProcessingError("capabilityUnavailable", "Web image processing only supports memory output");
     }
+    if (request.options.format === "jxl") {
+      throw new ImageProcessingError(
+        "unsupportedOutputFormat",
+        "JPEG XL encoding is only available in the Desktop Native engine",
+      );
+    }
     const gain = request.options.compressionGain;
     if (gain !== undefined && (!Number.isFinite(gain) || gain < 0.5 || gain > 2)) {
       throw new ImageProcessingError("invalidRequest", "Compression gain must be between 0.5 and 2.0");
@@ -229,7 +241,7 @@ export class WebImageProcessingService implements ImageProcessingService {
           const requestedFormat = request.options.format === "auto"
             ? sourceMetadata.format
             : request.options.format;
-          if (requestedFormat === "unknown" || requestedFormat === "gif" || requestedFormat === "bmp" || requestedFormat === "ico") {
+          if (requestedFormat === "unknown" || requestedFormat === "gif" || requestedFormat === "bmp" || requestedFormat === "ico" || requestedFormat === "jxl") {
             throw new ImageProcessingError("unsupportedOutputFormat", "The source format cannot be compressed");
           }
           const output = await compressWithWasmWorker(
@@ -315,6 +327,12 @@ export class WebImageProcessingService implements ImageProcessingService {
   async convert(request: ConvertImageRequest, context?: ImageTaskContext): Promise<ImageProcessingResult> {
     if (request.destination !== "memory") {
       throw new ImageProcessingError("capabilityUnavailable", "Web image processing only supports memory output");
+    }
+    if (request.format === "jxl") {
+      throw new ImageProcessingError(
+        "unsupportedOutputFormat",
+        "JPEG XL encoding is only available in the Desktop Native engine",
+      );
     }
     const resolved = await resolveSource(request.source, context);
     report(context, "encoding");

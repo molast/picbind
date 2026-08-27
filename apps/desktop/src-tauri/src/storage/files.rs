@@ -155,6 +155,7 @@ fn extension_for_mime(mime_type: &str) -> &'static str {
         "image/avif" => "avif",
         "image/gif" => "gif",
         "image/jpeg" => "jpg",
+        "image/jxl" => "jxl",
         "image/png" => "png",
         "image/svg+xml" => "svg",
         "image/webp" => "webp",

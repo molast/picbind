@@ -145,6 +145,12 @@ export async function compressWebImage(input: {
   compressionGain?: number;
   forceEncode?: boolean;
 }) {
+  if (input.format === "jxl") {
+    throw new ImageProcessingError(
+      "unsupportedOutputFormat",
+      "JPEG XL encoding is only available in the Desktop Native engine",
+    );
+  }
   try {
     return await compressRoomImageTask(
       new File([input.blob], input.name, { type: input.blob.type }),
@@ -173,6 +179,12 @@ export async function convertWebImage(input: {
   signal: AbortSignal;
   allowAlphaLoss?: boolean;
 }) {
+  if (input.format === "jxl") {
+    throw new ImageProcessingError(
+      "unsupportedOutputFormat",
+      "JPEG XL encoding is only available in the Desktop Native engine",
+    );
+  }
   try {
     if (input.format === "jpeg" && !input.allowAlphaLoss) {
       return await compressWebImage({ ...input, signal: input.signal });

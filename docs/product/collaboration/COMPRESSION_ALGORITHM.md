@@ -11,7 +11,7 @@
 3. 同格式压缩必须满足“结果更小”；否则返回原图，避免出现压缩后体积反而增大。
 4. 通过感知指标保护结构、边缘、颜色、亮度和 Alpha，不只比较文件大小。
 5. `K` 只调整压缩幅度，不改变特征权重、图片分类、编码器和性能参数。
-6. JPEG、PNG、WebP、AVIF 使用各自更适合的编码路径。
+6. JPEG、PNG、WebP、AVIF，以及 Desktop Native 专用的 JPEG XL，使用各自更适合的编码路径。
 
 ## 2. 总体调用链
 
@@ -63,10 +63,10 @@ PCE 前端入口
 
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
-`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的固定目标和 `auto` 且不改变
+`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF、JPEG XL 的固定目标和 `auto` 且不改变
 尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放；`planner` 只对
 同格式 JPEG、PNG 和 AVIF 执行有界质量候选与 Native 质量护栏，WebP 和所有跨格式输出使用
-单候选快速路径。`planner` 按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
+单候选快速路径，JPEG XL 始终使用无损单候选。`planner` 按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
 协作派生资源和完整质量对比也使用 Native Adapter；包含未支持操作或未覆盖字形的参数文档
 整体调用 Web Adapter，结果中的 `engine` 保持真实值。
 
@@ -232,16 +232,21 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 | PNG | `imagequant + lodepng + oxipng` | `PngEncoderOptions` 默认使用 256 色、imagequant speed 5、无抖动和 OxiPNG preset 1；`interactive` 在调色板与无损 RGBA 结果中选择较小者；`planner` 不重复生成无损候选 |
 | WebP | `zenwebp` | `WebPEncoderOptions` 默认使用有损 RGBA、method 5、Alpha quality 100 |
 | AVIF | `ravif 0.13 / rav1e` | `AvifEncoderOptions` 默认使用 speed 9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
+| JPEG XL | `zune-jpegxl 0.5.2` | `JpegXlEncoderOptions` 默认 effort 4、4 个 scoped worker threads、8-bit RGB/RGBA、去除元数据；当前只编码静态无损 JXL codestream，完整保留 Alpha |
 
-Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP 或 AVIF，再统一转换为 RGBA。因此四种
-输入都可以输出四种目标格式，实际覆盖 4×4 共 16 条编解码路径。Native 固定格式压缩仍
+Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP、AVIF 或 JPEG XL；JPEG XL 同时识别
+`FF 0A` codestream 与 12-byte container signature，并使用 `jxl-oxide 0.12.6` 解码，随后与
+其他格式一样进入统一 `DynamicImage` 像素模型。因此五种输入都可以输出五种目标格式，
+实际覆盖 5×5 共 25 条编解码路径。Native 固定格式压缩仍
 遵守同格式不增大和默认 Alpha 保护；跨格式转换使用 `forceEncode`，不套用返回源文件规则。
 Native `auto` Predictor 对解码后的 RGBA 进行有界采样，提取真实 Alpha、颜色熵、细节覆盖和
 平坦区域覆盖：平坦低熵图优先 PNG，透明细节图优先 WebP，其他透明图和高细节不透明图优先
-AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG。
+AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG，Auto 当前也不会选择 JPEG XL；生成
+JPEG XL 必须显式指定目标格式。
 
-Native `planner` 按 `dev_dioxus` 的格式专用纯 Rust 路径执行。WebP 以及源格式与目标格式不同的
-JPEG、PNG、WebP、AVIF 请求只使用 Gain 调整后的有效质量编码一次，不做候选回读。只有
+Native `planner` 按 `dev_dioxus` 的格式专用纯 Rust 路径执行。WebP、JPEG XL，以及源格式与目标格式不同的
+JPEG、PNG、WebP、AVIF 请求只编码一次，不做候选回读。JPEG XL 当前是无损编码，公开请求中的
+`quality` 与 Compression Gain 不改变其码流参数。只有
 `JPEG -> JPEG`、`PNG -> PNG` 和 `AVIF -> AVIF` 围绕有效质量生成 `-8 / 0 / +8` 三档升序去重
 候选；PNG 最低质量为 50，JPEG/AVIF 最低质量为 45。每个候选编码、回读并通过护栏后立即
 返回，不再为了寻找最小文件无条件执行剩余候选。单个候选编码或解码失败时继续下一档，取消
@@ -251,8 +256,9 @@ JPEG、PNG、WebP、AVIF 请求只使用 Gain 调整后的有效质量编码一�
 通过 `rgb::FromSlice` 将同一块交错 RGBA 缓冲借给 imagequant，不再为每个像素重建一份
 `imagequant::RGBA` 向量。
 
-Native 四种 codec 都按 `decoder/`、`encoder/` 分层。JPEG、PNG、WebP、AVIF 编码参数分别由
-`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`
+Native 五种 codec 都按 `decoder/`、`encoder/` 分层。JPEG、PNG、WebP、AVIF、JPEG XL 编码参数分别由
+`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`、
+`JpegXlEncoderOptions`
 承载，默认 `encode` / `encode_rgb` / `encode_rgba` 入口只是构造默认 Options 的兼容包装。
 这些 Options 当前属于 Native codec 内部扩展点，不是 API V1 新增的公开压缩配置。
 
@@ -265,6 +271,15 @@ tile threading panic，因此 `AvifDecoderOptions` 默认固定为 1 个解码�
 生成的 AVIF；只有同格式候选需要 `zenavif` 回读。Native 质量比较最多均匀采样
 16 万像素，计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95
 误差。当前同格式候选阈值如下：
+
+JPEG XL 编解码也按 `decoder/`、`encoder/` 拆分。`JpegXlDecoderOptions` 管理可选的 Rayon
+线程数，默认使用全局 Rayon 池；`JpegXlEncoderOptions` 管理 effort、线程数和位深，当前只
+接受 8-bit RGB/RGBA。编码使用 `zune-core 0.5.3` 的 `EncoderOptions` 和
+`zune-jpegxl 0.5.2` 的 `JxlSimpleEncoder`，解码使用启用 image/Rayon 集成的
+`jxl-oxide 0.12.6`。当前仅保证静态图片路径：Encoder 只生成单帧无损 codestream，Decoder
+集成不提供动画输出。JXL 单候选是逐像素无损结果，因此不进入有损候选质量阈值表；同格式
+结果不小于原 JXL 时仍由统一 Engine 返回原文件。编码响应的 metadata 直接使用已知尺寸、
+格式和 Alpha 状态构造，不会为了 metadata 额外回读刚生成的 JXL。
 
 | 格式 | 最低 SSIM | 最低 PSNR | 最低边缘保留率 | Alpha 护栏 |
 |---|---:|---:|---:|---|
@@ -599,7 +614,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PNG / Oxipng | `crates/picbind-image/src/core/png_oxipng.rs` |
 | 感知指标 | `crates/picbind-image/src/core/metrics.rs`、`crates/picbind-image/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
-| Desktop Native 四格式 codec | `crates/picbind-image-native/src/codecs/` |
+| Desktop Native 五格式 codec | `crates/picbind-image-native/src/codecs/` |
 | Desktop Native Workspace 参数操作与重放（含 resize） | `crates/picbind-image-native/src/operations/` |
 | Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |

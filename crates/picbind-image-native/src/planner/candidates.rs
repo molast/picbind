@@ -16,7 +16,12 @@ pub(crate) fn encode_best_candidate(
     options: &NativeEncodeOptions,
     control: Option<&NativeTaskControl>,
 ) -> Result<Vec<u8>, NativeImageError> {
-    if source_format != options.format || options.format == NativeImageFormat::WebP {
+    if source_format != options.format
+        || matches!(
+            options.format,
+            NativeImageFormat::WebP | NativeImageFormat::JpegXl
+        )
+    {
         return encode_single_candidate(source, options, control);
     }
 
@@ -30,6 +35,7 @@ pub(crate) fn encode_best_candidate(
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
+        NativeImageFormat::JpegXl => unreachable!("JPEG XL planner uses the single-candidate path"),
         NativeImageFormat::Png => {
             let rgba = rgba_pixels(source);
             first_passing_candidate(&qualities, |quality| {
@@ -66,6 +72,7 @@ fn encode_single_candidate(
             let rgb = crate::codecs::jpeg::prepare_rgb(source, options.allow_alpha_loss);
             crate::codecs::jpeg::encode_rgb(&rgb, quality)
         }
+        NativeImageFormat::JpegXl => crate::codecs::jpeg_xl::encode(source, quality),
         NativeImageFormat::Png => {
             let rgba = rgba_pixels(source);
             crate::codecs::png::encode_quantized_rgba(rgba.as_ref(), quality)
@@ -125,6 +132,7 @@ fn candidate_qualities(format: NativeImageFormat, base: u8) -> Vec<u8> {
     let minimum = match format {
         NativeImageFormat::Png => 50,
         NativeImageFormat::Jpeg | NativeImageFormat::WebP | NativeImageFormat::Avif => 45,
+        NativeImageFormat::JpegXl => 100,
     };
     let mut qualities = [base.saturating_add(8), base, base.saturating_sub(8)]
         .into_iter()

@@ -11,6 +11,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<(NativeImageFormat, DynamicImage), 
     let format = detect_format(input)?;
     let image = match format {
         NativeImageFormat::Avif => crate::codecs::avif::decode(input)?,
+        NativeImageFormat::JpegXl => crate::codecs::jpeg_xl::decode(input)?,
         NativeImageFormat::WebP => crate::codecs::webp::decode(input)?,
         NativeImageFormat::Jpeg => crate::codecs::jpeg::decode(input)?,
         NativeImageFormat::Png => crate::codecs::png::decode(input)?,
@@ -47,6 +48,10 @@ pub(crate) fn has_transparency(image: &DynamicImage) -> bool {
 }
 
 fn detect_format(input: &[u8]) -> Result<NativeImageFormat, NativeImageError> {
+    const JXL_CONTAINER_SIGNATURE: &[u8] = b"\0\0\0\x0cJXL \r\n\x87\n";
+    if input.starts_with(&[0xff, 0x0a]) || input.starts_with(JXL_CONTAINER_SIGNATURE) {
+        return Ok(NativeImageFormat::JpegXl);
+    }
     match image::guess_format(input)
         .map_err(|error| NativeImageError::InvalidImage(error.to_string()))?
     {
@@ -72,7 +77,7 @@ fn ensure_pixel_limit(image: &DynamicImage) -> Result<(), NativeImageError> {
 mod tests {
     use image::{DynamicImage, RgbImage, Rgba, RgbaImage};
 
-    use super::has_transparency;
+    use super::{detect_format, has_transparency};
 
     #[test]
     fn transparency_detection_handles_rgb_and_rgba_without_conversion() {
@@ -84,5 +89,17 @@ mod tests {
         assert!(!has_transparency(&rgb));
         assert!(!has_transparency(&opaque));
         assert!(has_transparency(&transparent));
+    }
+
+    #[test]
+    fn jpeg_xl_detection_accepts_codestream_and_container_signatures() {
+        assert_eq!(
+            detect_format(&[0xff, 0x0a]).unwrap(),
+            crate::NativeImageFormat::JpegXl
+        );
+        assert_eq!(
+            detect_format(b"\0\0\0\x0cJXL \r\n\x87\n").unwrap(),
+            crate::NativeImageFormat::JpegXl
+        );
     }
 }

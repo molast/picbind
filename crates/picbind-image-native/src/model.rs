@@ -1,17 +1,19 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeImageFormat {
     Jpeg,
+    JpegXl,
     Png,
     WebP,
     Avif,
 }
 
 impl NativeImageFormat {
-    pub const ALL: [Self; 4] = [Self::Jpeg, Self::Png, Self::WebP, Self::Avif];
+    pub const ALL: [Self; 5] = [Self::Jpeg, Self::JpegXl, Self::Png, Self::WebP, Self::Avif];
 
     pub fn parse(value: &str) -> Result<Self, crate::NativeImageError> {
         match value.to_ascii_lowercase().as_str() {
             "jpeg" | "jpg" => Ok(Self::Jpeg),
+            "jpeg-xl" | "jpegxl" | "jxl" => Ok(Self::JpegXl),
             "png" => Ok(Self::Png),
             "webp" => Ok(Self::WebP),
             "avif" => Ok(Self::Avif),
@@ -24,6 +26,7 @@ impl NativeImageFormat {
     pub const fn mime_type(self) -> &'static str {
         match self {
             Self::Jpeg => "image/jpeg",
+            Self::JpegXl => "image/jxl",
             Self::Png => "image/png",
             Self::WebP => "image/webp",
             Self::Avif => "image/avif",
@@ -33,6 +36,7 @@ impl NativeImageFormat {
     pub const fn extension(self) -> &'static str {
         match self {
             Self::Jpeg => "jpg",
+            Self::JpegXl => "jxl",
             Self::Png => "png",
             Self::WebP => "webp",
             Self::Avif => "avif",

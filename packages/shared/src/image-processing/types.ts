@@ -6,12 +6,13 @@ export type ImageInputFormat =
   | "png"
   | "webp"
   | "avif"
+  | "jxl"
   | "gif"
   | "bmp"
   | "ico"
   | "unknown";
 
-export type ImageOutputFormat = "jpeg" | "png" | "webp" | "avif";
+export type ImageOutputFormat = "jpeg" | "png" | "webp" | "avif" | "jxl";
 export type ImageProcessingEngine = "web" | "desktop-native";
 
 export type ImageMetadata = {

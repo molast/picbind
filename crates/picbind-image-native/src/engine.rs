@@ -163,7 +163,10 @@ fn encode_with(
     {
         return original_output(input, &image, source_format);
     }
-    let metadata = if selected.format == crate::NativeImageFormat::Avif {
+    let metadata = if matches!(
+        selected.format,
+        crate::NativeImageFormat::Avif | crate::NativeImageFormat::JpegXl
+    ) {
         NativeImageMetadata {
             width: image.width(),
             height: image.height(),

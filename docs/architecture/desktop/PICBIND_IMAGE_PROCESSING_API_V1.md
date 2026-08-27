@@ -45,16 +45,16 @@ V1 采用以下设计：
 
 | 能力 | Web 当前实现 | Desktop 当前实现 |
 | --- | --- | --- |
-| 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF 由 Native Planner / Encoder 执行 |
-| Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 四格式输入、固定格式与 `auto`、可选 resize 均走 Native Rust |
+| 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF、JPEG XL 由 Native Planner / Encoder 执行；当前格式按钮仍只展示浏览器可预览的四种格式 |
+| Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 五格式输入、固定格式与 `auto`、可选 resize 均可走 Native Rust；JPEG XL 仅由显式 API 请求输出 |
 | 参数实时预览 | Web Adapter 使用受限 Canvas / OffscreenCanvas | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
 | 最终参数重放 | Web Adapter 从不可变源图重放完整文档 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
-| Metadata 与质量分析 | Web Adapter 调用 WASM / Analysis Worker | 四格式输入使用 Native Rust 分析与双图质量比较 |
+| Metadata 与质量分析 | Web Adapter 调用 WASM / Analysis Worker | 五格式输入使用 Native Rust 分析与双图质量比较 |
 | placeholder / thumbnail | Web Adapter 调用现有 WASM 派生能力 | Native Rust 生成主色、BlurHash 和独立 WebP thumbnail |
 | 图片存储 | Dexie + OPFS Repository | Tauri IPC + SQLite + Native Files；Native codec 可直接解析受控存储引用 |
 
 Desktop 不是无条件禁用 Web Adapter。`DesktopImageProcessingSelector` 只把 JPEG、PNG、WebP、
-AVIF 和 `crop`、`resize`、`rotate`、`color`、`draw` 路由到 Native；GIF 等兼容输入以及
+AVIF、JPEG XL 和 `crop`、`resize`、`rotate`、`color`、`draw` 路由到 Native；GIF 等兼容输入以及
 `filter`、`annotation`、`ai` 参数文档在 `destination: "memory"` 时显式走 Web Adapter。
 需要 `temporary` 输出但不属于 Native capability 的请求返回 `capabilityUnavailable`。一旦
 任务已选择 Native，执行失败后不会再用 Web 重试。
@@ -65,11 +65,11 @@ AVIF 和 `crop`、`resize`、`rotate`、`color`、`draw` 路由到 Native；GIF 
 - `crates/picbind-image` 承担图片分析、压缩、格式处理、metadata、缩略图和 placeholder，
   但公开入口目前带有 `wasm_bindgen`、`JsValue` 和 `js_sys` 类型。
 - `crates/picbind-image-native` 是不依赖 Tauri、WASM 或 UI 类型的 Native codec，已实现
-  JPEG、PNG、WebP、AVIF 的统一解码与 4×4 编码矩阵。
+  JPEG、PNG、WebP、AVIF、JPEG XL 的统一解码与 5×5 编码矩阵。
 - `apps/desktop/src-tauri/src/image_processing` 已提供受控来源解析和二进制图片处理命令。
 - WebP / AVIF 的部分 Web 编码能力位于 `packages/wasm/image-codecs`，不是纯 Rust Core。
 
-当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE；Desktop 对四种受支持
+当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE；Desktop 对五种受支持
 格式使用 Native codec 执行 metadata、`interactive` / `planner` 压缩、`auto`、转换、参数
 预览、最终物化、派生资源和质量分析。受支持参数的纯 Rust 重放 Core 已实现并接入 Native
 Adapter。Web PCE 中可复用的 Planner 与参数重放模块尚未提取到双方共享 Core，这不影响
@@ -171,12 +171,13 @@ export type ImageInputFormat =
   | "png"
   | "webp"
   | "avif"
+  | "jxl"
   | "gif"
   | "bmp"
   | "ico"
   | "unknown";
 
-export type ImageOutputFormat = "jpeg" | "png" | "webp" | "avif";
+export type ImageOutputFormat = "jpeg" | "png" | "webp" | "avif" | "jxl";
 
 export type ImageMetadata = {
   width: number;
@@ -595,7 +596,7 @@ export type ImageProcessingCapabilities = {
 - 在迁移期由组合层决定是否允许显式 Web fallback。
 - 在日志和问题报告中记录实际引擎与能力。
 
-Adapter 不得声明尚未实现的能力。Desktop Native 当前报告四格式输入输出、受控存储来源、
+Adapter 不得声明尚未实现的能力。Desktop Native 当前报告五格式输入输出、受控存储来源、
 crop / resize / rotate / color / draw 参数操作、质量分析、进度与取消；临时产物通过
 `destination: "temporary"` 和 Storage Adapter 接管，不作为独立 capability 布尔值。
 
@@ -942,18 +943,19 @@ apps/desktop/src-tauri/src/image_processing/
 └── temporary.rs
 ```
 
-上述目录反映当前所有权。`codecs/` 只负责 JPEG、PNG、WebP、AVIF 编解码与统一分发；
-四种格式内部统一按 `decoder/`、`encoder/` 分层，encoder 参数分别由
-`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`
-承载，AVIF decoder 额外使用 `AvifDecoderOptions`。现有 crate 调用入口保留默认 Options
+上述目录反映当前所有权。`codecs/` 只负责 JPEG、PNG、WebP、AVIF、JPEG XL 编解码与统一分发；
+五种格式内部统一按 `decoder/`、`encoder/` 分层，encoder 参数分别由
+`JpegEncoderOptions`、`PngEncoderOptions`、`WebPEncoderOptions`、`AvifEncoderOptions`、
+`JpegXlEncoderOptions` 承载，AVIF 与 JPEG XL decoder 分别使用 `AvifDecoderOptions` 和
+`JpegXlDecoderOptions`。现有 crate 调用入口保留默认 Options
 包装，Options 当前不是 API V1 对 Web Adapter 开放的新字段。
 `operations/` 是 Workspace 参数操作层，负责参数文档重放以及 crop、resize、rotate、color、
 draw。压缩入口允许复用其中的 resize，但不会把 Planner 或 codec 规则放入操作层。
-Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。`zune_core/zune_image` 已完成
-替换可行性评估，但未引入当前实现：`zune_image` 不直接覆盖这里的纯 Rust AVIF 解码链，且
+Native 内部像素模型当前继续使用 `image::DynamicImage/RgbaImage`。`zune-core` 只在 JPEG XL
+encoder 边界用于构造颜色空间、位深和线程选项，`zune_image` 没有替换主像素体系：它不直接覆盖这里的纯 Rust AVIF 解码链，且
 Workspace 操作、绘制、质量分析和 Planner 都依赖现有交错 RGBA 模型，整体替换会扩大为跨模块
-重写并增加无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再在模型边界采用
-`zune_core` 类型，不能把该评估描述成当前已实现能力。
+重写并增加无收益的像素转换。未来公开模型需要保留颜色空间或位深时，可以再扩大
+`zune-core` 在模型边界的使用，不能把 JPEG XL codec 内部依赖描述成当前主体系已经替换。
 `crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
 的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
 Port 与 Adapter 边界。
@@ -1006,8 +1008,9 @@ Planner 和参数重放仍待提取。
 
 当前状态：5.1 至 5.9 已完成并按 capability 启用：
 
-- Native codec 使用统一 RGBA 解码模型覆盖 JPEG、PNG、WebP、AVIF 四种输入到四种输出的
-  16 条路径。
+- Native codec 使用统一像素模型覆盖 JPEG、PNG、WebP、AVIF、JPEG XL 五种输入到五种输出的
+  25 条路径。JPEG XL 同时识别 codestream 与 container signature，固定目标 MIME 为
+  `image/jxl`、扩展名为 `.jxl`；Auto Predictor 当前不会主动选择 JPEG XL。
 - JPEG 使用 `mozjpeg-rs`，默认 `ProgressiveBalanced`、Progressive、Huffman 优化和质量分档
   色度采样；PNG 使用 `imagequant + lodepng + oxipng`，默认 256 色、imagequant speed 5、
   无抖动和 Native OxiPNG preset 1，并通过 `rgb::FromSlice` 将现有 RGBA 缓冲零拷贝借给
@@ -1017,15 +1020,17 @@ Planner 和参数重放仍待提取。
   9、8-bit YCbCr、主质量同步 Alpha 质量、`UnassociatedClean` 和 Rayon 默认线程池，解码使用
   `zenavif 0.1.6`。因 `rav1d-safe 0.5.7` 在 macOS ARM 自动线程模式下会触发 tile threading
   panic，`AvifDecoderOptions` 当前默认固定 1 个解码线程；该限制与多线程 `ravif` 编码相互
-  独立。四种 codec 都按 `decoder/encoder` 分层，JPEG、PNG、WebP、AVIF encoder 分别使用
-  对应的 `XxxEncoderOptions`，AVIF decoder 使用 `AvifDecoderOptions`；现有调用入口保留默认
-  Options 包装。
+  独立。JPEG XL 使用 `jxl-oxide 0.12.6` 解码和 `zune-jpegxl 0.5.2` 编码，当前只输出静态、
+  无损、8-bit RGB/RGBA codestream；默认 effort 4、4 个 encoder worker threads，decoder
+  使用全局 Rayon 池。五种 codec 都按 `decoder/encoder` 分层，各 encoder 使用对应的
+  `XxxEncoderOptions`，AVIF/JPEG XL decoder 也分别使用 Options；现有调用入口保留默认
+  Options 包装。JPEG XL 的公开 `quality` / Compression Gain 当前不改变无损编码参数。
 - `inspect()`、支持目标尺寸的 `interactive` 固定目标 `compress()`、`auto` 和 `convert()`
   通过 Tauri 二进制 IPC 执行。Native resize 使用 Lanczos3，单边限制 16384 且总像素限制
   100,000,000。
 - Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
   传输，不使用 Base64 或 JSON 数字数组。
-- 固定目标和 `auto` 的 `planner` profile 已使用格式专用 Native 质量策略：WebP 和所有跨格式
+- 固定目标和 `auto` 的 `planner` profile 已使用格式专用 Native 质量策略：WebP、JPEG XL 和所有跨格式
   输出使用单候选；同格式 JPEG、PNG、AVIF 按质量升序尝试有界候选，并在首个通过轻量感知
   护栏的候选处停止。候选循环外复用 RGB/RGBA 缓冲，取消错误不会被当成候选失败吞掉。纯 Rust
   参数队列重放、受限 WebP 预览、全尺寸物化、
@@ -1045,7 +1050,7 @@ Planner 和参数重放仍待提取。
 
 | 子阶段 | 状态 | 范围与验收条件 |
 | --- | --- | --- |
-| 5.1 四格式 Codec | 已完成 | 四种输入到四种输出的 4×4 矩阵、Alpha 保护、同格式不增大 |
+| 5.1 五格式 Codec | 已完成 | 五种输入到五种输出的 5×5 矩阵、Alpha 保护、同格式不增大；JPEG XL 为 Desktop Native 静态无损能力 |
 | 5.2 Auto Predictor | 已完成 | Native 像素特征提取；透明图不选 JPEG；自动结果可重新解码且格式与预测一致 |
 | 5.3 Planner 质量护栏 | 已完成 | WebP/跨格式单候选；同格式 JPEG/PNG/AVIF 升序早停；候选失败隔离、取消传播和 SSIM / PSNR / 边缘 / Alpha 阈值 |
 | 5.4 Native Resize | 已完成 | interactive 在 Rust 内使用 Lanczos3 缩放后编码；尺寸、像素上限和同格式回退语义正确 |
@@ -1057,7 +1062,7 @@ Planner 和参数重放仍待提取。
 
 ### 阶段 6：一致性验证和切换
 
-当前状态：已完成。四格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
+当前状态：已完成。五格式 codec 矩阵、Auto Predictor、Native Planner 质量护栏、Native Resize、
 参数重放、预览/物化、协作派生资源、质量分析、Alpha 拒绝、同格式不增大、任务取消和临时
 artifact 生命周期已经通过 Rust 与 TypeScript 检查；Apple Silicon 性能与峰值内存已有可
 重复实测。macOS x86_64 因 Rust target 下载受阻列为后续兼容验证，不阻塞阶段 5.9，详见
@@ -1079,7 +1084,7 @@ artifact 生命周期已经通过 Rust 与 TypeScript 检查；Apple Silicon 性
 
 每个 Adapter 都必须通过：
 
-- JPEG、PNG、WebP、AVIF metadata。
+- Web Adapter 的 JPEG、PNG、WebP、AVIF metadata，以及 Desktop Native 的 JPEG XL metadata。
 - 空参数文档保持源图视觉和尺寸。
 - 多参数按序重放。
 - 裁剪、旋转和 resize 尺寸一致。

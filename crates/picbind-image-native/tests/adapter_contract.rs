@@ -45,7 +45,7 @@ fn operation(
 }
 
 #[test]
-fn four_format_metadata_and_conversion_contract() {
+fn five_format_metadata_and_conversion_contract() {
     let source = fixture(48, 32, false);
     for format in NativeImageFormat::ALL {
         let mut options = NativeEncodeOptions::new(format);

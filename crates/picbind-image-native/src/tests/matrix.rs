@@ -3,7 +3,7 @@ use crate::{NativeImageFormat, inspect};
 use super::{seed, transform};
 
 #[test]
-fn supports_the_complete_four_by_four_codec_matrix() {
+fn supports_the_complete_five_by_five_codec_matrix() {
     for source_format in NativeImageFormat::ALL {
         let source = seed(source_format);
         assert_eq!(inspect(&source).unwrap().format, source_format);

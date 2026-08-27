@@ -215,7 +215,7 @@ export default function ImageCompressionDialog({
                 const resultFormat = nextResult.metadata.format === "unknown"
                   ? format === "auto" ? "jpeg" : format
                   : nextResult.metadata.format;
-                if (resultFormat === "gif" || resultFormat === "bmp" || resultFormat === "ico") {
+                if (resultFormat === "gif" || resultFormat === "bmp" || resultFormat === "ico" || resultFormat === "jxl") {
                   throw new Error(labels.compressionFailed);
                 }
                 setResult({

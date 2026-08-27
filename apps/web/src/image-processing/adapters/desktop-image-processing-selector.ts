@@ -21,6 +21,7 @@ const nativeMimeTypes = new Set([
   "image/png",
   "image/webp",
   "image/avif",
+  "image/jxl",
 ]);
 const nativeOperations = new Set(["crop", "resize", "rotate", "color", "draw"]);
 
