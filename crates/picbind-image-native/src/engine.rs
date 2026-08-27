@@ -1,6 +1,6 @@
 use crate::{
     NativeEncodeOptions, NativeImageError, NativeImageMetadata, NativeImageOutput,
-    NativeTaskControl, decode, formats,
+    NativeTaskControl, codecs, decode,
 };
 
 pub fn inspect(input: &[u8]) -> Result<NativeImageMetadata, NativeImageError> {
@@ -119,7 +119,8 @@ fn encode_with(
     }
     let (source_format, source_image) = decode::decode(input)?;
     checkpoint(control)?;
-    let (image, dimensions_changed) = crate::resize::apply(source_image, options.dimensions)?;
+    let (image, dimensions_changed) =
+        crate::operations::resize::apply(source_image, options.dimensions)?;
     checkpoint(control)?;
     let mut selected = options.clone();
     if matches!(target, Target::Auto) {
@@ -132,7 +133,7 @@ fn encode_with(
     }
 
     let encoded = match strategy {
-        Strategy::Interactive => formats::encode(
+        Strategy::Interactive => codecs::encode(
             &image,
             selected.format,
             selected.effective_quality(),

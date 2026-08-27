@@ -2,6 +2,7 @@ mod color;
 mod crop;
 mod draw;
 mod model;
+pub(crate) mod resize;
 mod rotate;
 mod validation;
 
@@ -83,7 +84,7 @@ fn resize_operation(
     params: &serde_json::Value,
 ) -> Result<DynamicImage, NativeImageError> {
     let dimensions = validation::dimensions(params)?;
-    crate::resize::apply(image, Some(dimensions)).map(|(image, _)| image)
+    resize::apply(image, Some(dimensions)).map(|(image, _)| image)
 }
 
 fn unsupported(operation: &str) -> Result<DynamicImage, NativeImageError> {

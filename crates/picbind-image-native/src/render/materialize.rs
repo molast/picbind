@@ -2,7 +2,7 @@ use image::GenericImageView;
 
 use crate::{
     NativeImageError, NativeImageFormat, NativeImageOutput, NativeParameterDocument,
-    NativeTaskControl, decode, formats, replay_parameters, replay_parameters_with_control,
+    NativeTaskControl, codecs, decode, replay_parameters, replay_parameters_with_control,
 };
 
 use super::metadata_for;
@@ -79,7 +79,7 @@ fn materialize_inner(
     let image = rendered.into_image();
     let (width, height) = image.dimensions();
     let has_alpha = decode::has_transparency(&image);
-    let bytes = formats::encode(&image, format, quality, allow_alpha_loss)?;
+    let bytes = codecs::encode(&image, format, quality, allow_alpha_loss)?;
     if let Some(control) = control {
         control.checkpoint()?;
     }

@@ -6,7 +6,7 @@ mod same_format;
 
 use image::{DynamicImage, RgbaImage};
 
-use crate::{NativeEncodeOptions, NativeImageFormat, encode, formats};
+use crate::{NativeEncodeOptions, NativeImageFormat, codecs, encode};
 
 pub(super) fn source_image() -> DynamicImage {
     DynamicImage::ImageRgba8(RgbaImage::from_fn(24, 18, |x, y| {
@@ -16,7 +16,7 @@ pub(super) fn source_image() -> DynamicImage {
 
 pub(super) fn seed(format: NativeImageFormat) -> Vec<u8> {
     let image = source_image();
-    formats::encode(&image, format, 82, true).unwrap()
+    codecs::encode(&image, format, 82, true).unwrap()
 }
 
 pub(super) fn transform(

@@ -37,7 +37,7 @@ fn planned_auto_uses_a_decodable_predicted_format() {
 
 #[test]
 fn planned_jpeg_rejects_transparency_without_permission() {
-    let transparent = crate::formats::encode(
+    let transparent = crate::codecs::encode(
         &image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
             16,
             16,

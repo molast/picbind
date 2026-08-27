@@ -23,10 +23,10 @@ pub(crate) fn encode_best_candidate(
     let qualities = candidate_qualities(options.format, options.effective_quality());
     let candidate = match options.format {
         NativeImageFormat::Jpeg => {
-            let rgb = crate::formats::jpeg::prepare_rgb(source, options.allow_alpha_loss);
+            let rgb = crate::codecs::jpeg::prepare_rgb(source, options.allow_alpha_loss);
             first_passing_candidate(&qualities, |quality| {
                 checkpoint(control)?;
-                let bytes = crate::formats::jpeg::encode_rgb(&rgb, quality)?;
+                let bytes = crate::codecs::jpeg::encode_rgb(&rgb, quality)?;
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
@@ -34,7 +34,7 @@ pub(crate) fn encode_best_candidate(
             let rgba = rgba_pixels(source);
             first_passing_candidate(&qualities, |quality| {
                 checkpoint(control)?;
-                let bytes = crate::formats::png::encode_quantized_rgba(rgba.as_ref(), quality)?;
+                let bytes = crate::codecs::png::encode_quantized_rgba(rgba.as_ref(), quality)?;
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
@@ -42,7 +42,7 @@ pub(crate) fn encode_best_candidate(
             let rgba = rgba_pixels(source);
             first_passing_candidate(&qualities, |quality| {
                 checkpoint(control)?;
-                let bytes = crate::formats::avif::encode_rgba(rgba.as_ref(), quality)?;
+                let bytes = crate::codecs::avif::encode_rgba(rgba.as_ref(), quality)?;
                 evaluate_candidate(source, options.format, bytes)
             })?
         }
@@ -63,20 +63,20 @@ fn encode_single_candidate(
     let quality = options.effective_quality();
     match options.format {
         NativeImageFormat::Jpeg => {
-            let rgb = crate::formats::jpeg::prepare_rgb(source, options.allow_alpha_loss);
-            crate::formats::jpeg::encode_rgb(&rgb, quality)
+            let rgb = crate::codecs::jpeg::prepare_rgb(source, options.allow_alpha_loss);
+            crate::codecs::jpeg::encode_rgb(&rgb, quality)
         }
         NativeImageFormat::Png => {
             let rgba = rgba_pixels(source);
-            crate::formats::png::encode_quantized_rgba(rgba.as_ref(), quality)
+            crate::codecs::png::encode_quantized_rgba(rgba.as_ref(), quality)
         }
         NativeImageFormat::WebP => {
             let rgba = rgba_pixels(source);
-            crate::formats::webp::encode_rgba(rgba.as_ref(), quality)
+            crate::codecs::webp::encode_rgba(rgba.as_ref(), quality)
         }
         NativeImageFormat::Avif => {
             let rgba = rgba_pixels(source);
-            crate::formats::avif::encode_rgba(rgba.as_ref(), quality)
+            crate::codecs::avif::encode_rgba(rgba.as_ref(), quality)
         }
     }
 }

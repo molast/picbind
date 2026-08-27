@@ -787,11 +787,17 @@ crates/picbind-image-native/src/
 ├── error.rs
 ├── engine.rs
 ├── decode/
-├── formats/
+├── codecs/
 │   ├── jpeg/
 │   ├── png/
 │   ├── webp/
 │   └── avif/
+├── operations/
+│   ├── crop.rs
+│   ├── resize/
+│   ├── rotate.rs
+│   ├── color.rs
+│   └── draw/
 └── tests/
 
 apps/desktop/src-tauri/src/image_processing/
@@ -909,14 +915,15 @@ crates/picbind-image/src/
 
 crates/picbind-image-native/src/
 ├── analysis/
+├── codecs/
 ├── derived/
-├── parameters/
+├── operations/
+│   ├── draw/
+│   └── resize/
 ├── planner/
 ├── render/
-├── resize/
 ├── engine.rs
 ├── decode/
-├── formats/
 └── tests/
 
 apps/desktop/src-tauri/src/image_processing/
@@ -927,9 +934,12 @@ apps/desktop/src-tauri/src/image_processing/
 └── temporary.rs
 ```
 
-上述目录反映当前所有权。`crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与
-Native codec 也仍保留各自的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust
-模块，不改变已经生效的平台 Port 与 Adapter 边界。
+上述目录反映当前所有权。`codecs/` 只负责 JPEG、PNG、WebP、AVIF 编解码与统一分发；
+`operations/` 是 Workspace 参数操作层，负责参数文档重放以及 crop、resize、rotate、color、
+draw。压缩入口允许复用其中的 resize，但不会把 Planner 或 codec 规则放入操作层。
+`crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
+的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
+Port 与 Adapter 边界。
 
 ## 19. 分阶段实施
 

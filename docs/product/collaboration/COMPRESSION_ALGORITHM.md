@@ -578,9 +578,8 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | PNG / Oxipng | `crates/picbind-image/src/core/png_oxipng.rs` |
 | 感知指标 | `crates/picbind-image/src/core/metrics.rs`、`crates/picbind-image/src/core/hvs.rs` |
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
-| Desktop Native 四格式 codec | `crates/picbind-image-native/src/` |
-| Desktop Native resize | `crates/picbind-image-native/src/resize/` |
-| Desktop Native 参数重放 | `crates/picbind-image-native/src/parameters/` |
+| Desktop Native 四格式 codec | `crates/picbind-image-native/src/codecs/` |
+| Desktop Native Workspace 参数操作与重放（含 resize） | `crates/picbind-image-native/src/operations/` |
 | Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |
 | Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |

@@ -1,7 +1,7 @@
 use image::DynamicImage;
 
 use crate::{
-    MAX_DIMENSION, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat, formats,
+    MAX_DIMENSION, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat, codecs,
 };
 
 const THUMBNAIL_QUALITY: u8 = 78;
@@ -30,7 +30,7 @@ pub(super) fn generate(
     let width = (f64::from(image.width()) * scale).round().max(1.0) as u32;
     let height = (f64::from(image.height()) * scale).round().max(1.0) as u32;
     let thumbnail = image.resize_exact(width, height, image::imageops::FilterType::Lanczos3);
-    formats::encode(
+    codecs::encode(
         &thumbnail,
         NativeImageFormat::WebP,
         THUMBNAIL_QUALITY,

@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::{
     MAX_DIMENSION, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat,
-    NativeOperationType, NativeParameterDocument, NativeTaskControl, decode, formats,
-    parameters::{replay_image, replay_image_with_control},
+    NativeOperationType, NativeParameterDocument, NativeTaskControl, codecs, decode,
+    operations::{replay_image, replay_image_with_control},
 };
 
 use super::NativePreviewOutput;
@@ -80,7 +80,7 @@ fn render_preview_inner(
             image::imageops::FilterType::Lanczos3,
         );
     }
-    let bytes = formats::encode(&preview, NativeImageFormat::WebP, quality, false)?;
+    let bytes = codecs::encode(&preview, NativeImageFormat::WebP, quality, false)?;
     if let Some(control) = control {
         control.checkpoint()?;
     }

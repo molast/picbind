@@ -10,10 +10,10 @@ pub(crate) fn decode(input: &[u8]) -> Result<(NativeImageFormat, DynamicImage), 
     }
     let format = detect_format(input)?;
     let image = match format {
-        NativeImageFormat::Avif => crate::formats::avif::decode(input)?,
-        NativeImageFormat::WebP => crate::formats::webp::decode(input)?,
-        NativeImageFormat::Jpeg => crate::formats::jpeg::decode(input)?,
-        NativeImageFormat::Png => crate::formats::png::decode(input)?,
+        NativeImageFormat::Avif => crate::codecs::avif::decode(input)?,
+        NativeImageFormat::WebP => crate::codecs::webp::decode(input)?,
+        NativeImageFormat::Jpeg => crate::codecs::jpeg::decode(input)?,
+        NativeImageFormat::Png => crate::codecs::png::decode(input)?,
     };
     ensure_pixel_limit(&image)?;
     Ok((format, image))

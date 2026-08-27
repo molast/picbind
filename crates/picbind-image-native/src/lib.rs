@@ -1,14 +1,13 @@
 mod analysis;
+mod codecs;
 mod decode;
 mod derived;
 mod engine;
 mod error;
-mod formats;
 mod model;
-mod parameters;
+mod operations;
 mod planner;
 mod render;
-mod resize;
 mod task;
 
 pub use analysis::{
@@ -29,7 +28,7 @@ pub use model::{
     MAX_DIMENSION, MAX_INPUT_BYTES, MAX_PIXELS, NativeEncodeOptions, NativeImageDimensions,
     NativeImageFormat, NativeImageMetadata, NativeImageOutput,
 };
-pub use parameters::{
+pub use operations::{
     NativeImageOperation, NativeOperationType, NativeParameterDocument, NativeRenderedImage,
     replay_parameters, replay_parameters_with_control,
 };

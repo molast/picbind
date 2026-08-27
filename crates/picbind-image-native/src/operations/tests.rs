@@ -1,7 +1,7 @@
 use image::{DynamicImage, Rgba, RgbaImage};
 use serde_json::json;
 
-use crate::{NativeImageError, NativeImageFormat, formats};
+use crate::{NativeImageError, NativeImageFormat, codecs};
 
 use super::{
     NativeImageOperation, NativeOperationType, NativeParameterDocument, replay_parameters,
@@ -16,7 +16,7 @@ fn source() -> Vec<u8> {
             if x < 10 { 150 } else { 255 },
         ])
     }));
-    formats::encode(&image, NativeImageFormat::Png, 100, false).unwrap()
+    codecs::encode(&image, NativeImageFormat::Png, 100, false).unwrap()
 }
 
 fn operation(
