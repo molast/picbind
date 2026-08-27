@@ -198,6 +198,27 @@ beforeAll(async () => {
 });
 
 describe("OAuth Handoff communication", () => {
+  it("exchanges a Desktop deep-link handoff only from the PicBind auth origin", async () => {
+    const seeded = await seedHandoff({ origin: "picbind://auth" });
+    const response = await exchange(seeded.code, "picbind://auth");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        authenticated: true,
+        user: { id: seeded.userId },
+      },
+    });
+  });
+
+  it("does not consume a Desktop deep-link handoff from another origin", async () => {
+    const seeded = await seedHandoff({ origin: "picbind://auth" });
+    const mismatch = await exchange(seeded.code, "picbind://other");
+
+    expect(mismatch.status).toBe(403);
+    expect((await exchange(seeded.code, "picbind://auth")).status).toBe(200);
+  });
+
   it("accepts the dynamically assigned Desktop loopback callback port", async () => {
     const desktopOrigin = "http://127.0.0.1:53147";
     const seeded = await seedHandoff({ origin: desktopOrigin });

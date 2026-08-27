@@ -109,12 +109,34 @@ pnpm build:web
 - 应用标识：`com.picbind.desktop`
 - 主窗口 capability：`core:default`、`core:webview:allow-internal-toggle-devtools`
 - 下载方式：Web 使用浏览器下载；Tauri 使用原生保存对话框和 Rust 二进制写入
+- OAuth 回调协议：`picbind://auth/callback`
+- Deep Link：使用 `tauri-plugin-deep-link` 注册 `picbind` scheme
+- 单实例：使用 `tauri-plugin-single-instance` 将二次协议唤起转交给已运行实例
 
 桌面图标直接复用 `apps/web/public/images/favicon/android-chrome-512x512.png`。
 
 Native Store 启动后会在 Tauri 返回的应用数据目录内创建 `database/`、`assets/`、
 `derived/`、`cache/` 和 `temp/`。本机验证已确认 `database/picbind.sqlite` 创建成功且
 schema 为 V2；业务代码不得硬编码本机绝对路径。
+
+### 6.1 桌面 OAuth Deep Link
+
+Google/GitHub 登录继续在系统浏览器完成，Provider 的 HTTPS callback 仍指向 Worker。
+桌面端启动授权时传入固定返回地址 `picbind://auth/callback`；Worker 完成 Provider
+code 兑换后生成以下协议链接：
+
+```text
+picbind://auth/callback?auth_result=success&auth_code=<one-time-handoff-code>
+```
+
+Deep Link 只携带 60 秒有效且只能使用一次的 Handoff Code，不携带 Session Token。
+Tauri 原生层校验 scheme、host 和 path，将合法链接写入单条待处理队列并发送前端事件；
+WebView 就绪后通过原生命令向 Worker 的 `POST /api/auth/exchange` 兑换用户资料。
+队列用于覆盖冷启动，单实例插件用于覆盖应用已经运行时的再次唤起。
+
+Windows/Linux 启动时会调用 Deep Link 插件的运行时注册；macOS 和正式安装包通过
+`tauri.conf.json` 中的 bundle 配置注册 `picbind` scheme。Worker 必须先部署 Deep Link
+支持，再测试或发布使用该流程的桌面构建。旧版随机 loopback 端口仍由 Worker 暂时兼容。
 
 ## 7. 当前限制
 

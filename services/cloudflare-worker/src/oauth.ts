@@ -1,4 +1,5 @@
 import {
+  DESKTOP_AUTH_ORIGIN,
   MAX_SESSIONS_PER_USER,
   type AuthEnv,
   createAuthHandoffStatement,
@@ -81,11 +82,22 @@ export function isDesktopLoopbackReturnTo(url: URL) {
     && !url.password;
 }
 
+export function isDesktopDeepLinkReturnTo(url: URL) {
+  return url.protocol === "picbind:"
+    && url.hostname === "auth"
+    && url.port === ""
+    && url.pathname === "/callback"
+    && url.search === ""
+    && url.hash === ""
+    && !url.username
+    && !url.password;
+}
+
 function safeReturnTo(env: OAuthEnv, raw: string | null) {
   if (!raw || raw.length > 2048) return defaultReturnTo(env);
   try {
     const url = new URL(raw);
-    if (isDesktopLoopbackReturnTo(url)) {
+    if (isDesktopLoopbackReturnTo(url) || isDesktopDeepLinkReturnTo(url)) {
       return url.toString();
     }
     return allowedOrigins(env).has(url.origin) ? url.toString() : defaultReturnTo(env);
@@ -353,7 +365,9 @@ export async function handleOAuthCallback(request: Request, env: OAuthEnv, provi
       env,
       userId,
       session.id,
-      stored.return_to,
+      isDesktopDeepLinkReturnTo(new URL(stored.return_to))
+        ? DESKTOP_AUTH_ORIGIN
+        : new URL(stored.return_to).origin,
       now,
     );
     await env.USER_DB.batch([

@@ -1,10 +1,13 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.picbind.com")
   .replace(/\/+$/, "");
 const AUTH_CACHE_KEY = "picbind:auth-cache:v1";
 const AVATAR_CACHE_KEY = "picbind:auth-avatar-cache:v1";
 const LAST_PROVIDER_KEY = "picbind:last-oauth-provider";
+const DESKTOP_OAUTH_EVENT = "picbind:auth-deep-link";
+const DESKTOP_OAUTH_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type OAuthProvider = "google" | "github";
 
@@ -133,6 +136,67 @@ function tauriError(error: unknown) {
   );
 }
 
+type DesktopOAuthObserver = {
+  authenticated(state: AuthState): void;
+  failed(error: AuthServiceError): void;
+};
+
+type DesktopOAuthWaiter = {
+  resolve(state: AuthState): void;
+  reject(error: AuthServiceError): void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+const desktopOAuthObservers = new Set<DesktopOAuthObserver>();
+let desktopOAuthReady: Promise<void> | null = null;
+let desktopOAuthWaiter: DesktopOAuthWaiter | null = null;
+let desktopOAuthCallback: { url: string; result: Promise<AuthState> } | null = null;
+
+function settleDesktopOAuth(state: AuthState | null, error: AuthServiceError | null) {
+  const waiter = desktopOAuthWaiter;
+  desktopOAuthWaiter = null;
+  if (waiter) {
+    clearTimeout(waiter.timeout);
+    if (state) waiter.resolve(state);
+    else waiter.reject(error || new AuthServiceError("oauth_failed"));
+  }
+  for (const observer of desktopOAuthObservers) {
+    if (state) observer.authenticated(state);
+    else observer.failed(error || new AuthServiceError("oauth_failed"));
+  }
+}
+
+function completeDesktopOAuth(url: string) {
+  if (desktopOAuthCallback?.url === url) return desktopOAuthCallback.result;
+  const result = invoke<AuthState>("desktop_auth_exchange", { callbackUrl: url })
+    .then((value) => {
+      const state = normalizeState(value);
+      writeCache(state);
+      settleDesktopOAuth(state, null);
+      return state;
+    })
+    .catch((error: unknown) => {
+      const normalized = tauriError(error);
+      settleDesktopOAuth(null, normalized);
+      throw normalized;
+    });
+  desktopOAuthCallback = { url, result };
+  void result.finally(() => {
+    if (desktopOAuthCallback?.result === result) desktopOAuthCallback = null;
+  }).catch(() => {});
+  return result;
+}
+
+async function ensureDesktopOAuthListener() {
+  if (!desktopOAuthReady) {
+    desktopOAuthReady = listen<string>(DESKTOP_OAUTH_EVENT, (event) => {
+      void invoke<string | null>("desktop_auth_take_deep_link").catch(() => null);
+      void completeDesktopOAuth(event.payload).catch(() => {});
+    }).then(() => undefined);
+  }
+  await desktopOAuthReady;
+}
+
 export const authService = {
   cachedState: readCache,
   cacheState: writeCache,
@@ -155,7 +219,14 @@ export const authService = {
     } catch {}
   },
   async restore() {
-    if (isTauri()) return readCache() || anonymousAuthState();
+    if (isTauri()) {
+      await ensureDesktopOAuthListener();
+      const callback = await invoke<string | null>("desktop_auth_take_deep_link")
+        .catch(() => null);
+      return callback
+        ? await completeDesktopOAuth(callback)
+        : readCache() || anonymousAuthState();
+    }
     const url = new URL(window.location.href);
     const result = url.searchParams.get("auth_result");
     const code = url.searchParams.get("auth_code");
@@ -203,11 +274,34 @@ export const authService = {
   async oauth(provider: OAuthProvider) {
     this.rememberProvider(provider);
     if (isTauri()) {
-      const state = await invoke<AuthState>("desktop_auth_oauth", { provider }).catch((error) => {
-        throw tauriError(error);
+      await ensureDesktopOAuthListener();
+      await invoke<string | null>("desktop_auth_take_deep_link").catch(() => null);
+      if (desktopOAuthWaiter) {
+        clearTimeout(desktopOAuthWaiter.timeout);
+        desktopOAuthWaiter.reject(new AuthServiceError(
+          "oauth_cancelled",
+          "A newer OAuth login replaced this request",
+        ));
+      }
+      const state = new Promise<AuthState>((resolve, reject) => {
+        desktopOAuthWaiter = {
+          resolve,
+          reject,
+          timeout: setTimeout(() => {
+            if (!desktopOAuthWaiter) return;
+            desktopOAuthWaiter = null;
+            reject(new AuthServiceError("oauth_cancelled", "OAuth login timed out"));
+          }, DESKTOP_OAUTH_TIMEOUT_MS),
+        };
       });
-      writeCache(state);
-      return state;
+      try {
+        await invoke<void>("desktop_auth_oauth", { provider });
+      } catch (error) {
+        const normalized = tauriError(error);
+        settleDesktopOAuth(null, normalized);
+        return await state;
+      }
+      return await state;
     }
     const returnTo = new URL(window.location.href);
     returnTo.searchParams.delete("auth_result");
@@ -229,5 +323,9 @@ export const authService = {
       localStorage.removeItem(AVATAR_CACHE_KEY);
     } catch {}
     return state;
+  },
+  observeDesktopOAuth(observer: DesktopOAuthObserver) {
+    desktopOAuthObservers.add(observer);
+    return () => desktopOAuthObservers.delete(observer);
   },
 };

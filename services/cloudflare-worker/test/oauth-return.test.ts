@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { isDesktopLoopbackReturnTo } from "../src/oauth";
+import { isDesktopDeepLinkReturnTo, isDesktopLoopbackReturnTo } from "../src/oauth";
 
 describe("desktop OAuth return URL", () => {
+  it("accepts only the fixed PicBind authentication deep link", () => {
+    expect(isDesktopDeepLinkReturnTo(new URL("picbind://auth/callback"))).toBe(true);
+    expect(isDesktopDeepLinkReturnTo(new URL("picbind://auth/other"))).toBe(false);
+    expect(isDesktopDeepLinkReturnTo(new URL("picbind://other/callback"))).toBe(false);
+    expect(isDesktopDeepLinkReturnTo(new URL(
+      "picbind://auth/callback?redirect=https://evil.test",
+    ))).toBe(false);
+    expect(isDesktopDeepLinkReturnTo(new URL("picbind://auth/callback#code"))).toBe(false);
+  });
+
   it("accepts only the fixed callback path on an IPv4 loopback random port", () => {
     expect(isDesktopLoopbackReturnTo(new URL(
       "http://127.0.0.1:49152/picbind/oauth/callback",

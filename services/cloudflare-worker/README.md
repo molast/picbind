@@ -213,6 +213,19 @@ Migration `0004_provider_isolated_users.sql` separates previously linked
 provider identities and invalidates existing Sessions before Worker `3.4.0` is
 deployed.
 
+The Tauri client starts OAuth with `return_to=picbind://auth/callback`. After
+provider authorization, the Worker redirects the system browser to
+`picbind://auth/callback?auth_result=success&auth_code=...`. The custom scheme
+is accepted only for the exact `auth` host and `/callback` path. The Handoff
+Code is bound to the `picbind://auth` native exchange origin, expires after 60
+seconds, and can be consumed once by `POST /api/auth/exchange`; Session tokens
+are never placed in the deep link. The previous random-port IPv4 loopback
+return URL remains accepted for compatibility with older Desktop clients.
+
+Deploy the Worker support before distributing a Desktop build that starts the
+custom-scheme flow. No OAuth provider callback registration changes are needed:
+Google and GitHub still return to the HTTPS Worker callback URLs listed above.
+
 Migration `0005_auth_handoff_codes.sql` must be applied before deploying OAuth
 handoff routes. Handoff rows contain only hashed one-time
 codes and authentication metadata; expired rows are removed by the existing

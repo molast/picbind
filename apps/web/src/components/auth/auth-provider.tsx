@@ -43,24 +43,39 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   React.useEffect(() => {
     let active = true;
+    const showOAuthError = (error: unknown) => {
+      if (!active) return;
+      const code = error instanceof Error && "code" in error
+        ? String((error as Error & { code: string }).code)
+        : "oauth_failed";
+      setRestoreError(code);
+      setDialog({
+        mode: "login",
+        lang: document.documentElement.lang.startsWith("zh") ? "zh" : "en",
+        lastProvider: authService.lastProvider(),
+      });
+    };
+    const unobserve = authService.observeDesktopOAuth({
+      authenticated(next) {
+        if (!active) return;
+        setStateValue(next);
+        setRestoreError(null);
+        setDialog(null);
+      },
+      failed: showOAuthError,
+    });
     void authService
       .restore()
       .then((next) => {
         if (active) setStateValue(next);
       })
-      .catch((error: unknown) => {
-        if (!active) return;
-        const code = error instanceof Error && "code" in error
-          ? String((error as Error & { code: string }).code)
-          : "oauth_failed";
-        setRestoreError(code);
-        setDialog({ mode: "login", lang: document.documentElement.lang.startsWith("zh") ? "zh" : "en", lastProvider: authService.lastProvider() });
-      })
+      .catch(showOAuthError)
       .finally(() => {
         if (active) setChecking(false);
       });
     return () => {
       active = false;
+      unobserve();
     };
   }, []);
 

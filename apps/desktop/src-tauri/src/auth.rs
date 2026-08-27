@@ -1,14 +1,20 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    time::{Duration, timeout},
-};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::time::Duration;
 
 const DEFAULT_API_BASE: &str = "https://api.picbind.com/api";
-const OAUTH_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const DESKTOP_AUTH_ORIGIN: &str = "picbind://auth";
+const OAUTH_RETURN_TO: &str = "picbind://auth/callback";
+pub const OAUTH_DEEP_LINK_EVENT: &str = "picbind:auth-deep-link";
 const MAX_AVATAR_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Default)]
+pub struct OAuthDeepLinkState {
+    pending: Mutex<Option<String>>,
+    last_received: Mutex<Option<String>>,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,104 +213,145 @@ fn open_system_browser(url: &str) -> Result<(), String> {
         .map_err(|error| format!("oauth_unavailable:{error}"))
 }
 
-fn query_value(target: &str, key: &str) -> Option<String> {
-    let query = target.split_once('?')?.1;
-    urlencoding::decode(query.split('&').find_map(|part| {
-        let (name, value) = part.split_once('=')?;
-        (name == key).then_some(value)
-    })?)
-    .ok()
-    .map(|value| value.into_owned())
+fn oauth_deep_link(raw: &str) -> Result<reqwest::Url, String> {
+    if raw.len() > 2048 {
+        return Err("oauth_invalid_state:OAuth callback is too long".into());
+    }
+    let url = reqwest::Url::parse(raw)
+        .map_err(|_| "oauth_invalid_state:Invalid OAuth callback".to_string())?;
+    if url.scheme() != "picbind"
+        || url.host_str() != Some("auth")
+        || url.port().is_some()
+        || url.path() != "/callback"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("oauth_invalid_state:Invalid OAuth callback".into());
+    }
+    Ok(url)
 }
 
-async fn receive_oauth_callback(listener: TcpListener) -> Result<(String, String), String> {
-    let (mut stream, _) = timeout(OAUTH_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| "oauth_cancelled:OAuth login timed out".to_string())?
-        .map_err(|error| format!("oauth_failed:{error}"))?;
-    let mut request = vec![0_u8; 8192];
-    let length = timeout(Duration::from_secs(5), stream.read(&mut request))
-        .await
-        .map_err(|_| "oauth_failed:OAuth callback timed out".to_string())?
-        .map_err(|error| format!("oauth_failed:{error}"))?;
-    let request = String::from_utf8_lossy(&request[..length]);
-    let target = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .filter(|target| target.starts_with("/picbind/oauth/callback?"))
-        .ok_or_else(|| "oauth_invalid_state:Invalid OAuth callback".to_string())?;
-    let result = query_value(target, "auth_result").unwrap_or_default();
-    let code = query_value(target, "auth_code").unwrap_or_default();
-    let success = result == "success" && !code.is_empty();
-    let message = if success {
-        "PicBind login completed. You can close this window and return to the app."
-    } else {
-        "PicBind login was not completed. You can close this window and try again."
-    };
-    let body = format!(
-        "<!doctype html><meta charset=\"utf-8\"><title>PicBind</title><style>body{{font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#f4f7fb;color:#172033}}main{{text-align:center;padding:32px}}h1{{font-size:24px}}</style><main><h1>PicBind</h1><p>{message}</p></main>"
-    );
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    stream
-        .write_all(response.as_bytes())
-        .await
-        .map_err(|error| format!("oauth_failed:{error}"))?;
-    if success {
-        Ok((code, result))
-    } else {
-        Err(result
-            .strip_prefix("error:")
-            .unwrap_or("oauth_failed")
-            .to_string())
+fn oauth_handoff_code(raw: &str) -> Result<String, String> {
+    let url = oauth_deep_link(raw)?;
+    let result = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "auth_result").then(|| value.into_owned()))
+        .unwrap_or_default();
+    if result != "success" {
+        return Err(format!(
+            "{}:OAuth login was not completed",
+            result.strip_prefix("error:").unwrap_or("oauth_failed")
+        ));
     }
+    let code = url
+        .query_pairs()
+        .find_map(|(key, value)| (key == "auth_code").then(|| value.into_owned()))
+        .unwrap_or_default();
+    if !(43..=128).contains(&code.len())
+        || !code
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || value == b'_' || value == b'-')
+    {
+        return Err("oauth_invalid_state:Invalid OAuth handoff code".into());
+    }
+    Ok(code)
+}
+
+pub fn handle_oauth_deep_link(app: &AppHandle, raw: &str) -> bool {
+    if oauth_deep_link(raw).is_err() {
+        return false;
+    }
+    if let Some(state) = app.try_state::<OAuthDeepLinkState>() {
+        if let Ok(mut last_received) = state.last_received.lock() {
+            if last_received.as_deref() == Some(raw) {
+                return false;
+            }
+            *last_received = Some(raw.to_string());
+        }
+        if let Ok(mut pending) = state.pending.lock() {
+            *pending = Some(raw.to_string());
+        }
+    }
+    let _ = app.emit(OAUTH_DEEP_LINK_EVENT, raw);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    true
 }
 
 #[tauri::command]
-pub async fn desktop_auth_oauth(provider: String) -> Result<AuthState, String> {
+pub async fn desktop_auth_oauth(
+    provider: String,
+    deep_link: State<'_, OAuthDeepLinkState>,
+) -> Result<(), String> {
     if provider != "google" && provider != "github" {
         return Err("oauth_unavailable:Unsupported OAuth provider".into());
     }
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|error| format!("oauth_unavailable:{error}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| format!("oauth_unavailable:{error}"))?
-        .port();
-    let return_to = format!("http://127.0.0.1:{port}/picbind/oauth/callback");
+    if let Ok(mut pending) = deep_link.pending.lock() {
+        pending.take();
+    }
     let start_url = format!(
         "{}/auth/oauth/{provider}/start?return_to={}",
         api_base().trim_end_matches('/'),
-        urlencoding::encode(&return_to)
+        urlencoding::encode(OAUTH_RETURN_TO)
     );
-    open_system_browser(&start_url)?;
-    let (code, _) = receive_oauth_callback(listener).await?;
+    open_system_browser(&start_url)
+}
+
+#[tauri::command]
+pub async fn desktop_auth_exchange(callback_url: String) -> Result<AuthState, String> {
+    let code = oauth_handoff_code(&callback_url)?;
     post_auth(
         "auth/exchange",
         &serde_json::json!({ "code": code }),
-        &format!("http://127.0.0.1:{port}"),
+        DESKTOP_AUTH_ORIGIN,
     )
     .await
 }
 
+#[tauri::command]
+pub fn desktop_auth_take_deep_link(
+    deep_link: State<'_, OAuthDeepLinkState>,
+) -> Result<Option<String>, String> {
+    deep_link
+        .pending
+        .lock()
+        .map(|mut pending| pending.take())
+        .map_err(|_| "oauth_failed:OAuth callback state is unavailable".into())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{allowed_avatar_url, query_value};
+    use super::{allowed_avatar_url, oauth_deep_link, oauth_handoff_code};
 
     #[test]
-    fn reads_and_decodes_oauth_callback_values() {
-        let target = "/picbind/oauth/callback?auth_result=success&auth_code=a%2Bb";
+    fn accepts_only_the_picbind_auth_callback() {
+        assert!(oauth_deep_link("picbind://auth/callback?auth_result=success").is_ok());
+        assert!(oauth_deep_link("picbind://other/callback?auth_result=success").is_err());
+        assert!(oauth_deep_link("picbind://auth/other?auth_result=success").is_err());
+        assert!(oauth_deep_link("https://auth/callback?auth_result=success").is_err());
+        assert!(oauth_deep_link("picbind://auth/callback#code").is_err());
+    }
+
+    #[test]
+    fn reads_a_valid_one_time_handoff_code() {
+        let code = "abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE";
         assert_eq!(
-            query_value(target, "auth_result").as_deref(),
-            Some("success")
+            oauth_handoff_code(&format!(
+                "picbind://auth/callback?auth_result=success&auth_code={code}"
+            )),
+            Ok(code.into())
         );
-        assert_eq!(query_value(target, "auth_code").as_deref(), Some("a+b"));
-        assert_eq!(query_value(target, "missing"), None);
+        assert!(
+            oauth_handoff_code("picbind://auth/callback?auth_result=error%3Aoauth_cancelled")
+                .is_err()
+        );
+        assert!(
+            oauth_handoff_code("picbind://auth/callback?auth_result=success&auth_code=short")
+                .is_err()
+        );
     }
 
     #[test]
