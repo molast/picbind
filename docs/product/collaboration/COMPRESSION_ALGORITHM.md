@@ -64,8 +64,9 @@ PCE 前端入口
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
 按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
 `interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF 的固定目标和 `auto` 且不改变
-尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放，`planner` 执行
-多候选编码与 Native 质量护栏但按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
+尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放，`planner` 对
+JPEG、PNG、WebP 及同格式 AVIF 执行 Native 质量护栏，但按现有契约不接受目标尺寸。非 AVIF
+源转 AVIF 使用单候选快速路径。Desktop 的参数预览、物化、
 协作派生资源和完整质量对比也使用 Native Adapter；包含未支持操作或未覆盖字形的参数文档
 整体调用 Web Adapter，结果中的 `engine` 保持真实值。
 
@@ -230,7 +231,7 @@ Desktop Native 固定目标格式使用另一套平台专用 codec：
 | JPEG | `mozjpeg-rs` | 渐进式、Huffman 优化，按质量选择 4:4:4 / 4:2:2 / 4:2:0；透明源默认拒绝，明确允许后与白色合成 |
 | PNG | `imagequant + lodepng + oxipng` | 在调色板候选与无损 RGBA 候选中选择较小结果；单个量化候选失败时保留无损候选 |
 | WebP | `zenwebp` | 有损 RGBA 编码，method 5，Alpha quality 100 |
-| AVIF | `image` 的 `ravif/rav1e` encoder | speed 9、单线程 RGBA 编码；使用 `zenavif` 解码 |
+| AVIF | `image` 的 `ravif/rav1e` encoder | speed 9、单线程 RGBA 编码；跨格式单候选；同格式按质量升序搜索并使用 `zenavif` 回读 |
 
 Native 解码先根据 magic bytes 识别 JPEG、PNG、WebP 或 AVIF，再统一转换为 RGBA。因此四种
 输入都可以输出四种目标格式，实际覆盖 4×4 共 16 条编解码路径。Native 固定格式压缩仍
@@ -240,8 +241,12 @@ Native `auto` Predictor 对解码后的 RGBA 进行有界采样，提取真实 A
 AVIF，其余使用 WebP。透明图永远不会自动选择 JPEG。
 
 Native `planner` 围绕 Gain 计算后的有效质量生成 `+8 / 0 / -8` 三档去重候选；PNG 最低质量
-限制为 50，其他格式为 45。每个候选独立编码、重新解码和校验，单个候选编码或解码失败不
-影响其他候选。通过护栏的候选中选择文件最小者。Native 质量比较最多均匀采样 16 万像素，
+限制为 50，其他格式为 45。JPEG、PNG 和 WebP 会独立编码、重新解码并校验全部候选，单个
+候选失败不影响其他候选，最后选择通过护栏的最小文件。AVIF 按 `dev_dioxus` 的纯 Rust
+路径分流：非 AVIF 源转 AVIF 使用 Gain 调整后的有效质量、speed 9 和单线程编码一次，不执行
+候选质量回读；输出 metadata 直接使用已知尺寸、格式和 Alpha 状态，不再额外解码刚生成的
+AVIF。`AVIF -> AVIF` 只转换一次 RGBA，三档候选按质量升序编码、回读并校验，返回
+第一个通过护栏的候选，单个候选失败时继续尝试下一档。Native 质量比较最多均匀采样 16 万像素，
 计算全局亮度 SSIM、RGB PSNR、相邻像素梯度能量保留率、Alpha 平均误差和 P95 误差。当前
 阈值如下：
 
@@ -250,7 +255,7 @@ Native `planner` 围绕 Gain 计算后的有效质量生成 `+8 / 0 / -8` 三档
 | JPEG | 0.955 | 28.0 dB | 0.72 | 透明输入仍由显式 Alpha loss 规则控制 |
 | PNG | 0.985 | 32.0 dB | 0.86 | 平均误差 <= 0.1，P95 <= 1 |
 | WebP | 0.960 | 29.0 dB | 0.74 | 平均误差 <= 1，P95 <= 3 |
-| AVIF | 0.955 | 22.5 dB | 0.72 | 平均误差 <= 1，P95 <= 3 |
+| AVIF（同格式） | 0.955 | 22.5 dB | 0.72 | 平均误差 <= 1，P95 <= 3 |
 
 Native 护栏是平台专用的轻量实现，不包含 Web PCE 的 MS-SSIM、Delta E 或 Butteraugli，不能
 把两端描述成字节级或指标实现完全一致；两端共同保证格式、尺寸、Alpha 和产品回退语义。
@@ -399,10 +404,12 @@ Web PCE 路径：
 8. 超过 1200 万像素时，只尝试最多两个非 100 质量候选，控制耗时和内存。
 
 Desktop Native `interactive` AVIF 请求不经过上述 Web PCE 多候选流程：Tauri 后台阻塞任务
-使用 `ravif/rav1e` speed 9 单线程编码一次，并用 `zenavif` 解码输入和验证输出格式。
-`planner` AVIF 使用同一编码器生成三档候选，再执行上文的 Native 质量护栏。
+使用 `ravif/rav1e` speed 9 单线程编码一次；`zenavif` 用于 AVIF 输入和同格式候选的质量回读，
+编码结果的 metadata 由已知尺寸、格式和 Alpha 状态直接构造，不额外解码刚生成的 AVIF。
+`planner` 对非 AVIF 源使用相同的单候选快速路径；只有 `AVIF -> AVIF` 才生成三档升序候选，
+逐个执行 Native 质量护栏并在首个候选通过时停止。AVIF 候选循环外只创建一次 RGBA 缓冲。
 9. AVIF 转 AVIF 若候选不小于原图或编码失败，返回原图。
-10. 跨格式转 AVIF 若没有候选通过但至少存在有效候选，返回最后一个有效候选；完全没有有效候选才报错。
+10. 跨格式转 AVIF 的单次编码失败时直接返回编码错误。
 
 当前 AVIF 不启用 Butteraugli 外层校验，其质量由 PCE 内建指标和 libaom 编码计划控制。
 

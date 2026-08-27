@@ -12,38 +12,91 @@ struct PassingCandidate {
 
 pub(crate) fn encode_best_candidate(
     source: &DynamicImage,
+    source_format: NativeImageFormat,
     options: &NativeEncodeOptions,
     control: Option<&NativeTaskControl>,
 ) -> Result<Vec<u8>, NativeImageError> {
+    if options.format == NativeImageFormat::Avif {
+        let rgba = source.to_rgba8();
+        if source_format != NativeImageFormat::Avif {
+            if let Some(control) = control {
+                control.checkpoint()?;
+            }
+            return crate::formats::avif::encode_rgba(&rgba, options.effective_quality());
+        }
+
+        let mut qualities = candidate_qualities(options.format, options.effective_quality());
+        qualities.sort_unstable();
+        return first_passing_candidate(&qualities, |quality| {
+            encode_avif_candidate(source, &rgba, quality, control)
+        })
+        .map(|candidate| candidate.bytes)
+        .ok_or_else(|| no_passing_candidate(options.format));
+    }
+
     let qualities = candidate_qualities(options.format, options.effective_quality());
     let candidates = collect_candidates(&qualities, |quality| {
-        if let Some(control) = control {
-            control.checkpoint()?;
-        }
-        let bytes = formats::encode(source, options.format, quality, options.allow_alpha_loss)?;
-        let (decoded_format, decoded) = decode::decode(&bytes)?;
-        if decoded_format != options.format {
-            return Err(NativeImageError::EncodeFailed(
-                "candidate output format does not match the requested format".into(),
-            ));
-        }
-        let metrics = quality::compare(source, &decoded)?;
-        if !guardrails::passes(options.format, metrics) {
-            return Ok(None);
-        }
-        Ok(Some(PassingCandidate { bytes }))
+        encode_candidate(source, options, quality, control)
     });
     if let Some(control) = control {
         control.checkpoint()?;
     }
     select_smallest(candidates)
         .map(|candidate| candidate.bytes)
-        .ok_or_else(|| {
-            NativeImageError::EncodeFailed(format!(
-                "no {:?} candidate passed the native quality guardrails",
-                options.format
-            ))
-        })
+        .ok_or_else(|| no_passing_candidate(options.format))
+}
+
+fn encode_candidate(
+    source: &DynamicImage,
+    options: &NativeEncodeOptions,
+    quality: u8,
+    control: Option<&NativeTaskControl>,
+) -> Result<Option<PassingCandidate>, NativeImageError> {
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
+    let bytes = formats::encode(source, options.format, quality, options.allow_alpha_loss)?;
+    let (decoded_format, decoded) = decode::decode(&bytes)?;
+    if decoded_format != options.format {
+        return Err(NativeImageError::EncodeFailed(
+            "candidate output format does not match the requested format".into(),
+        ));
+    }
+    let metrics = quality::compare(source, &decoded)?;
+    if !guardrails::passes(options.format, metrics) {
+        return Ok(None);
+    }
+    Ok(Some(PassingCandidate { bytes }))
+}
+
+fn encode_avif_candidate(
+    source: &DynamicImage,
+    rgba: &image::RgbaImage,
+    quality: u8,
+    control: Option<&NativeTaskControl>,
+) -> Result<Option<PassingCandidate>, NativeImageError> {
+    if let Some(control) = control {
+        control.checkpoint()?;
+    }
+    let bytes = crate::formats::avif::encode_rgba(rgba, quality)?;
+    let decoded = std::panic::catch_unwind(|| decode::decode(&bytes))
+        .map_err(|_| NativeImageError::InvalidImage("AVIF decoder panicked".into()))??;
+    if decoded.0 != NativeImageFormat::Avif {
+        return Err(NativeImageError::EncodeFailed(
+            "candidate output format does not match the requested format".into(),
+        ));
+    }
+    let metrics = quality::compare(source, &decoded.1)?;
+    if !guardrails::passes(NativeImageFormat::Avif, metrics) {
+        return Ok(None);
+    }
+    Ok(Some(PassingCandidate { bytes }))
+}
+
+fn no_passing_candidate(format: NativeImageFormat) -> NativeImageError {
+    NativeImageError::EncodeFailed(format!(
+        "no {format:?} candidate passed the native quality guardrails"
+    ))
 }
 
 fn select_smallest<T>(candidates: Vec<T>) -> Option<T>
@@ -84,11 +137,20 @@ where
         .collect()
 }
 
+fn first_passing_candidate<T, F>(qualities: &[u8], mut encode: F) -> Option<T>
+where
+    F: FnMut(u8) -> Result<Option<T>, NativeImageError>,
+{
+    qualities
+        .iter()
+        .find_map(|quality| encode(*quality).ok().flatten())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::NativeImageError;
 
-    use super::{PassingCandidate, collect_candidates, select_smallest};
+    use super::{PassingCandidate, collect_candidates, first_passing_candidate, select_smallest};
 
     #[test]
     fn a_failed_candidate_does_not_discard_later_successes() {
@@ -110,5 +172,21 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(selected.bytes, vec![2; 4]);
+    }
+
+    #[test]
+    fn avif_search_stops_at_the_first_passing_candidate() {
+        let mut visited = Vec::new();
+        let selected = first_passing_candidate(&[72, 80, 88], |quality| {
+            visited.push(quality);
+            match quality {
+                72 => Err(NativeImageError::EncodeFailed("expected failure".into())),
+                80 => Ok(Some(PassingCandidate { bytes: vec![2] })),
+                _ => panic!("search continued after a passing AVIF candidate"),
+            }
+        })
+        .unwrap();
+        assert_eq!(visited, vec![72, 80]);
+        assert_eq!(selected.bytes, vec![2]);
     }
 }

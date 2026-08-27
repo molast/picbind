@@ -33,6 +33,10 @@ pub(crate) fn decode(input: &[u8]) -> Result<DynamicImage, NativeImageError> {
 
 pub(crate) fn encode(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
     let rgba = image.to_rgba8();
+    encode_rgba(&rgba, quality)
+}
+
+pub(crate) fn encode_rgba(rgba: &RgbaImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
     let mut bytes = Vec::new();
     image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut bytes, 9, quality)
         .with_num_threads(Some(1))

@@ -988,8 +988,9 @@ Planner 和参数重放仍待提取。
   100,000,000。
 - Native Store 来源会校验 opaque revision，命令不接受任意文件路径；Blob 通过原始二进制帧
   传输，不使用 Base64 或 JSON 数字数组。
-- 固定目标和 `auto` 的 `planner` profile 已使用 Native 多质量候选、候选失败隔离、轻量
-  感知质量护栏和最小有效候选选择。纯 Rust 参数队列重放、受限 WebP 预览、全尺寸物化、
+- 固定目标和 `auto` 的 `planner` profile 已使用 Native 质量策略：JPEG、PNG、WebP 使用
+  多质量候选、候选失败隔离、轻量感知质量护栏和最小有效候选选择；非 AVIF 源转 AVIF 使用
+  单候选快速路径，`AVIF -> AVIF` 按质量升序返回首个通过护栏的候选。纯 Rust 参数队列重放、受限 WebP 预览、全尺寸物化、
   BlurHash/主色 placeholder、独立 WebP thumbnail 和完整质量对比均已通过二进制 Tauri IPC
   接入 Desktop Adapter；双图质量比较使用两个长度分隔的原始字节区，不使用 Base64。
 - Native request 使用 API V1 与唯一 `requestId`；未知版本和重复活跃 ID 会被拒绝。Desktop

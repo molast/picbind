@@ -138,7 +138,9 @@ fn encode_with(
             selected.effective_quality(),
             selected.allow_alpha_loss,
         ),
-        Strategy::Planner => crate::planner::encode_best_candidate(&image, &selected, control),
+        Strategy::Planner => {
+            crate::planner::encode_best_candidate(&image, source_format, &selected, control)
+        }
     };
     checkpoint(control)?;
     let encoded = match encoded {
@@ -160,7 +162,18 @@ fn encode_with(
     {
         return original_output(input, &image, source_format);
     }
-    let metadata = inspect(&encoded)?;
+    let metadata = if selected.format == crate::NativeImageFormat::Avif {
+        NativeImageMetadata {
+            width: image.width(),
+            height: image.height(),
+            format: selected.format,
+            mime_type: selected.format.mime_type(),
+            size_bytes: encoded.len(),
+            has_alpha,
+        }
+    } else {
+        inspect(&encoded)?
+    };
     Ok(NativeImageOutput {
         bytes: encoded,
         metadata,
