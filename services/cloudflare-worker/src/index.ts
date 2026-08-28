@@ -3,12 +3,6 @@ import {
   MetricsCounter,
   type MetricsCounterState,
 } from "./metrics-counter";
-import {
-  handleCreateShareRoom,
-  handleShareRoomRealtime,
-  handleShareRoomSocket,
-} from "./realtime/share-room";
-import { ShareRoomObject } from "./realtime/share-room-object";
 import { devError, isDevMode, type RuntimeLogEnv } from "./runtime-log";
 import type { QiniuStorageEnv } from "./qiniu-storage";
 import workerPackage from "../package.json";
@@ -60,7 +54,6 @@ type Env = RuntimeLogEnv & QiniuStorageEnv & AuthEnv & OAuthEnv & {
     put(key: string, value: string): Promise<void>;
   };
   METRICS_COUNTER: DurableObjectNamespace;
-  REALTIME_ROOMS: DurableObjectNamespace;
   WORKSPACE_REALTIME: DurableObjectNamespace;
   SHARE_IMAGES_R2: R2Bucket;
   GLOBAL_LIMITER?: {
@@ -77,20 +70,11 @@ type Env = RuntimeLogEnv & QiniuStorageEnv & AuthEnv & OAuthEnv & {
   };
   ADMIN_KEY?: string;
   SITE_URL?: string;
-  ROOM_URL?: string;
   ALLOWED_ORIGINS?: string;
   BAIDU_PUSH_SITE?: string;
   BAIDU_PUSH_TOKEN?: string;
   TURN_TOKEN_ID?: string;
   TURN_API_TOKEN?: string;
-  FILE_TRANSFER_MODE?: string;
-  MAX_IMAGE_TRANSFER_SIZE_MB?: string;
-  R2_RTT_THRESHOLD_MS?: string;
-  R2_FILE_TTL_SECONDS?: string;
-  R2_BUCKET_NAME?: string;
-  R2_ACCOUNT_ID?: string;
-  R2_ACCESS_KEY_ID?: string;
-  R2_SECRET_ACCESS_KEY?: string;
 };
 
 const CONFIG_KEY = "metrics:config:v1";
@@ -286,13 +270,6 @@ function allowedOrigins(env: Env, request: Request) {
       .map((item) => item.trim())
       .filter(Boolean),
   );
-  if (env.ROOM_URL) {
-    try {
-      values.add(new URL(env.ROOM_URL).origin);
-    } catch {
-      // Invalid configuration remains excluded from CORS.
-    }
-  }
   values.add(new URL(request.url).origin);
   return values;
 }
@@ -751,16 +728,6 @@ const worker = {
         response = await handleAdminState(request, env);
       } else if (pathname === "/api/seo/baidu/push") {
         response = await handleBaiduPush(request, env);
-      } else if (pathname === "/api/realtime/room/create") {
-        response = hasMissingOrInvalidOrigin(env, request)
-          ? json({ error: "Invalid origin" }, { status: 403 })
-          : await handleCreateShareRoom(request, env);
-      } else if (pathname.startsWith("/api/realtime/room/")) {
-        response = hasMissingOrInvalidOrigin(env, request)
-          ? json({ error: "Invalid origin" }, { status: 403 })
-          : pathname === "/api/realtime/room/socket"
-            ? await handleShareRoomSocket(request, env)
-            : await handleShareRoomRealtime(request, env);
       } else {
         response = json({ error: "Not found" }, { status: 404 });
       }
@@ -781,4 +748,4 @@ const worker = {
 };
 
 export default worker;
-export { MetricsCounter, ShareRoomObject, WorkspaceRealtimeObject };
+export { MetricsCounter, WorkspaceRealtimeObject };

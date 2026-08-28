@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:webview:allow-internal-toggle-devtools"
+    "core:webview:allow-internal-toggle-devtools",
+    "websocket:default",
+    "picbind-realtime:default"
   ]
 }

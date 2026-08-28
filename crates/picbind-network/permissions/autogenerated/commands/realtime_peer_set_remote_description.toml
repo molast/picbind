@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-realtime-peer-set-remote-description"
+description = "Enables the realtime_peer_set_remote_description command without any pre-configured scope."
+commands.allow = ["realtime_peer_set_remote_description"]
+
+[[permission]]
+identifier = "deny-realtime-peer-set-remote-description"
+description = "Denies the realtime_peer_set_remote_description command without any pre-configured scope."
+commands.deny = ["realtime_peer_set_remote_description"]

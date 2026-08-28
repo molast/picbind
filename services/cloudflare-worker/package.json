@@ -9,8 +9,7 @@
     "test:worker": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log vitest run --config vitest.worker.config.mts",
     "deploy": "pnpm run d1:migrate:remote && cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler deploy",
     "d1:migrate:local": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler d1 migrations apply USER_DB --local",
-    "d1:migrate:remote": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler d1 migrations apply USER_DB --remote",
-    "r2:cors:apply": "wrangler r2 bucket cors set picbind-bucket --file r2-cors.json"
+    "d1:migrate:remote": "cross-env WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/logs/wrangler.log wrangler d1 migrations apply USER_DB --remote"
   },
   "dependencies": {
     "qiniu": "^7.15.2"

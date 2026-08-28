@@ -1,16 +1,18 @@
 import React from "react";
+import type { RealtimeService, RealtimeSession } from "@picbind/shared";
+import { getRealtimeClientId } from "../../realtime";
 import { createWorkspaceShare, rotateWorkspaceShare, shareUrl } from "../api";
 import { promoteLocalWorkspace, saveWorkspace } from "../repository";
-import { WorkspaceRealtimeClient } from "../realtime";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
-export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspace, setImages, realtimeRef, subscribe, transition, setCopied, setNotice, }: {
+export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setCopied, setNotice, }: {
   workspace: WorkspaceIdentity | null;
   publicSiteUrl?: string;
   setWorkspace: React.Dispatch<React.SetStateAction<WorkspaceIdentity | null>>;
   setImages: React.Dispatch<React.SetStateAction<WorkspaceImage[]>>;
-  realtimeRef: React.MutableRefObject<WorkspaceRealtimeClient | null>;
-  subscribe: (client: WorkspaceRealtimeClient) => void;
+  realtimeRef: React.MutableRefObject<RealtimeSession | null>;
+  realtimeService: RealtimeService;
+  subscribe: (client: RealtimeSession) => void;
   transition: () => void;
   setCopied: React.Dispatch<React.SetStateAction<boolean>>;
   setNotice: (message: string) => void;
@@ -24,13 +26,18 @@ export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspa
     await promoteLocalWorkspace(previousId, next);
     setWorkspace(next);
     setImages((current) => current.map((image) => ({ ...image, workspaceId: next.workspaceId })));
-    const realtime = new WorkspaceRealtimeClient(next);
-    realtimeRef.current?.disconnect();
+    const realtime = await realtimeService.connect({
+      workspaceId: next.workspaceId,
+      role: next.role,
+      shareToken: next.shareToken,
+      ownerCapability: next.ownerCapability,
+      clientId: getRealtimeClientId(),
+    });
+    void realtimeRef.current?.close("workspace-replaced");
     realtimeRef.current = realtime;
     subscribe(realtime);
     transition();
-    await realtime.connect();
-  }, [realtimeRef, setImages, setWorkspace, subscribe, transition, workspace]);
+  }, [realtimeRef, realtimeService, setImages, setWorkspace, subscribe, transition, workspace]);
 
   const rotateShare = React.useCallback(async () => {
     if (!workspace) return;

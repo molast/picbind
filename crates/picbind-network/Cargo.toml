@@ -2,12 +2,40 @@
 name = "picbind-network"
 version = "0.1.0"
 edition = "2024"
+links = "tauri-plugin-picbind-realtime"
 
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+native-webrtc = [
+  "dep:bytes",
+  "dep:serde",
+  "dep:serde_json",
+  "dep:tokio",
+  "dep:uuid",
+  "dep:webrtc",
+]
+tauri = [
+  "native-webrtc",
+  "dep:tauri",
+  "dep:tauri-plugin-websocket",
+]
+
 [dependencies]
 picbind-protocol = { path = "../picbind-protocol" }
+bytes = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+tauri = { version = "2.11.5", optional = true }
+tauri-plugin-websocket = { version = "2.4.2", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"], optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+webrtc = { version = "0.14.0", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+
+[build-dependencies]
+tauri-plugin = { version = "2.6.3", features = ["build"] }

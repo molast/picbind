@@ -19,6 +19,7 @@ chrono = "0.4"
 ecb = { version = "0.1", features = ["alloc"] }
 md-5 = "0.10"
 picbind-image-native = { path = "../../../crates/picbind-image-native" }
+picbind-network = { path = "../../../crates/picbind-network", features = ["tauri"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +28,7 @@ sha2 = "0.10"
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-websocket = "2.4.2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }

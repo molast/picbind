@@ -1,4 +1,5 @@
 import React from "react";
+import { REALTIME_LIMITS } from "@picbind/shared";
 import { SourceTransferRegistry } from "../source-transfer";
 import { readWorkspaceImageSource, saveWorkspaceImage } from "../repository";
 import { disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
@@ -25,14 +26,25 @@ export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationCon
   const receiveSource = React.useCallback(async (value: Record<string, unknown>) => {
     const requestId = String(value.requestId || "");
     if (value.type === "sourceStart") {
-      transfers.current.start({ requestId, imageId: String(value.imageId || ""), mimeType: String(value.mimeType || ""),
+      const started = transfers.current.start({ requestId, imageId: String(value.imageId || ""), mimeType: String(value.mimeType || ""),
         totalChunks: Number(value.totalChunks), totalBytes: Number(value.totalBytes), sha256: String(value.sha256 || ""),
         currentCommitId: typeof value.currentCommitId === "string" ? value.currentCommitId : null });
+      if (!started) {
+        finishSourceRequest({ requestId });
+        setNotice("Received source metadata is invalid");
+      } else if (transfers.current.isCompletionPending(requestId)) {
+        await receiveSource({ ...value, type: "sourceComplete" });
+      }
       return;
     }
     if (value.type === "sourceChunk") {
       const chunk = value.bytes instanceof ArrayBuffer ? value.bytes : ArrayBuffer.isView(value.bytes) ? value.bytes : Array.isArray(value.bytes) ? new Uint8Array(value.bytes.map(Number)) : null;
-      if (chunk) transfers.current.push(requestId, Number(value.index), chunk);
+      if (chunk && !transfers.current.push(requestId, Number(value.index), chunk)) {
+        transfers.current.cancel(requestId);
+        finishSourceRequest({ requestId });
+        setNotice("Received source data exceeded its transfer limits");
+        return;
+      }
       if (transfers.current.isCompletionPending(requestId)) await receiveSource({ ...value, type: "sourceComplete" });
       return;
     }
@@ -65,7 +77,7 @@ export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationCon
     const source = await readWorkspaceImageSource(image);
     if (!source) { setSourceRequestDialog(null); return; }
     const data = new Uint8Array(await source.arrayBuffer());
-    const chunkSize = 48 * 1024;
+    const chunkSize = REALTIME_LIMITS.sourceChunkBytes;
     const total = Math.ceil(data.length / chunkSize);
     const sha256 = await digestBlob(source);
     const targetUserId = String(value.senderId);

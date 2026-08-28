@@ -1,3 +1,5 @@
+import { REALTIME_LIMITS } from "@picbind/shared";
+
 export type SourceTransferManifest = {
   requestId: string;
   imageId: string;
@@ -19,6 +21,12 @@ type PendingTransfer = SourceTransferManifest & {
   completionRequested: boolean;
 };
 
+type PendingManifest = {
+  chunks: Map<number, Uint8Array>;
+  bytes: number;
+  completionRequested: boolean;
+};
+
 function bytesFrom(value: ArrayBuffer | ArrayBufferView) {
   const source = value instanceof ArrayBuffer
     ? new Uint8Array(value)
@@ -35,8 +43,10 @@ async function sha256(value: Blob) {
 
 export class SourceTransferRegistry {
   private readonly transfers = new Map<string, PendingTransfer>();
+  private readonly pendingManifests = new Map<string, PendingManifest>();
+  private pendingManifestBytes = 0;
 
-  get size() { return this.transfers.size; }
+  get size() { return this.transfers.size + this.pendingManifests.size; }
 
   start(manifest: SourceTransferManifest) {
     if (!manifest.requestId
@@ -50,15 +60,30 @@ export class SourceTransferRegistry {
       || !/^[0-9a-f]{64}$/i.test(manifest.sha256)) {
       return false;
     }
-    this.transfers.set(manifest.requestId, { ...manifest, chunks: new Map(), completionRequested: false });
+    const pending = this.takePendingManifest(manifest.requestId);
+    this.transfers.set(manifest.requestId, {
+      ...manifest,
+      chunks: new Map(),
+      completionRequested: pending?.completionRequested === true,
+    });
+    if (pending) {
+      for (const [index, chunk] of pending.chunks) {
+        if (!this.push(manifest.requestId, index, chunk)) {
+          this.transfers.delete(manifest.requestId);
+          return false;
+        }
+      }
+    }
     return true;
   }
 
   push(requestId: string, index: number, value: ArrayBuffer | ArrayBufferView) {
     const transfer = this.transfers.get(requestId);
-    if (!transfer || !Number.isSafeInteger(index) || index < 0 || index >= transfer.totalChunks) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= 65_536) {
       return false;
     }
+    if (!transfer) return this.pushPendingManifest(requestId, index, value);
+    if (index >= transfer.totalChunks) return false;
     if (transfer.chunks.has(index)) return true;
     const bytes = bytesFrom(value);
     const received = [...transfer.chunks.values()]
@@ -73,7 +98,11 @@ export class SourceTransferRegistry {
 
   async complete(requestId: string): Promise<CompletedSourceTransfer | null> {
     const transfer = this.transfers.get(requestId);
-    if (!transfer) return null;
+    if (!transfer) {
+      const pending = this.pendingManifests.get(requestId);
+      if (pending) pending.completionRequested = true;
+      return null;
+    }
     transfer.completionRequested = true;
     if (transfer.chunks.size !== transfer.totalChunks) return null;
     this.transfers.delete(requestId);
@@ -100,8 +129,53 @@ export class SourceTransferRegistry {
     return this.transfers.get(requestId)?.completionRequested === true;
   }
 
-  has(requestId: string) { return this.transfers.has(requestId); }
+  has(requestId: string) {
+    return this.transfers.has(requestId) || this.pendingManifests.has(requestId);
+  }
 
-  cancel(requestId: string) { this.transfers.delete(requestId); }
-  clear() { this.transfers.clear(); }
+  cancel(requestId: string) {
+    this.transfers.delete(requestId);
+    this.takePendingManifest(requestId);
+  }
+
+  clear() {
+    this.transfers.clear();
+    this.pendingManifests.clear();
+    this.pendingManifestBytes = 0;
+  }
+
+  private pushPendingManifest(
+    requestId: string,
+    index: number,
+    value: ArrayBuffer | ArrayBufferView,
+  ) {
+    if (!requestId) return false;
+    const bytes = bytesFrom(value);
+    if (bytes.byteLength < 1 || bytes.byteLength > REALTIME_LIMITS.sourceChunkBytes) return false;
+    let pending = this.pendingManifests.get(requestId);
+    if (!pending) {
+      if (this.pendingManifests.size >= REALTIME_LIMITS.maximumConcurrentSourceTransfers) {
+        return false;
+      }
+      pending = { chunks: new Map(), bytes: 0, completionRequested: false };
+      this.pendingManifests.set(requestId, pending);
+    }
+    if (pending.chunks.has(index)) return true;
+    if (this.pendingManifestBytes + bytes.byteLength > REALTIME_LIMITS.maximumSocketQueueBytes) {
+      this.takePendingManifest(requestId);
+      return false;
+    }
+    pending.chunks.set(index, bytes);
+    pending.bytes += bytes.byteLength;
+    this.pendingManifestBytes += bytes.byteLength;
+    return true;
+  }
+
+  private takePendingManifest(requestId: string) {
+    const pending = this.pendingManifests.get(requestId);
+    if (!pending) return undefined;
+    this.pendingManifests.delete(requestId);
+    this.pendingManifestBytes -= pending.bytes;
+    return pending;
+  }
 }

@@ -1,9 +1,9 @@
 # PicBind Realtime Transport API V1
 
-> 文档状态：规划中，尚未开始迁移
+> 文档状态：阶段 1-6 代码已实施，阶段 17 本地自动化验证已完成；阶段 0 性能/互操作 spike 与阶段 7 发布验证待执行
 > 适用范围：当前 Workspace Realtime V2 的 Web 与 Tauri Desktop 实时协作链路
 > 明确排除：已弃用的 Share Room、旧 Room 页面及其弱网 WebSocket / WebRTC 实现
-> 最后校对：2026-08-27
+> 最后校对：2026-08-28
 
 ## 1. 文档目的
 
@@ -18,15 +18,16 @@ PicBind 的 Web 与 Desktop 复用 Workspace UI 和协作业务，但不再强�
 - PicBind 自有的 Desktop Native 网络代码、Tauri 注册入口、Rust WebRTC 句柄和生命周期
   统一归属 `crates/picbind-network`。
 
-本文档定义迁移边界、公共接口、平台 Adapter、Native Rust 目录、消息顺序、背压、重连、
-生命周期、测试矩阵和任务顺序。文档中的目标结构均为规划，不能视为已经实现。
+本文档记录迁移边界、公共接口、平台 Adapter、Native Rust 目录、消息顺序、背压、重连、
+生命周期、测试矩阵和任务顺序。除明确标记“待验证”的实机、性能和发布项目外，本文描述的
+代码结构已经实现并通过当前 macOS 环境的静态检查和自动化测试。
 
 ## 2. 结论摘要
 
 V1 采用以下设计：
 
 1. 只迁移当前 `WorkspaceRealtimeClient` 对应的 Workspace Realtime V2。
-2. 已弃用的 Share Room 不进入 V1 契约；遗留 Room 网络代码应删除，不建立兼容层。
+2. 已弃用的 Share Room 不进入 V1 契约；遗留 Room 网络代码已删除，不建立兼容层。
 3. 对外接口命名为 `RealtimeService` 和 `RealtimeSession`，Workspace 页面不直接创建
    `WebSocket`、`RTCPeerConnection` 或 Tauri WebSocket。
 4. 平台选择只在 `apps/web` 的应用组合根发生一次。
@@ -43,12 +44,12 @@ V1 采用以下设计：
 10. `apps/desktop/src-tauri` 只注册 `picbind-network` 导出的 Tauri plugins；不得复制连接、
     信令、重连、帧转换或 Peer 状态机。
 
-## 3. 当前实现基线
+## 3. 当前实现状态
 
 ### 3.1 当前有效链路
 
-当前有效实现位于 `packages/ui/src/workspace/realtime.ts`，由 Workspace 页面和分享命令创建
-`WorkspaceRealtimeClient`。它同时负责：
+平台无关 Session Core 位于 `packages/ui/src/workspace/realtime.ts`，由
+`WorkspaceRealtimeService` 创建并通过 `RealtimeProvider` 注入 Workspace 页面。Core 负责：
 
 - 调用 `realtimeTicket()` 获取 Workspace、ticket 和 ICE Server。
 - 建立 `/api/workspaces/{workspaceId}/realtime-v2` WebSocket。
@@ -70,34 +71,27 @@ V1 采用以下设计：
 
 ### 3.2 已弃用 Room 的处理
 
-产品页面已经不再提供旧版 Room。仓库仍可搜索到以下遗留代码和导出：
+旧 Share Room 的 Web 页面、UI 入口、SDK wrapper、HTTP signaling、弱网 socket、R2 transfer、
+Worker route 和 `ShareRoomObject` 实现已经删除。Cloudflare `wrangler.toml` 只保留历史 `v2`
+创建 migration，并通过 `v6 deleted_classes = ["ShareRoomObject"]` 下线已部署 class。
 
-- `packages/ui/src/components/share/use-share-room-connection.ts`
-- `packages/ui/src/utils/weak-network-socket.ts`
-- `packages/ui/src/utils/realtime-room.ts`
-- `packages/ui/src/index.ts` 中的 `ShareRoomPage`、`CreateRoomButton` 导出
-- `apps/web/src` 中遗留的 Room page、stack 和 SDK wrapper
-
-这些文件不代表当前产品迁移范围。V1 必须遵守：
-
-- 不把 `AdaptiveMessageChannel` 或旧 Room HTTP signaling 包装进新接口。
-- 不为旧 Room 保留第二套 WebSocket relay、heartbeat、R2 transfer 或 WebRTC 状态机。
-- 在修改生产入口前先用引用检查确认遗留文件不可达，再单独删除及清理 export、route 和测试。
-- Workspace 中仍使用的通用图片、review 或存储能力不能仅因历史命名含 `room` 就直接删除；
-  删除依据必须是实际引用和产品入口，而不是文件名。
+Workspace 仍使用的图片编辑、review、存储和历史数据类型按实际引用保留；部分内部类型仍带
+`RoomImage` 等历史名称，但不包含旧 Room 网络或产品入口。TURN 凭据生成已迁到
+`services/cloudflare-worker/src/realtime/turn-credentials.ts`，只服务 Workspace Realtime。
 
 ### 3.3 当前 Rust 边界
 
-`crates/picbind-network` 已被仓库结构文档指定为 WebSocket、WebRTC、信令和传输抽象的所有者，
-但当前实现尚不完整：
+`crates/picbind-network` 现在拥有 Desktop Native 网络边界：
 
-- `src/websocket/mod.rs` 只有模块占位。
-- `src/webrtc/mod.rs` 只有模块占位。
-- `src/signaling/mod.rs` 只有模块占位。
-- `src/transfer/mod.rs` 已有 `TransportRouter`、RTC qualification 和回退基础测试，但它与
-  TypeScript 当前更完整的多 Peer 路由规则尚未对齐。
-- `apps/desktop/src-tauri` 当前没有依赖 `picbind-network`，也没有注册 WebSocket plugin 或
-  Realtime Native plugin。
+- `websocket/tauri_plugin.rs` 导出官方 Tauri WebSocket plugin 注册入口。
+- `webrtc/` 实现 Rust Peer、Offer/Answer、Trickle ICE、两条 ordered DataChannel、入站帧校验
+  和每通道 buffered amount 背压。
+- `session/` 使用 `sessionId + peerId` 管理句柄和批量清理。
+- `tauri/` 提供 commands、raw binary event channel、state、permissions 和窗口/应用退出清理。
+- `transfer/mod.rs` 的多 Peer Router 已覆盖独立 qualification、可靠 WebSocket 队列、owner
+  broadcast 的逐 Peer 路由和单 Peer 失败隔离。
+- Desktop app crate 依赖 `picbind-network`，只注册其 WebSocket 与 Realtime plugins；因 Tauri
+  ACL 发现机制，manifest 仍直接声明官方 `tauri-plugin-websocket` 依赖，但不直接注册或实现它。
 
 ### 3.4 Tauri WebSocket plugin 能力
 
@@ -115,7 +109,7 @@ Tauri 官方 WebSocket plugin 提供：
 2. plugin 的 JavaScript `send()` 是异步的，Binary 在 plugin 边界可能表现为 `number[]`；
    这些差异必须封闭在 Desktop Socket Adapter 内。
 
-因此 V1 的推荐组合是“共享 TypeScript 会话策略 + Tauri WebSocket Adapter + Rust WebRTC
+V1 当前组合是“共享 TypeScript 会话策略 + Tauri WebSocket Adapter + Rust WebRTC
 Adapter”。如果未来要求 WebSocket 和 WebRTC 的完整会话状态机都在 Rust 中运行，则应在
 `picbind-network` 内改用 Rust WebSocket client；那将不再是“使用 Tauri WebSocket plugin”
 的方案，不能把两种架构混写为同一个实现。
@@ -152,8 +146,10 @@ flowchart TD
     UI["Workspace UI / Hooks"] --> Provider["RealtimeProvider"]
     Provider --> Service["RealtimeService Port"]
     Root["apps/web Composition Root"] --> Selector["Runtime Selector"]
-    Selector -- Browser --> WebAdapter["WebRealtimeService"]
-    Selector -- Tauri --> DesktopAdapter["DesktopRealtimeService"]
+    Selector -- Browser --> WebAdapter["Browser Socket / Peer factories"]
+    Selector -- Tauri --> DesktopAdapter["Tauri Socket / Native Peer factories"]
+    WebAdapter --> Service
+    DesktopAdapter --> Service
     WebAdapter --> WebSocket["Browser WebSocket"]
     WebAdapter --> WebRtc["Browser RTCPeerConnection"]
     DesktopAdapter --> TauriWs["Tauri WebSocket plugin"]
@@ -352,20 +348,35 @@ export interface RealtimePeer {
 - signaling 与业务帧必须保持调用顺序；不能为每个 `send()` 创建互不等待的 Promise。
 - reconnect 后只重新发送尚未 ACK 的 reliable 帧。
 - ephemeral 帧在断线期间允许丢弃，不能占满 reliable 队列。
-- bulk 帧不得阻塞 control/signaling 队列，control 和 bulk 至少采用不同优先级。
+- RTC 使用独立的 `workspace-control` 与 `workspace-bulk` 通道和各自的 Rust send lock；
+  Native Adapter 在 raw IPC 前也为两条通道分别提供有界 FIFO，保证 Tauri invoke 并发不会
+  重排 `sourceStart`、分片和 `sourceComplete`；WebSocket fallback 当前仍是单 FIFO。
+  fallback 下大量 bulk 对 control 延迟的影响仍需实测，不能标记为已完成的性能保证。
+- reliable、bulk 和 ephemeral 分别维护发送 sequence；bulk 分片不能在两个 reliable 事件之间
+  制造虚假的 sequence gap。
+- source manifest/complete 使用 control，二进制分片使用 bulk；接收 Registry 在 4 个 transfer、
+  总计 8 MiB 的边界内暂存先于 manifest 到达的分片，再按 manifest 校验数量、大小和 SHA-256。
 
 ### 8.2 队列上限
 
-实施前需要冻结以下配置并加入契约测试：
+当前冻结值位于 `packages/shared/src/realtime/limits.ts`：
 
-- reliable event 最大条数和最大总字节数。
-- socket 待写队列最大字节数。
-- RTC control/bulk 各自最大 buffered amount。
-- 单个 Binary frame 上限。
-- source chunk 大小和最大并发 source transfer 数。
+| 配置 | 当前值 |
+| --- | ---: |
+| Text frame | 96 KiB |
+| Binary frame | 4 MiB |
+| Binary header | 32 KiB |
+| reliable event | 1,024 条 / 32 MiB |
+| socket 待写队列 | 8 MiB |
+| RTC control buffered amount | 256 KiB |
+| RTC bulk buffered amount | 1 MiB |
+| source chunk | 48 KiB |
+| 并发 source transfer | 4 |
 
-达到上限时返回 `socketQueueFull` 或 `rtcBackpressure`，并保留仍可通过 WebSocket 可靠发送的
-帧。禁止无限增长、静默覆盖 reliable 帧或把大二进制转成 Base64。
+达到上限时返回 `socketQueueFull` 或 `rtcBackpressure`。单帧 `rtcBackpressure` 将该帧溢出到
+常驻 WebSocket，但不关闭 Peer，避免丢弃 DataChannel 中已经接受、尚未送达的 source 分片；
+持续 buffered amount 超限仍由健康窗口触发 Peer 回退。禁止无限增长、静默覆盖 reliable 帧
+或把大二进制转成 Base64。
 
 ### 8.3 Tauri IPC 二进制
 
@@ -380,11 +391,15 @@ Desktop Native RTC 意味着 WebView 中的 Workspace 数据需要跨 IPC 发送
 - 如果 IPC 不能满足 bulk 传输，Desktop source transfer 应改为受控 Native Store 引用，
   由 `picbind-network` 在 Rust 侧读取并分块，而不是退回 WebView WebRTC。
 
-性能 spike 未通过前，不能宣称 Desktop Native WebRTC 已可替换生产链路。
+当前正式路径已使用 Tauri raw invoke body 和 raw `Channel<ArrayBuffer>` event，不使用 Base64 或
+业务层 JSON `number[]`。Rust 侧在同一个临界区内分配 Native event sequence 并写入 IPC
+Channel，确保 control/bulk 并发回调不会让较小 sequence 后到并被前端误判为 stale event。
+但真实 source/thumbnail/preview 的复制次数、吞吐、峰值内存和 UI 长任务尚未测量，因此仍不能
+宣称 Native bulk IPC 已通过生产性能门槛。
 
 ## 9. Web Adapter
 
-`WebRealtimeService` 包装当前实现，第一轮不改变行为：
+Web 组合使用共享 `WorkspaceRealtimeService` 和 Browser factories：
 
 - `BrowserRealtimeSocketFactory` 创建 DOM WebSocket，设置 `binaryType = "arraybuffer"`。
 - `BrowserRealtimePeerFactory` 创建 `RTCPeerConnection` 和两条 ordered DataChannel。
@@ -393,8 +408,8 @@ Desktop Native RTC 意味着 WebView 中的 Workspace 数据需要跨 IPC 发送
 - Browser close/error/message 转换为公共 event。
 - 页面卸载时调用 `RealtimeSession.close("page-left")`。
 
-Web Adapter 不导入 `@tauri-apps/api` 或 `@tauri-apps/plugin-websocket`，Web 构建不能包含
-Desktop runtime 依赖。
+Browser Adapter 不导入 `@tauri-apps/api` 或 `@tauri-apps/plugin-websocket`；平台选择与
+Desktop adapter import 只存在于 `apps/web` 组合层，不进入 `packages/ui` Session Core。
 
 ## 10. Desktop WebSocket Adapter
 
@@ -425,10 +440,10 @@ Desktop capability 至少加入：
 
 ### 11.1 Rust 库
 
-Desktop DataChannel 使用 Rust `webrtc` crate。正式锁定版本前必须在当前 Rust toolchain 和
-Tauri 2.11.x 上完成 spike，验证：
+Desktop DataChannel 已锁定 Rust `webrtc = 0.14.0` 和 Tauri `2.11.5`。当前 macOS Apple
+Silicon 已通过 `cargo test/check`；以下发布级验证仍未完成：
 
-- macOS arm64、Windows x64 和 Linux x64 编译。
+- Windows x64 和 Linux x64 编译。
 - Offer/Answer、Trickle ICE 和配置的 STUN/TURN 可用。
 - ordered DataChannel 的 Text/Binary 双向发送。
 - buffered amount 或等价背压信号可观测。
@@ -443,8 +458,8 @@ V1 不使用 media track、codec 或屏幕捕获能力，依赖 feature 应尽�
 `picbind-network` 为每个 Desktop Peer 保存不透明 `peerId`，TypeScript 只能持有 ID：
 
 - Rust state 使用 `sessionId + peerId` 作为唯一键。
-- Peer 内部拥有 Rust `RTCPeerConnection`、control/bulk DataChannel、pending candidates 和
-  task cancellation token。
+- Peer 内部拥有 Rust `RTCPeerConnection` 与 control/bulk DataChannel；远端 SDP 设置前的
+  candidate 暂存由 Desktop TypeScript Adapter 有界管理。
 - Tauri 事件必须携带 `sessionId`、`peerId` 和单调递增 sequence，防止旧 Peer 事件污染重建
   后的新 Peer。
 - command 不得持有全局锁跨越 `.await`；先取得 Arc/handle，再释放 map lock 后执行异步操作。
@@ -453,7 +468,7 @@ V1 不使用 media track、codec 或屏幕捕获能力，依赖 feature 应尽�
 ### 11.3 Tauri Bridge
 
 `crates/picbind-network` 自己导出 Realtime plugin，负责 commands、event channel、state 和
-清理。建议 bridge 能力包括：
+清理。当前 bridge 能力包括：
 
 ```text
 realtime_peer_create
@@ -468,19 +483,19 @@ realtime_peer_close
 realtime_session_close
 ```
 
-command 名只是内部 bridge，不属于 Workspace 业务 API。`DesktopRealtimeService` 必须继续把
-它们封装为 `RealtimePeer`，页面不得直接 invoke。
+command 名只是内部 bridge，不属于 Workspace 业务 API。`NativeRealtimePeer` 把它们封装为
+公共 `RealtimePeer`，页面不得直接 invoke。
 
 ## 12. `crates/picbind-network` 所有权
 
 ### 12.1 Cargo features
 
-建议按平台能力拆 feature，避免 Web 或纯协议测试编译 Tauri/WebRTC：
+当前按平台能力拆分 feature，避免纯协议测试编译 Tauri/WebRTC：
 
 ```toml
 [features]
 default = []
-native-webrtc = ["dep:tokio", "dep:webrtc"]
+native-webrtc = ["dep:bytes", "dep:serde", "dep:serde_json", "dep:tokio", "dep:uuid", "dep:webrtc"]
 tauri = [
   "native-webrtc",
   "dep:tauri",
@@ -488,9 +503,10 @@ tauri = [
 ]
 ```
 
-`webrtc` 的准确版本和 feature 必须由阶段 0 spike 锁定，文档不提前伪造已验证版本。
+当前 `webrtc` 锁定为 `0.14.0`；只验证了本机 macOS 编译与单元测试，未验证其他 OS 和实机
+浏览器互操作。
 
-### 12.2 目标文件结构
+### 12.2 当前文件结构
 
 ```text
 crates/picbind-network/
@@ -505,9 +521,7 @@ crates/picbind-network/
     │   ├── mod.rs
     │   └── models.rs
     ├── transfer/
-    │   ├── mod.rs
-    │   ├── router.rs
-    │   └── queue.rs
+    │   └── mod.rs
     ├── websocket/
     │   ├── mod.rs
     │   └── tauri_plugin.rs
@@ -524,19 +538,21 @@ crates/picbind-network/
         └── state.rs
 ```
 
+此外 crate 根目录包含 `build.rs` 与 `permissions/`，用于生成 `picbind-realtime` command ACL。
+
 说明：
 
 - `websocket/tauri_plugin.rs` 只封装官方 WebSocket plugin 注册与 Native 配置，不复制官方
   plugin 的实现。
-- `webrtc/native.rs` 和 `peer.rs` 才是 PicBind 的 Rust WebRTC 实现。
+- `webrtc/native.rs` 定义 Native event/frame，`peer.rs` 与 `data_channel.rs` 实现 Rust WebRTC。
 - `tauri/` 只做 bridge 与生命周期，不实现 Workspace 业务协议。
 - 稳定 Workspace event、reliability、data class 和 relay envelope 继续归
   `crates/picbind-protocol`；`picbind-network` 不复制协议类型。
-- `transfer/` 的现有 Router 必须先对齐 TypeScript 当前多 Peer 行为，再成为可复用规则来源。
+- `transfer/mod.rs` 已对齐当前多 Peer qualification、逐目标路由和失败隔离规则。
 
 ### 12.3 Desktop app crate
 
-目标 `apps/desktop/src-tauri/src/lib.rs` 只保留注册：
+`apps/desktop/src-tauri/src/lib.rs` 的实时网络部分只保留注册：
 
 ```rust
 tauri::Builder::default()
@@ -554,29 +570,30 @@ tauri::Builder::default()
 
 ## 13. 组合与依赖注入
 
-建议新增：
+当前目录：
 
 ```text
 packages/shared/src/realtime/
 ├── contract.ts
 ├── errors.ts
 ├── events.ts
+├── fifo.ts
+├── limits.ts
 ├── types.ts
+├── contract.test.ts
 └── index.ts
 
 packages/ui/src/realtime/
 ├── realtime-context.tsx
-├── workspace-realtime-session.ts
+├── workspace-realtime-service.ts
 └── index.ts
 
 apps/web/src/realtime/
 ├── create-realtime-service.ts
 ├── realtime-provider-root.tsx
 └── adapters/
-    ├── web-realtime-service.ts
     ├── browser-socket.ts
     ├── browser-peer.ts
-    ├── desktop-realtime-service.ts
     ├── tauri-socket.ts
     └── native-peer.ts
 ```
@@ -585,9 +602,15 @@ apps/web/src/realtime/
 
 ```ts
 export function createRealtimeService(): RealtimeService {
-  return isTauri()
-    ? createDesktopRealtimeService()
-    : createWebRealtimeService();
+  return new WorkspaceRealtimeService(isTauri()
+    ? {
+        socketFactory: new TauriRealtimeSocketFactory(),
+        peerFactory: new NativeRealtimePeerFactory(),
+      }
+    : {
+        socketFactory: new BrowserRealtimeSocketFactory(),
+        peerFactory: new BrowserRealtimePeerFactory(),
+      });
 }
 ```
 
@@ -619,7 +642,8 @@ export function createRealtimeService(): RealtimeService {
 
 ### 14.3 RTC 恢复
 
-- RTC failed、closed、DataChannel closed、持续高 RTT/丢包或 backpressure 时立即回退 socket。
+- RTC failed、closed、DataChannel closed或持续高 RTT/丢包/backpressure 时回退 socket；单次
+  `rtcBackpressure` 只把当前帧溢出到 WebSocket，保留 Peer 及其已缓冲帧。
 - fallback 后清理旧 Peer handle，再按条件重新发起 Offer。
 - WebSocket 可靠队列清空前不晋升 RTC。
 - 两端 `transportReady` epoch 一致后才能标记 primary。
@@ -635,56 +659,58 @@ export function createRealtimeService(): RealtimeService {
 - 所有反序列化失败返回 `invalidFrame`，不能 panic 或继续处理部分数据。
 - remove collaborator 继续要求 owner 角色；Native 化不改变服务端鉴权。
 - Tauri 事件不携带本机路径、密钥或完整 ticket。
+- Worker 对 TURN API 返回的 ICE URL 去重，并按 STUN、TURN/UDP、TURN/TLS、TURN/TCP 的覆盖
+  优先级最多保留 4 个，避免过多 server 拖慢 ICE discovery。
 
 ## 16. 分阶段任务
 
 ### 阶段 0：冻结范围与完成 spike
 
-- [ ] 确认 Workspace Realtime V2 是唯一产品链路。
-- [ ] 通过引用、route 和构建检查列出可删除的旧 Room 网络代码。
-- [ ] 冻结当前 WebSocket/RTC route、ACK/NACK、probe、health 与 reconnect 行为。
-- [ ] 验证 Tauri WebSocket plugin 的 Text/Binary、close code、FIFO 和 capability。
+- [x] 确认 Workspace Realtime V2 是唯一产品链路。
+- [x] 通过引用、route 和构建检查列出并删除旧 Room 网络代码。
+- [x] 冻结当前 WebSocket/RTC route、ACK/NACK、probe、health 与 reconnect 行为。
+- [x] 通过 Adapter 测试和 macOS 编译验证 Tauri WebSocket 的 Text/Binary、close、FIFO 和 capability。
 - [ ] 验证 Rust `webrtc` 与 Browser WebRTC 的 DataChannel 互操作。
 - [ ] 测量 Native RTC 二进制 IPC 的吞吐、复制、内存和 UI 卡顿。
-- [ ] 冻结队列、frame、buffered amount 和 source chunk 上限。
+- [x] 冻结队列、frame、buffered amount 和 source chunk 上限。
 
 完成条件：可以用可重复测试证明 Desktop Native RTC 技术路径和二进制桥接可用。
 
 ### 阶段 1：冻结公共契约
 
-- [ ] 新建 `packages/shared/src/realtime/`。
-- [ ] 定义 Service、Session、Socket、Peer、Frame、State、Event 和 Error。
-- [ ] 为同步 eventId、异步发送结果和 delivery failure 定义语义。
-- [ ] 添加 Adapter contract tests。
+- [x] 新建 `packages/shared/src/realtime/`。
+- [x] 定义 Service、Session、Socket、Peer、Frame、State、Event 和 Error。
+- [x] 为同步 eventId、异步发送结果和 delivery failure 定义语义。
+- [x] 添加 FIFO、Browser、Tauri 和 Native Adapter contract tests。
 
 完成条件：Web/Desktop Adapter 可以使用同一测试套件，UI 不依赖任何平台类型。
 
 ### 阶段 2：包装现有 Web 实现
 
-- [ ] 把 `WorkspaceRealtimeClient` 拆为共享 Session Core 与 Browser factories。
-- [ ] 保留当前协议和运行行为，不在这一步调整 WebRTC 策略。
-- [ ] 新增 RealtimeProvider 并迁移 Workspace hooks。
-- [ ] 清除 Workspace 生产代码中的直接 `new WebSocket` 和 `new RTCPeerConnection`。
-- [ ] 完成现有 Web 回归测试。
+- [x] 把 `WorkspaceRealtimeClient` 拆为共享 Session Core 与 Browser factories。
+- [x] 保留当前协议和运行行为，不在这一步调整 WebRTC 策略。
+- [x] 新增 RealtimeProvider 并迁移 Workspace hooks。
+- [x] 清除 Workspace 生产代码中的直接 `new WebSocket` 和 `new RTCPeerConnection`。
+- [x] 完成现有 Web 静态检查和 Workspace/Adapter 回归测试。
 
 完成条件：Web 行为不变，业务只依赖 `RealtimeService`。
 
 ### 阶段 3：接入 Desktop WebSocket plugin
 
-- [ ] 在 workspace 依赖中加入 Tauri WebSocket plugin Rust 与 npm 包。
-- [ ] 由 `picbind-network` 导出 WebSocket plugin 注册入口。
-- [ ] 在 Desktop capability 加入最小 websocket 权限。
-- [ ] 实现 `TauriRealtimeSocketFactory` 和有界 FIFO 写队列。
+- [x] 在 workspace 依赖中加入 Tauri WebSocket plugin Rust 与 npm 包。
+- [x] 由 `picbind-network` 导出 WebSocket plugin 注册入口。
+- [x] 在 Desktop capability 加入仅限 `main` window 的 websocket 权限。
+- [x] 实现 `TauriRealtimeSocketFactory` 和有界 FIFO 写队列。
 - [ ] 验证 ticket、成员状态、信令和纯 WebSocket 业务传输。
 
 完成条件：Desktop 禁用 RTC 时可通过 Tauri WebSocket 完成 Workspace 协作。
 
 ### 阶段 4：实现 Native Rust WebRTC
 
-- [ ] 为 `picbind-network` 增加 `native-webrtc` 与 `tauri` features。
-- [ ] 实现 Rust Peer、ICE、Offer/Answer、candidate 和两条 ordered DataChannel。
-- [ ] 实现 Tauri Realtime plugin、commands、events、state 和 close。
-- [ ] 实现 Desktop `RealtimePeerFactory`。
+- [x] 为 `picbind-network` 增加 `native-webrtc` 与 `tauri` features。
+- [x] 实现 Rust Peer、ICE、Offer/Answer、candidate 和两条 ordered DataChannel。
+- [x] 实现 Tauri Realtime plugin、commands、raw events、state 和 close。
+- [x] 实现 Desktop `RealtimePeerFactory`。
 - [ ] 完成 Web-Desktop 与 Desktop-Desktop DataChannel 互操作测试。
 - [ ] 验证应用退出、页面关闭、Peer replacement 和异常断线清理。
 
@@ -692,9 +718,9 @@ export function createRealtimeService(): RealtimeService {
 
 ### 阶段 5：对齐路由、可靠性和弱网行为
 
-- [ ] 对齐 `TransportRouter` 与当前多 Peer route 语义。
-- [ ] 验证 ACK/NACK、sequence gap、reliable resend 和 delivery failure。
-- [ ] 验证 qualification、ready epoch、健康窗口和 backpressure。
+- [x] 对齐 `TransportRouter` 与当前多 Peer route 语义。
+- [x] 通过单元测试验证 ACK/NACK、sequence gap、reliable resend 和 delivery failure。
+- [x] 实现 qualification、ready epoch、健康窗口、入站限制和 backpressure，并覆盖核心单元测试。
 - [ ] 验证 socket reconnect 期间 RTC primary 的行为。
 - [ ] 验证 control 不被 bulk 大流量阻塞。
 
@@ -702,11 +728,14 @@ export function createRealtimeService(): RealtimeService {
 
 ### 阶段 6：清理旧 Room 和平台泄漏
 
-- [ ] 删除确认不可达的旧 Room WebSocket/WebRTC、route、export 和测试。
+- [x] 删除确认不可达的旧 Room WebSocket/WebRTC、route、export 和测试。
 - [ ] 保留仍被 Workspace 使用的通用 review、图片和存储模块，并按真实职责重命名。
-- [ ] 检查 `packages/ui` 不再导入 Tauri network API。
-- [ ] 检查业务代码没有 `isTauri()` 网络分支。
-- [ ] 更新仓库结构、协议和 Desktop 开发文档。
+- [x] 检查 `packages/ui` 不再导入 Tauri network API。
+- [x] 检查业务代码没有 `isTauri()` 网络分支。
+- [x] 更新仓库结构和 Desktop 开发文档。
+
+未勾选的重命名项仅指仍被 Workspace 使用的历史 `RoomImage` 等内部名称；旧 Room 网络实现和
+生产入口已经清零，不影响唯一协议边界。
 
 完成条件：仓库只有一套在用的 Workspace Realtime 业务协议和一套跨平台 Service 契约。
 
@@ -715,12 +744,31 @@ export function createRealtimeService(): RealtimeService {
 - [ ] 通过 Web-Web、Web-Desktop、Desktop-Desktop 全矩阵。
 - [ ] 完成 macOS、Windows、Linux Desktop 实机测试。
 - [ ] 验证安装包 capability、CSP 和生产 WSS/TURN 环境。
-- [ ] 记录 Native RTC feature flag 和回滚条件。
-- [ ] 删除临时诊断日志、测试开关和 fake transport。
+- [x] 记录 Native RTC feature 和回滚条件：Tauri build 使用 `tauri` feature，RTC 失败只回退
+  Tauri WebSocket，禁止回退 WebView RTC。
+- [x] 生产代码未保留临时诊断日志、测试开关或 fake transport。
 
 完成条件：Desktop 默认使用 Tauri WebSocket + Rust WebRTC，且不存在静默 WebView RTC 回退。
 
 ## 17. 测试矩阵
+
+### 17.0 当前验证结果
+
+2026-08-28 在 macOS Apple Silicon 本地完成：
+
+- Shared realtime contract：3 项通过。
+- Browser/Tauri/Native Adapter：13 项通过，覆盖 ArrayBuffer、ordered channel、ICE 暂存、
+  raw IPC FIFO、Rust 背压映射、sequence 丢弃、初始化失败清理、入站限制、FIFO drain 和
+  幂等 close。
+- Workspace tests：62 项通过，其中 realtime Core 覆盖多 Peer、逐目标路由、单 Peer 定向回退、
+  WebSocket 常驻、ACK、Trickle ICE、bulk 背压溢出、可靠 sequence 隔离和幂等 close。
+- Worker 普通测试 36 项、Worker runtime 测试 34 项通过，dry-run build 通过；TURN ICE URL
+  去重和上限另有定向覆盖。
+- `cargo test -p picbind-network --features tauri` 7 项通过，包含 Native event 并发有序派发；
+  `cargo check -p picbind-network --features tauri` 与 `cargo check -p picbind-desktop` 通过。
+- Shared、UI、Web TypeScript check 通过。
+
+以上结果是本地契约、单元和编译验证，不等价于下面的真实端到端、TURN、性能或长期资源测试。
 
 ### 17.1 Adapter 契约测试
 
@@ -766,7 +814,8 @@ export function createRealtimeService(): RealtimeService {
 - 100 次 Peer 创建/销毁后 Rust task、socket 和内存稳定。
 - 大 Binary IPC 不造成主线程长任务和不可控内存峰值。
 
-具体阈值在阶段 0 校对当前实现后冻结；若产品要修改阈值，应作为单独行为变更评审。
+算法阈值已冻结在 `REALTIME_LIMITS` / `REALTIME_QUALITY`；本节弱网场景和资源门槛仍需真实
+链路执行。若产品要修改阈值，应作为单独行为变更评审。
 
 ## 18. Review 清单
 
@@ -800,19 +849,31 @@ V1 只有满足以下条件才算完成：
 - 大 Binary Native RTC IPC 通过性能与内存门槛。
 - 页面和应用退出后没有残留连接、listener、timer、Tokio task 或 Peer handle。
 
+当前尚未满足完整 V1 验收：Web-Desktop/Desktop-Desktop 实机互操作、真实 TURN、Native bulk
+IPC 性能与内存、100 次 Peer 生命周期、生产 CSP/WSS/TURN、Windows 和 Linux 均未验证。
+因此当前状态是“实现与本地自动化完成，发布验收待执行”，不能标记为生产验收完成。
+
 ## 20. 相关文件与资料
 
 当前实现：
 
+- `packages/shared/src/realtime/`
+- `packages/ui/src/realtime/`
 - `packages/ui/src/workspace/realtime.ts`
 - `packages/ui/src/workspace/realtime-protocol.ts`
 - `packages/ui/src/workspace/realtime-client.test.ts`
 - `packages/ui/src/workspace/api.ts`
+- `apps/web/src/realtime/create-realtime-service.ts`
+- `apps/web/src/realtime/realtime-provider-root.tsx`
+- `apps/web/src/realtime/adapters/`
+- `crates/picbind-network/src/session/`
+- `crates/picbind-network/src/signaling/`
 - `crates/picbind-network/src/transfer/mod.rs`
-- `crates/picbind-network/src/websocket/mod.rs`
-- `crates/picbind-network/src/webrtc/mod.rs`
-- `crates/picbind-network/src/signaling/mod.rs`
-- `services/cloudflare-worker`
+- `crates/picbind-network/src/websocket/`
+- `crates/picbind-network/src/webrtc/`
+- `crates/picbind-network/src/tauri/`
+- `services/cloudflare-worker/src/realtime/workspace-object.ts`
+- `services/cloudflare-worker/src/realtime/turn-credentials.ts`
 
 参考：
 

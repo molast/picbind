@@ -1,7 +1,7 @@
 "use client";
 
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
-import type { RealtimeMessageChannel } from "./weak-network-socket";
+import type { RealtimeMessageChannel } from "./realtime-message-channel";
 import type { ImageObjectMetadata } from "./image-object";
 
 export const IMAGE_CHUNK_SIZE = 16 * 1024;

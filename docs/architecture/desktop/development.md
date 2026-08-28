@@ -108,7 +108,8 @@ pnpm build:web
 - Web 构建命令：`pnpm --dir ../web build`
 - 静态输出目录：`apps/web/out`
 - 应用标识：`com.picbind.desktop`
-- 主窗口 capability：`core:default`、`core:webview:allow-internal-toggle-devtools`
+- 主窗口 capability：`core:default`、`core:webview:allow-internal-toggle-devtools`、
+  `websocket:default`、`picbind-realtime:default`，仅授予 `main` window
 - 下载方式：Web 使用浏览器下载；Tauri 使用原生保存对话框和 Rust 二进制写入
 - OAuth 回调：使用 `http://127.0.0.1:<random-port>/picbind/oauth/callback`
 - 单实例：使用 `tauri-plugin-single-instance` 防止重复启动应用
@@ -134,14 +135,30 @@ Worker 完成 Provider code 兑换后，将浏览器重定向到该地址，并�
 `POST /api/auth/exchange`，最后将用户资料直接返回给 WebView。开发版和正式包、macOS、
 Windows 与 Linux 均使用相同流程，也不注册自定义 URL scheme。
 
+### 6.2 Desktop Realtime
+
+Workspace 实时协作通过应用组合根选择 transport：
+
+- WebSocket 使用 `@tauri-apps/plugin-websocket`，Text/Binary 转换和有界异步 FIFO 位于
+  `apps/web/src/realtime/adapters/tauri-socket.ts`。
+- WebRTC 使用 `crates/picbind-network` 的 Rust `webrtc = 0.14.0` 实现，通过
+  `picbind-realtime` Tauri plugin 暴露 Peer commands 和 raw binary event channel。
+- 公共层 Binary 始终是 `ArrayBuffer`；Native RTC 正式路径不使用 Base64。
+- RTC 晋升后 WebSocket 仍保持在线，承担信令、成员状态和可靠回退。
+- RTC 失败时只回退 Tauri WebSocket，不创建 WebView `RTCPeerConnection`。
+- 主窗口销毁或应用退出时，plugin 会 drain 并关闭所有 Native Peer。
+
+当前只通过 macOS 编译、契约和单元测试。真实 TURN、Web-Desktop/Desktop-Desktop 互操作、
+Native bulk IPC 性能与内存、Windows 和 Linux 尚未验证。
+
 ## 7. 当前限制
 
 - Tauri 仍复用现有 Web UI，但图片缓存已经使用 Rust Native Store。
 - 单图、ZIP、Room 图片和 favicon ZIP 通过统一 Download Repository 分流；Tauri 不依赖
   WKWebView 的 Blob `<a download>`。
 - 没有原生文件选择、菜单、托盘、通知或 Shell 权限。
-- Web/Tauri 差异只允许位于 `ImageStorageRepository` 的两个平台实现中；运行环境由统一
-  selector 选择一次，不进入业务 Repository、页面组件和业务 Store。
+- Web/Tauri 的存储、图片处理和 realtime 差异只允许位于各自平台 Adapter；运行环境由应用
+  组合层选择，不进入 Workspace 页面组件和业务 Store。
 - 压缩图、Room 和消息图片已使用分页元数据与按需 Blob 读取；兼容接口仍可显式恢复
   完整列表。
 - 当前开发阶段不迁移旧 Dexie + OPFS 图片缓存；存储结构调整后直接清理开发缓存。

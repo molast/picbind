@@ -1,6 +1,6 @@
 "use client";
 
-import { getRoomSdkConfig } from "../config";
+import { getPicBindUiConfig } from "../config";
 import { getLang, getShareRoomLabels } from "../locales";
 import type {
   RoomCompressionDimensions,
@@ -87,7 +87,7 @@ export function compressRoomImageTask(
       requestedFormat,
       targetWidth: dimensions?.width,
       targetHeight: dimensions?.height,
-      wasmBaseUrl: getRoomSdkConfig().wasmBaseUrl,
+      wasmBaseUrl: getPicBindUiConfig().wasmBaseUrl,
       encodingOptions,
     });
   });

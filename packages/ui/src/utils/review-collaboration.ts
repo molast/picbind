@@ -1,6 +1,6 @@
 "use client";
 
-import type { RealtimeMessageChannel } from "./weak-network-socket";
+import type { RealtimeMessageChannel } from "./realtime-message-channel";
 
 export type ReviewTool =
   | "select"

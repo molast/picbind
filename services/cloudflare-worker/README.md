@@ -1,8 +1,7 @@
 # PicBind Cloudflare Worker
 
-This Worker provides the API, Room, signaling, WebSocket fallback, and R2
-transfer services used by the Dioxus Web/Desktop applications. Weixin messaging
-runs directly in the Desktop Rust client and is not proxied by this Worker.
+This Worker provides PicBind API, authentication, Workspace Realtime V2
+signaling and WebSocket fallback for Web and Desktop clients.
 
 ## Routes
 
@@ -12,7 +11,6 @@ runs directly in the Desktop Rust client and is not proxied by this Worker.
 - `GET /api/admin/state?key=...`
 - `POST /api/admin/state?key=...`
 - `POST /api/seo/baidu/push?key=...`
-- `POST /api/realtime/room/create`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
@@ -105,9 +103,8 @@ Notes:
 - `METRICS_COUNTER`: Durable Object for high-frequency counters (`totalCompressed`, `totalViews`, `totalSavedBytes`, `formatStats`).
 - `GLOBAL_LIMITER`: Worker Rate Limiting binding (global limiter).
 - `ROUTE_LIMITER`: Worker Rate Limiting binding (route-level limiter).
-- `REALTIME_ROOMS`: Durable Object namespace for temporary share-room metadata.
 - `WORKSPACE_REALTIME`: Durable Object namespace for ephemeral Workspace WebSocket relay.
-- `SHARE_IMAGES_R2`: R2 bucket used for high-latency file-transfer fallback.
+- `SHARE_IMAGES_R2`: R2 bucket used for OAuth avatar storage.
 - `USER_DB`: D1 database for independent user profiles/sessions and persistent Workspace link records.
 - `AUTH_LIMITER`: stricter per-IP limiter for registration and login attempts.
 
@@ -117,19 +114,11 @@ Notes:
 - `ADMIN_KEY`: enables admin endpoints.
 - `SITE_URL`: canonical site URL.
 - `OAUTH_CALLBACK_ORIGIN`: public Worker origin used to build OAuth callback URLs.
-- `ROOM_URL`: optional standalone Room entry URL used for generated invite links.
 - `ALLOWED_ORIGINS`: comma-separated allowed origins.
 - `BAIDU_PUSH_SITE`: Baidu site URL. Defaults to `SITE_URL`.
 - `BAIDU_PUSH_TOKEN`: Baidu push token.
 - `TURN_TOKEN_ID`: Cloudflare TURN token ID. Kept Worker-side.
 - `TURN_API_TOKEN`: Cloudflare TURN API token used to generate short-lived ICE credentials.
-- `FILE_TRANSFER_MODE`: `r2`, `p2p`, or `auto`. `auto` uses R2 above the RTT threshold.
-- `R2_RTT_THRESHOLD_MS`: auto-mode R2 threshold. Defaults to `200`.
-- `R2_FILE_TTL_SECONDS`: object lifetime before Worker deletion. Defaults to `1800`.
-- `R2_BUCKET_NAME`: S3 API bucket name. Defaults to the configured bucket name.
-- `R2_ACCOUNT_ID`: Cloudflare account ID used for the R2 S3 endpoint.
-- `R2_ACCESS_KEY_ID`: R2 S3 API access key ID.
-- `R2_SECRET_ACCESS_KEY`: R2 S3 API secret access key.
 - `QINIU_ACCESS_KEY`: Qiniu server access key. Configure as a Worker secret.
 - `QINIU_SECRET_KEY`: Qiniu server secret key. Configure as a Worker secret.
 - `QINIU_BUCKET`: Qiniu bucket used for future room file storage.
@@ -187,8 +176,6 @@ For production, store the API tokens as Worker secrets:
 
 ```bash
 npx wrangler secret put TURN_API_TOKEN
-npx wrangler secret put R2_ACCESS_KEY_ID
-npx wrangler secret put R2_SECRET_ACCESS_KEY
 npx wrangler secret put QINIU_ACCESS_KEY
 npx wrangler secret put QINIU_SECRET_KEY
 npx wrangler secret put GOOGLE_CLIENT_ID
@@ -244,55 +231,16 @@ browser will receive only an object key, upload endpoint, and short-lived upload
 token when Qiniu room storage is enabled.
 
 Set `TURN_TOKEN_ID` as a Worker environment variable. The Worker generates
-one-hour ICE credentials and relays SDP signaling through the room Durable
-Object. Image bytes travel over a browser-to-browser WebRTC DataChannel; TURN is
-used only when a direct ICE candidate pair cannot connect.
-
-R2 hybrid transfer uses presigned S3 PUT/GET URLs, so image bytes do not pass
-through the Worker. Set `FILE_TRANSFER_MODE="r2"` to force R2 during testing,
-`"p2p"` to force DataChannel transfer, or `"auto"` to select R2 when the RTT
-reported at Send time exceeds `R2_RTT_THRESHOLD_MS`.
-
-The R2 bucket must allow browser uploads and downloads. The checked-in
-`r2-cors.json` includes the production, standalone Room, and local development
-origins. Apply it to the remote bucket after changing any allowed origin:
-
-```bash
-pnpm run r2:cors:apply
-```
-
-The active policy is equivalent to:
-
-```json
-[
-  {
-    "AllowedOrigins": [
-      "https://picbind.com",
-      "https://www.picbind.com",
-      "https://room.picbind.com",
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "http://localhost:4174",
-      "http://127.0.0.1:4174"
-    ],
-    "AllowedMethods": ["GET", "HEAD", "PUT"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-Configure an R2 lifecycle rule as a final cleanup fallback. The room Durable
-Object also tracks `uploaded -> shared -> downloading -> downloaded -> expired
--> deleted` and deletes the object when its TTL alarm fires.
+one-hour ICE credentials and relays SDP signaling through the Workspace Durable
+Object. Image bytes prefer the client-to-client WebRTC DataChannel and fall back
+to the Workspace WebSocket; TURN is used when a direct ICE candidate pair cannot
+connect.
 
 Recommended Worker env values:
 
 ```text
 SITE_URL=https://picbind.com
-ROOM_URL=https://room.picbind.com
-ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com,https://room.picbind.com
+ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com
 BAIDU_PUSH_SITE=https://picbind.com
 ADMIN_KEY=<your-admin-key>
 BAIDU_PUSH_TOKEN=<your-baidu-token>

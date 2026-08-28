@@ -16,6 +16,7 @@
     "dev": "vite --host 127.0.0.1 --port 4173",
     "check": "tsc --noEmit",
     "test:image-processing": "node --import tsx --test src/image-processing/contract.test.ts",
+    "test:realtime": "node --import tsx --test src/realtime/contract.test.ts",
     "build:sdk": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "build:preview": "vite build --outDir preview-dist",
     "build": "pnpm run build:sdk && pnpm run build:preview"

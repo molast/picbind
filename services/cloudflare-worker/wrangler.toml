@@ -26,10 +26,6 @@ name = "METRICS_COUNTER"
 class_name = "MetricsCounter"
 
 [[durable_objects.bindings]]
-name = "REALTIME_ROOMS"
-class_name = "ShareRoomObject"
-
-[[durable_objects.bindings]]
 name = "WORKSPACE_REALTIME"
 class_name = "WorkspaceRealtimeObject"
 
@@ -53,24 +49,18 @@ deleted_classes = ["WeixinMessagingObject"]
 tag = "v5"
 new_sqlite_classes = ["WorkspaceRealtimeObject"]
 
+[[migrations]]
+tag = "v6"
+deleted_classes = ["ShareRoomObject"]
+
 [vars]
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
-# Options: "p2p" forces WebRTC DataChannel, "r2" forces R2 transfer,
-# and "auto" uses R2 when RTT exceeds R2_RTT_THRESHOLD_MS, otherwise P2P.
-FILE_TRANSFER_MODE = "auto"
-MAX_IMAGE_TRANSFER_SIZE_MB = "10"
-R2_RTT_THRESHOLD_MS = "200"
-R2_FILE_TTL_SECONDS = "1800"
-R2_BUCKET_NAME = "picbind-bucket"
-R2_ACCOUNT_ID = "a3af9fe482ea605e4cc8b2496a45b806"
 # QINIU_ACCESS_KEY and QINIU_SECRET_KEY must be configured with Wrangler Secret.
 # QINIU_BUCKET and QINIU_UPLOAD_URL will be added when Qiniu room storage is enabled.
 SITE_URL = "https://picbind.com"
 OAUTH_CALLBACK_ORIGIN = "https://api.picbind.com"
-# Optional standalone Room deployment origin. Defaults to SITE_URL.
-# ROOM_URL = "https://room.picbind.com"
-ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,https://room.picbind.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:4174,http://127.0.0.1:4174,tauri://localhost,http://tauri.localhost"
+ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,http://localhost:3000,http://127.0.0.1:3000,tauri://localhost,http://tauri.localhost"
 TURN_TOKEN_ID = "b7372f7025974b852a03b856a4c3461f"
 
 [[ratelimits]]

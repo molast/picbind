@@ -19,6 +19,8 @@ pub fn run() {
             },
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(picbind_network::tauri::websocket_plugin())
+        .plugin(picbind_network::tauri::realtime_plugin())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let store =

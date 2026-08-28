@@ -1,6 +1,6 @@
 import React from "react";
+import type { RealtimeSession } from "@picbind/shared";
 import type { Collaborator, WorkspaceIdentity, WorkspaceImage } from "../types";
-import { WorkspaceRealtimeClient } from "../realtime";
 
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
@@ -10,7 +10,7 @@ export function useWorkspaceCollaborationCommands({ workspace, selected, onlineP
   onlinePeers: number;
   runtime: string;
   message: string;
-  realtimeRef: React.MutableRefObject<WorkspaceRealtimeClient | null>;
+  realtimeRef: React.MutableRefObject<RealtimeSession | null>;
   pendingSourceRequests: React.MutableRefObject<Map<string, { imageId: string; timer: number; eventId?: string }>>;
   finishSourceRequest: (value: { requestId?: string; eventId?: string; imageId?: string }) => void;
   setMessages: React.Dispatch<React.SetStateAction<Array<{ id: string; text: string; actor: string }>>>;

@@ -6,7 +6,6 @@ import Link from "next/link";
 import { isTauri } from "@tauri-apps/api/core";
 import { FiPlus } from "react-icons/fi";
 import { WorkspaceLanguageSwitcher, WorkspaceShareIdEntryDialog } from "@picbind/ui/source";
-import type { ShareRoom } from "@picbind/ui/source/types";
 import type { HomeCompressLandingCopy, Lang } from "@/locales";
 import type { HomeOutputFormat } from "./home-compression-types";
 import AccountControl from "@/components/auth/account-control";
@@ -25,9 +24,6 @@ type HomeHeroProps = {
   onFormatOptionsChange(open: boolean): void;
   onToggleFormat(format: HomeOutputFormat): void;
   onSelectAllFormats(): void;
-  onRoomCreated?(room: ShareRoom): void;
-  hasActiveRoom?: boolean;
-  onRestoreActiveRoom?(): void;
 };
 
 export default function HomeHero({
@@ -44,9 +40,6 @@ export default function HomeHero({
   onFormatOptionsChange,
   onToggleFormat,
   onSelectAllFormats,
-  onRoomCreated,
-  hasActiveRoom = false,
-  onRestoreActiveRoom,
 }: HomeHeroProps) {
   const [desktop, setDesktop] = React.useState(false);
   const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
@@ -236,6 +229,7 @@ export default function HomeHero({
       <WorkspaceShareIdEntryDialog
         open={workspaceEntryOpen}
         lang={lang}
+        desktop={desktop}
         onClose={() => setWorkspaceEntryOpen(false)}
       />
     </section>

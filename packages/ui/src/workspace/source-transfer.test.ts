@@ -47,6 +47,21 @@ test("waits for chunks that arrive after Source completion", async () => {
   assert.equal(missing.size, 0);
 });
 
+test("retains bounded chunks and completion that arrive before Source metadata", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const registry = new SourceTransferRegistry();
+  assert.equal(registry.push("request-1", 1, bytes.slice(2)), true);
+  assert.equal(await registry.complete("request-1"), null);
+  assert.equal(registry.has("request-1"), true);
+  assert.equal(registry.start(await manifest(bytes)), true);
+  assert.equal(registry.isCompletionPending("request-1"), true);
+  assert.equal(registry.push("request-1", 0, bytes.slice(0, 2)), true);
+
+  const completed = await registry.complete("request-1");
+  assert.deepEqual([...new Uint8Array(await completed!.source.arrayBuffer())], [...bytes]);
+  assert.equal(registry.size, 0);
+});
+
 test("rejects corrupt Source chunks and clears request state", async () => {
   const bytes = new Uint8Array([1, 2, 3, 4]);
   const corrupt = new SourceTransferRegistry();

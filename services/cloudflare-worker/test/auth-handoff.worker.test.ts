@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { ensureDefaultWorkspace, sha256 } from "../src/auth";
 import { ensureOAuthUser } from "../src/oauth";
 import { WORKSPACE_REALTIME_PROTOCOL } from "../src/realtime/workspace-v2-protocol";
-import { generateTurnIceServers } from "../src/realtime/share-room";
+import { generateTurnIceServers } from "../src/realtime/turn-credentials";
 
 type TestEnv = {
   USER_DB: D1Database;

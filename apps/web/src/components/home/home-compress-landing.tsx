@@ -7,52 +7,22 @@ import DesktopHome from "./desktop-home";
 import HomeHero from "./home-hero";
 import HomeInfoSection from "./home-info-section";
 import HomeResults from "./home-results";
-import RoomUnavailableDialog, {
-  type RoomUnavailableReason,
-} from "./room-unavailable-dialog";
 import { useHomeCompression } from "./use-home-compression";
 import type { Lang } from "@/locales";
-import type { ShareRoom } from "@picbind/ui/source/types";
 import { isTauri } from "@tauri-apps/api/core";
 
 type HomeCompressLandingProps = {
   initialLang: Lang;
-  onRoomCreated?(room: ShareRoom): void;
-  hasActiveRoom?: boolean;
-  onRestoreActiveRoom?(): void;
 };
 
 export default function HomeCompressLanding({
   initialLang,
-  onRoomCreated,
-  hasActiveRoom = false,
-  onRestoreActiveRoom,
 }: HomeCompressLandingProps) {
   const home = useHomeCompression({ initialLang });
   const [desktop, setDesktop] = React.useState<boolean | null>(null);
-  const [roomUnavailableReason, setRoomUnavailableReason] =
-    React.useState<RoomUnavailableReason | null>(null);
 
   React.useEffect(() => {
     setDesktop(isTauri());
-  }, []);
-
-  React.useEffect(() => {
-    const url = new URL(window.location.href);
-    const reason = url.searchParams.get("roomClosed") === "1"
-      ? "closed"
-      : url.searchParams.get("roomKicked") === "1"
-        ? "kicked"
-        : null;
-    if (!reason) return;
-    setRoomUnavailableReason(reason);
-    url.searchParams.delete("roomClosed");
-    url.searchParams.delete("roomKicked");
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${url.pathname}${url.search}${url.hash}`,
-    );
   }, []);
 
   if (!home.langReady || desktop === null) {
@@ -61,11 +31,7 @@ export default function HomeCompressLanding({
 
   if (desktop) {
     return (
-      <DesktopHome
-        home={home}
-        roomUnavailableReason={roomUnavailableReason}
-        onRoomUnavailableClose={() => setRoomUnavailableReason(null)}
-      />
+      <DesktopHome home={home} />
     );
   }
 
@@ -85,9 +51,6 @@ export default function HomeCompressLanding({
         onFormatOptionsChange={home.setShowFormatOptions}
         onToggleFormat={home.handleToggleFormat}
         onSelectAllFormats={home.handleSelectAllFormats}
-        onRoomCreated={onRoomCreated}
-        hasActiveRoom={hasActiveRoom}
-        onRestoreActiveRoom={onRestoreActiveRoom}
       />
 
       <input
@@ -145,11 +108,6 @@ export default function HomeCompressLanding({
         isCountBouncing={home.isCountBouncing}
       />
       <HomeFooter copy={home.copy} lang={home.lang} />
-      <RoomUnavailableDialog
-        lang={home.lang}
-        reason={roomUnavailableReason}
-        onClose={() => setRoomUnavailableReason(null)}
-      />
     </main>
   );
 }

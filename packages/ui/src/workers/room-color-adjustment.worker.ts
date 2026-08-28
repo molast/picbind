@@ -4,7 +4,7 @@ import {
   applyRoomColorAdjustments,
   type RoomColorAdjustments,
 } from "../utils/room-color-adjustments";
-import { configureRoomSdk } from "../config";
+import { configurePicBindUi } from "../config";
 import type { Lang } from "../locales";
 import {
   encodeRoomImageData,
@@ -33,7 +33,7 @@ async function decodeImage(blob: Blob) {
 self.onmessage = async (event: MessageEvent<ColorAdjustmentRequest>) => {
   let bitmap: ImageBitmap | null = null;
   try {
-    if (event.data.wasmBaseUrl) configureRoomSdk({ wasmBaseUrl: event.data.wasmBaseUrl });
+    if (event.data.wasmBaseUrl) configurePicBindUi({ wasmBaseUrl: event.data.wasmBaseUrl });
     bitmap = await decodeImage(event.data.image);
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const context = canvas.getContext("2d", { alpha: true });

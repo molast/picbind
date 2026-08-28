@@ -24,7 +24,10 @@ export async function joinWorkspace(shareToken: string) {
   return request<{ workspace: RemoteWorkspace }>(`/api/workspace-links/${encodeURIComponent(shareToken)}/join`, { method: "POST" });
 }
 
-export async function realtimeTicket(workspace: WorkspaceIdentity, clientId: string) {
+export async function realtimeTicket(
+  workspace: Pick<WorkspaceIdentity, "workspaceId" | "role" | "shareToken" | "ownerCapability">,
+  clientId: string,
+) {
   const owner = workspace.role === "owner";
   const path = owner
     ? `/api/workspaces/${encodeURIComponent(workspace.workspaceId)}/realtime-ticket`

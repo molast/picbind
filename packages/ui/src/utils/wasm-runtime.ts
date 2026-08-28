@@ -1,12 +1,12 @@
 "use client";
 
-import { getRoomSdkConfig } from "../config";
+import { getPicBindUiConfig } from "../config";
 
 let cachedMod: any = null;
 let cachedModPromise: Promise<any> | null = null;
 
 async function loadWasmModule() {
-  const configuredBaseUrl = getRoomSdkConfig().wasmBaseUrl?.trim();
+  const configuredBaseUrl = getPicBindUiConfig().wasmBaseUrl?.trim();
   if (!configuredBaseUrl) {
     return import("@picbind/image-wasm");
   }

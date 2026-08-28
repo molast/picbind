@@ -186,7 +186,10 @@ POST /api/site/view
 GET  /api/admin/state?key=...
 POST /api/admin/state?key=...
 POST /api/seo/baidu/push?key=...
-POST /api/realtime/room/create
+POST /api/workspaces
+POST /api/workspace-links/:shareId/realtime-ticket
+POST /api/workspaces/:workspaceId/realtime-ticket
+GET  /api/workspaces/:workspaceId/realtime-v2
 ```
 
 Worker 使用 Cloudflare KV 保存统计和页面配置。需要绑定：

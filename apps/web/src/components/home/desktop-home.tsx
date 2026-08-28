@@ -17,20 +17,13 @@ import {
 import AccountControl from "@/components/auth/account-control";
 import type { useHomeCompression } from "./use-home-compression";
 import DesktopHomeResults from "./desktop-home-results";
-import RoomUnavailableDialog, {
-  type RoomUnavailableReason,
-} from "./room-unavailable-dialog";
 
 type DesktopHomeProps = {
   home: ReturnType<typeof useHomeCompression>;
-  roomUnavailableReason: RoomUnavailableReason | null;
-  onRoomUnavailableClose(): void;
 };
 
 export default function DesktopHome({
   home,
-  roomUnavailableReason,
-  onRoomUnavailableClose,
 }: DesktopHomeProps) {
   const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
   const hasItems = home.sortedItems.length > 0;
@@ -205,12 +198,8 @@ export default function DesktopHome({
       <WorkspaceShareIdEntryDialog
         open={workspaceEntryOpen}
         lang={home.lang}
+        desktop
         onClose={() => setWorkspaceEntryOpen(false)}
-      />
-      <RoomUnavailableDialog
-        lang={home.lang}
-        reason={roomUnavailableReason}
-        onClose={onRoomUnavailableClose}
       />
     </main>
   );

@@ -15,25 +15,20 @@
     "./styles.css": "./dist/room.css",
     "./source": "./src/index.ts",
     "./source.css": "./src/embed.css",
-    "./source/config": "./src/config.ts",
     "./source/locales": "./src/locales/index.ts",
-    "./source/create-room-button": "./src/components/share/create-room-button.tsx",
     "./source/worker-version": "./src/worker-version.ts",
     "./source/worker-version-warning": "./src/components/share/worker-version-warning.tsx",
-    "./source/types": "./src/public-types.ts",
     "./source/image-storage": "./src/database/image-storage.ts",
     "./source/image-processing-web-runtime": "./src/image-processing/web-runtime.ts",
     "./source/download": "./src/download/index.ts"
   },
   "scripts": {
     "sync:worker-version": "node scripts/sync-worker-version.mjs",
-    "dev": "node scripts/sync-worker-version.mjs && vite --host 127.0.0.1 --port 4174",
     "check": "node scripts/sync-worker-version.mjs && tsc --noEmit",
     "test:storage": "node --import tsx --test src/database/repositories/web-image-storage-repository.test.ts",
     "test:workspace": "node --import tsx --test src/workspace/*.test.ts",
     "build:sdk": "node scripts/sync-worker-version.mjs && vite build --mode library && tsc -p tsconfig.build.json",
-    "build:preview": "node scripts/sync-worker-version.mjs && vite build --outDir preview-dist",
-    "build": "pnpm run build:sdk && pnpm run build:preview"
+    "build": "pnpm run build:sdk"
   },
   "peerDependencies": {
     "react": "^18.3.1",

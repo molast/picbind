@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-realtime-peer-create-answer"
+description = "Enables the realtime_peer_create_answer command without any pre-configured scope."
+commands.allow = ["realtime_peer_create_answer"]
+
+[[permission]]
+identifier = "deny-realtime-peer-create-answer"
+description = "Denies the realtime_peer_create_answer command without any pre-configured scope."
+commands.deny = ["realtime_peer_create_answer"]

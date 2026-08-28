@@ -1,5 +1,4 @@
 import React from "react";
-import { isTauri } from "@tauri-apps/api/core";
 import {
   FiCheck,
   FiHome,
@@ -48,6 +47,7 @@ type WorkspaceHeaderProps = {
   onlinePeers: number;
   collaborationOpen: boolean;
   copied: boolean;
+  desktop: boolean;
   lang: Lang;
   onLanguageChange(lang: Lang): void;
   onEnterWorkspace(): void;
@@ -63,6 +63,7 @@ export function WorkspaceHeader({
   onlinePeers,
   collaborationOpen,
   copied,
+  desktop,
   lang,
   onLanguageChange,
   onEnterWorkspace,
@@ -72,12 +73,6 @@ export function WorkspaceHeader({
   onSettings,
 }: WorkspaceHeaderProps) {
   const isOwner = workspace.role === "owner";
-  const [desktop, setDesktop] = React.useState(false);
-
-  React.useEffect(() => {
-    setDesktop(isTauri());
-  }, []);
-
   return <header
     className="relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 border-b border-[#dfe3e8] px-3 sm:gap-6 sm:px-[22px]"
     style={headerBackground(workspace.style)}

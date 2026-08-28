@@ -1,14 +1,11 @@
 "use client";
 
-export { default as ShareRoomPage } from "./components/share/share-room-page";
-export { default as CreateRoomButton } from "./components/share/create-room-button";
-export { configureRoomSdk } from "./config";
-export { ROOM_VERSION } from "./version";
 export { default as WorkerVersionWarning } from "./components/share/worker-version-warning";
 export { default as WorkspacePage } from "./workspace/page/workspace-page";
 export { WorkspaceLanguageSwitcher } from "./workspace/components/workspace-language-switcher";
 export { default as WorkspaceShareIdEntryDialog } from "./workspace/dialogs/workspace-share-id-entry-dialog";
 export * from "./image-processing";
+export * from "./realtime";
 export * from "./workspace/types";
 export {
   EXPECTED_WORKER_VERSION,
@@ -17,8 +14,6 @@ export {
   type WorkerVersionMismatch,
 } from "./worker-version";
 export * from "./messaging";
-export type { RoomSdkConfig } from "./config";
-export type { ShareRoom } from "./utils/share-room";
 export {
   getLang,
   getShareRoomLabels,
@@ -26,11 +21,6 @@ export {
   type Lang,
   type ShareRoomLabels,
 } from "./locales";
-export type {
-  ActivityItem,
-  ConnectionState,
-  RoomImage,
-} from "./components/share/share-room-types";
 export type { ImagePlaceholderMetadata } from "./utils/share-placeholder";
 export type {
   ReviewAnchor,

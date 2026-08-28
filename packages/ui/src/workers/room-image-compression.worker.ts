@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { configureRoomSdk } from "../config";
+import { configurePicBindUi } from "../config";
 import { getShareRoomLabels } from "../locales";
 import type { Lang } from "../locales";
 import {
@@ -23,7 +23,7 @@ type CompressionRequest = {
 self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
   const { image, lang, allowAlphaLoss = false, requestedFormat, targetWidth, targetHeight, wasmBaseUrl, encodingOptions } = event.data;
   try {
-    if (wasmBaseUrl) configureRoomSdk({ wasmBaseUrl });
+    if (wasmBaseUrl) configurePicBindUi({ wasmBaseUrl });
     const dimensions =
       targetWidth !== undefined && targetHeight !== undefined
         ? { width: targetWidth, height: targetHeight }

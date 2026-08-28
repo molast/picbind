@@ -1,5 +1,6 @@
 export { emojiToSvg, firstGrapheme } from "./utils/emoji";
 export * from "./image-processing";
+export * from "./realtime";
 export {
   createMotionIntent,
   parseMotionIntent,

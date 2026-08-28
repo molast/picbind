@@ -3,6 +3,14 @@ import type { RoomEventItem } from "../../utils/room-event";
 
 export type ConnectionState = "waiting" | "connecting" | "connected" | "error";
 export type MessageTransportMode = "p2p" | "relay";
+export type RoomRole = "owner" | "guest";
+
+export type RoomMemberPresence = {
+  clientId: string;
+  role: RoomRole;
+  status: "online" | "offline";
+  leftAt?: number;
+};
 
 export type ActivityItem = RoomEventItem;
 

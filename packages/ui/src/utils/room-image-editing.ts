@@ -8,7 +8,7 @@ import {
 } from "./room-color-adjustments";
 import type { RoomCompressionFormat } from "./room-image-compression";
 import { compressRoomImageTask } from "./room-image-compression-task";
-import { getRoomSdkConfig } from "../config";
+import { getPicBindUiConfig } from "../config";
 export type { RoomColorAdjustments } from "./room-color-adjustments";
 
 export type RoomImageEditResult = {
@@ -130,7 +130,7 @@ function adjustPixelsInWorker(
       lang: getLang(),
       sourceSizeBytes: image.size,
       encodingOptions: editingEncodingPreset(format),
-      wasmBaseUrl: getRoomSdkConfig().wasmBaseUrl,
+      wasmBaseUrl: getPicBindUiConfig().wasmBaseUrl,
     });
   });
 }

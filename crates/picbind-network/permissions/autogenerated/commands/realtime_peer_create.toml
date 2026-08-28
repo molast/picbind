@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-realtime-peer-create"
+description = "Enables the realtime_peer_create command without any pre-configured scope."
+commands.allow = ["realtime_peer_create"]
+
+[[permission]]
+identifier = "deny-realtime-peer-create"
+description = "Denies the realtime_peer_create command without any pre-configured scope."
+commands.deny = ["realtime_peer_create"]

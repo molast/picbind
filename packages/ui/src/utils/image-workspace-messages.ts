@@ -2,7 +2,7 @@
 
 import type { ImageObjectMetadata } from "./image-object";
 import type { ImagePlaceholderMetadata } from "./share-placeholder";
-import type { RealtimeMessageChannel } from "./weak-network-socket";
+import type { RealtimeMessageChannel } from "./realtime-message-channel";
 
 export type ImageShareDescriptor = ImageObjectMetadata & {
   imageId: string;

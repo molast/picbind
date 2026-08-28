@@ -95,6 +95,7 @@ function DesktopHeader({ generator }: { generator: FaviconGenerator }) {
       <WorkspaceShareIdEntryDialog
         open={workspaceEntryOpen}
         lang={generator.lang}
+        desktop
         onClose={() => setWorkspaceEntryOpen(false)}
       />
     </>

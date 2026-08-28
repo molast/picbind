@@ -3,7 +3,7 @@
 import React from "react";
 
 import { FiMessageCircle, FiSend, FiUser, FiX } from "react-icons/fi";
-import type { RoomMemberPresence } from "../../../utils/realtime-room";
+import type { RoomMemberPresence } from "../share-room-types";
 import type { MessagingProviderSnapshot } from "../../../messaging";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { ImageDelivery } from "../../../database/repositories/image-delivery-repository";

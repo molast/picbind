@@ -3,7 +3,7 @@
 import React from "react";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { RoomImage } from "../share-room-types";
-import type { RoomRole } from "../../../utils/realtime-room";
+import type { RoomRole } from "../share-room-types";
 import type {
   ReviewAnchor,
   ReviewAnnotation,

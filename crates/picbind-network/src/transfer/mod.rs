@@ -1,4 +1,6 @@
-use picbind_protocol::events::{DataClass, Reliability, WorkspaceEvent};
+use std::collections::{HashMap, HashSet};
+
+use picbind_protocol::events::{Reliability, WorkspaceEvent};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Transport {
@@ -8,74 +10,138 @@ pub enum Transport {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RtcQualification {
-    pub channel_open: bool,
-    pub heartbeat_ack: bool,
-    pub test_message_ack: bool,
+    pub control_open: bool,
+    pub bulk_open: bool,
+    pub probe_acknowledged: bool,
+    pub stable: bool,
+    pub ready_epoch_matches: bool,
 }
 
 impl RtcQualification {
     pub fn qualified(self) -> bool {
-        self.channel_open && self.heartbeat_ack && self.test_message_ack
+        self.control_open
+            && self.bulk_open
+            && self.probe_acknowledged
+            && self.stable
+            && self.ready_epoch_matches
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionRole {
+    Owner,
+    Collaborator,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RelayRoute<'a> {
+    Workspace,
+    Owner,
+    User(&'a str),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransportTarget {
+    pub user_id: Option<String>,
+    pub transport: Transport,
+    pub targeted_socket_relay: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct TransportRouter {
-    active: Transport,
-    rtc: RtcQualification,
-    reliable_ws_queue: usize,
-}
-
-impl Default for TransportRouter {
-    fn default() -> Self {
-        Self {
-            active: Transport::WebSocket,
-            rtc: RtcQualification::default(),
-            reliable_ws_queue: 0,
-        }
-    }
+    peers: HashMap<String, RtcQualification>,
+    online_collaborators: HashSet<String>,
+    reliable_ws_events: HashSet<String>,
 }
 
 impl TransportRouter {
-    pub fn active(&self) -> Transport {
-        self.active
-    }
     pub fn queued_reliable(&self) -> usize {
-        self.reliable_ws_queue
+        self.reliable_ws_events.len()
     }
+
     pub fn record_ws_enqueue(&mut self, event: &WorkspaceEvent) {
         if event.reliability == Reliability::Reliable {
-            self.reliable_ws_queue += 1;
+            self.reliable_ws_events.insert(event.event_id.clone());
         }
     }
-    pub fn record_ws_ack(&mut self) {
-        self.reliable_ws_queue = self.reliable_ws_queue.saturating_sub(1);
-        self.try_promote();
+
+    pub fn record_ws_ack(&mut self, event_id: &str) {
+        self.reliable_ws_events.remove(event_id);
     }
-    pub fn set_rtc_qualification(&mut self, value: RtcQualification) {
-        self.rtc = value;
-        self.try_promote();
-    }
-    fn try_promote(&mut self) {
-        if self.rtc.qualified() && self.reliable_ws_queue == 0 {
-            self.active = Transport::WebRtc;
+
+    pub fn set_collaborator_online(&mut self, user_id: impl Into<String>, online: bool) {
+        let user_id = user_id.into();
+        if online {
+            self.online_collaborators.insert(user_id);
+        } else {
+            self.online_collaborators.remove(&user_id);
+            self.peers.remove(&user_id);
         }
     }
-    pub fn rtc_failed(&mut self) {
-        self.active = Transport::WebSocket;
-        self.rtc = RtcQualification::default();
+
+    pub fn set_rtc_qualification(&mut self, user_id: impl Into<String>, value: RtcQualification) {
+        self.peers.insert(user_id.into(), value);
     }
-    pub fn route(&self, event: &WorkspaceEvent) -> Transport {
-        if self.active == Transport::WebRtc
-            && matches!(
-                event.data_class,
-                DataClass::Preview | DataClass::SourceOrCommit
-            )
-            && event.kind != "commitCreated"
+
+    pub fn rtc_failed(&mut self, user_id: &str) {
+        self.peers.remove(user_id);
+    }
+
+    pub fn active_for(&self, user_id: &str) -> Transport {
+        if self.reliable_ws_events.is_empty()
+            && self
+                .peers
+                .get(user_id)
+                .is_some_and(|value| value.qualified())
         {
             Transport::WebRtc
         } else {
             Transport::WebSocket
+        }
+    }
+
+    pub fn route(&self, role: SessionRole, route: RelayRoute<'_>) -> Vec<TransportTarget> {
+        if role == SessionRole::Collaborator {
+            return vec![TransportTarget {
+                user_id: Some("owner".into()),
+                transport: self.active_for("owner"),
+                targeted_socket_relay: false,
+            }];
+        }
+
+        match route {
+            RelayRoute::User(user_id) => vec![TransportTarget {
+                user_id: Some(user_id.into()),
+                transport: self.active_for(user_id),
+                targeted_socket_relay: false,
+            }],
+            RelayRoute::Owner => vec![TransportTarget {
+                user_id: None,
+                transport: Transport::WebSocket,
+                targeted_socket_relay: false,
+            }],
+            RelayRoute::Workspace if self.online_collaborators.is_empty() => {
+                vec![TransportTarget {
+                    user_id: None,
+                    transport: Transport::WebSocket,
+                    targeted_socket_relay: false,
+                }]
+            }
+            RelayRoute::Workspace => {
+                let mut users = self.online_collaborators.iter().collect::<Vec<_>>();
+                users.sort();
+                users
+                    .into_iter()
+                    .map(|user_id| {
+                        let transport = self.active_for(user_id);
+                        TransportTarget {
+                            user_id: Some(user_id.clone()),
+                            transport,
+                            targeted_socket_relay: transport == Transport::WebSocket,
+                        }
+                    })
+                    .collect()
+            }
         }
     }
 }
@@ -83,10 +149,12 @@ impl TransportRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use picbind_protocol::events::DataClass;
     use serde_json::Value;
-    fn event() -> WorkspaceEvent {
+
+    fn event(id: &str) -> WorkspaceEvent {
         WorkspaceEvent {
-            event_id: "e".into(),
+            event_id: id.into(),
             sequence: 1,
             timestamp: 0,
             data_class: DataClass::Preview,
@@ -95,28 +163,59 @@ mod tests {
             payload: Value::Null,
         }
     }
-    #[test]
-    fn rtc_requires_all_checks_and_drained_queue() {
-        let mut r = TransportRouter::default();
-        r.record_ws_enqueue(&event());
-        r.set_rtc_qualification(RtcQualification {
-            channel_open: true,
-            heartbeat_ack: true,
-            test_message_ack: true,
-        });
-        assert_eq!(r.active(), Transport::WebSocket);
-        r.record_ws_ack();
-        assert_eq!(r.active(), Transport::WebRtc);
+
+    fn qualified() -> RtcQualification {
+        RtcQualification {
+            control_open: true,
+            bulk_open: true,
+            probe_acknowledged: true,
+            stable: true,
+            ready_epoch_matches: true,
+        }
     }
+
     #[test]
-    fn rtc_failure_immediately_falls_back() {
-        let mut r = TransportRouter::default();
-        r.set_rtc_qualification(RtcQualification {
-            channel_open: true,
-            heartbeat_ack: true,
-            test_message_ack: true,
-        });
-        r.rtc_failed();
-        assert_eq!(r.active(), Transport::WebSocket);
+    fn rtc_requires_qualification_and_a_drained_reliable_queue() {
+        let mut router = TransportRouter::default();
+        router.set_rtc_qualification("guest-1", qualified());
+        router.record_ws_enqueue(&event("event-1"));
+        assert_eq!(router.active_for("guest-1"), Transport::WebSocket);
+        router.record_ws_ack("event-1");
+        assert_eq!(router.active_for("guest-1"), Transport::WebRtc);
+    }
+
+    #[test]
+    fn owner_workspace_broadcast_routes_each_peer_independently() {
+        let mut router = TransportRouter::default();
+        router.set_collaborator_online("guest-rtc", true);
+        router.set_collaborator_online("guest-socket", true);
+        router.set_rtc_qualification("guest-rtc", qualified());
+
+        let targets = router.route(SessionRole::Owner, RelayRoute::Workspace);
+        assert_eq!(
+            targets,
+            vec![
+                TransportTarget {
+                    user_id: Some("guest-rtc".into()),
+                    transport: Transport::WebRtc,
+                    targeted_socket_relay: false,
+                },
+                TransportTarget {
+                    user_id: Some("guest-socket".into()),
+                    transport: Transport::WebSocket,
+                    targeted_socket_relay: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn one_peer_failure_does_not_demote_other_peers() {
+        let mut router = TransportRouter::default();
+        router.set_rtc_qualification("guest-1", qualified());
+        router.set_rtc_qualification("guest-2", qualified());
+        router.rtc_failed("guest-1");
+        assert_eq!(router.active_for("guest-1"), Transport::WebSocket);
+        assert_eq!(router.active_for("guest-2"), Transport::WebRtc);
     }
 }

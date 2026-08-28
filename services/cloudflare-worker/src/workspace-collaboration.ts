@@ -7,7 +7,7 @@ import {
   uuidV7,
   type AuthEnv,
 } from "./auth";
-import { generateTurnIceServers } from "./realtime/share-room";
+import { generateTurnIceServers } from "./realtime/turn-credentials";
 import {
   WORKSPACE_REALTIME_PROTOCOL,
   WORKSPACE_TICKET_BYTES,

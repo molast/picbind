@@ -1,5 +1,23 @@
 import { realtimeTicket } from "./api";
 import {
+  REALTIME_LIMITS,
+  REALTIME_QUALITY,
+  RealtimeTransportError,
+  realtimeFrameBytes,
+  toRealtimeError,
+  type RealtimeFrame,
+  type RealtimeIceCandidate,
+  type RealtimePeer,
+  type RealtimePeerConnectionState,
+  type RealtimePeerFactory,
+  type RealtimeSendOptions,
+  type RealtimeSession,
+  type RealtimeSessionEvent,
+  type RealtimeSessionState,
+  type RealtimeSocket,
+  type RealtimeSocketFactory,
+} from "@picbind/shared";
+import {
   decodeBinaryRelay,
   encodeBinaryRelay,
   streamId,
@@ -7,18 +25,14 @@ import {
   type RelayRoute,
   WorkspaceEventGate,
 } from "./realtime-protocol";
-import type { WorkspaceEvent, WorkspaceIdentity } from "./types";
+import type { WorkspaceEvent } from "./types";
 
-type Listener = (event: WorkspaceEvent | Record<string, unknown>) => void;
+type Listener = (event: RealtimeSessionEvent) => void;
 type Transport = "socket" | "rtc";
-type SendOptions = {
-  route?: RelayRoute;
-  targetUserId?: string;
-  delivery?: RelayDelivery;
-  dataClass?: WorkspaceEvent["dataClass"];
-};
+type SendOptions = RealtimeSendOptions;
 type PendingFrame = {
-  frame: string | ArrayBuffer;
+  frame: RealtimeFrame;
+  bytes: number;
   delivery: RelayDelivery;
   dataClass: WorkspaceEvent["dataClass"];
 };
@@ -26,10 +40,12 @@ type Probe = { sentAt: number; qualification: boolean; timeout: number };
 type PeerState = {
   key: string;
   userId: string;
-  pc: RTCPeerConnection;
-  control: RTCDataChannel | null;
-  bulk: RTCDataChannel | null;
-  candidates: RTCIceCandidateInit[];
+  peer: RealtimePeer;
+  unsubscribe: () => void;
+  connectionState: RealtimePeerConnectionState;
+  controlOpen: boolean;
+  bulkOpen: boolean;
+  candidates: RealtimeIceCandidate[];
   probes: Map<string, Probe>;
   qualificationRtts: number[];
   healthOutcomes: boolean[];
@@ -44,33 +60,25 @@ type PeerState = {
   fallingBack: boolean;
 };
 
-const CLIENT_ID_KEY = "picbind.workspace.client-id";
-const RTC_QUALITY = Object.freeze({
-  requiredQualificationProbes: 3,
-  maximumQualificationRttMs: 500,
-  minimumStableMs: 2_000,
-  healthIntervalMs: 2_000,
-  probeTimeoutMs: 2_500,
-  disconnectedFallbackMs: 3_000,
-  maximumBufferedBytes: 1024 * 1024,
-  degradedRttMs: 1_500,
-  degradedWindowMs: 5_000,
-  maximumLossRate: 0.3,
-  healthWindowSize: 10,
-});
+export type WorkspaceRealtimeDependencies = {
+  socketFactory: RealtimeSocketFactory;
+  peerFactory: RealtimePeerFactory;
+};
 
-function persistentClientId() {
-  let value = localStorage.getItem(CLIENT_ID_KEY);
-  if (!value) {
-    value = `client_${crypto.randomUUID()}`;
-    localStorage.setItem(CLIENT_ID_KEY, value);
-  }
-  return value;
-}
+export type WorkspaceRealtimeIdentity = {
+  workspaceId: string;
+  role: "owner" | "collaborator";
+  shareToken: string | null;
+  ownerCapability: string | null;
+};
 
-export class WorkspaceRealtimeClient {
-  private socket: WebSocket | null = null;
+export class WorkspaceRealtimeClient implements RealtimeSession {
+  readonly id = crypto.randomUUID();
+  private socket: RealtimeSocket | null = null;
+  private socketUnsubscribe: (() => void) | null = null;
+  private socketGeneration = 0;
   private readonly peers = new Map<string, PeerState>();
+  private readonly pendingCandidates = new Map<string, RealtimeIceCandidate[]>();
   private readonly listeners = new Set<Listener>();
   private readonly reliable = new Map<string, PendingFrame>();
   private readonly reliableTypes = new Map<string, string>();
@@ -78,17 +86,27 @@ export class WorkspaceRealtimeClient {
   private readonly eventGate = new WorkspaceEventGate();
   private readonly timers = new Set<number>();
   private readonly onlineCollaborators = new Set<string>();
-  private readonly localClientId = persistentClientId();
   private readonly localUserId: string;
+  private reliableBytes = 0;
   private reconnectTimer: number | null = null;
   private reconnectAttempt = 0;
   private disposed = false;
   private ownerOnline = false;
-  private iceServers: RTCIceServer[] = [];
-  state: "idle" | "socket" | "rtc" | "unavailable" = "idle";
+  private iceServers: import("@picbind/shared").RealtimeIceServer[] = [];
+  private currentState: RealtimeSessionState = "idle";
+  private connectPromise: Promise<void> | null = null;
+  private closePromise: Promise<void> | null = null;
 
-  constructor(private workspace: WorkspaceIdentity) {
+  constructor(
+    private workspace: WorkspaceRealtimeIdentity,
+    private readonly dependencies: WorkspaceRealtimeDependencies,
+    private readonly localClientId: string,
+  ) {
     this.localUserId = `${workspace.role === "owner" ? "owner" : "guest"}-${this.localClientId}`;
+  }
+
+  get state() {
+    return this.currentState;
   }
 
   subscribe(listener: Listener) {
@@ -96,8 +114,14 @@ export class WorkspaceRealtimeClient {
     return () => this.listeners.delete(listener);
   }
 
-  private emit(value: WorkspaceEvent | Record<string, unknown>) {
+  private emit(value: RealtimeSessionEvent) {
     this.listeners.forEach((listener) => listener(value));
+  }
+
+  private setState(state: RealtimeSessionState) {
+    if (this.currentState === state) return;
+    this.currentState = state;
+    this.emit({ type: "stateChanged", state });
   }
 
   private schedule(callback: () => void, delay: number) {
@@ -110,8 +134,33 @@ export class WorkspaceRealtimeClient {
   }
 
   async connect() {
-    this.disposed = false;
-    const ticket = await realtimeTicket(this.workspace, this.localClientId);
+    if (this.disposed) return;
+    if (this.connectPromise) return this.connectPromise;
+    this.connectPromise = (async () => {
+      try {
+        await this.connectTransport();
+      } catch (error) {
+        if (this.disposed) return;
+        this.emit({
+          type: "error",
+          error: toRealtimeError(error, {
+            code: "socketConnectFailed",
+            message: "Realtime connection failed",
+            retryable: true,
+          }),
+        });
+        this.setState(this.hasPrimaryPeer() ? "rtc" : "unavailable");
+        this.scheduleReconnect();
+      }
+    })().finally(() => { this.connectPromise = null; });
+    return this.connectPromise;
+  }
+
+  private async connectTransport() {
+    this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
+    const ticket = await realtimeTicket(this.workspace, this.localClientId).catch((error) => {
+      throw new RealtimeTransportError("ticketFailed", "Realtime ticket request failed", true, error);
+    });
     if (this.disposed) return;
     this.iceServers = ticket.iceServers;
     if (this.workspace.role === "collaborator" && ticket.workspaceId) {
@@ -123,34 +172,51 @@ export class WorkspaceRealtimeClient {
     );
     url.protocol = "wss:";
     url.searchParams.set("ticket", ticket.ticket);
-    const socket = new WebSocket(url);
-    socket.binaryType = "arraybuffer";
+    const generation = ++this.socketGeneration;
+    const socket = await this.dependencies.socketFactory.connect({ url: url.toString() }).catch((error) => {
+      throw new RealtimeTransportError("socketConnectFailed", "Realtime socket connection failed", true, error);
+    });
+    if (this.disposed || generation !== this.socketGeneration) {
+      await socket.close(1000, "stale-generation");
+      return;
+    }
+    this.socketUnsubscribe?.();
     this.socket = socket;
-    socket.onopen = () => {
+    const open = () => {
       this.reconnectAttempt = 0;
-      this.state = this.hasPrimaryPeer() ? "rtc" : "socket";
+      this.setState(this.hasPrimaryPeer() ? "rtc" : "socket");
       this.flushReliable();
     };
-    socket.onmessage = (message) => this.receive(message.data as string | ArrayBuffer, "socket");
-    socket.onerror = () => {
-      if (!this.hasPrimaryPeer()) this.state = "unavailable";
-    };
-    socket.onclose = () => {
-      if (this.socket === socket) this.socket = null;
-      if (this.disposed) return;
-      this.state = this.hasPrimaryPeer() ? "rtc" : "unavailable";
-      this.scheduleReconnect();
-    };
+    this.socketUnsubscribe = socket.subscribe((event) => {
+      if (generation !== this.socketGeneration || this.socket !== socket) return;
+      if (event.type === "open") open();
+      else if (event.type === "message") this.receive(event.frame, "socket");
+      else if (event.type === "error") {
+        this.emit({ type: "error", error: event.error });
+        if (!this.hasPrimaryPeer()) this.setState("unavailable");
+      } else if (event.type === "close") {
+        this.socketUnsubscribe?.();
+        this.socketUnsubscribe = null;
+        if (this.socket === socket) this.socket = null;
+        if (this.disposed) return;
+        this.setState(this.hasPrimaryPeer() ? "rtc" : "unavailable");
+        this.scheduleReconnect();
+      }
+    });
+    if (socket.state === "open") open();
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer !== null || this.disposed) return;
-    const baseDelay = Math.min(1_500 * (2 ** this.reconnectAttempt), 15_000);
+    const baseDelay = Math.min(
+      REALTIME_QUALITY.reconnectInitialDelayMs * (2 ** this.reconnectAttempt),
+      REALTIME_QUALITY.reconnectMaximumDelayMs,
+    );
     const delay = Math.floor(baseDelay * (0.8 + Math.random() * 0.4));
     this.reconnectAttempt += 1;
     this.reconnectTimer = this.schedule(() => {
       this.reconnectTimer = null;
-      void this.connect().catch(() => this.scheduleReconnect());
+      void this.connect();
     }, delay);
   }
 
@@ -158,21 +224,31 @@ export class WorkspaceRealtimeClient {
     return this.workspace.role === "collaborator" ? "owner" : senderId || "";
   }
 
-  private receive(raw: string | ArrayBuffer, transport: Transport, rtcPeer?: PeerState) {
+  private receive(frame: RealtimeFrame, transport: Transport, rtcPeer?: PeerState) {
     let value: Record<string, unknown>;
-    if (raw instanceof ArrayBuffer) {
-      const decoded = decodeBinaryRelay(raw);
+    if (frame.kind === "binary") {
+      const decoded = decodeBinaryRelay(frame.data);
       if (!decoded) return;
       value = { type: "workspaceRelay", event: { ...decoded.event, bytes: decoded.bytes } };
     } else {
       try {
-        value = JSON.parse(raw) as Record<string, unknown>;
+        value = JSON.parse(frame.data) as Record<string, unknown>;
       } catch {
+        this.emit({
+          type: "error",
+          error: new RealtimeTransportError(
+            "invalidFrame",
+            "Realtime text frame is not valid JSON",
+            false,
+          ).toRealtimeError(),
+        });
         return;
       }
     }
 
     if (value.type === "eventAck" && typeof value.eventId === "string") {
+      const pending = this.reliable.get(value.eventId);
+      if (pending) this.reliableBytes -= pending.bytes;
       this.reliable.delete(value.eventId);
       this.reliableTypes.delete(value.eventId);
       this.peers.forEach((peer) => this.qualifyPeer(peer));
@@ -180,6 +256,8 @@ export class WorkspaceRealtimeClient {
     }
     if (value.type === "eventNack" && typeof value.eventId === "string") {
       const eventType = this.reliableTypes.get(value.eventId);
+      const pending = this.reliable.get(value.eventId);
+      if (pending) this.reliableBytes -= pending.bytes;
       this.reliable.delete(value.eventId);
       this.reliableTypes.delete(value.eventId);
       this.emit({ type: "deliveryFailed", eventId: value.eventId, eventType });
@@ -275,20 +353,22 @@ export class WorkspaceRealtimeClient {
       this.emit(event);
       return;
     }
-    this.emit({ ...value, transport });
+    this.emit({ ...value, type: typeof value.type === "string" ? value.type : "message", transport });
   }
 
   private nextEvent(type: string, payload: Record<string, unknown>, options: SendOptions) {
     const route = options.route || "workspace";
     const eventStream = streamId(route, options.targetUserId);
-    const sequence = (this.sequences.get(eventStream) || 0) + 1;
-    this.sequences.set(eventStream, sequence);
+    const reliability = options.delivery || "reliable";
+    const sequenceStream = `${reliability}:${eventStream}`;
+    const sequence = (this.sequences.get(sequenceStream) || 0) + 1;
+    this.sequences.set(sequenceStream, sequence);
     return {
       eventId: crypto.randomUUID(),
       sequence,
       timestamp: Date.now(),
       dataClass: options.dataClass || "collaborationEvent",
-      reliability: options.delivery || "reliable",
+      reliability,
       streamId: eventStream,
       senderId: this.localUserId,
       senderName: this.workspace.role === "owner" ? "Owner" : "Guest",
@@ -301,14 +381,17 @@ export class WorkspaceRealtimeClient {
   send(type: string, payload: Record<string, unknown>, options: SendOptions = {}) {
     const event = this.nextEvent(type, payload, options);
     const frame = this.encodeJsonFrame(event, options.route || "workspace", options.targetUserId);
-    this.rememberReliable(event, frame, options);
+    if (!this.rememberReliable(event, frame, options)) return event.eventId;
     this.routeFrame(frame, event, options);
     return event.eventId;
   }
 
-  removeCollaborator(userId: string) {
-    if (this.workspace.role !== "owner" || !userId || this.socket?.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(JSON.stringify({ type: "memberKick", targetUserId: userId }));
+  async removeCollaborator(userId: string) {
+    if (this.workspace.role !== "owner" || !userId || this.socket?.state !== "open") return false;
+    await this.socket.send({
+      kind: "text",
+      data: JSON.stringify({ type: "memberKick", targetUserId: userId }),
+    });
     return true;
   }
 
@@ -319,43 +402,75 @@ export class WorkspaceRealtimeClient {
     options: Omit<SendOptions, "delivery"> & { delivery?: "reliable" | "bulk" } = {},
   ) {
     const event = this.nextEvent(type, payload, options);
-    const frame = encodeBinaryRelay({
-      route: options.route || "workspace",
-      targetUserId: options.targetUserId,
-      delivery: options.delivery || "bulk",
-      event,
-      bytes: binary,
-    });
-    this.rememberReliable(event, frame, options);
+    let frame: RealtimeFrame;
+    try {
+      frame = { kind: "binary", data: encodeBinaryRelay({
+        route: options.route || "workspace",
+        targetUserId: options.targetUserId,
+        delivery: options.delivery || "bulk",
+        event,
+        bytes: binary,
+      }) };
+    } catch (error) {
+      this.emit({ type: "deliveryFailed", eventId: event.eventId, eventType: type });
+      this.emit({
+        type: "error",
+        error: toRealtimeError(error, {
+          code: "invalidFrame",
+          message: "Workspace binary event is too large",
+          retryable: false,
+        }),
+      });
+      return event.eventId;
+    }
+    if (!this.rememberReliable(event, frame, options)) return event.eventId;
     this.routeFrame(frame, event, options);
     return event.eventId;
   }
 
   private encodeJsonFrame(event: WorkspaceEvent, route: RelayRoute, targetUserId?: string) {
-    return JSON.stringify({
-      type: "workspaceRelay",
-      version: 1,
-      route,
-      targetUserId,
-      delivery: event.reliability,
-      event,
-    });
+    return {
+      kind: "text",
+      data: JSON.stringify({
+        type: "workspaceRelay",
+        version: 1,
+        route,
+        targetUserId,
+        delivery: event.reliability,
+        event,
+      }),
+    } satisfies RealtimeFrame;
   }
 
-  private rememberReliable(event: WorkspaceEvent, frame: string | ArrayBuffer, options: SendOptions) {
-    if (event.reliability !== "reliable") return;
+  private rememberReliable(event: WorkspaceEvent, frame: RealtimeFrame, options: SendOptions) {
+    if (event.reliability !== "reliable") return true;
+    const bytes = realtimeFrameBytes(frame);
+    if (this.reliable.size >= REALTIME_LIMITS.maximumReliableEvents
+      || this.reliableBytes + bytes > REALTIME_LIMITS.maximumReliableBytes) {
+      const error = new RealtimeTransportError(
+        "socketQueueFull",
+        "Workspace reliable event queue is full",
+        true,
+      ).toRealtimeError();
+      this.emit({ type: "deliveryFailed", eventId: event.eventId, eventType: event.type });
+      this.emit({ type: "error", error });
+      return false;
+    }
     this.reliable.set(event.eventId, {
       frame,
+      bytes,
       delivery: options.delivery || "reliable",
       dataClass: event.dataClass,
     });
+    this.reliableBytes += bytes;
     this.reliableTypes.set(event.eventId, event.type);
+    return true;
   }
 
-  private routeFrame(frame: string | ArrayBuffer, event: WorkspaceEvent, options: SendOptions) {
+  private routeFrame(frame: RealtimeFrame, event: WorkspaceEvent, options: SendOptions) {
     if (this.workspace.role === "collaborator") {
       const peer = this.peers.get("owner");
-      if (peer?.primary && this.sendPeerFrame(peer, frame, event)) return;
+      if (peer?.primary && this.sendPeerFrame(peer, frame, event, frame)) return;
       this.sendSocket(frame);
       return;
     }
@@ -371,70 +486,106 @@ export class WorkspaceRealtimeClient {
     }
     for (const userId of this.onlineCollaborators) {
       const peer = this.peers.get(userId);
-      if (peer?.primary && this.sendPeerFrame(peer, frame, event)) continue;
-      this.sendSocket(this.targetFrame(frame, userId));
+      const socketFallback = this.targetFrame(frame, userId);
+      if (peer?.primary && this.sendPeerFrame(peer, frame, event, socketFallback)) continue;
+      this.sendSocket(socketFallback);
     }
   }
 
-  private targetFrame(frame: string | ArrayBuffer, targetUserId: string) {
-    if (typeof frame === "string") {
-      const envelope = JSON.parse(frame) as { event: WorkspaceEvent };
+  private targetFrame(frame: RealtimeFrame, targetUserId: string): RealtimeFrame {
+    if (frame.kind === "text") {
+      const envelope = JSON.parse(frame.data) as { event: WorkspaceEvent };
       return this.encodeJsonFrame(envelope.event, "user", targetUserId);
     }
-    const decoded = decodeBinaryRelay(frame);
+    const decoded = decodeBinaryRelay(frame.data);
     if (!decoded) return frame;
-    return encodeBinaryRelay({
-      route: "user",
-      targetUserId,
-      delivery: decoded.event.reliability === "reliable" ? "reliable" : "bulk",
-      event: decoded.event,
-      bytes: decoded.bytes,
-    });
+    return {
+      kind: "binary",
+      data: encodeBinaryRelay({
+        route: "user",
+        targetUserId,
+        delivery: decoded.event.reliability === "reliable" ? "reliable" : "bulk",
+        event: decoded.event,
+        bytes: decoded.bytes,
+      }),
+    } satisfies RealtimeFrame;
   }
 
-  private sendPeerFrame(peer: PeerState, frame: string | ArrayBuffer, event: WorkspaceEvent) {
-    const channel = event.reliability === "bulk"
+  private sendPeerFrame(
+    peer: PeerState,
+    frame: RealtimeFrame,
+    event: WorkspaceEvent,
+    socketFallback = frame,
+  ) {
+    const channel = frame.kind === "binary"
+      || event.reliability === "bulk"
       || event.dataClass === "preview"
-      || event.dataClass === "sourceOrCommit"
-      ? peer.bulk
-      : peer.control;
-    if (channel?.readyState !== "open") return false;
-    try {
-      if (typeof frame === "string") channel.send(frame);
-      else channel.send(frame);
-      return true;
-    } catch {
+      ? "bulk"
+      : "control";
+    if (channel === "bulk" ? !peer.bulkOpen : !peer.controlOpen) return false;
+    void peer.peer.send(channel, frame).catch((error) => {
+      const realtimeError = toRealtimeError(error, {
+        code: "rtcDataChannelFailed",
+        message: "RTC DataChannel send failed",
+        retryable: true,
+      });
+      if (realtimeError.code === "rtcBackpressure") {
+        this.sendSocket(socketFallback);
+        return;
+      }
+      this.emit({
+        type: "error",
+        error: realtimeError,
+      });
       this.fallbackPeer(peer, "send-failed");
-      return false;
-    }
+      this.sendSocket(socketFallback);
+    });
+    return true;
   }
 
-  private sendSocket(frame: string | ArrayBuffer) {
-    if (this.socket?.readyState !== WebSocket.OPEN) return false;
-    this.socket.send(frame);
+  private sendSocket(frame: RealtimeFrame) {
+    if (this.socket?.state !== "open") return false;
+    void this.socket.send(frame).catch((error) => {
+      this.emit({
+        type: "error",
+        error: toRealtimeError(error, {
+          code: "socketClosed",
+          message: "Realtime socket send failed",
+          retryable: true,
+        }),
+      });
+      if (!this.hasPrimaryPeer()) this.setState("unavailable");
+    });
     return true;
   }
 
   private flushReliable() {
-    if (this.socket?.readyState !== WebSocket.OPEN) return;
-    this.reliable.forEach(({ frame }) => this.socket?.send(frame));
+    if (this.socket?.state !== "open") return;
+    this.reliable.forEach(({ frame }) => this.sendSocket(frame));
   }
 
   private sendSignal(value: Record<string, unknown>) {
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(value));
+    this.sendSocket({ kind: "text", data: JSON.stringify(value) });
   }
 
-  private createPeer(key: string, userId: string, initiator: boolean) {
+  private async createPeer(key: string, userId: string, initiator: boolean) {
     const existing = this.peers.get(key);
     if (existing) this.stopPeer(existing);
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    const nativePeer = await this.dependencies.peerFactory.create({
+      sessionId: this.id,
+      peerId: key,
+      iceServers: this.iceServers,
+      initiator,
+    });
     const peer: PeerState = {
       key,
       userId,
-      pc,
-      control: null,
-      bulk: null,
-      candidates: [],
+      peer: nativePeer,
+      unsubscribe: () => undefined,
+      connectionState: "new",
+      controlOpen: false,
+      bulkOpen: false,
+      candidates: this.pendingCandidates.get(key) || [],
       probes: new Map(),
       qualificationRtts: [],
       healthOutcomes: [],
@@ -448,44 +599,63 @@ export class WorkspaceRealtimeClient {
       primary: false,
       fallingBack: false,
     };
+    this.pendingCandidates.delete(key);
     this.peers.set(key, peer);
-    pc.onicecandidate = ({ candidate }) => {
-      if (!candidate) return;
-      this.sendSignal({
-        type: "webrtcIceCandidate",
-        targetRole: this.workspace.role === "collaborator" ? "owner" : undefined,
-        targetUserId: this.workspace.role === "owner" ? peer.userId : undefined,
-        candidate: candidate.toJSON(),
-      });
-    };
-    pc.ondatachannel = ({ channel }) => this.attachChannel(peer, channel);
-    pc.onconnectionstatechange = () => {
-      if (["failed", "closed"].includes(pc.connectionState)) {
-        this.fallbackPeer(peer, "peer-failed");
-      } else if (pc.connectionState === "connected") {
-        peer.disconnectedAt = 0;
-        this.startQualification(peer);
+    peer.unsubscribe = nativePeer.subscribe((event) => {
+      if (this.peers.get(key) !== peer) return;
+      if (event.type === "iceCandidate") {
+        this.sendSignal({
+          type: "webrtcIceCandidate",
+          targetRole: this.workspace.role === "collaborator" ? "owner" : undefined,
+          targetUserId: this.workspace.role === "owner" ? peer.userId : undefined,
+          candidate: event.candidate,
+        });
+      } else if (event.type === "connectionState") {
+        peer.connectionState = event.state;
+        if (["failed", "closed"].includes(event.state)) {
+          this.fallbackPeer(peer, "peer-failed");
+        } else if (event.state === "connected") {
+          peer.disconnectedAt = 0;
+          this.startQualification(peer);
+        }
+      } else if (event.type === "channelState") {
+        if (event.channel === "control") peer.controlOpen = event.state === "open";
+        else peer.bulkOpen = event.state === "open";
+        if (event.state === "closed") this.fallbackPeer(peer, "channel-closed");
+        else this.startQualification(peer);
+      } else if (event.type === "message") {
+        this.receive(event.frame, "rtc", peer);
+      } else if (event.type === "error") {
+        this.emit({ type: "error", error: event.error });
+        this.fallbackPeer(peer, "peer-error");
       }
-    };
-    if (initiator) {
-      this.attachChannel(peer, pc.createDataChannel("workspace-control", { ordered: true }));
-      this.attachChannel(peer, pc.createDataChannel("workspace-bulk", { ordered: true }));
-    }
+    });
     return peer;
   }
 
   private offerOwner() {
     if (this.workspace.role !== "collaborator"
       || !this.ownerOnline
-      || this.socket?.readyState !== WebSocket.OPEN) return;
+      || this.socket?.state !== "open") return;
     const current = this.peers.get("owner");
-    if (current && !current.fallingBack && current.pc.connectionState !== "closed") return;
-    const peer = this.createPeer("owner", "owner", true);
+    if (current && !current.fallingBack && current.connectionState !== "closed") return;
     void (async () => {
-      const offer = await peer.pc.createOffer();
-      await peer.pc.setLocalDescription(offer);
+      const peer = await this.createPeer("owner", "owner", true);
+      const offer = await peer.peer.createOffer();
+      await peer.peer.setLocalDescription(offer);
       this.sendSignal({ type: "webrtcOffer", description: offer, targetRole: "owner" });
-    })().catch(() => this.fallbackPeer(peer, "offer-failed"));
+    })().catch((error) => {
+      const peer = this.peers.get("owner");
+      if (peer) this.fallbackPeer(peer, "offer-failed");
+      this.emit({
+        type: "error",
+        error: toRealtimeError(error, {
+          code: "rtcSignalFailed",
+          message: "RTC offer creation failed",
+          retryable: true,
+        }),
+      });
+    });
   }
 
   private async handleSignal(value: Record<string, unknown>) {
@@ -498,70 +668,63 @@ export class WorkspaceRealtimeClient {
       this.onlineCollaborators.add(senderId);
       const description = this.description(value, "offer");
       if (!description) return;
-      const peer = this.createPeer(key, senderId, false);
-      await peer.pc.setRemoteDescription(description);
+      const peer = await this.createPeer(key, senderId, false);
+      await peer.peer.setRemoteDescription(description);
       await this.flushCandidates(peer);
-      const answer = await peer.pc.createAnswer();
-      await peer.pc.setLocalDescription(answer);
+      const answer = await peer.peer.createAnswer();
+      await peer.peer.setLocalDescription(answer);
       this.sendSignal({ type: "webrtcAnswer", description: answer, targetUserId: senderId });
       return;
     }
     const peer = this.peers.get(key);
-    if (!peer) return;
+    if (!peer) {
+      if (value.type === "webrtcIceCandidate" && value.candidate) {
+        const candidates = this.pendingCandidates.get(key) || [];
+        if (candidates.length < 256) candidates.push(value.candidate as RealtimeIceCandidate);
+        this.pendingCandidates.set(key, candidates);
+      }
+      return;
+    }
     if (value.type === "webrtcAnswer") {
       const description = this.description(value, "answer");
       if (!description) return;
-      await peer.pc.setRemoteDescription(description);
+      await peer.peer.setRemoteDescription(description);
       await this.flushCandidates(peer);
     } else if (value.type === "webrtcIceCandidate" && value.candidate) {
-      const candidate = value.candidate as RTCIceCandidateInit;
-      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate);
-      else peer.candidates.push(candidate);
+      await peer.peer.addIceCandidate(value.candidate as RealtimeIceCandidate);
     }
   }
 
   private description(value: Record<string, unknown>, type: "offer" | "answer") {
     if (value.description && typeof value.description === "object") {
-      return value.description as RTCSessionDescriptionInit;
+      const description = value.description as Partial<import("@picbind/shared").RealtimeSessionDescription>;
+      return description.type === type && typeof description.sdp === "string"
+        ? { type, sdp: description.sdp }
+        : null;
     }
     return typeof value.sdp === "string" ? { type, sdp: value.sdp } : null;
   }
 
   private async flushCandidates(peer: PeerState) {
-    for (const candidate of peer.candidates.splice(0)) await peer.pc.addIceCandidate(candidate);
-  }
-
-  private attachChannel(peer: PeerState, channel: RTCDataChannel) {
-    if (channel.label === "workspace-control") peer.control = channel;
-    else if (channel.label === "workspace-bulk") peer.bulk = channel;
-    else {
-      channel.close();
-      return;
-    }
-    channel.binaryType = "arraybuffer";
-    channel.onmessage = (message) => {
-      this.receive(message.data as string | ArrayBuffer, "rtc", peer);
-    };
-    channel.onclose = () => this.fallbackPeer(peer, "channel-closed");
-    channel.onopen = () => this.startQualification(peer);
+    for (const candidate of peer.candidates.splice(0)) await peer.peer.addIceCandidate(candidate);
   }
 
   private startQualification(peer: PeerState) {
     if (peer.qualificationStartedAt
-      || peer.control?.readyState !== "open"
-      || peer.bulk?.readyState !== "open") return;
+      || !peer.controlOpen
+      || !peer.bulkOpen) return;
     peer.qualificationStartedAt = Date.now();
-    for (let index = 0; index < RTC_QUALITY.requiredQualificationProbes; index += 1) {
+    for (let index = 0; index < REALTIME_QUALITY.requiredQualificationProbes; index += 1) {
       this.schedule(() => this.sendProbe(peer, true), index * 300);
     }
-    this.schedule(() => this.qualifyPeer(peer), RTC_QUALITY.minimumStableMs + 100);
+    this.schedule(() => this.qualifyPeer(peer), REALTIME_QUALITY.minimumStableMs + 100);
     this.schedule(() => {
       if (!peer.primary) this.fallbackPeer(peer, "qualification-failed");
     }, 6_000);
   }
 
   private sendProbe(peer: PeerState, qualification: boolean) {
-    if (peer.control?.readyState !== "open") return;
+    if (!peer.controlOpen) return;
     const probeId = crypto.randomUUID();
     const sentAt = Date.now();
     const timeout = this.schedule(() => {
@@ -570,7 +733,7 @@ export class WorkspaceRealtimeClient {
         this.pushHealth(peer, false);
         this.evaluateHealth(peer);
       }
-    }, RTC_QUALITY.probeTimeoutMs);
+    }, REALTIME_QUALITY.probeTimeoutMs);
     peer.probes.set(probeId, { sentAt, qualification, timeout });
     this.sendPeerControl(peer, { type: "rtcProbe", probeId });
   }
@@ -593,11 +756,11 @@ export class WorkspaceRealtimeClient {
 
   private qualifyPeer(peer: PeerState) {
     if (peer.localReadyEpoch
-      || peer.control?.readyState !== "open"
-      || peer.bulk?.readyState !== "open"
-      || peer.qualificationRtts.length < RTC_QUALITY.requiredQualificationProbes
-      || Math.max(...peer.qualificationRtts) > RTC_QUALITY.maximumQualificationRttMs
-      || Date.now() - peer.qualificationStartedAt < RTC_QUALITY.minimumStableMs
+      || !peer.controlOpen
+      || !peer.bulkOpen
+      || peer.qualificationRtts.length < REALTIME_QUALITY.requiredQualificationProbes
+      || Math.max(...peer.qualificationRtts) > REALTIME_QUALITY.maximumQualificationRttMs
+      || Date.now() - peer.qualificationStartedAt < REALTIME_QUALITY.minimumStableMs
       || this.reliable.size > 0) return;
     const epoch = peer.remoteReadyEpoch
       || (this.workspace.role === "collaborator" ? Math.max(1, Date.now()) : 0);
@@ -632,7 +795,7 @@ export class WorkspaceRealtimeClient {
       || !peer.localReadyEpoch
       || peer.localReadyEpoch !== peer.remoteReadyEpoch) return;
     peer.primary = true;
-    this.state = "rtc";
+    this.setState("rtc");
     this.emit({ type: "peerTransportChanged", userId: peer.userId, transport: "rtc" });
     this.startHealthChecks(peer);
   }
@@ -640,55 +803,64 @@ export class WorkspaceRealtimeClient {
   private startHealthChecks(peer: PeerState) {
     if (peer.healthTimer !== null) window.clearInterval(peer.healthTimer);
     peer.healthTimer = window.setInterval(() => {
-      if (peer.pc.connectionState === "disconnected") {
+      if (peer.connectionState === "disconnected") {
         peer.disconnectedAt ||= Date.now();
-        if (Date.now() - peer.disconnectedAt >= RTC_QUALITY.disconnectedFallbackMs) {
+        if (Date.now() - peer.disconnectedAt >= REALTIME_QUALITY.disconnectedFallbackMs) {
           this.fallbackPeer(peer, "peer-disconnected");
           return;
         }
       } else {
         peer.disconnectedAt = 0;
       }
-      if (peer.control?.readyState !== "open" || peer.bulk?.readyState !== "open") {
+      if (!peer.controlOpen || !peer.bulkOpen) {
         this.fallbackPeer(peer, "channel-closed");
         return;
       }
       this.sendProbe(peer, false);
-    }, RTC_QUALITY.healthIntervalMs);
+      void Promise.all([
+        peer.peer.bufferedAmount("control"),
+        peer.peer.bufferedAmount("bulk"),
+      ]).then(([control, bulk]) => this.evaluateHealth(peer, Math.max(control, bulk))).catch(() => {
+        this.fallbackPeer(peer, "buffered-amount-failed");
+      });
+    }, REALTIME_QUALITY.healthIntervalMs);
   }
 
   private pushHealth(peer: PeerState, success: boolean, rtt?: number) {
     peer.healthOutcomes.push(success);
-    if (peer.healthOutcomes.length > RTC_QUALITY.healthWindowSize) peer.healthOutcomes.shift();
+    if (peer.healthOutcomes.length > REALTIME_QUALITY.healthWindowSize) peer.healthOutcomes.shift();
     if (rtt !== undefined) {
       peer.healthRtts.push(rtt);
-      if (peer.healthRtts.length > RTC_QUALITY.healthWindowSize) peer.healthRtts.shift();
+      if (peer.healthRtts.length > REALTIME_QUALITY.healthWindowSize) peer.healthRtts.shift();
     }
   }
 
-  private evaluateHealth(peer: PeerState) {
+  private evaluateHealth(peer: PeerState, buffered = 0) {
     const lossRate = peer.healthOutcomes.length
       ? peer.healthOutcomes.filter((success) => !success).length / peer.healthOutcomes.length
       : 0;
     const averageRtt = peer.healthRtts.length
       ? peer.healthRtts.reduce((sum, value) => sum + value, 0) / peer.healthRtts.length
       : 0;
-    const buffered = Math.max(peer.control?.bufferedAmount || 0, peer.bulk?.bufferedAmount || 0);
-    const degraded = (peer.healthOutcomes.length >= 5 && lossRate >= RTC_QUALITY.maximumLossRate)
-      || averageRtt >= RTC_QUALITY.degradedRttMs
-      || buffered >= RTC_QUALITY.maximumBufferedBytes;
+    const degraded = (peer.healthOutcomes.length >= 5 && lossRate >= REALTIME_QUALITY.maximumLossRate)
+      || averageRtt >= REALTIME_QUALITY.degradedRttMs
+      || buffered >= REALTIME_LIMITS.maximumRtcBulkBufferedBytes;
     if (!degraded) {
       peer.degradedSince = 0;
       return;
     }
     peer.degradedSince ||= Date.now();
-    if (Date.now() - peer.degradedSince >= RTC_QUALITY.degradedWindowMs) {
+    if (Date.now() - peer.degradedSince >= REALTIME_QUALITY.degradedWindowMs) {
       this.fallbackPeer(peer, "health-degraded");
     }
   }
 
   private sendPeerControl(peer: PeerState, value: Record<string, unknown>) {
-    if (peer.control?.readyState === "open") peer.control.send(JSON.stringify(value));
+    if (!peer.controlOpen) return;
+    void peer.peer.send("control", {
+      kind: "text",
+      data: JSON.stringify(value),
+    }).catch(() => this.fallbackPeer(peer, "control-send-failed"));
   }
 
   private fallbackPeer(peer: PeerState, reason: string, notifyPeer = true) {
@@ -707,9 +879,9 @@ export class WorkspaceRealtimeClient {
     }
     this.peers.delete(peer.key);
     this.stopPeer(peer);
-    this.state = this.hasPrimaryPeer()
+    this.setState(this.hasPrimaryPeer()
       ? "rtc"
-      : this.socket?.readyState === WebSocket.OPEN ? "socket" : "unavailable";
+      : this.socket?.state === "open" ? "socket" : "unavailable");
     this.emit({ type: "peerTransportChanged", userId: peer.userId, transport: "socket", reason });
     this.flushReliable();
     if (this.workspace.role === "collaborator" && this.ownerOnline) {
@@ -725,31 +897,38 @@ export class WorkspaceRealtimeClient {
       this.timers.delete(probe.timeout);
     }
     peer.probes.clear();
-    if (peer.control) peer.control.onclose = null;
-    if (peer.bulk) peer.bulk.onclose = null;
-    peer.control?.close();
-    peer.bulk?.close();
-    peer.pc.close();
+    peer.unsubscribe();
+    peer.controlOpen = false;
+    peer.bulkOpen = false;
+    void peer.peer.close();
   }
 
   private hasPrimaryPeer() {
     return [...this.peers.values()].some((peer) => peer.primary);
   }
 
-  disconnect() {
-    this.disposed = true;
-    this.peers.forEach((peer) => this.sendPeerControl(peer, { type: "peerLeaving" }));
-    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-    this.reconnectAttempt = 0;
-    this.timers.forEach((timer) => window.clearTimeout(timer));
-    this.timers.clear();
-    this.peers.forEach((peer) => this.stopPeer(peer));
-    this.peers.clear();
-    this.socket?.close(1000, "page-left");
-    this.socket = null;
-    this.listeners.clear();
-    this.onlineCollaborators.clear();
-    this.ownerOnline = false;
+  async close(reason = "page-left") {
+    this.closePromise ??= (async () => {
+      this.disposed = true;
+      this.setState("closed");
+      this.peers.forEach((peer) => this.sendPeerControl(peer, { type: "peerLeaving" }));
+      if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.reconnectAttempt = 0;
+      this.timers.forEach((timer) => window.clearTimeout(timer));
+      this.timers.clear();
+      this.peers.forEach((peer) => this.stopPeer(peer));
+      this.peers.clear();
+      this.pendingCandidates.clear();
+      this.socketGeneration += 1;
+      this.socketUnsubscribe?.();
+      this.socketUnsubscribe = null;
+      await this.socket?.close(1000, reason);
+      this.socket = null;
+      this.listeners.clear();
+      this.onlineCollaborators.clear();
+      this.ownerOnline = false;
+    })();
+    return this.closePromise;
   }
 }
