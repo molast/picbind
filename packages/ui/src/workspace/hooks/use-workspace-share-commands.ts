@@ -5,8 +5,9 @@ import { createWorkspaceShare, rotateWorkspaceShare, shareUrl } from "../api";
 import { promoteLocalWorkspace, saveWorkspace } from "../repository";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
-export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setCopied, setNotice, }: {
+export function useWorkspaceShareCommands({ workspace, displayName, publicSiteUrl, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setCopied, setNotice, }: {
   workspace: WorkspaceIdentity | null;
+  displayName?: string | null;
   publicSiteUrl?: string;
   setWorkspace: React.Dispatch<React.SetStateAction<WorkspaceIdentity | null>>;
   setImages: React.Dispatch<React.SetStateAction<WorkspaceImage[]>>;
@@ -31,13 +32,14 @@ export function useWorkspaceShareCommands({ workspace, publicSiteUrl, setWorkspa
       role: next.role,
       shareToken: next.shareToken,
       ownerCapability: next.ownerCapability,
+      displayName,
       clientId: getRealtimeClientId(),
     });
     void realtimeRef.current?.close("workspace-replaced");
     realtimeRef.current = realtime;
     subscribe(realtime);
     transition();
-  }, [realtimeRef, realtimeService, setImages, setWorkspace, subscribe, transition, workspace]);
+  }, [displayName, realtimeRef, realtimeService, setImages, setWorkspace, subscribe, transition, workspace]);
 
   const rotateShare = React.useCallback(async () => {
     if (!workspace) return;

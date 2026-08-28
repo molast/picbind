@@ -44,7 +44,7 @@ export function useAuth() {
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setStateValue] = React.useState<AuthState>(
-    () => authService.cachedState() || anonymousAuthState(),
+    () => anonymousAuthState(),
   );
   const [checking, setChecking] = React.useState(true);
   const [authenticating, setAuthenticating] = React.useState(false);

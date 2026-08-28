@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
-use webrtc::data_channel::{RTCDataChannel, data_channel_message::DataChannelMessage};
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
 
 use super::{NativeEventDispatcher, NativeFrame, NativePeerChannel, NativePeerEventKind};
 
@@ -25,27 +25,40 @@ fn decode_frame(is_string: bool, data: &[u8]) -> Result<NativeFrame, String> {
 
 #[derive(Default)]
 pub struct NativeDataChannels {
-    control: RwLock<Option<Arc<RTCDataChannel>>>,
-    bulk: RwLock<Option<Arc<RTCDataChannel>>>,
+    control: RwLock<Option<Arc<dyn DataChannel>>>,
+    bulk: RwLock<Option<Arc<dyn DataChannel>>>,
 }
 
 impl NativeDataChannels {
-    pub async fn get(&self, channel: NativePeerChannel) -> Option<Arc<RTCDataChannel>> {
+    pub async fn get(&self, channel: NativePeerChannel) -> Option<Arc<dyn DataChannel>> {
         match channel {
             NativePeerChannel::Control => self.control.read().await.clone(),
             NativePeerChannel::Bulk => self.bulk.read().await.clone(),
         }
     }
 
-    async fn set(&self, channel: NativePeerChannel, value: Arc<RTCDataChannel>) {
+    async fn set(&self, channel: NativePeerChannel, value: Arc<dyn DataChannel>) {
         let target = match channel {
             NativePeerChannel::Control => &self.control,
             NativePeerChannel::Bulk => &self.bulk,
         };
-        if let Some(previous) = target.write().await.replace(value)
-            && let Err(error) = previous.close().await
+        let previous = target.write().await.replace(value);
+        if let Some(previous) = previous {
+            let _ = previous.close().await;
+        }
+    }
+
+    async fn clear_if_current(&self, channel: NativePeerChannel, current: &Arc<dyn DataChannel>) {
+        let target = match channel {
+            NativePeerChannel::Control => &self.control,
+            NativePeerChannel::Bulk => &self.bulk,
+        };
+        let mut value = target.write().await;
+        if value
+            .as_ref()
+            .is_some_and(|value| Arc::ptr_eq(value, current))
         {
-            let _ = error;
+            value.take();
         }
     }
 
@@ -62,11 +75,21 @@ impl NativeDataChannels {
 }
 
 pub async fn attach_data_channel(
-    data_channel: Arc<RTCDataChannel>,
+    data_channel: Arc<dyn DataChannel>,
     channels: Arc<NativeDataChannels>,
     events: NativeEventDispatcher,
 ) {
-    let channel = match data_channel.label() {
+    let label = match data_channel.label().await {
+        Ok(value) => value,
+        Err(error) => {
+            events.emit(NativePeerEventKind::Error(format!(
+                "failed to read native RTC DataChannel label: {error}"
+            )));
+            let _ = data_channel.close().await;
+            return;
+        }
+    };
+    let channel = match label.as_str() {
         "workspace-control" => NativePeerChannel::Control,
         "workspace-bulk" => NativePeerChannel::Bulk,
         _ => {
@@ -75,41 +98,71 @@ pub async fn attach_data_channel(
         }
     };
 
-    let open_events = events.clone();
-    data_channel.on_open(Box::new(move || {
-        open_events.emit(NativePeerEventKind::ChannelState {
-            channel,
-            state: "open".into(),
-        });
-        Box::pin(async {})
-    }));
+    match data_channel.ordered().await {
+        Ok(true) => {}
+        Ok(false) => {
+            events.emit(NativePeerEventKind::Error(format!(
+                "native RTC {} channel must be ordered",
+                channel.as_str()
+            )));
+            let _ = data_channel.close().await;
+            return;
+        }
+        Err(error) => {
+            events.emit(NativePeerEventKind::Error(format!(
+                "failed to inspect native RTC {} channel: {error}",
+                channel.as_str()
+            )));
+            let _ = data_channel.close().await;
+            return;
+        }
+    }
 
-    let close_events = events.clone();
-    data_channel.on_close(Box::new(move || {
-        close_events.emit(NativePeerEventKind::ChannelState {
-            channel,
-            state: "closed".into(),
-        });
-        Box::pin(async {})
-    }));
-
-    let message_events = events.clone();
-    data_channel.on_message(Box::new(move |message: DataChannelMessage| {
-        let kind = match decode_frame(message.is_string, &message.data) {
-            Ok(frame) => NativePeerEventKind::Message { channel, frame },
-            Err(error) => NativePeerEventKind::Error(error),
-        };
-        message_events.emit(kind);
-        Box::pin(async {})
-    }));
-
-    let error_events = events;
-    data_channel.on_error(Box::new(move |error| {
-        error_events.emit(NativePeerEventKind::Error(error.to_string()));
-        Box::pin(async {})
-    }));
-
-    channels.set(channel, data_channel).await;
+    channels.set(channel, data_channel.clone()).await;
+    tokio::spawn(async move {
+        let mut closed_emitted = false;
+        while let Some(event) = data_channel.poll().await {
+            match event {
+                DataChannelEvent::OnOpen => {
+                    events.emit(NativePeerEventKind::ChannelState {
+                        channel,
+                        state: "open".into(),
+                    });
+                }
+                DataChannelEvent::OnMessage(message) => {
+                    let kind = match decode_frame(message.is_string, &message.data) {
+                        Ok(frame) => NativePeerEventKind::Message { channel, frame },
+                        Err(error) => NativePeerEventKind::Error(error),
+                    };
+                    events.emit(kind);
+                }
+                DataChannelEvent::OnError => {
+                    events.emit(NativePeerEventKind::Error(format!(
+                        "native RTC {} channel reported an error",
+                        channel.as_str()
+                    )));
+                }
+                DataChannelEvent::OnClose => {
+                    events.emit(NativePeerEventKind::ChannelState {
+                        channel,
+                        state: "closed".into(),
+                    });
+                    closed_emitted = true;
+                    break;
+                }
+                DataChannelEvent::OnClosing
+                | DataChannelEvent::OnBufferedAmountLow
+                | DataChannelEvent::OnBufferedAmountHigh => {}
+            }
+        }
+        if !closed_emitted {
+            events.emit(NativePeerEventKind::ChannelState {
+                channel,
+                state: "closed".into(),
+            });
+        }
+        channels.clear_if_current(channel, &data_channel).await;
+    });
 }
 
 #[cfg(test)]

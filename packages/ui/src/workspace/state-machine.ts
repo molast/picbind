@@ -4,6 +4,7 @@ import type {
   WorkspaceCommit,
   WorkspaceRuntimeState,
 } from "./types";
+import type { RealtimeSessionState } from "@picbind/shared";
 
 const WORKSPACE_TRANSITIONS: Record<WorkspaceRuntimeState, WorkspaceRuntimeState[]> = {
   local: ["connecting", "unavailable"],
@@ -17,6 +18,7 @@ const WORKSPACE_TRANSITIONS: Record<WorkspaceRuntimeState, WorkspaceRuntimeState
 
 export type WorkspaceRuntimeAction =
   | { type: "transition"; next: WorkspaceRuntimeState }
+  | { type: "realtimeStateChanged"; state: RealtimeSessionState }
   | { type: "restoreLocal" };
 
 export function workspaceRuntimeReducer(
@@ -24,6 +26,16 @@ export function workspaceRuntimeReducer(
   action: WorkspaceRuntimeAction,
 ) {
   if (action.type === "restoreLocal") return "local" as const;
+  if (action.type === "realtimeStateChanged") {
+    if (action.state === "unavailable" || action.state === "closed") {
+      return WORKSPACE_TRANSITIONS[current].includes("unavailable") ? "unavailable" : current;
+    }
+    if ((action.state === "connecting" || action.state === "reconnecting")
+      && (current === "connecting" || current === "ownerOffline" || current === "unavailable")) {
+      return WORKSPACE_TRANSITIONS[current].includes("connecting") ? "connecting" : current;
+    }
+    return current;
+  }
   return WORKSPACE_TRANSITIONS[current].includes(action.next) ? action.next : current;
 }
 

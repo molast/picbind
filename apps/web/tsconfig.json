@@ -30,6 +30,9 @@
       ],
       "@perceptual-wasm/*": [
         "../../packages/wasm/perceptual-wasm/*"
+      ],
+      "@picbind/shared": [
+        "../../packages/shared/src/index.ts"
       ]
     },
     "target": "ES2017"

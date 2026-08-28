@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "node ./dev-local.mjs web",
     "dev:desktop": "pnpm --dir apps/desktop dev",
+    "dev:desktop-only": "node ./dev-local.mjs desktop-only",
     "build:web": "pnpm --dir apps/web build",
     "build:desktop": "pnpm --dir apps/desktop build",
     "build:wasm": "pnpm --dir packages/wasm build",

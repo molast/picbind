@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "PicBind local tasks"
 echo "  1) Web development only"
 echo "  2) Desktop development"
-echo "  3) Desktop production build"
+echo "  3) Desktop app only (requires Web on :3000)"
+echo "  4) Desktop production build"
 echo "  0) Exit"
 printf "Select a task [1]: "
 read -r TASK_CHOICE
@@ -19,6 +20,9 @@ case "${TASK_CHOICE:-1}" in
     exec node "$ROOT_DIR/dev-local.mjs" desktop
     ;;
   3)
+    exec node "$ROOT_DIR/dev-local.mjs" desktop-only
+    ;;
+  4)
     exec pnpm --dir "$ROOT_DIR/apps/desktop" run build
     ;;
   0)

@@ -55,6 +55,7 @@ export type RealtimeConnectRequest = {
   role: RealtimeRole;
   shareToken?: string | null;
   ownerCapability?: string | null;
+  displayName?: string | null;
   clientId: string;
 };
 

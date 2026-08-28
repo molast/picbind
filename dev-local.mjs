@@ -191,7 +191,7 @@ process.once("SIGHUP", () => void shutdown(129));
 async function main() {
   ensurePnpm();
   const mode = process.argv[2] || "desktop";
-  if (mode !== "desktop" && mode !== "web") {
+  if (mode !== "desktop" && mode !== "desktop-only" && mode !== "web") {
     console.error(`Unknown local development mode: ${mode}`);
     process.exit(2);
   }
@@ -199,6 +199,12 @@ async function main() {
   const reuseWebApp = await isWebPortInUse();
   if (reuseWebApp) {
     console.log(`Reusing Web app at http://localhost:${webPort}.`);
+  } else if (mode === "desktop-only") {
+    console.error(
+      `Desktop-only mode requires the Web app at http://localhost:${webPort}. ` +
+        "Start the Web service first.",
+    );
+    process.exit(1);
   } else {
     start("Web app", webDir, ["run", "dev"]);
   }

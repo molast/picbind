@@ -25,7 +25,8 @@ export async function joinWorkspace(shareToken: string) {
 }
 
 export async function realtimeTicket(
-  workspace: Pick<WorkspaceIdentity, "workspaceId" | "role" | "shareToken" | "ownerCapability">,
+  workspace: Pick<WorkspaceIdentity, "workspaceId" | "role" | "shareToken" | "ownerCapability">
+    & { displayName?: string | null },
   clientId: string,
 ) {
   const owner = workspace.role === "owner";
@@ -35,7 +36,7 @@ export async function realtimeTicket(
   return request<{ ticket: string; workspaceId?: string; expiresAt: string; protocol: string; iceServers: RTCIceServer[] }>(path, {
     method: "POST",
     headers: owner && workspace.ownerCapability ? { "x-picbind-owner-capability": workspace.ownerCapability } : {},
-    body: JSON.stringify({ clientId }),
+    body: JSON.stringify({ clientId, displayName: workspace.displayName }),
   });
 }
 

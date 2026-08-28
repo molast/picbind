@@ -2,6 +2,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const webRoot = path.dirname(fileURLToPath(import.meta.url))
+const sharedSource = path.resolve(webRoot, "../../packages/shared/src/index.ts")
 const isDevelopment = process.env.NODE_ENV === "development"
 
 function isJsquashAvifCircularChunkWarning(warning, compilation) {
@@ -34,6 +35,7 @@ const nextConfig = {
     "@picbind/image-codecs",
     "@picbind/image-wasm",
     "@picbind/perceptual-wasm",
+    "@picbind/shared",
     "@picbind/ui",
   ],
   ...(isDevelopment
@@ -98,8 +100,10 @@ const nextConfig = {
     )
     fileLoaderRule.exclude = /\.svg$/i
 
-    if (isServer) {
-      config.resolve.alias = { ...config.resolve.alias, canvas: false }
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@picbind/shared$": sharedSource,
+      ...(isServer ? { canvas: false } : {}),
     }
 
     config.ignoreWarnings = [

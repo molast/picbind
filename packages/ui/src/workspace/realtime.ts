@@ -15,6 +15,7 @@ import {
   type RealtimeSessionEvent,
   type RealtimeSessionState,
   type RealtimeSocket,
+  type RealtimeSocketEvent,
   type RealtimeSocketFactory,
 } from "@picbind/shared";
 import {
@@ -70,6 +71,7 @@ export type WorkspaceRealtimeIdentity = {
   role: "owner" | "collaborator";
   shareToken: string | null;
   ownerCapability: string | null;
+  displayName: string | null;
 };
 
 export class WorkspaceRealtimeClient implements RealtimeSession {
@@ -188,22 +190,47 @@ export class WorkspaceRealtimeClient implements RealtimeSession {
       this.flushReliable();
     };
     this.socketUnsubscribe = socket.subscribe((event) => {
-      if (generation !== this.socketGeneration || this.socket !== socket) return;
-      if (event.type === "open") open();
-      else if (event.type === "message") this.receive(event.frame, "socket");
-      else if (event.type === "error") {
-        this.emit({ type: "error", error: event.error });
-        if (!this.hasPrimaryPeer()) this.setState("unavailable");
-      } else if (event.type === "close") {
-        this.socketUnsubscribe?.();
-        this.socketUnsubscribe = null;
-        if (this.socket === socket) this.socket = null;
-        if (this.disposed) return;
-        this.setState(this.hasPrimaryPeer() ? "rtc" : "unavailable");
-        this.scheduleReconnect();
-      }
+      this.handleSocketEvent(socket, generation, event, open);
     });
     if (socket.state === "open") open();
+  }
+
+  private handleSocketEvent(
+    socket: RealtimeSocket,
+    generation: number,
+    event: RealtimeSocketEvent,
+    open: () => void = () => undefined,
+  ) {
+    if (generation !== this.socketGeneration || this.socket !== socket) return;
+    if (event.type === "open") {
+      open();
+      return;
+    }
+    if (event.type === "message") {
+      this.receive(event.frame, "socket");
+      return;
+    }
+    if (event.type === "error") {
+      this.emit({ type: "error", error: event.error });
+      if (!this.hasPrimaryPeer()) this.setState("unavailable");
+      return;
+    }
+
+    this.socketUnsubscribe?.();
+    this.socketUnsubscribe = null;
+    if (this.socket === socket) this.socket = null;
+    if (this.disposed) return;
+    if (this.workspace.role === "collaborator" && event.code === 4003) {
+      this.emit({
+        type: "memberRemoved",
+        reason: event.reason || "Removed by Owner",
+        transport: "socket",
+      });
+      void this.close("member-removed");
+      return;
+    }
+    this.setState(this.hasPrimaryPeer() ? "rtc" : "unavailable");
+    this.scheduleReconnect();
   }
 
   private scheduleReconnect() {
@@ -371,7 +398,8 @@ export class WorkspaceRealtimeClient implements RealtimeSession {
       reliability,
       streamId: eventStream,
       senderId: this.localUserId,
-      senderName: this.workspace.role === "owner" ? "Owner" : "Guest",
+      senderName: this.workspace.displayName
+        || (this.workspace.role === "owner" ? "Owner" : "Guest"),
       senderRole: this.workspace.role,
       type,
       ...payload,
@@ -685,6 +713,10 @@ export class WorkspaceRealtimeClient implements RealtimeSession {
       }
       return;
     }
+    if (this.workspace.role === "collaborator" && key === "owner"
+      && value.type === "webrtcAnswer" && value.senderRole === "owner") {
+      peer.userId = senderId;
+    }
     if (value.type === "webrtcAnswer") {
       const description = this.description(value, "answer");
       if (!description) return;
@@ -833,6 +865,14 @@ export class WorkspaceRealtimeClient implements RealtimeSession {
       peer.healthRtts.push(rtt);
       if (peer.healthRtts.length > REALTIME_QUALITY.healthWindowSize) peer.healthRtts.shift();
     }
+    const lost = peer.healthOutcomes.filter((outcome) => !outcome).length;
+    this.emit({
+      type: "peerNetworkStats",
+      userId: peer.userId,
+      transport: "rtc",
+      packetLossRate: (lost / peer.healthOutcomes.length) * 100,
+      sampleCount: peer.healthOutcomes.length,
+    });
   }
 
   private evaluateHealth(peer: PeerState, buffered = 0) {
@@ -923,8 +963,13 @@ export class WorkspaceRealtimeClient implements RealtimeSession {
       this.socketGeneration += 1;
       this.socketUnsubscribe?.();
       this.socketUnsubscribe = null;
-      await this.socket?.close(1000, reason);
+      const socket = this.socket;
       this.socket = null;
+      try {
+        await socket?.close(1000, reason);
+      } catch {
+        // The remote endpoint may already have removed the transport during shutdown.
+      }
       this.listeners.clear();
       this.onlineCollaborators.clear();
       this.ownerOnline = false;

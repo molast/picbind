@@ -17,7 +17,7 @@
     "check": "tsc --noEmit",
     "lint": "next lint",
     "test:image-processing": "node --import tsx --test src/image-processing/adapters/desktop-image-processing-service.test.ts src/image-processing/adapters/desktop-image-processing-selector.test.ts",
-    "test:realtime": "node --import tsx --test src/realtime/adapters/*.test.ts"
+    "test:realtime": "node --import tsx --test src/realtime/adapters/*.test.ts src/components/workspace-route-mode.test.ts"
   },
   "dependencies": {
     "@picbind/image-codecs": "workspace:*",

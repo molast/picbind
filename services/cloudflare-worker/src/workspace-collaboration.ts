@@ -174,6 +174,12 @@ function validGuestClientId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{16,80}$/.test(value);
 }
 
+function normalizedDisplayName(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return normalized ? normalized.slice(0, 80) : fallback;
+}
+
 export async function handleWorkspaceLinkRealtimeTicket(
   request: Request,
   env: WorkspaceRealtimeEnv,
@@ -200,7 +206,7 @@ export async function handleWorkspaceLinkRealtimeTicket(
     shareId,
     workspaceId: workspace.id,
     role: "collaborator",
-    displayName: "Guest",
+    displayName: normalizedDisplayName(body?.displayName, "Guest"),
     origin,
     issuedAt,
     expiresAt,
@@ -247,7 +253,7 @@ export async function handleWorkspaceRealtimeTicket(
     userId: `owner-${clientId}`,
     workspaceId,
     role: "owner",
-    displayName: "Owner",
+    displayName: normalizedDisplayName(body?.displayName, "Owner"),
     origin,
     issuedAt,
     expiresAt,

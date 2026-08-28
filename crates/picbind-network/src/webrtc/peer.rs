@@ -3,16 +3,14 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use bytes::Bytes;
+use bytes::BytesMut;
 use tokio::sync::Mutex;
 use webrtc::{
-    api::APIBuilder,
-    data_channel::{RTCDataChannel, data_channel_init::RTCDataChannelInit},
-    ice_transport::{ice_candidate::RTCIceCandidateInit, ice_server::RTCIceServer},
+    data_channel::{DataChannel, RTCDataChannelInit},
     peer_connection::{
-        RTCPeerConnection, configuration::RTCConfiguration,
-        peer_connection_state::RTCPeerConnectionState,
-        sdp::session_description::RTCSessionDescription,
+        PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+        RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionIceEvent, RTCPeerConnectionState,
+        RTCSessionDescription,
     },
 };
 
@@ -27,12 +25,44 @@ use super::{
 pub struct NativePeer {
     pub session_id: String,
     pub peer_id: String,
-    connection: Arc<RTCPeerConnection>,
+    connection: Arc<dyn PeerConnection>,
     channels: Arc<NativeDataChannels>,
     events: NativeEventDispatcher,
     control_send: Mutex<()>,
     bulk_send: Mutex<()>,
     closed: AtomicBool,
+}
+
+const CONTROL_BUFFERED_MAXIMUM_BYTES: usize = 256 * 1024;
+const BULK_BUFFERED_MAXIMUM_BYTES: usize = 1024 * 1024;
+
+struct NativePeerHandler {
+    channels: Arc<NativeDataChannels>,
+    events: NativeEventDispatcher,
+}
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for NativePeerHandler {
+    async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
+        if let Ok(candidate) = event.candidate.to_json() {
+            self.events
+                .emit(NativePeerEventKind::IceCandidate(NativeIceCandidate {
+                    candidate: candidate.candidate,
+                    sdp_mid: candidate.sdp_mid,
+                    sdp_m_line_index: candidate.sdp_mline_index,
+                    username_fragment: candidate.username_fragment,
+                }));
+        }
+    }
+
+    async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
+        self.events
+            .emit(NativePeerEventKind::ConnectionState(state.to_string()));
+    }
+
+    async fn on_data_channel(&self, data_channel: Arc<dyn DataChannel>) {
+        attach_data_channel(data_channel, self.channels.clone(), self.events.clone()).await;
+    }
 }
 
 impl NativePeer {
@@ -54,25 +84,35 @@ impl NativePeer {
                 ..Default::default()
             })
             .collect();
-        let connection = APIBuilder::new()
-            .build()
-            .new_peer_connection(RTCConfiguration {
-                ice_servers,
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| error.to_string())?;
+        let channels = Arc::new(NativeDataChannels::default());
+        let handler = Arc::new(NativePeerHandler {
+            channels: channels.clone(),
+            events: events.clone(),
+        });
+        let connection: Arc<dyn PeerConnection> = Arc::new(
+            PeerConnectionBuilder::<String>::new()
+                .with_configuration(
+                    RTCConfigurationBuilder::new()
+                        .with_ice_servers(ice_servers)
+                        .build(),
+                )
+                .with_handler(handler)
+                .with_udp_addrs(vec!["0.0.0.0:0".to_owned(), "[::]:0".to_owned()])
+                .with_data_channel_send_buffer_limit(BULK_BUFFERED_MAXIMUM_BYTES)
+                .build()
+                .await
+                .map_err(|error| error.to_string())?,
+        );
         let peer = Arc::new(Self {
             session_id: options.session_id,
             peer_id: options.peer_id,
-            connection: Arc::new(connection),
-            channels: Arc::new(NativeDataChannels::default()),
+            connection,
+            channels,
             events,
             control_send: Mutex::new(()),
             bulk_send: Mutex::new(()),
             closed: AtomicBool::new(false),
         });
-        peer.register_connection_events();
         if options.initiator {
             for label in ["workspace-control", "workspace-bulk"] {
                 let data_channel = peer
@@ -80,26 +120,14 @@ impl NativePeer {
                     .create_data_channel(
                         label,
                         Some(RTCDataChannelInit {
-                            ordered: Some(true),
+                            ordered: true,
                             ..Default::default()
                         }),
                     )
                     .await
                     .map_err(|error| error.to_string())?;
-                debug_assert_eq!(data_channel.ordered(), true);
-                peer.attach(data_channel).await;
+                attach_data_channel(data_channel, peer.channels.clone(), peer.events.clone()).await;
             }
-        } else {
-            let weak = Arc::downgrade(&peer);
-            peer.connection
-                .on_data_channel(Box::new(move |data_channel: Arc<RTCDataChannel>| {
-                    let weak = weak.clone();
-                    Box::pin(async move {
-                        if let Some(peer) = weak.upgrade() {
-                            peer.attach(data_channel).await;
-                        }
-                    })
-                }));
         }
         Ok(peer)
     }
@@ -160,6 +188,7 @@ impl NativePeer {
                 sdp_mid: value.sdp_mid,
                 sdp_mline_index: value.sdp_m_line_index,
                 username_fragment: value.username_fragment,
+                url: None,
             })
             .await
             .map_err(|error| error.to_string())
@@ -171,8 +200,8 @@ impl NativePeer {
             NativeFrame::Binary(value) => value.len(),
         };
         let (send_lock, buffered_maximum) = match channel {
-            NativePeerChannel::Control => (&self.control_send, 256 * 1024),
-            NativePeerChannel::Bulk => (&self.bulk_send, 1024 * 1024),
+            NativePeerChannel::Control => (&self.control_send, CONTROL_BUFFERED_MAXIMUM_BYTES),
+            NativePeerChannel::Bulk => (&self.bulk_send, BULK_BUFFERED_MAXIMUM_BYTES),
         };
         let _guard = send_lock.lock().await;
         let data_channel = self
@@ -181,8 +210,9 @@ impl NativePeer {
             .await
             .ok_or("DataChannel is unavailable")?;
         if data_channel
-            .buffered_amount()
+            .outstanding_bytes()
             .await
+            .map_err(|error| error.to_string())?
             .saturating_add(frame_bytes)
             > buffered_maximum
         {
@@ -194,13 +224,13 @@ impl NativePeer {
         match frame {
             NativeFrame::Text(value) => {
                 data_channel
-                    .send_text(value)
+                    .try_send_text(&value)
                     .await
                     .map_err(|error| error.to_string())?;
             }
             NativeFrame::Binary(value) => {
                 data_channel
-                    .send(&Bytes::from(value))
+                    .try_send(BytesMut::from(value.as_slice()))
                     .await
                     .map_err(|error| error.to_string())?;
             }
@@ -210,7 +240,7 @@ impl NativePeer {
 
     pub async fn buffered_amount(&self, channel: NativePeerChannel) -> usize {
         match self.channels.get(channel).await {
-            Some(value) => value.buffered_amount().await,
+            Some(value) => value.outstanding_bytes().await.unwrap_or_default(),
             None => 0,
         }
     }
@@ -221,33 +251,6 @@ impl NativePeer {
         }
         self.channels.close().await;
         let _ = self.connection.close().await;
-    }
-
-    async fn attach(&self, data_channel: Arc<RTCDataChannel>) {
-        attach_data_channel(data_channel, self.channels.clone(), self.events.clone()).await;
-    }
-
-    fn register_connection_events(&self) {
-        let candidate_events = self.events.clone();
-        self.connection.on_ice_candidate(Box::new(move |candidate| {
-            if let Some(candidate) = candidate.and_then(|value| value.to_json().ok()) {
-                candidate_events.emit(NativePeerEventKind::IceCandidate(NativeIceCandidate {
-                    candidate: candidate.candidate,
-                    sdp_mid: candidate.sdp_mid,
-                    sdp_m_line_index: candidate.sdp_mline_index,
-                    username_fragment: candidate.username_fragment,
-                }));
-            }
-            Box::pin(async {})
-        }));
-
-        let connection_events = self.events.clone();
-        self.connection.on_peer_connection_state_change(Box::new(
-            move |state: RTCPeerConnectionState| {
-                connection_events.emit(NativePeerEventKind::ConnectionState(state.to_string()));
-                Box::pin(async {})
-            },
-        ));
     }
 }
 

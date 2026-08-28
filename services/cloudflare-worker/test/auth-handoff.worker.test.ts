@@ -96,6 +96,7 @@ async function requestTicket(seeded: Awaited<ReturnType<typeof seedHandoff>>, or
 async function requestGuestTicket(
   seeded: Awaited<ReturnType<typeof seedHandoff>>,
   origin = ORIGIN,
+  displayName?: string,
 ) {
   const clientId = `guest_${crypto.randomUUID()}`;
   const response = await SELF.fetch(
@@ -107,7 +108,7 @@ async function requestGuestTicket(
         "content-type": "application/json",
         "cf-connecting-ip": crypto.randomUUID(),
       },
-      body: JSON.stringify({ clientId }),
+      body: JSON.stringify({ clientId, displayName }),
     },
   );
   return { response, clientId };
@@ -423,7 +424,7 @@ describe("Workspace Ticket communication", () => {
 
   it("records collaborator role and never stores the plaintext Ticket", async () => {
     const seeded = await seedHandoff();
-    const { response } = await requestGuestTicket(seeded);
+    const { response } = await requestGuestTicket(seeded, ORIGIN, "Desktop User");
     const envelope = await response.json() as Record<string, any>;
     const ticket = envelope.data.ticket as string;
     const object = testEnv.WORKSPACE_REALTIME.get(
@@ -435,6 +436,7 @@ describe("Workspace Ticket communication", () => {
     });
     expect(stored).not.toContain(ticket);
     expect(stored).toContain('"role":"collaborator"');
+    expect(stored).toContain('"displayName":"Desktop User"');
   });
 
   it("atomically allows only one consumption of a Ticket", async () => {

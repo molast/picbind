@@ -300,7 +300,10 @@ export class WorkspaceRealtimeObject {
     if (type === "memberKick") {
       if (attachment.role !== "owner" || !nonEmptyString(payload.targetUserId, 128)) return;
       const targetUserId = payload.targetUserId;
-      const targets = this.state.getWebSockets(`user:${targetUserId}`);
+      const targets = this.state.getWebSockets(`user:${targetUserId}`).filter((candidate) => {
+        const target = candidate.deserializeAttachment() as WorkspaceSocketAttachment | null;
+        return target?.role === "collaborator";
+      });
       if (!targets.length) return;
       this.sendToSockets(targets, {
         type: "memberRemoved",

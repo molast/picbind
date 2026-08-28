@@ -28,6 +28,7 @@ export class WorkspaceRealtimeService implements RealtimeService {
       role: request.role,
       shareToken: request.shareToken ?? null,
       ownerCapability: request.ownerCapability ?? null,
+      displayName: request.displayName ?? null,
     }, this.dependencies, request.clientId);
 
     // Start immediately, but return the session before ticket/socket I/O completes so

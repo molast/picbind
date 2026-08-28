@@ -1,11 +1,12 @@
 import React from "react";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { ImageParameterDocument } from "../image-protocol";
-import type { WorkspaceActivity, WorkspaceCommit, WorkspaceImage, WorkspaceProposal } from "../types";
+import type { Collaborator, WorkspaceActivity, WorkspaceCommit, WorkspaceImage, WorkspaceProposal } from "../types";
 
 export function useWorkspaceDialogs() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = React.useState(false);
+  const [removingCollaborator, setRemovingCollaborator] = React.useState<Collaborator | null>(null);
   const [operationLogOpen, setOperationLogOpen] = React.useState(false);
   const [proposalPreview, setProposalPreview] = React.useState<{ proposalId: string; imageId: string; original: Blob; result: Blob } | null>(null);
   const [sourceRequestDialog, setSourceRequestDialog] = React.useState<Record<string, unknown> | null>(null);
@@ -24,5 +25,5 @@ export function useWorkspaceDialogs() {
   const [stoppingCollaboration, setStoppingCollaboration] = React.useState(false);
   const [pendingProcessedResult, setPendingProcessedResult] = React.useState<{ source: WorkspaceImage; result: ProcessedImageResult } | null>(null);
   const [processedResultSaving, setProcessedResultSaving] = React.useState(false);
-  return { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, saveCollaborationOpen, setSaveCollaborationOpen, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving };
+  return { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, saveCollaborationOpen, setSaveCollaborationOpen, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving };
 }

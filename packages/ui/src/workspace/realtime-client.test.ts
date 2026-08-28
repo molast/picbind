@@ -19,6 +19,7 @@ class MockSocket implements RealtimeSocket {
   state = "open" as const;
   readonly frames: RealtimeFrame[] = [];
   closeCount = 0;
+  closeError: Error | null = null;
   private readonly listeners = new Set<(event: RealtimeSocketEvent) => void>();
 
   subscribe(listener: (event: RealtimeSocketEvent) => void) {
@@ -26,7 +27,10 @@ class MockSocket implements RealtimeSocket {
     return () => this.listeners.delete(listener);
   }
   async send(frame: RealtimeFrame) { this.frames.push(frame); }
-  async close() { this.closeCount += 1; }
+  async close() {
+    this.closeCount += 1;
+    if (this.closeError) throw this.closeError;
+  }
 }
 
 class MockPeer implements RealtimePeer {
@@ -62,6 +66,7 @@ function identity(role: "owner" | "collaborator"): WorkspaceRealtimeIdentity {
     role,
     shareToken: role === "collaborator" ? "share-1" : null,
     ownerCapability: role === "owner" ? "owner-1" : null,
+    displayName: role === "owner" ? "Alice" : "Bob",
   };
 }
 
@@ -79,9 +84,12 @@ function harness(role: "owner" | "collaborator") {
     },
   }, "client-1");
   type TestPeer = {
+    userId: string;
     peer: MockPeer;
     controlOpen: boolean;
     bulkOpen: boolean;
+    healthOutcomes: boolean[];
+    healthRtts: number[];
     localReadyEpoch: number;
     remoteReadyEpoch: number;
     primary: boolean;
@@ -91,6 +99,14 @@ function harness(role: "owner" | "collaborator") {
     receive: (frame: RealtimeFrame, transport: "socket") => void;
     peers: Map<string, TestPeer>;
     promotePeer: (peer: TestPeer) => void;
+    pushHealth: (peer: TestPeer, success: boolean, rtt?: number) => void;
+    handleSocketEvent: (
+      socket: RealtimeSocket,
+      generation: number,
+      event: RealtimeSocketEvent,
+    ) => void;
+    reconnectTimer: number | null;
+    disposed: boolean;
   };
   internals.socket = socket;
   const receive = (value: Record<string, unknown>) => internals.receive({
@@ -104,7 +120,7 @@ function harness(role: "owner" | "collaborator") {
 }
 
 test("collaborator initiates RTC with Worker-compatible signal names", async () => {
-  const { receive, textFrames } = harness("collaborator");
+  const { internals, receive, textFrames } = harness("collaborator");
   receive({ type: "connected", role: "collaborator", ownerOnline: true });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -112,6 +128,15 @@ test("collaborator initiates RTC with Worker-compatible signal names", async () 
   assert.equal(offer?.type, "webrtcOffer");
   assert.equal(offer?.targetRole, "owner");
   assert.equal((offer?.description as { type: string }).type, "offer");
+
+  receive({
+    type: "webrtcAnswer",
+    senderId: "owner-client-1",
+    senderRole: "owner",
+    description: { type: "answer", sdp: "answer-sdp" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(internals.peers.get("owner")?.userId, "owner-client-1");
 });
 
 test("owner answers each collaborator with an independent peer", async () => {
@@ -148,6 +173,30 @@ test("promoting RTC keeps the WebSocket signaling connection open", async () => 
 
   assert.equal(peer.primary, true);
   assert.equal(socket.closeCount, 0);
+  await client.close();
+});
+
+test("RTC health probes publish rolling packet loss for the matching peer", async () => {
+  const { client, internals, receive } = harness("owner");
+  const events: Array<Record<string, unknown>> = [];
+  client.subscribe((event) => events.push(event));
+  receive({
+    type: "webrtcOffer",
+    senderId: "guest-1",
+    description: { type: "offer", sdp: "offer-sdp" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const peer = internals.peers.get("guest-1")!;
+
+  internals.pushHealth(peer, true, 24);
+  internals.pushHealth(peer, false);
+  internals.pushHealth(peer, true, 32);
+
+  const stats = events.filter((event) => event.type === "peerNetworkStats").at(-1)!;
+  assert.equal(stats.userId, "guest-1");
+  assert.equal(stats.transport, "rtc");
+  assert.equal(stats.sampleCount, 3);
+  assert.equal(Math.round(Number(stats.packetLossRate) * 10) / 10, 33.3);
   await client.close();
 });
 
@@ -286,4 +335,42 @@ test("ACK removes a reliable event and close is idempotent", async () => {
   await Promise.all([client.close(), client.close()]);
   assert.equal(socket.closeCount, 1);
   assert.equal(internals.peers.size, 0);
+});
+
+test("Session cleanup completes when the remote socket has already closed", async () => {
+  const { client, internals, receive, socket } = harness("owner");
+  receive({
+    type: "webrtcOffer",
+    senderId: "guest-1",
+    description: { type: "offer", sdp: "offer-sdp" },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  socket.closeError = new Error("connection not found for the given id: 7");
+
+  await client.close("member-removed");
+
+  assert.equal(client.state, "closed");
+  assert.equal(socket.closeCount, 1);
+  assert.equal(internals.peers.size, 0);
+});
+
+test("a removed collaborator treats close code 4003 as terminal", async () => {
+  const { client, internals, socket } = harness("collaborator");
+  const events: Array<Record<string, unknown>> = [];
+  client.subscribe((event) => events.push(event));
+
+  internals.handleSocketEvent(socket, 0, {
+    type: "close",
+    code: 4003,
+    reason: "Removed by Owner",
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(
+    events.find((event) => event.type === "memberRemoved"),
+    { type: "memberRemoved", reason: "Removed by Owner", transport: "socket" },
+  );
+  assert.equal(internals.reconnectTimer, null);
+  assert.equal(internals.disposed, true);
+  assert.equal(client.state, "closed");
 });

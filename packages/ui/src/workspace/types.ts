@@ -78,6 +78,8 @@ export type Collaborator = {
   online: boolean;
   currentAction?: string;
   currentImageId?: string;
+  transport?: "socket" | "rtc";
+  packetLossRate?: number;
 };
 
 export type WorkspaceActivity = {

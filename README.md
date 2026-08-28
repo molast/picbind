@@ -81,7 +81,7 @@ pnpm dev:desktop
 ## 本地 Desktop 开发
 
 macOS、Linux、Git Bash 和 WSL 下的脚本会显示阻塞式菜单，可以选择启动 Tauri
-Desktop 开发环境、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
+Desktop 开发环境、仅启动 Desktop app、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
 模式下由根目录进程管理器复用 3000 端口已有的 Web 服务，或启动并跟踪唯一的 Web 服务；
 确认开发启动页可访问后才启动 Tauri。任何受管理进程停止时，其余受管理进程及子进程会被
 回收，复用的外部 Web 服务不会被停止。Room、Durable Object、R2、KV 和其他 Worker API 统一
@@ -102,6 +102,10 @@ dev-local.cmd
 `http://localhost:3000/tauri-dev.html`。所选任务会一直占用当前终端；按 `Ctrl+C` 会
 停止 Tauri 和本次命令启动的 Web 进程，不会停止复用的已有服务。修改 Worker 后必须部署到
 Cloudflare，应用才会使用到新实现。
+
+选择 `Desktop app only (requires Web on :3000)` 或运行 `pnpm dev:desktop-only` 时，只会
+启动 Tauri Desktop app，不会启动、重启或替换 Web 服务。该模式要求 3000 端口已有本仓库的
+Web app，若服务不存在或 `/tauri-dev.html` 不可访问则直接退出。
 
 ## WASM 构建
 
