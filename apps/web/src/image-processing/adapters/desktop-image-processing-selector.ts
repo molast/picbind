@@ -7,6 +7,7 @@ import {
   type ConvertImageRequest,
   type CreateShareAssetsRequest,
   type ImageParameterDocument,
+  type ImagePreviewCacheArtifact,
   type ImageProcessingService,
   type ImageProcessingSource,
   type ImageTaskContext,
@@ -69,6 +70,10 @@ export class DesktopImageProcessingSelector implements ImageProcessingService {
     return service.renderPreview(request, context);
   }
 
+  releasePreviewCache(artifact: ImagePreviewCacheArtifact) {
+    return (artifact.engine === "desktop-native" ? this.native : this.web).releasePreviewCache(artifact);
+  }
+
   async materialize(request: MaterializeImageRequest, context?: ImageTaskContext) {
     if (supportsNativeSource(request.source) && supportsNativeDocument(request.document)) {
       return this.native.materialize(request, context);
@@ -101,6 +106,10 @@ export class DesktopImageProcessingSelector implements ImageProcessingService {
       ? this.native
       : this.web;
     return service.createShareAssets(request, context);
+  }
+
+  releaseMemorySource(cacheKey: string) {
+    return this.native.releaseMemorySource(cacheKey);
   }
 
   releaseTemporary(artifact: TemporaryImageArtifact) {

@@ -597,8 +597,17 @@ if source_format == target_format
 - Desktop Native resize 与后续编码位于同一个 `spawn_blocking` 任务；缩放后的 RGBA 缓冲在
   编码任务返回时释放，不通过 IPC 往返传输。
 - Native 参数预览、物化、placeholder、thumbnail 和质量分析同样位于单个 `spawn_blocking`
-  命令中；解码图、重放容器、缩放缓冲和指标向量在命令返回后释放。预览与派生资源继续
-  返回有界内存结果；压缩、转换和物化选择 `temporary` destination 时，输出写入应用受控的
+  命令中。普通任务的解码图、重放容器、缩放缓冲和指标向量在命令返回后释放；Image
+  Workspace 协作源例外：A 源图使用受控 `cacheKey` 在 Rust 内保留原始编码字节和一份
+  `960×720` 范围内的解码预览基线，后续预览只克隆该有界像素缓冲后重放参数，不再复制或
+  Lanczos 缩放全尺寸 RGBA。Original 空参数预览直接借用该有界像素，不执行 clone 或参数重放；
+  B 不使用该有界预览基线，而是从 A 的完整编码字节应用当前参数，并按 A 的图片格式和最高质量档位
+  物化为唯一一份全尺寸 Blob。Native 历史预览的 WebP 交付使用 libwebp `method 0` 与线程级并行的快速档，不改变原图格式或正式压缩的 `method 5`。停止协作、替换源图、删除图片或离开 Workspace 时显式释放该缓存，
+  最多保留 4 个源且按约 768 MB 上限淘汰旧项。普通预览与派生资源返回有界内存结果；Workspace
+  当前 Commit 在 B 更新后异步从 B 生成保持宽高比、不放大且宽高分别不超过 `720×540`、quality
+  `0.80` 的 WebP C 文件，历史
+  Commit 未命中时才从 A 和参数文档重放。每图 C 文件 LRU 同时限制 12 条和 12 MiB，并只通过
+  只读地址交付给 WebView。压缩、转换和物化选择 `temporary` destination 时，输出写入应用受控的
   `temp/image-processing`，`sync_all` 后同目录 rename，并只向 WebView 返回实例内 UUID
   token。token 默认 15 分钟过期，支持幂等释放；Storage 接管成功后 token 失效，接管失败
   时仍可重试或释放，应用重启会清理上个实例遗留文件。
@@ -613,6 +622,29 @@ AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回
 - Desktop 的压缩、Favicon 和 Workspace 页面使用持久路由栈；站内切换只隐藏非当前页面，不卸载压缩页面，也不会批量终止活跃 Worker。
 - Blob URL 在替换、删除或页面卸载时调用 `URL.revokeObjectURL()`。
 - 原始 `File` 在该图片所有格式均不再处于 queued/processing 后，从 staged 内存缓存释放。
+- Image Workspace 的 A（不可变源 Blob）、B（A 加最新参数所得、保持 A 格式的唯一全尺寸 Blob）
+  和 C（Commit 预览文件 LRU）分别管理。B 使用最高质量档位，不经过预览降采样或预览质量压缩。
+  图片从 Library 进入 Working 时生成一份不进入 C LRU 的原始卡片缩略图；它与 C 使用相同的保持
+  宽高比、不放大、最大 `720×540`、quality `0.80` WebP 档位，并作为 Repository thumbnail
+  缓存文件保存，不进入协作容器，也不作为长期 Blob 保存在 UI 状态。
+  C 按每张图片隔离，以不可变 `commitId` 为键；保持处理结果
+  宽高比且不放大，实际宽高分别不超过 `720×540`，使用 quality `0.80` 的 WebP，并只保存地址、
+  释放标识和元数据，不保存 Blob；每图最多 12 条且总文件大小最多 12 MiB，
+  命中移动到 MRU，超限
+  淘汰最久未使用项。Desktop 直接写 `temp/image-preview-cache` 并通过不透明
+  `picbind-preview:` URL 显示，Web 使用可释放对象 URL。
+- 本端或远端 Commit 生成 B 期间，Working 卡片保留上一张 C 并显示 loading；B 完成后异步预热当前
+  Commit 的 C，C 完成后原子切换卡片并移除 loading。最大化和正式协作画布始终直接显示 B。
+  关闭历史预览只清活动引用，停止协作、源替换、图片删除或离开 Workspace 清空全部 C 文件。
+  没有稳定 Commit ID 的 Proposal 文件关闭后立即释放。
+- Owner 的 B 实时预览只用于网络传输，不覆盖原始 Working thumbnail。直接停止协作时先把图片参数
+  和 Current 恢复到初始状态，再释放 B、C 与 Native A 缓存；普通 Working 卡片读取原始 thumbnail
+  文件，不重新处理全尺寸 A，也不会因残留参数重新触发 B/C 渲染。
+- `Save Image` 和 `Save & Stop` 的覆盖模式把当前 B 物化为新的 A，清空旧参数历史，并用 B 生成的
+  thumbnail 缓存文件覆盖当前卡片；新建模式保留原 A 与原 thumbnail，并为新的 Working 图片写入
+  独立 B 源文件和 thumbnail。两种 thumbnail 都是缓存文件，不是长期驻留的预览 Blob。
+- 已有参数再次进入颜色、裁剪、尺寸或 Review 编辑器时先用 B 作为稳定 poster；用于替换同类型参数的
+  一次性 editor preview Blob 不进入 C，完成解码和当前参数绘制后才原子移除 poster。
 - Dexie / IndexedDB 负责关联数据和必要的文件队列元数据持久化，OPFS 负责图片文件；压缩算法不会把图片 Blob 存入 Dexie 表。
 
 ## 14. 当前边界
@@ -683,7 +715,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线保持 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色的既有顺序。基础通道与光影步骤预编译为三个 `256` 项 LUT，逐像素循环只执行当前设置实际启用的 HSL、色彩平衡、滤镜、替换和重着色阶段；未启用阶段不再做浮点运算，也不再为每个像素创建 HSL 数组、色调权重对象或闭包。色调曲线支持添加、移动和删除控制点，端点保留且可调整输出值，控制点最多 `12` 个；处理时按输入值排序，经 Catmull-Rom 插值生成 `256` 项 LUT。弹窗在最长边不超过 `720×420` 的 Canvas 预览副本上执行同一像素函数，连续操作按约 `36 ms` 合并更新。最终输出的原始尺寸像素循环由独立 `room-color-adjustment.worker.ts` 执行，避免大图处理阻塞弹窗主线程；调整后的 RGBA 在同一个 Worker 内直接交给 PNG、WebP 或 AVIF 编码器，JPEG 因当前 WASM 未提供公开 RGBA 入口而在该 Worker 内使用一次临时 PNG 载体，不再把临时 PNG 传回主线程后启动第二个 Worker。颜色替换可从预览点击取样，Alpha 始终保持原值且不会被静默压平；生成结果记录为 `adjust`，后续由统一结果弹窗决定本地存储或分享。全部设置保持默认值时禁止生成无意义结果。
 12. Review 标注线宽以图片归一化比例保存，渲染时乘以原图到当前适配画布的缩放比例。因此不同像素尺寸的图片在相同线宽档位和初始适配视图下具有一致的屏幕视觉粗细，同时图形自身拉伸不会放大描边。自由画笔、直线、箭头、矩形、圆形、虚线和圆点线共用该换算。Transformer 锚点、旋转手柄、旋转偏移和选框边框属于操作 UI，只按视口缩放反向补偿，不受原图分辨率影响。
 13. Review 保存图片时先在全尺寸 `OffscreenCanvas` 合成原图与标注快照，但合成得到的 PNG 只作为临时无损像素载体，不再直接作为最终文件。随后通过一次性压缩 Worker 编码为源图格式：JPEG、PNG 使用共享 `image-wasm`，WebP、AVIF 使用 Room 现有对应编码器。若首选结果超过 `max(原图大小 × 1.5, 原图大小 + 512 KB)`，会额外尝试 WebP；WebP 源则尝试 AVIF，并选择两个有效结果中更小的一个。该护栏不能退回原图，因为原图不包含新标注。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
-14. 新版 Image Workspace 的协作图片使用延迟物化流程。裁剪、尺寸调整、色彩调整、旋转和 Doodle 在协作状态下只提交版本化 JSON 参数；画布、卡片和对端同步使用最长边受限的 WebP 预览，参数提交不会调用全尺寸编辑编码器，也不会用预览 Blob 替换完整渲染结果。Owner 使用 `Apply changes`，Collaborator 使用 `Submit proposal`；非协作图片仍使用 `Generate result` 生成独立结果。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。只有保存协作图片、导出或下载时，才从缓存原图重放参数栈并物化完整结果；未获得原图的 Collaborator 只基于 Owner 已渲染预览应用新增参数，Owner 发送新预览或原图后会重建该预览基线，避免重复应用已有参数。
+14. 新版 Image Workspace 的裁剪、尺寸调整、色彩调整、旋转和 Doodle 仍只通过版本化 JSON 参数同步，不传输处理后的 B。正式 Commit 或回退生效后，各端分别从本端 A 重放当前完整参数队列，立即物化唯一一份全尺寸 B；B 保持 A 的图片格式，使用 quality `100`，不经过预览降采样或预览质量档位。Web 参数重放会把该 quality 覆盖传入裁剪、尺寸、色彩和最终格式恢复编码链；这只影响协作 B，不改变普通编辑结果第 8、11 条的默认 `78/58` 档位。B 处理期间 Working 卡片保留上一张稳定 C 并显示 loading，B 完成后再异步生成保持宽高比、不放大且宽高分别不超过 `720×540` 的 quality `0.80` WebP C；C 完成后原子切换卡片并移除 loading，最大化和正式协作画布始终读取 B。Owner 使用 `Apply changes`；Collaborator 使用 `Submit proposal`，Proposal 在 Owner 批准成为正式 Commit 前不会更新 B。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。未获得原图的 Collaborator 只能把已收到的干净预览作为本端 A；收到原图后会替换 A，并按当前参数重新生成 B/C。
 
 关键实现：
 

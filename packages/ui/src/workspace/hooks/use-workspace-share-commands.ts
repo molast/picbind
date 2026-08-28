@@ -1,21 +1,19 @@
 import React from "react";
 import type { RealtimeService, RealtimeSession } from "@picbind/shared";
 import { getRealtimeClientId } from "../../realtime";
-import { createWorkspaceShare, rotateWorkspaceShare, shareUrl } from "../api";
+import { createWorkspaceShare, rotateWorkspaceShare } from "../api";
 import { promoteLocalWorkspace, saveWorkspace } from "../repository";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
-export function useWorkspaceShareCommands({ workspace, displayName, publicSiteUrl, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setCopied, setNotice, }: {
+export function useWorkspaceShareCommands({ workspace, displayName, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setNotice, }: {
   workspace: WorkspaceIdentity | null;
   displayName?: string | null;
-  publicSiteUrl?: string;
   setWorkspace: React.Dispatch<React.SetStateAction<WorkspaceIdentity | null>>;
   setImages: React.Dispatch<React.SetStateAction<WorkspaceImage[]>>;
   realtimeRef: React.MutableRefObject<RealtimeSession | null>;
   realtimeService: RealtimeService;
   subscribe: (client: RealtimeSession) => void;
   transition: () => void;
-  setCopied: React.Dispatch<React.SetStateAction<boolean>>;
   setNotice: (message: string) => void;
 }) {
   const createShare = React.useCallback(async () => {
@@ -50,12 +48,5 @@ export function useWorkspaceShareCommands({ workspace, displayName, publicSiteUr
     setNotice("A new link was created. The previous link is no longer valid.");
   }, [setNotice, setWorkspace, workspace]);
 
-  const copyShare = React.useCallback(async () => {
-    if (!workspace?.shareToken) return;
-    await navigator.clipboard.writeText(shareUrl(workspace.shareToken, publicSiteUrl));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }, [publicSiteUrl, setCopied, workspace]);
-
-  return { createShare, rotateShare, copyShare };
+  return { createShare, rotateShare };
 }

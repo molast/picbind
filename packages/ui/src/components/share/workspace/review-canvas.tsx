@@ -52,6 +52,8 @@ type MagnifierPosition = {
 
 type ReviewCanvasProps = {
   image: RoomImage;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   labels: ShareRoomLabels;
   scale: number;
   offset: ReviewViewportOffset;
@@ -87,6 +89,8 @@ type ReviewCanvasProps = {
 
 export default function ReviewCanvas({
   image,
+  posterUrl,
+  editorBaseReady = true,
   labels,
   scale,
   offset,
@@ -146,6 +150,7 @@ export default function ReviewCanvas({
     React.useState<MagnifierPosition | null>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
   const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
+  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
   const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(
     null,
   );
@@ -565,6 +570,7 @@ export default function ReviewCanvas({
                 height: event.currentTarget.naturalHeight,
               };
               setImageSize(dimensions);
+              setRenderedImageUrl(image.url);
               onDimensionsChange(dimensions);
             }}
             className="block h-full w-full select-none object-contain"
@@ -624,6 +630,7 @@ export default function ReviewCanvas({
               />
             </div>
           ) : null}
+          {posterUrl && (!editorBaseReady || renderedImageUrl !== image.url) ? <div className="absolute inset-0 z-30 cursor-wait" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}><img src={posterUrl} alt="" draggable={false} className="h-full w-full select-none object-contain" aria-hidden="true" /></div> : null}
           {textEditor && fitRatio ? (
             <textarea
               ref={textInputRef}

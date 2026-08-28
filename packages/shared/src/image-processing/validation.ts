@@ -93,6 +93,7 @@ export function validateImageProcessingSource(source: ImageProcessingSource) {
   if (source.kind === "blob") {
     if (!(source.blob instanceof Blob)) invalid("Blob source data is required");
     if (!source.mimeType.startsWith("image/")) invalid("Image source mimeType is invalid");
+    if (source.cacheKey !== undefined && !source.cacheKey.trim()) invalid("Image source cacheKey is invalid");
     return;
   }
   if (source.kind !== "stored" || !source.asset) invalid("Stored image reference is required");

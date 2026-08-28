@@ -1,6 +1,6 @@
 "use client";
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   IMAGE_PROCESSING_API_VERSION,
@@ -64,6 +64,11 @@ type NativeBinaryResponse = {
 type NativePreviewResponse = NativeBinaryResponse & {
   width: number;
   height: number;
+  cache?: {
+    token: string;
+    mimeType: "image/webp";
+    sizeBytes: number;
+  };
 };
 
 type NativeShareAssetsResponse = NativeBinaryResponse & {
@@ -101,12 +106,14 @@ export type DesktopNativeBridge = {
     handler: (event: { payload: T }) => void,
   ): Promise<() => void>;
   randomUUID(): string;
+  convertFileSrc?(path: string, protocol: string): string;
 };
 
 const defaultNativeBridge: DesktopNativeBridge = {
   invoke: (command, args) => invoke(command, args as never),
   listen: (event, handler) => listen(event, handler),
   randomUUID: () => crypto.randomUUID(),
+  convertFileSrc,
 };
 
 function checkContext(context?: ImageTaskContext) {
@@ -120,11 +127,21 @@ function outputName(name: string, format: ImageOutputFormat | string) {
   return `${name.replace(/\.[^.]+$/, "") || "image"}.${extension}`;
 }
 
-async function encodeSource(source: ImageProcessingSource) {
+async function encodeSource(source: ImageProcessingSource, memorySources: Set<string>) {
   validateImageProcessingSource(source);
   if (source.kind === "blob") {
+    if (source.cacheKey && memorySources.has(source.cacheKey)) {
+      return {
+        source: { kind: "memory", cacheKey: source.cacheKey },
+        bytes: new Uint8Array(),
+      };
+    }
     const bytes = new Uint8Array(await source.blob.arrayBuffer());
-    return { source: { kind: "inline" }, bytes };
+    return {
+      source: { kind: "inline", cacheKey: source.cacheKey },
+      bytes,
+      registeredCacheKey: source.cacheKey,
+    };
   }
   return {
     source: {
@@ -200,6 +217,7 @@ function parseNativeError(error: unknown): ImageProcessingError {
 
 async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
   bridge: DesktopNativeBridge,
+  memorySources: Set<string>,
   metadata: Record<string, unknown>,
   source: ImageProcessingSource,
   context?: ImageTaskContext,
@@ -207,8 +225,8 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
 ) {
   checkContext(context);
   const requestId = context?.requestId || bridge.randomUUID();
-  const encodedSource = await encodeSource(source);
-  const encodedAssessed = assessed ? await encodeSource(assessed) : undefined;
+  const encodedSource = await encodeSource(source, memorySources);
+  const encodedAssessed = assessed ? await encodeSource(assessed, memorySources) : undefined;
   checkContext(context);
   const metadataBytes = encoder.encode(JSON.stringify({
     apiVersion: IMAGE_PROCESSING_API_VERSION,
@@ -250,6 +268,8 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
   try {
     checkContext(context);
     raw = await bridge.invoke<ArrayBuffer | Uint8Array | number[]>("image_processing_execute", frame);
+    if (encodedSource.registeredCacheKey) memorySources.add(encodedSource.registeredCacheKey);
+    if (encodedAssessed?.registeredCacheKey) memorySources.add(encodedAssessed.registeredCacheKey);
   } catch (error) {
     throw parseNativeError(error);
   } finally {
@@ -279,6 +299,7 @@ async function executeNative<T extends NativeBinaryResponse = NativeResponse>(
 
 export class DesktopImageProcessingService implements ImageProcessingService {
   readonly engine = "desktop-native" as const;
+  private readonly memorySources = new Set<string>();
 
   constructor(
     private readonly bridge: DesktopNativeBridge = defaultNativeBridge,
@@ -289,7 +310,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
   }
 
   async inspect(source: ImageProcessingSource, context?: ImageTaskContext) {
-    const { result } = await executeNative(this.bridge, { operation: "inspect" }, source, context);
+    const { result } = await executeNative(this.bridge, this.memorySources, { operation: "inspect" }, source, context);
     return result.metadata;
   }
 
@@ -301,8 +322,9 @@ export class DesktopImageProcessingService implements ImageProcessingService {
       || !Number.isFinite(request.quality) || request.quality < 0 || request.quality > 1) {
       throw new ImageProcessingError("invalidRequest", "Preview dimensions, quality or mimeType are invalid");
     }
-    const { result, bytes } = await executeNative<NativePreviewResponse>(this.bridge, {
+    const { result, bytes } = await executeNative<NativePreviewResponse>(this.bridge, this.memorySources, {
       operation: "renderPreview",
+      destination: request.destination || "memory",
       document: request.document,
       preview: {
         maxWidth: request.maxWidth,
@@ -310,6 +332,25 @@ export class DesktopImageProcessingService implements ImageProcessingService {
         quality: Math.max(1, Math.round(request.quality * 100)),
       },
     }, request.source, context);
+    if (request.destination === "cache") {
+      if (!result.cache || bytes.byteLength !== 0) {
+        throw new ImageProcessingError("internal", "Native preview cache output is invalid");
+      }
+      return {
+        artifact: {
+          kind: "cache" as const,
+          id: result.cache.token,
+          url: (this.bridge.convertFileSrc || convertFileSrc)(result.cache.token, "picbind-preview"),
+          mimeType: result.cache.mimeType,
+          sizeBytes: result.cache.sizeBytes,
+          engine: this.engine,
+        },
+        width: result.width,
+        height: result.height,
+        engine: this.engine,
+        documentVersion: 1 as const,
+      };
+    }
     return {
       artifact: { kind: "blob" as const, blob: new Blob([bytes], { type: "image/webp" }) },
       width: result.width,
@@ -317,6 +358,10 @@ export class DesktopImageProcessingService implements ImageProcessingService {
       engine: this.engine,
       documentVersion: 1 as const,
     };
+  }
+
+  async releasePreviewCache(artifact: Parameters<ImageProcessingService["releasePreviewCache"]>[0]) {
+    await this.bridge.invoke("image_processing_release_preview_cache", { token: artifact.id });
   }
 
   async materialize(
@@ -328,7 +373,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     if (!Number.isFinite(quality) || quality < 1 || quality > 100) {
       throw new ImageProcessingError("invalidRequest", "Materialize quality must be between 1 and 100");
     }
-    const { result, bytes } = await executeNative<NativeResponse>(this.bridge, {
+    const { result, bytes } = await executeNative<NativeResponse>(this.bridge, this.memorySources, {
       operation: "materialize",
       destination: request.destination,
       document: request.document,
@@ -352,6 +397,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
   async compareQuality(request: CompareImageQualityRequest, context?: ImageTaskContext) {
     const { result } = await executeNative<NativeQualityResponse>(
       this.bridge,
+      this.memorySources,
       { operation: "compareQuality" },
       request.source,
       context,
@@ -373,7 +419,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
       || !Number.isInteger(request.container.height) || request.container.height < 1) {
       throw new ImageProcessingError("invalidRequest", "Share asset container is invalid");
     }
-    const { result, bytes } = await executeNative<NativeShareAssetsResponse>(this.bridge, {
+    const { result, bytes } = await executeNative<NativeShareAssetsResponse>(this.bridge, this.memorySources, {
       operation: "createShareAssets",
       document: request.document,
       container: request.container,
@@ -391,6 +437,11 @@ export class DesktopImageProcessingService implements ImageProcessingService {
 
   async releaseTemporary(artifact: Parameters<ImageProcessingService["releaseTemporary"]>[0]) {
     await this.bridge.invoke("image_processing_release_temporary", { token: artifact.token });
+  }
+
+  async releaseMemorySource(cacheKey: string) {
+    this.memorySources.delete(cacheKey);
+    await this.bridge.invoke("image_processing_release_memory_source", { cacheKey });
   }
 
   async compress(
@@ -430,7 +481,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     if (!Number.isFinite(gain) || gain < 0.5 || gain > 2) {
       throw new ImageProcessingError("invalidRequest", "Compression gain must be between 0.5 and 2.0");
     }
-    const { result, bytes } = await executeNative(this.bridge, {
+    const { result, bytes } = await executeNative(this.bridge, this.memorySources, {
       operation: "encode",
       destination: request.destination,
       options: {
@@ -462,7 +513,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
     if (!Number.isFinite(quality) || quality < 1 || quality > 100) {
       throw new ImageProcessingError("invalidRequest", "Conversion quality must be between 1 and 100");
     }
-    const { result, bytes } = await executeNative(this.bridge, {
+    const { result, bytes } = await executeNative(this.bridge, this.memorySources, {
       operation: "encode",
       destination: request.destination,
       options: {

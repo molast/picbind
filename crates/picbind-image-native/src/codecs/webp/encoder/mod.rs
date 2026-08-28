@@ -17,6 +17,13 @@ impl WebPEncoderOptions {
         options.config.quality = f32::from(quality);
         options
     }
+
+    pub(crate) fn preview(quality: u8) -> Self {
+        let mut options = Self::new(quality);
+        options.config.method = 0;
+        options.config.thread_level = 1;
+        options
+    }
 }
 
 impl Default for WebPEncoderOptions {
@@ -67,6 +74,13 @@ impl<'a> PreparedWebPPixels<'a> {
 
 pub(crate) fn encode(image: &DynamicImage, quality: u8) -> Result<Vec<u8>, NativeImageError> {
     encode_with_options(image, &WebPEncoderOptions::new(quality))
+}
+
+pub(crate) fn encode_preview(
+    image: &DynamicImage,
+    quality: u8,
+) -> Result<Vec<u8>, NativeImageError> {
+    encode_with_options(image, &WebPEncoderOptions::preview(quality))
 }
 
 pub(crate) fn encode_with_options(

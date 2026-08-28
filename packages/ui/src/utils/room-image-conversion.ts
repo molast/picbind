@@ -1,7 +1,7 @@
 "use client";
 
 import type { RoomImageEditResult } from "./room-image-editing";
-import type { RoomCompressionFormat } from "./room-image-compression";
+import type { RoomCompressionEncodingOptions, RoomCompressionFormat } from "./room-image-compression";
 import { compressRoomImageTask } from "./room-image-compression-task";
 import { appendFileNameSuffix } from "./image-object";
 
@@ -11,6 +11,7 @@ export async function convertRoomImageTask(
   image: File,
   format: RoomConversionFormat,
   signal: AbortSignal,
+  encodingOptions?: RoomCompressionEncodingOptions,
 ): Promise<RoomImageEditResult> {
   const result = await compressRoomImageTask(
     image,
@@ -18,6 +19,7 @@ export async function convertRoomImageTask(
     signal,
     undefined,
     format === "jpeg",
+    encodingOptions,
   );
   return {
     blob: result.blob,

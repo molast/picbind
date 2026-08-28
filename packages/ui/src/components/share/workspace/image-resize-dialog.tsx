@@ -10,6 +10,8 @@ import { type RoomImageEditResult } from "../../../utils/room-image-editing";
 
 type ImageResizeDialogProps = {
   image: RoomImage | null;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
@@ -24,13 +26,14 @@ function validDimension(value: number) {
   return Number.isFinite(value) && value >= 1 && value <= MAX_DIMENSION;
 }
 
-export default function ImageResizeDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialSize }: ImageResizeDialogProps) {
+export default function ImageResizeDialog({ image, posterUrl, editorBaseReady = true, labels, onClose, onSave, parameterAction, onApplyParameters, initialSize }: ImageResizeDialogProps) {
   const imageProcessing = useImageProcessing();
   const [width, setWidth] = React.useState(1);
   const [height, setHeight] = React.useState(1);
   const [locked, setLocked] = React.useState(true);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
   const ratioRef = React.useRef(1);
 
   React.useEffect(() => {
@@ -43,7 +46,7 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave, para
     setLocked(true);
     setWorking(false);
     setError(null);
-  }, [image, initialSize]);
+  }, [image?.id, initialSize]);
 
   React.useEffect(() => {
     if (!image) return;
@@ -52,7 +55,7 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave, para
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [image, onClose, working]);
+  }, [image?.id, onClose, working]);
 
   if (!image) return null;
   const valid = validDimension(width) && validDimension(height);
@@ -71,8 +74,9 @@ export default function ImageResizeDialog({ image, labels, onClose, onSave, para
         </header>
 
         <div className="space-y-4 p-5">
-          <div className="overflow-hidden rounded-md bg-slate-100">
-            <img src={image.url} alt="" className="h-36 w-full object-contain" />
+          <div className="relative h-36 overflow-hidden rounded-md bg-slate-100">
+            <img src={image.url} alt="" onLoad={() => setRenderedImageUrl(image.url)} className="h-full w-full object-contain" />
+            {posterUrl && (!editorBaseReady || renderedImageUrl !== image.url) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" aria-hidden="true" /> : null}
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
             <label className="space-y-1.5 text-xs font-medium text-slate-600">

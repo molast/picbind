@@ -22,9 +22,17 @@ export function placeholderFrom(value: unknown): WorkspaceImage["placeholder"] |
     : undefined;
 }
 
-export function collaborationPreviewFor(image: WorkspaceImage, workspace: WorkspaceIdentity | null, containers: Map<string, { sourceKind: "source" | "preview"; preview?: Blob }>) {
+export function collaborationPreviewFor(image: WorkspaceImage, workspace: WorkspaceIdentity | null, containers: Map<string, { sourceKind: "source" | "preview"; workingBlob?: Blob }>) {
   const container = containers.get(image.imageId);
-  return workspace && container && canRenderFromCollaborationSource(workspace.role, container.sourceKind === "source") ? container.preview : undefined;
+  const usesRenderedState = image.shared || Boolean(image.parameterDocument?.operations.length);
+  return usesRenderedState && workspace && container && canRenderFromCollaborationSource(workspace.role, container.sourceKind === "source") ? container.workingBlob : undefined;
+}
+
+export function collaborationCardPreviewFor(image: WorkspaceImage, workspace: WorkspaceIdentity | null, containers: Map<string, { sourceKind: "source" | "preview"; cardPreview?: { artifact: { url: string } } | null }>) {
+  const container = containers.get(image.imageId);
+  if ((!image.shared && !image.parameterDocument?.operations.length) || !workspace || !container
+    || !canRenderFromCollaborationSource(workspace.role, container.sourceKind === "source")) return undefined;
+  return container.cardPreview?.artifact.url;
 }
 
 export function workspaceRenderedDimensions(image: Pick<WorkspaceImage, "width" | "height" | "parameterDocument">) {

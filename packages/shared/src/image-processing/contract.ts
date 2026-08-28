@@ -4,6 +4,7 @@ import type {
   ConvertImageRequest,
   CreateShareAssetsRequest,
   ImageMetadata,
+  ImagePreviewCacheArtifact,
   ImagePreviewResult,
   ImageProcessingCapabilities,
   ImageProcessingEngine,
@@ -23,10 +24,12 @@ export interface ImageProcessingService {
   capabilities(): Promise<ImageProcessingCapabilities>;
   inspect(source: ImageProcessingSource, context?: ImageTaskContext): Promise<ImageMetadata>;
   renderPreview(request: RenderPreviewRequest, context?: ImageTaskContext): Promise<ImagePreviewResult>;
+  releasePreviewCache(artifact: ImagePreviewCacheArtifact): Promise<void>;
   materialize(request: MaterializeImageRequest, context?: ImageTaskContext): Promise<ImageProcessingResult>;
   compress(request: CompressImageRequest, context?: ImageTaskContext): Promise<ImageProcessingResult>;
   compareQuality(request: CompareImageQualityRequest, context?: ImageTaskContext): Promise<ImageQualityAnalysisResult>;
   convert(request: ConvertImageRequest, context?: ImageTaskContext): Promise<ImageProcessingResult>;
   createShareAssets(request: CreateShareAssetsRequest, context?: ImageTaskContext): Promise<ImageShareAssets>;
+  releaseMemorySource(cacheKey: string): Promise<void>;
   releaseTemporary(artifact: TemporaryImageArtifact): Promise<void>;
 }

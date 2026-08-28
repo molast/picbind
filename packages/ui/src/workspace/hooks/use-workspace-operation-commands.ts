@@ -1,11 +1,10 @@
 import React from "react";
 import { listCommits, saveCommit, saveProposal } from "../repository";
-import { adoptCollaborationRender, type CollaborationImageContainer } from "../collaboration-image-container";
+import type { CollaborationImageContainer } from "../collaboration-image-container";
 import { emptyImageParameterDocument, setImageOperation } from "../image-protocol";
 import { protocolOperationType } from "../utils/workspace-operation-mapping";
 import { cachedCommit } from "../utils/workspace-page-utils";
 import { workspaceOperationStorageMode } from "../image-flow";
-import { readWorkspaceCommitSnapshot, readWorkspaceImagePreview, readWorkspaceImageSource } from "../repository";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage, WorkspaceOperation, WorkspaceProposal } from "../types";
 
@@ -76,10 +75,10 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
     await saveCommit(parameterCommit);
     setCommits((current) => [...current, cachedCommit(parameterCommit)]);
     await updateImage(selected.imageId, { parameterDocument, currentCommitId: parameterCommit.commitId, state: "shared" });
-    const currentContainer = collaborationContainers.current.get(selected.imageId);
-    const rendered = currentContainer && processed
-      ? adoptCollaborationRender(currentContainer, parameterDocument, processed)
-      : await syncCollaborationPreview({ ...selected, parameterDocument, currentCommitId: parameterCommit.commitId }, parameterDocument);
+    const rendered = await syncCollaborationPreview(
+      { ...selected, parameterDocument, currentCommitId: parameterCommit.commitId },
+      parameterDocument,
+    );
     if (rendered) collaborationContainers.current.set(selected.imageId, rendered);
     sendRealtime("commitCreated", { commit: parameterCommit, parameterDocument }, { delivery: "reliable", dataClass: "collaborationEvent" });
     await persistCollaborationActivity(workspace.workspaceId, "operationCommitted", selected.imageId, {
@@ -91,29 +90,38 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
   const proposalInput = React.useCallback(async (proposal: WorkspaceProposal) => {
     const image = images.find((item) => item.imageId === proposal.imageId);
     if (!image) throw new Error("Proposal image is unavailable");
-    if (workspace?.role === "collaborator" || proposal.authorId === "local") {
-      const container = collaborationContainers.current.get(proposal.imageId);
-      const source = container?.sourceKind === "source"
-        ? container.source
-        : await readWorkspaceImageSource(image) || await readWorkspaceImagePreview(image);
-      if (!source) throw new Error("Source is not available for Proposal preview");
-      return { ...image, source };
+    const container = collaborationContainers.current.get(proposal.imageId);
+    if (!container || container.disposed) {
+      throw new Error("Proposal source is not loaded in collaboration memory");
     }
-    // The initial commit is represented by the immutable image source and does
-    // not need a separately materialized snapshot in the repository.
     const initialCommitId = `initial_${image.imageId}`;
-    if (image.currentCommitId === proposal.baseCommitId || proposal.baseCommitId === initialCommitId) {
-      const source = await readWorkspaceImageSource(image) || await readWorkspaceImagePreview(image);
-      if (!source) throw new Error("Proposal base version is unavailable");
-      return { ...image, source };
+    let baseDocument = emptyImageParameterDocument();
+    if (proposal.baseCommitId !== initialCommitId) {
+      if (image.currentCommitId === proposal.baseCommitId) {
+        baseDocument = container.parameterDocument;
+      } else {
+        const history = (await listCommits(proposal.imageId))
+          .sort((left, right) => left.createdAt - right.createdAt);
+        const targetIndex = history.findIndex((commit) => commit.commitId === proposal.baseCommitId);
+        if (targetIndex < 0) throw new Error("Proposal base version is unavailable");
+        baseDocument = history.slice(0, targetIndex + 1)
+          .flatMap((commit) => commit.operations)
+          .reduce((document, operation) => setImageOperation(document, {
+            id: operation.operationId,
+            userId: operation.authorId,
+            time: operation.createdAt,
+            type: protocolOperationType(operation.type, operation.parameters),
+            params: { ...operation.parameters, workspaceOperationType: operation.type },
+          }), emptyImageParameterDocument());
+      }
     }
-    const history = await listCommits(proposal.imageId);
-    const base = history.find((commit) => commit.commitId === proposal.baseCommitId);
-    const snapshot = base ? await readWorkspaceCommitSnapshot(base) : null;
-    if (!base || !snapshot) throw new Error("Proposal base version is unavailable");
-    return { ...image, source: snapshot, name: base.snapshotName || image.name, mimeType: base.snapshotMimeType || image.mimeType,
-      width: base.snapshotWidth || image.width, height: base.snapshotHeight || image.height };
-  }, [collaborationContainers, images, workspace?.role]);
+    return {
+      ...image,
+      source: container.originalBlob,
+      cacheKey: container.cacheKey,
+      baseDocument,
+    };
+  }, [collaborationContainers, images]);
 
   return { createOperation, submitProposal, proposalInput };
 }

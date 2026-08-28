@@ -61,6 +61,10 @@ function source() {
   };
 }
 
+function cachedSource() {
+  return { ...source(), cacheKey: "workspace:image:1" };
+}
+
 test("Desktop Adapter sends versioned binary requests and filters progress by requestId", async () => {
   const handlers = new Set<(event: { payload: never }) => void>();
   const progress: ImageTaskProgress[] = [];
@@ -159,6 +163,57 @@ test("Desktop Adapter returns and releases opaque temporary artifacts", async ()
   assert.deepEqual(released, ["opaque-token", "opaque-token"]);
 });
 
+test("Desktop Adapter returns preview cache file URLs without inline image bytes", async () => {
+  const released: string[] = [];
+  const bridge: DesktopNativeBridge = {
+    randomUUID: () => "preview-cache-request",
+    convertFileSrc: (path, protocol) => `${protocol}://localhost/${path}`,
+    async listen() {
+      return () => undefined;
+    },
+    async invoke<T>(command: string, args?: unknown) {
+      if (command === "image_processing_release_preview_cache") {
+        released.push((args as { token: string }).token);
+        return undefined as T;
+      }
+      const request = decodeRequest(args);
+      assert.equal(request.metadata.destination, "cache");
+      return response({
+        width: 320,
+        height: 180,
+        implementation: "test-native",
+        cache: {
+          token: "preview-token",
+          mimeType: "image/webp",
+          sizeBytes: 321,
+        },
+      }) as T;
+    },
+  };
+  const service = new DesktopImageProcessingService(bridge);
+  const result = await service.renderPreview({
+    source: source(),
+    document: { version: 1, operations: [] },
+    maxWidth: 320,
+    maxHeight: 180,
+    mimeType: "image/webp",
+    quality: 0.8,
+    destination: "cache",
+  });
+
+  assert.deepEqual(result.artifact, {
+    kind: "cache",
+    id: "preview-token",
+    url: "picbind-preview://localhost/preview-token",
+    mimeType: "image/webp",
+    sizeBytes: 321,
+    engine: "desktop-native",
+  });
+  if (result.artifact.kind !== "cache") assert.fail("Expected preview cache artifact");
+  await service.releasePreviewCache(result.artifact);
+  assert.deepEqual(released, ["preview-token"]);
+});
+
 test("Desktop Adapter maps AbortSignal to the matching Native cancellation task", async () => {
   let rejectExecution: ((reason: string) => void) | undefined;
   let started!: () => void;
@@ -212,4 +267,43 @@ test("Desktop Adapter exposes stable Native error codes", async () => {
     }),
     (error) => error instanceof ImageProcessingError && error.code === "alphaLossForbidden",
   );
+});
+
+test("Desktop Adapter sends a collaboration Blob once and then uses its Native memory key", async () => {
+  const requests: ReturnType<typeof decodeRequest>[] = [];
+  const released: string[] = [];
+  const bridge: DesktopNativeBridge = {
+    randomUUID: () => `memory-${requests.length}`,
+    async listen() {
+      return () => undefined;
+    },
+    async invoke<T>(command: string, args?: unknown) {
+      if (command === "image_processing_release_memory_source") {
+        released.push((args as { cacheKey: string }).cacheKey);
+        return true as T;
+      }
+      const request = decodeRequest(args);
+      requests.push(request);
+      return response({ width: 2, height: 1, implementation: "test-native" }, new Uint8Array([1])) as T;
+    },
+  };
+  const service = new DesktopImageProcessingService(bridge);
+  const request = {
+    source: cachedSource(),
+    document: { version: 1 as const, operations: [] },
+    maxWidth: 100,
+    maxHeight: 100,
+    mimeType: "image/webp" as const,
+    quality: 0.8,
+  };
+
+  await service.renderPreview(request);
+  await service.renderPreview(request);
+  assert.deepEqual(requests.map((value) => value.metadata.source), [
+    { kind: "inline", cacheKey: "workspace:image:1" },
+    { kind: "memory", cacheKey: "workspace:image:1" },
+  ]);
+  assert.deepEqual(requests.map((value) => value.metadata.inlineLength), [4, 0]);
+  await service.releaseMemorySource("workspace:image:1");
+  assert.deepEqual(released, ["workspace:image:1"]);
 });

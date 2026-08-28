@@ -4,7 +4,9 @@ mod preview;
 use crate::NativeImageMetadata;
 
 pub use materialize::{materialize, materialize_with_control};
-pub use preview::{render_preview, render_preview_with_control};
+pub use preview::{
+    render_preview, render_preview_from_decoded_with_control, render_preview_with_control,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativePreviewOutput {

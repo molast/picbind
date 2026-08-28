@@ -2,7 +2,7 @@
 
 > 文档状态：V1 Port、Web Adapter、UI 迁移和 Desktop Native capability 切换已完成；共享 Rust Core 提取与 macOS x86_64 补测仍为后续项
 > 适用范围：Web 与 Tauri Desktop 的图片检查、参数预览、最终物化、压缩、转换和协作派生资源
-> 最后校对：2026-08-27
+> 最后校对：2026-08-28
 
 ## 1. 文档目的
 
@@ -26,8 +26,10 @@ V1 采用以下设计：
 2. Web 与 Desktop 共享请求、参数文档、结果、错误和能力模型，但各自拥有独立 Adapter。
 3. 应用组合根只判断一次运行环境，`packages/ui` 不直接判断 Tauri，也不反向导入
    `apps/web`。
-4. 协作编辑继续使用“一个不可变源图 + 一个有序参数文档”的延迟物化模型。
-5. 参数预览与参数提交不得触发全尺寸编码；只有保存、另存、覆盖、导出或下载才物化。
+4. 协作编辑使用“不可变源图 A + 有序参数文档 + 正式协作结果 B”的模型；正式 Commit 或
+   回退生效后，各端立即从 A 重放当前参数并物化唯一一份 B。
+5. 编辑器预览和未获批准的 Proposal 不触发 B 的全尺寸编码；保存、另存、覆盖、导出或下载
+   直接使用当前 B，必要时再按对应业务目标生成独立结果。
 6. 压缩和格式转换是独立的全尺寸任务，不写入协作参数文档。
 7. 输入和输出同时支持短生命周期 `Blob` 与受控 `ImageAssetReference`，不把绝对路径暴露
    给 UI，也不强制 Desktop 通过 IPC 传输整张图片。
@@ -134,7 +136,7 @@ flowchart TD
 | 输入解析 | 从 `Blob` 或 Web Storage Repository 读取 | Rust 直接解析 Native Store 引用；未落盘 Blob 使用原始二进制 IPC | 不接受任意绝对路径，处理期间源资产不可变 |
 | 解码与 metadata | 浏览器解码能力与 `picbind-image` WASM | Native Rust 解码器 | 方向修正、尺寸、格式和 Alpha 判定语义一致 |
 | 参数预览 | 受限尺寸 Canvas / OffscreenCanvas，必要时使用 WASM | 受限尺寸 Native 缓冲区，通过临时产物或小型二进制结果交给 WebView | 使用同一参数文档和操作顺序，不执行全尺寸压缩 Planner |
-| 最终物化 | 从源 Blob 全尺寸重放参数，再由 Web 编码器输出 | Rust 直接从 Native Store 源文件全尺寸重放参数并写受控输出 | 只在保存、覆盖、导出或下载时编码 |
+| 最终物化 | 从源 Blob 全尺寸重放参数，再由 Web 编码器输出 | Rust 直接从 Native Store 源文件全尺寸重放参数并写受控输出 | 协作 B 在正式 Commit/回退后更新；其他结果在保存、覆盖、导出或下载时生成 |
 | JPEG / PNG 压缩 | 现有 Worker、WASM Planner 和编码器 | Native Rust Planner 和编码器 | Alpha、质量护栏、候选失败隔离和同格式不增大规则一致 |
 | WebP / AVIF 压缩 | 当前浏览器 codec 与 Worker 编排 | 可使用不同 Native codec、线程数和 effort | 输出格式与质量护栏一致，不要求字节或大小一致 |
 | placeholder / thumbnail | 当前 WASM 派生能力 | Native Rust 派生能力 | placeholder 与 thumbnail 分开生成，realtime 限制一致 |
@@ -212,6 +214,7 @@ export type ImageProcessingSource =
       blob: Blob;
       name: string;
       mimeType: string;
+      cacheKey?: string;
     }
   | {
       kind: "stored";
@@ -223,6 +226,14 @@ export type ImageProcessingSource =
 约束：
 
 - 新导入但尚未持久化的 Web 文件可以使用 `blob`。
+- `cacheKey` 只用于调用方明确管理的短生命周期内存源。Web Adapter 仍直接读取同一个 Blob；
+  Desktop Adapter 首次把 Blob 送入 Rust，并准备最长宽高不超过 `960×720` 的解码预览基线，
+  后续预览请求只传 key，不能再次传输、解码、复制或缩放全尺寸像素。
+  Original 空参数预览直接借用该基线像素，不执行 clone 和参数重放；预览交付统一为
+  WebP 只是 WebView 显示边界的小尺寸结果，使用 libwebp `method 0` 快速档，不会改变原图格式或
+  正式 WebP 压缩的 `method 5` 策略。
+- 同一个 `cacheKey` 在释放前必须始终代表同一份不可变 Blob。源数据被替换时必须创建新 key，
+  不能在旧 key 下静默覆盖。
 - Web Adapter 遇到 `stored` 时通过 `ImageStorageRepository` 读取 Blob。
 - Desktop Adapter 遇到 `stored` 时只传递受控引用，由 Rust 根据 Native Store 记录解析
   文件，不向 WebView 返回绝对路径。
@@ -399,6 +410,8 @@ export interface ImageProcessingService {
     context?: ImageTaskContext,
   ): Promise<ImageShareAssets>;
 
+  releaseMemorySource(cacheKey: string): Promise<void>;
+  releasePreviewCache(artifact: ImagePreviewCacheArtifact): Promise<void>;
   releaseTemporary(artifact: TemporaryImageArtifact): Promise<void>;
 }
 ```
@@ -407,8 +420,12 @@ V1 不提供独立的 `crop()`、`resize()`、`adjustColor()` 和 `draw()` 全�
 统一进入参数文档，由 `renderPreview()` 和 `materialize()` 解释，防止普通编辑与协作编辑
 再次形成两套逻辑。
 
-`releaseTemporary()` 必须具备幂等性。Web Adapter 可以直接完成空操作，但不能因此让
-Desktop 临时产物失去显式释放契约。
+`releaseMemorySource()`、`releasePreviewCache()` 和 `releaseTemporary()` 必须具备幂等性。Web Adapter 的
+`releaseMemorySource()` 可以直接完成空操作，因为 Blob 由 Workspace 容器和 GC 管理；
+Desktop 必须同时删除 TypeScript 已注册 key 和 Rust 已解码缓存。Workspace 离开、图片删除、
+停止协作或源数据替换时都必须调用该方法。`releasePreviewCache()` 在 Web 端撤销对象 URL，在
+Desktop 端删除 token 对应的只读缓存文件。Web Adapter 可以直接完成 `releaseTemporary()`
+空操作，但不能因此让 Desktop 临时产物失去显式释放契约。
 
 ## 9. 请求语义
 
@@ -422,10 +439,20 @@ export type RenderPreviewRequest = {
   maxHeight: number;
   mimeType: "image/webp";
   quality: number;
+  destination?: "memory" | "cache";
+};
+
+export type ImagePreviewCacheArtifact = {
+  kind: "cache";
+  id: string;
+  url: string;
+  mimeType: "image/webp";
+  sizeBytes: number;
+  engine: ImageProcessingEngine;
 };
 
 export type ImagePreviewResult = {
-  artifact: { kind: "blob"; blob: Blob };
+  artifact: { kind: "blob"; blob: Blob } | ImagePreviewCacheArtifact;
   width: number;
   height: number;
   engine: ImageProcessingEngine;
@@ -433,11 +460,46 @@ export type ImagePreviewResult = {
 };
 ```
 
+协作图片当前使用明确的 A/B/C 模型：A 是不可变的干净源 Blob，B 是 A 应用当前最新参数后的
+唯一一份全尺寸 Blob，保持 A 的图片格式并使用最高质量档位，不经过预览降采样或预览质量压缩。
+C 是每张图片独立、以不可变
+`commitId` 为键的预览文件 LRU；生成时保持处理结果宽高比且不放大，实际宽高只要求分别不超过
+`720×540`，并使用 quality `0.80` 的 WebP。C 的 value 只保留文件地址、释放标识、实际宽高和
+文件大小，不保存 Blob。Activity、Original、
+已提交 Proposal、回退确认和 Working 图片卡片使用 C；协作画布和最大化视图直接使用 B。
+
+只有正式 Commit 或正式回退才更新 B。本端或远端参数同步后生成 B 的阶段，Working 卡片保留上一张
+稳定 C 并覆盖 loading；B 完成后再后台异步预热当前 Commit 的 C。当前 Commit 的 C 直接以新 B
+为输入生成，文件完成后原子切换卡片并移除 loading，失败不回滚 B。C 命中时移动到 MRU，历史
+Commit 未命中时才从 A 与目标参数文档重放生成；每图最多 12 条且
+总文件大小最多 12 MiB，任一上限超出即淘汰最久未使用项。
+关闭弹窗只清活动引用，不删除仍在 LRU 中的文件；没有稳定 Commit ID 的临时 Proposal 在关闭时
+释放。图片删除、停止协作、源替换或离开 Workspace 时清空整池。
+
+图片进入协作内存时只从 Repository 读取一次 A，之后预览入口不得重新读取磁盘、IndexedDB、
+Native Store 或网络。Desktop 使用 A 的 `cacheKey` 复用 Rust 有界解码预览基线。编辑器为了
+替换同类型参数生成的一次性基线不是 Commit 快照，保留为独立 editor preview Blob，不进入 C；
+B 仍作为稳定 poster，只有 editor preview 完成解码和参数绘制后才能原子替换 poster。
+
+图片从 Library 进入 Working 时，从 A 生成保持宽高比、不放大、宽高分别不超过 `720×540`、
+WebP quality `0.80` 的原始卡片缩略图，并写入 Repository 的 thumbnail 缓存文件。该缩略图不进入
+协作容器、不进入 C LRU，也不作为长期 Blob 保存在 UI 状态。Owner 的 B 实时预览只发送给协作者，
+不得覆盖这份原始 thumbnail。Owner 直接停止协作时先清空参数、恢复初始 Current，随后释放 B、C
+和 Native A；普通 Working 卡片直接读取原始 thumbnail 文件，避免重新处理全尺寸 A 或由残留参数
+触发容器重建。
+
+`Save Image` 与 `Save & Stop` 均先在按钮旁选择覆盖或新建。覆盖把当前 B 物化为新的 A，清空旧参数
+历史，并使用 B 生成的 thumbnail 缓存文件覆盖当前卡片；若继续协作，则从新 A 与空参数重新建立
+容器并同步状态。新建保留原 A 及其 thumbnail，同时在 Working 中写入独立的 B 源文件和 thumbnail。
+`Save & Stop` 在所选保存动作成功后再执行停止流程。
+
 预览规则：
 
 - 在受限尺寸画布或 Native 预览缓冲区上应用参数。
-- Desktop 可以通过 IPC 返回受限大小的二进制预览，TypeScript Adapter 必须包装为 Blob；
-  预览不得返回全尺寸像素缓冲区或 Native 路径。
+- `memory` destination 返回受限大小 Blob；`cache` destination 在 Desktop Native 中直接写入
+  `temp/image-preview-cache`，IPC 只返回不透明 token 和元数据，不返回图片字节或文件路径。
+- Desktop Adapter 将 token 转成只读 `picbind-preview:` URL，WebView 的协议处理器只允许按
+  已登记 token 读取 WebP。Web Adapter 使用可释放的对象 URL 实现同一地址型契约。
 - 不修改协作容器中的源图，不生成新的 Library / Working 图片。
 - 不运行首页完整压缩 Planner，也不以预览图替换最终输出。
 - 连续拖动可以合并或取消旧请求；过期请求的结果不得覆盖新参数。
@@ -460,7 +522,7 @@ export type MaterializeImageRequest = {
 物化规则：
 
 - 始终从不可变源图开始，按顺序应用完整参数文档。
-- 只在保存、另存、覆盖、导出或下载时调用。
+- 协作 B 在正式 Commit 或正式回退生效后调用；普通编辑结果在保存、另存、覆盖、导出或下载时调用。
 - `format: "source"` 表示尽量保持源格式，不表示可以绕过 Alpha 或格式能力检查。
 - Web 的 `memory` 输出通常是 Blob；Desktop 的 `temporary` 输出应写入 Native Store 的
   受控临时区并返回 opaque token。
@@ -662,6 +724,17 @@ export class ImageProcessingError extends Error {
 预览调用方必须记录最新 `requestId`。较旧任务即使来不及物理取消，其结果也不能覆盖较新
 参数。该规则同时适用于 Web Worker 和 Desktop Native task。
 
+### 12.4 UI 反馈与首帧交付
+
+- 图片处理开始后保留上一份稳定可见内容，并叠加进行中反馈；不能在等待期间清空图片、回退源图
+  或暴露尚未应用完整参数的中间帧。
+- 为避免极短任务造成 loading 闪烁，UI 可以延迟显示 loading，但处理状态必须立即建立；一旦等待
+  超过该阈值就必须显示明确反馈。
+- Native/Worker 返回 Blob、临时 token 或缓存地址只代表数据产物已生成。UI 必须继续保留旧内容和
+  loading，直到新资源完成解码并确认首帧已渲染，再原子切换。
+- 失败、取消和过期结果不能破坏上一份稳定内容，也不能提前结束较新请求的 loading；失败时应退出
+  进行中状态并提供可恢复的错误反馈。
+
 ## 13. Web Adapter
 
 当前位置：
@@ -812,6 +885,8 @@ crates/picbind-image-native/src/
 apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
 ├── commands.rs
+├── memory.rs
+├── preview_cache.rs
 ├── tasks.rs
 ├── source_resolver.rs
 └── temporary.rs
@@ -938,6 +1013,8 @@ crates/picbind-image-native/src/
 apps/desktop/src-tauri/src/image_processing/
 ├── mod.rs
 ├── commands.rs
+├── memory.rs
+├── preview_cache.rs
 ├── tasks.rs
 ├── source_resolver.rs
 └── temporary.rs
@@ -1078,7 +1155,8 @@ Native codec crate；其中 WebP encoder 通过 Rust wrapper 静态编译 vendor
   中断，但取消后的结果不会继续持久化或交付。
 - `compress()`、`convert()` 和 `materialize()` 支持 `temporary` destination；临时文件使用
   不透明、实例内、15 分钟过期的 token，支持幂等释放和由 Storage Adapter 接管。预览、
-  thumbnail 与质量结果仍走有界内存响应。
+  thumbnail 与质量结果默认仍走有界内存响应；Workspace Commit 预览使用独立 `cache`
+  destination 和 `picbind-preview:` 只读文件地址，不属于可接管的业务临时产物。
 
 #### 阶段 5 Native 子任务
 
@@ -1143,6 +1221,8 @@ artifact 生命周期已经通过 Rust 与 TypeScript 检查；Apple Silicon 性
 
 - Web Worker、`ImageBitmap`、Blob URL 和 WASM handle 被释放。
 - Desktop 临时文件、任务表和取消标记被回收。
+- Workspace C 缓存池按 12 条/12 MiB 执行 LRU；淘汰、停止协作、源替换、图片删除和页面卸载
+  都会释放 Native 预览文件或 Web 对象 URL，关闭命中的弹窗不会误删池内文件。
 - Desktop 临时 token 接管后失效，重复释放不报错，过期 token 可由 recovery 清理。
 - stored source 的 revision 不匹配时返回 `sourceChanged`，不处理被替换后的文件。
 - 多任务并发受上限约束。

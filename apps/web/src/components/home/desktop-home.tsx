@@ -2,18 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import React from "react";
 import {
   FiFolder,
   FiGrid,
   FiImage,
-  FiPlus,
   FiUploadCloud,
 } from "react-icons/fi";
-import {
-  WorkspaceLanguageSwitcher,
-  WorkspaceShareIdEntryDialog,
-} from "@picbind/ui/source";
+import { WorkspaceLanguageSwitcher } from "@picbind/ui/source";
 import AccountControl from "@/components/auth/account-control";
 import type { useHomeCompression } from "./use-home-compression";
 import DesktopHomeResults from "./desktop-home-results";
@@ -25,7 +20,6 @@ type DesktopHomeProps = {
 export default function DesktopHome({
   home,
 }: DesktopHomeProps) {
-  const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
   const hasItems = home.sortedItems.length > 0;
   const desktopCopy = home.copy.desktop;
 
@@ -65,18 +59,10 @@ export default function DesktopHome({
             <FiFolder className="h-4 w-4" aria-hidden="true" />
             {desktopCopy.workspace}
           </Link>
-          <button
-            type="button"
-            onClick={() => setWorkspaceEntryOpen(true)}
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiPlus className="h-4 w-4" aria-hidden="true" />
-            {desktopCopy.enterWorkspace}
-          </button>
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <AccountControl lang={home.lang} />
+          <AccountControl lang={home.lang} showWorkspaceEntry />
           <WorkspaceLanguageSwitcher
             lang={home.lang}
             onChange={home.handleSwitchLang}
@@ -195,12 +181,6 @@ export default function DesktopHome({
         ) : null}
       </section>
 
-      <WorkspaceShareIdEntryDialog
-        open={workspaceEntryOpen}
-        lang={home.lang}
-        desktop
-        onClose={() => setWorkspaceEntryOpen(false)}
-      />
     </main>
   );
 }

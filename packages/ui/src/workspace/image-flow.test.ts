@@ -13,8 +13,12 @@ import {
   shouldSuggestWorkspaceCompression,
   workspaceOperationStorageMode,
 } from "./image-flow";
-import type { WorkspaceImage } from "./types";
-import { workspaceRenderedDimensions } from "./utils/workspace-image-display";
+import type { WorkspaceIdentity, WorkspaceImage } from "./types";
+import {
+  collaborationCardPreviewFor,
+  collaborationPreviewFor,
+  workspaceRenderedDimensions,
+} from "./utils/workspace-image-display";
 
 test("collaborator switches from placeholder to local parameter rendering after receiving Source", () => {
   assert.equal(canRenderFromCollaborationSource("collaborator", false), false);
@@ -152,4 +156,34 @@ test("shares only images that are both in Working and explicitly shared", () => 
     { ...base, imageId: "working-private", shared: false },
     { ...base, imageId: "library-shared", workspaceLocation: "library" },
   ]).map((image) => image.imageId), ["working-shared"]);
+});
+
+test("stopped collaboration ignores stale B and C container data", () => {
+  const image = {
+    imageId: "stopped",
+    workspaceId: "workspace",
+    name: "stopped.png",
+    mimeType: "image/png",
+    size: 1,
+    width: 10,
+    height: 10,
+    workspaceLocation: "working",
+    state: "working",
+    shared: false,
+    currentCommitId: "initial_stopped",
+    previewRevision: 1,
+    parameterDocument: { version: 1 as const, operations: [] },
+    createdAt: 1,
+    updatedAt: 1,
+  } satisfies WorkspaceImage;
+  const workingBlob = new Blob(["stale-working"]);
+  const container = {
+    sourceKind: "source" as const,
+    workingBlob,
+    cardPreview: { artifact: { url: "picbind-preview://localhost/stale" } },
+  };
+  const workspace = { role: "owner" } as WorkspaceIdentity;
+
+  assert.equal(collaborationPreviewFor(image, workspace, new Map([[image.imageId, container]])), undefined);
+  assert.equal(collaborationCardPreviewFor(image, workspace, new Map([[image.imageId, container]])), undefined);
 });

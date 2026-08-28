@@ -36,7 +36,7 @@ export type ImageAssetReference = {
 };
 
 export type ImageProcessingSource =
-  | { kind: "blob"; blob: Blob; name: string; mimeType: string }
+  | { kind: "blob"; blob: Blob; name: string; mimeType: string; cacheKey?: string }
   | { kind: "stored"; asset: ImageAssetReference; name: string };
 
 export type TemporaryImageArtifact = {
@@ -113,10 +113,24 @@ export type RenderPreviewRequest = {
   maxHeight: number;
   mimeType: "image/webp";
   quality: number;
+  destination?: "memory" | "cache";
 };
 
+export type ImagePreviewCacheArtifact = {
+  kind: "cache";
+  id: string;
+  url: string;
+  mimeType: "image/webp";
+  sizeBytes: number;
+  engine: ImageProcessingEngine;
+};
+
+export type ImagePreviewArtifact =
+  | { kind: "blob"; blob: Blob }
+  | ImagePreviewCacheArtifact;
+
 export type ImagePreviewResult = {
-  artifact: { kind: "blob"; blob: Blob };
+  artifact: ImagePreviewArtifact;
   width: number;
   height: number;
   engine: ImageProcessingEngine;

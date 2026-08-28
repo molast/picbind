@@ -40,6 +40,8 @@ import {
 type ReviewWorkspaceProps = {
   roomId: string;
   image: RoomImage;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   labels: ShareRoomLabels;
   actorId: string;
   role: RoomRole | null;
@@ -107,6 +109,8 @@ function mergeReviewAnchors(primary: ReviewAnchor[], secondary: ReviewAnchor[]) 
 export default function ReviewWorkspace({
   roomId,
   image,
+  posterUrl,
+  editorBaseReady = true,
   labels,
   actorId,
   role,
@@ -1003,6 +1007,8 @@ export default function ReviewWorkspace({
       />
       <ReviewCanvas
         image={image}
+        posterUrl={posterUrl}
+        editorBaseReady={editorBaseReady}
         labels={labels}
         scale={scale}
         offset={offset}

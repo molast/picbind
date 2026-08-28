@@ -70,7 +70,7 @@ Workspace 的页面控制器。负责加载 Workspace、本地状态组合、实
 
 - `use-workspace-operation-commands.ts`：创建图片操作。协作者必须先创建并保存本地 Commit，再创建 Proposal 并发送给 Owner；Owner 操作直接创建 Commit。
 - `use-workspace-operation-editor.ts`：读取已有参数，初始化编辑器。
-- `use-workspace-collaboration-preview.ts`：使用单一源数据和 JSON 参数文档渲染协作预览。
+- `use-workspace-collaboration-preview.ts`：维护 A（不可变源 Blob）、B（正式协作 Blob）和每图独立的 C（Commit 预览文件 LRU）；使用 A 和 JSON 参数文档渲染 B/历史 C，当前 Commit 的 C 直接从 B 生成。
 - `use-workspace-editor-state.tsx`：编辑器初始参数和加载状态。
 - `use-workspace-rollback-commands.ts`：Owner 回退 Commit/Activity 栈，并同步 `historyRolledBack`。
 
@@ -83,6 +83,43 @@ Workspace 的页面控制器。负责加载 Workspace、本地状态组合、实
 - `use-workspace-share-commands.ts`、`use-workspace-rotation.ts`：固定分享链接创建和刷新。
 
 ## 核心数据规则
+
+### 协作图片内存
+
+- A 在图片进入协作内存时只从 Repository 或实时源传输读取一次，之后保持不可变。图片从 Library
+  进入 Working 时，从 A 生成保持宽高比、不放大、最大 `720×540`、WebP quality `0.80` 的原始
+  卡片缩略图，并写入 Repository 的 thumbnail 缓存文件；协作容器不保存该缩略图 Blob。
+- B 是正式协作状态，始终等于 A 应用当前最新参数后的唯一一份全尺寸 Blob；输出格式与 A 相同，
+  使用最高质量档位，不经过预览降采样或预览质量压缩。只有 Commit 或正式回退更新 B，协作画布和
+  最大化视图直接显示 B。
+- C 是每张协作图片独立的预览文件 LRU，key 是不可变 `commitId`。生成时保持处理结果的宽高比且
+  不放大，输出宽高只要求分别不超过 `720×540`，并使用 quality `0.80` 的 WebP；value 只保存
+  文件地址、释放标识、实际宽高和文件字节数，不保存预览 Blob。Activity、
+  Original、已提交 Proposal、
+  回退确认和 Working 图片卡片复用 C；命中时移动到 MRU。当前 Commit 在 B 更新后直接以 B 为输入
+  异步生成 C，历史 Commit 未命中时才从 A 和对应参数文档重放生成。
+- 每图 C 同时限制为 12 条和 12 MiB，任一上限超出即淘汰最久未使用项。关闭弹窗只清活动引用，
+  不删除仍在 LRU 中的文件；没有稳定 Commit ID 的 Proposal 文件关闭后立即释放。
+- 本端或远端 Commit 开始生成 B 时，Working 卡片保留上一张稳定 C 并覆盖 loading；B 更新后再后台
+  异步预热当前 `commitId` 的 C，文件完成后原子刷新卡片并移除 loading。预热失败不回滚 B。
+- 协作期间 Owner 发给协作者的 B 预览只用于实时传输，不得覆盖 Repository 中的原始 Working
+  thumbnail。Owner 直接停止协作时，必须先把参数文档和 Current 重置为初始状态，再释放 B、C
+  和 Native A 缓存；普通 Working 卡片随后直接读取原始 thumbnail 缓存文件，不重新处理全尺寸 A，
+  也不得因旧参数恢复 effect 重新生成 B/C。
+- `Save Image` 和 `Save & Stop` 都通过按钮旁 Popover 选择覆盖或新建。覆盖会把当前 B 作为新的 A
+  写入源文件缓存，清空旧参数历史，并用 B 生成的 thumbnail 缓存文件覆盖当前卡片；继续协作时从
+  新 A 和空参数文档重新建立容器。新建会保留原图片及其原始 thumbnail，并在 Working 中为 B 创建
+  独立图片和独立 thumbnail 缓存文件。`Save & Stop` 完成相同保存后再停止协作。
+- 已有参数的图片再次进入编辑器时，B 同时作为稳定 poster 立即显示；为了替换同类型参数而从 A
+  生成的一次性 editor preview 只作为编辑基线。颜色、裁剪、尺寸和 Review 组件必须等该基线完成
+  解码及当前参数绘制后再原子移除 B poster，不能暴露未应用参数的中间帧，也不能因基线到达而重置
+  用户已修改的控件状态。
+- 裁剪弹窗必须先从参数文档得到已有的归一化裁剪框，再挂载裁剪内容和加载图片；不能先用默认裁剪框
+  绘制首帧，再通过 effect 跳到已有裁剪位置。
+- 编辑器为替换同类型参数生成的基线属于一次性 editor preview Blob，不进入按 Commit 缓存的 C。
+- Desktop 使用 A 的 `cacheKey` 复用 Rust 的 `960×720` 有界解码预览基线；C 由 Native 直接写入
+  专用缓存文件并通过只读 `picbind-preview:` 地址显示。图片删除、停止协作、源替换或离开 Workspace
+  时必须释放 A 的 Native 内存和全部 C 文件。
 
 ### Commit
 
@@ -118,11 +155,31 @@ Activity 是按时间顺序排列的协作操作栈：
 
 每张协作图片只有一个独立容器：
 
-- `source` 是原始图片源数据。
+- `originalBlob` 是 A。
+- `workingBlob` 是 B。
 - `parameterDocument` 是当前 JSON 参数。
-- `preview` 是根据源数据和参数渲染出的临时预览。
+- `previewCache` 是以 Commit ID 为键的 C 文件地址 LRU，`cardPreview` 是当前 Working 卡片稳定引用，
+  `activePreview` 只是当前弹窗引用。
+- `editorPreviewBlob` 是不进入 C 的一次性编辑器基线。
 
-不要为每个 Activity 创建独立业务图片。历史预览应使用同一个源数据重新应用目标参数。
+普通 Working thumbnail 和 C 都是缓存文件，但所有权不同：普通 thumbnail 由 Repository 按图片
+记录管理，C 由协作容器按 Commit LRU 管理；两者都不能作为长期缩略图 Blob 放入 React 状态。
+
+不要为每个 Activity 创建独立业务图片。首次历史预览使用同一个 A 重新应用目标参数并生成缓存文件，
+后续直接复用 Commit 对应的 C 地址。
+
+### UI 等待反馈
+
+- Workspace 中任何需要等待的图片读取、参数重放、编码、缓存生成和图片解码都必须提供进行中反馈。
+  任务开始后保留上一张稳定图片，在其上叠加 loading；不能清空容器、回退 A、显示未应用参数的
+  中间帧，或先显示起点再闪到最终结果。
+- 极短任务可以使用短暂的 loading 延迟显示阈值来避免闪烁，但处理状态必须立即建立，并阻止同一
+  操作被重复提交。超过阈值后必须显示反馈。
+- B 或 C 的 Blob/文件生成完成不等于 UI 更新完成。新图片必须先在隐藏或叠加层中完成解码，并由
+  `load`/等价的首帧成功信号确认后，再原子切换可见内容并结束 loading。失败时保留上一张稳定图片，
+  清除 loading 并显示错误反馈。
+- loading 生命周期必须绑定图片 ID、Commit ID 和请求序列。旧请求的成功、失败或取消不能替换新
+  结果，也不能提前关闭新请求的 loading。
 
 ## 实时通信
 
@@ -177,4 +234,6 @@ git diff --check
 4. 涉及 Activity 时，同时检查 Current 推导、回退截断和持久化删除。
 5. 涉及图片时，确认没有把处理后的 Blob 替换成业务源数据。
 6. 涉及实时事件时，确认重复事件幂等，并检查 WebSocket 和 RTC 两条路径。
-7. 修改完成后运行 Workspace 检查和测试，不要只依赖 TypeScript 编译。
+7. 涉及耗时 UI 时，确认上一帧保留到新资源完成解码和首帧渲染，等待期间有反馈且过期结果不会
+   结束当前 loading。
+8. 修改完成后运行 Workspace 检查和测试，不要只依赖 TypeScript 编译。

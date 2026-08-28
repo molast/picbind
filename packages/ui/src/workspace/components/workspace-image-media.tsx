@@ -21,6 +21,10 @@ export function BlobImageMedia({ blob, alt, fit = "cover" }: { blob: Blob; alt: 
   return url ? <img src={url} alt={alt} className={`h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`} /> : null;
 }
 
+export function ImageAddressMedia({ url, alt, fit = "cover" }: { url: string; alt: string; fit?: "cover" | "contain" }) {
+  return <img src={url} alt={alt} className={`h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`} />;
+}
+
 export function WorkspaceImageMedia({ image, role, fit = "cover", controls = false, preferOriginal = false }: { image: WorkspaceImage; role: WorkspaceIdentity["role"]; fit?: "cover" | "contain"; controls?: boolean; preferOriginal?: boolean }) {
   const imageProcessing = useImageProcessing();
   const [showPreview, setShowPreview] = React.useState(false);

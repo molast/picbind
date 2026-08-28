@@ -1,4 +1,5 @@
 import React from "react";
+import { useImageProcessing } from "../../image-processing";
 import {
   clearWorkspaceImageHistory,
   deleteWorkspaceImage,
@@ -9,7 +10,13 @@ import { browserReportsWeakNetwork, canDeleteWorkspaceImage, shouldSuggestWorksp
 import { emptyImageParameterDocument } from "../image-protocol";
 import { dimensions } from "../utils/workspace-image-display";
 import { readWorkspaceImageSource } from "../repository";
-import { disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
+import type { CollaborationImageContainer } from "../collaboration-image-container";
+import {
+  COLLABORATION_PREVIEW_MAX_HEIGHT,
+  COLLABORATION_PREVIEW_MAX_WIDTH,
+  COLLABORATION_PREVIEW_QUALITY,
+} from "../collaboration-image-container";
+import type { WorkspaceProcessingSource } from "./use-workspace-preview";
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage, WorkspaceProposal } from "../types";
 
 type SetState<T> = React.Dispatch<React.SetStateAction<T>>;
@@ -34,7 +41,7 @@ type ImageCommandsOptions = {
   setProposals: SetState<WorkspaceProposal[]>;
   setNewVersions: SetState<Record<string, string>>;
   setMaximizedImageId: SetState<string | null>;
-  setProcessingSource: SetState<{ imageId: string; blob: Blob; width: number; height: number } | null>;
+  setProcessingSource: SetState<WorkspaceProcessingSource | null>;
   setEditing: SetState<any>;
   setReviewOpen: SetState<boolean>;
   setActivityPreview: SetState<any>;
@@ -48,9 +55,11 @@ type ImageCommandsOptions = {
   updateImage: (imageId: string, patch: Partial<WorkspaceImage>) => Promise<void>;
   persistWorkspaceLog: (workspaceId: string, kind: string, imageId?: string, detail?: unknown) => Promise<void>;
   releaseProcessingSource: () => void;
+  releaseCollaborationContainer: (imageId: string) => void;
 };
 
 export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
+  const imageProcessing = useImageProcessing();
   const {
     workspace, imagesRef, collaborationContainers, selectedId, maximizedImageId,
     processingSource, activityPreview, rollbackTarget, deleteChoice, deletingImage,
@@ -58,12 +67,11 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
     setMaximizedImageId, setProcessingSource, setEditing, setReviewOpen, setActivityPreview,
     setRollbackTarget, setRollbackPreview, setDeletingImage, setDeleteChoice, setNotice,
     sendRealtime, collaborationDeleteBlockedMessage, updateImage, persistWorkspaceLog, releaseProcessingSource,
+    releaseCollaborationContainer,
   } = options;
 
   const clearTransientState = React.useCallback((imageId: string) => {
-    const container = collaborationContainers.current.get(imageId);
-    if (container) disposeCollaborationImageContainer(container);
-    collaborationContainers.current.delete(imageId);
+    releaseCollaborationContainer(imageId);
     if (maximizedImageId === imageId) setMaximizedImageId(null);
     if (processingSource?.imageId === imageId) {
       setProcessingSource(null);
@@ -75,17 +83,36 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
       setRollbackTarget(null);
       setRollbackPreview(null);
     }
-  }, [activityPreview, collaborationContainers, maximizedImageId, processingSource, rollbackTarget, setActivityPreview, setEditing, setMaximizedImageId, setProcessingSource, setReviewOpen, setRollbackPreview, setRollbackTarget]);
+  }, [activityPreview, maximizedImageId, processingSource, releaseCollaborationContainer, rollbackTarget, setActivityPreview, setEditing, setMaximizedImageId, setProcessingSource, setReviewOpen, setRollbackPreview, setRollbackTarget]);
 
   const moveImageToWorking = React.useCallback(async (image: WorkspaceImage) => {
     if (!workspace || workspace.role !== "owner") return;
+    const source = image.sourceCached ? await readWorkspaceImageSource(image) : null;
+    let preview: Blob | undefined;
+    if (source) {
+      const result = await imageProcessing.renderPreview({
+        source: { kind: "blob", blob: source, name: image.name, mimeType: source.type || image.mimeType },
+        document: emptyImageParameterDocument(),
+        maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
+        maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
+        mimeType: "image/webp",
+        quality: COLLABORATION_PREVIEW_QUALITY,
+      }, { requestId: `workspace-working-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
+      if (result.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
+      preview = result.artifact.blob;
+    }
     await updateImage(image.imageId, {
       workspaceLocation: "working",
       state: image.state === "private" ? "working" : image.state,
+      ...(preview ? {
+        preview,
+        previewCached: true,
+        previewRevision: image.previewRevision + 1,
+      } : {}),
     });
     setSelectedId(image.imageId);
     await persistWorkspaceLog(workspace.workspaceId, "imageMovedToWorking", image.imageId);
-  }, [persistWorkspaceLog, setSelectedId, updateImage, workspace]);
+  }, [imageProcessing, persistWorkspaceLog, setSelectedId, updateImage, workspace]);
 
   const requestMoveImageToWorking = React.useCallback((image: WorkspaceImage) => {
     const weakNetwork = browserReportsWeakNetwork();

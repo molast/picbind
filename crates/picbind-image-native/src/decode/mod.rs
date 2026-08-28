@@ -1,8 +1,73 @@
 use image::{DynamicImage, GenericImageView};
 
 use crate::{
-    MAX_INPUT_BYTES, MAX_PIXELS, NativeImageError, NativeImageFormat, NativeImageMetadata,
+    MAX_INPUT_BYTES, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat,
+    NativeImageMetadata,
 };
+
+#[derive(Clone)]
+pub struct NativeDecodedImage {
+    pub(crate) format: NativeImageFormat,
+    pub(crate) image: DynamicImage,
+    source_width: u32,
+    source_height: u32,
+    has_alpha: bool,
+}
+
+impl NativeDecodedImage {
+    pub fn width(&self) -> u32 {
+        self.source_width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.source_height
+    }
+
+    pub fn estimated_size_bytes(&self) -> usize {
+        self.image.as_bytes().len()
+    }
+
+    pub fn metadata(
+        &self,
+        source_size_bytes: usize,
+    ) -> Result<NativeImageMetadata, NativeImageError> {
+        Ok(NativeImageMetadata {
+            width: self.source_width,
+            height: self.source_height,
+            format: self.format,
+            mime_type: self.format.mime_type(),
+            size_bytes: source_size_bytes,
+            has_alpha: self.has_alpha,
+        })
+    }
+
+    pub fn into_preview(mut self, bounds: NativeImageDimensions) -> Self {
+        let scale = (f64::from(bounds.width) / f64::from(self.source_width))
+            .min(f64::from(bounds.height) / f64::from(self.source_height))
+            .min(1.0);
+        let width = (f64::from(self.source_width) * scale).round().max(1.0) as u32;
+        let height = (f64::from(self.source_height) * scale).round().max(1.0) as u32;
+        if width != self.image.width() || height != self.image.height() {
+            self.image =
+                self.image
+                    .resize_exact(width, height, image::imageops::FilterType::Lanczos3);
+        }
+        self
+    }
+}
+
+pub fn decode_image(input: &[u8]) -> Result<NativeDecodedImage, NativeImageError> {
+    let (format, image) = decode(input)?;
+    let (source_width, source_height) = image.dimensions();
+    let has_alpha = has_transparency(&image);
+    Ok(NativeDecodedImage {
+        format,
+        image,
+        source_width,
+        source_height,
+        has_alpha,
+    })
+}
 
 pub(crate) fn decode(input: &[u8]) -> Result<(NativeImageFormat, DynamicImage), NativeImageError> {
     if input.len() > MAX_INPUT_BYTES {

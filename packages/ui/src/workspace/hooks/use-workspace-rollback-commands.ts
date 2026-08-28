@@ -6,7 +6,7 @@ import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceIm
 
 const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
-export function useWorkspaceRollbackCommands({ workspace, selected, commits, selectedCollaborationActivities, activityPreview, rollbackTarget, setCommits, setActivities, setRollbackTarget, setRollbackPreview, setActivityPreview, setNotice, updateImage, syncCollaborationPreview, renderCollaborationPreviewSnapshot, sendRealtime, currentActivityId, }: {
+export function useWorkspaceRollbackCommands({ workspace, selected, commits, selectedCollaborationActivities, activityPreview, rollbackTarget, setCommits, setActivities, setRollbackTarget, setRollbackPreview, setActivityPreview, setNotice, updateImage, syncCollaborationPreview, renderCollaborationPreviewSnapshot, clearCollaborationPreviewSnapshot, sendRealtime, currentActivityId, }: {
   workspace: WorkspaceIdentity | null;
   selected: WorkspaceImage | null;
   commits: WorkspaceCommit[];
@@ -16,12 +16,13 @@ export function useWorkspaceRollbackCommands({ workspace, selected, commits, sel
   setCommits: React.Dispatch<React.SetStateAction<WorkspaceCommit[]>>;
   setActivities: React.Dispatch<React.SetStateAction<WorkspaceActivity[]>>;
   setRollbackTarget: React.Dispatch<React.SetStateAction<WorkspaceCommit | null>>;
-  setRollbackPreview: React.Dispatch<React.SetStateAction<Blob | null>>;
+  setRollbackPreview: React.Dispatch<React.SetStateAction<string | null>>;
   setActivityPreview: React.Dispatch<React.SetStateAction<any>>;
   setNotice: (message: string) => void;
   updateImage: (imageId: string, patch: Partial<WorkspaceImage>) => Promise<void>;
   syncCollaborationPreview: (image: WorkspaceImage, document: any) => Promise<any>;
-  renderCollaborationPreviewSnapshot: (image: WorkspaceImage, document: any) => Promise<{ blob: Blob } | null>;
+  renderCollaborationPreviewSnapshot: (image: WorkspaceImage, document: any, commitId?: string) => Promise<{ url: string } | null>;
+  clearCollaborationPreviewSnapshot: (imageId: string) => void;
   sendRealtime: (type: string, payload: Record<string, unknown>) => void;
   currentActivityId: string | null;
 }) {
@@ -40,15 +41,19 @@ export function useWorkspaceRollbackCommands({ workspace, selected, commits, sel
     setRollbackTarget(commit); setRollbackPreview(null);
     try {
       const parameterDocument = parameterDocumentAtCommit(selected, commit);
-      const rendered = await renderCollaborationPreviewSnapshot(selected, parameterDocument);
-      if (!rendered?.blob.size) throw new Error("Rollback preview is unavailable");
-      setRollbackPreview(rendered.blob);
+      const rendered = await renderCollaborationPreviewSnapshot(selected, parameterDocument, commit.commitId);
+      if (!rendered?.url) throw new Error("Rollback preview is unavailable");
+      setRollbackPreview(rendered.url);
     } catch (error) {
       setRollbackTarget(null); setNotice(error instanceof Error ? error.message : "Rollback preview is unavailable");
     }
   }, [parameterDocumentAtCommit, renderCollaborationPreviewSnapshot, selected, setNotice, setRollbackPreview, setRollbackTarget]);
 
-  const cancelRollbackTarget = React.useCallback(() => { setRollbackTarget(null); setRollbackPreview(null); }, [setRollbackPreview, setRollbackTarget]);
+  const cancelRollbackTarget = React.useCallback(() => {
+    if (rollbackTarget?.imageId) clearCollaborationPreviewSnapshot(rollbackTarget.imageId);
+    setRollbackTarget(null);
+    setRollbackPreview(null);
+  }, [clearCollaborationPreviewSnapshot, rollbackTarget?.imageId, setRollbackPreview, setRollbackTarget]);
 
   const rollbackCommit = React.useCallback(async (commit: WorkspaceCommit) => {
     if (workspace?.role !== "owner" || !selected || commit.imageId !== selected.imageId) return;

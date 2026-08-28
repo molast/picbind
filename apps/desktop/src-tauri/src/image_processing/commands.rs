@@ -3,7 +3,7 @@ use picbind_image_native::{
     NativeImageMetadata, NativeParameterDocument, NativeTaskControl, compare_quality_with_control,
     create_share_assets_with_control, encode_auto_planned_with_control, encode_auto_with_control,
     encode_planned_with_control, encode_with_control, inspect, materialize_with_control,
-    render_preview_with_control,
+    render_preview_from_decoded_with_control, render_preview_with_control,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -12,6 +12,8 @@ use tauri::{
 };
 
 use super::{
+    memory::NativeImageMemory,
+    preview_cache::{NativePreviewCache, PreviewCacheArtifactResponse},
     source_resolver::resolve_source,
     tasks::NativeImageTasks,
     temporary::{NativeTemporaryStore, TemporaryArtifactResponse},
@@ -54,6 +56,7 @@ enum NativeDestination {
     #[default]
     Memory,
     Temporary,
+    Cache,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,9 +73,17 @@ enum NativeOperation {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(super) enum NativeSource {
-    Inline,
+    Inline {
+        #[serde(default, rename = "cacheKey", alias = "cache_key")]
+        cache_key: Option<String>,
+    },
+    Memory {
+        #[serde(rename = "cacheKey", alias = "cache_key")]
+        cache_key: String,
+    },
     Stored {
         scope: String,
+        #[serde(rename = "scopeKey", alias = "scope_key")]
         scope_key: String,
         id: String,
         variant: String,
@@ -134,6 +145,8 @@ struct NativePreviewResponse {
     height: u32,
     data_length: usize,
     implementation: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<PreviewCacheArtifactResponse>,
 }
 
 #[derive(Debug, Serialize)]
@@ -189,6 +202,8 @@ pub async fn image_processing_execute(
     store: State<'_, NativeImageStore>,
     tasks: State<'_, NativeImageTasks>,
     temporary: State<'_, NativeTemporaryStore>,
+    preview_cache: State<'_, NativePreviewCache>,
+    memory: State<'_, NativeImageMemory>,
     app: AppHandle,
     request: Request<'_>,
 ) -> Result<Response, String> {
@@ -199,10 +214,14 @@ pub async fn image_processing_execute(
         .map_err(|error| command_error(("invalidRequest", error)))?;
     let store = store.inner().clone();
     let temporary = temporary.inner().clone();
+    let preview_cache = preview_cache.inner().clone();
+    let memory = memory.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         execute(
             store,
             temporary,
+            preview_cache,
+            memory,
             &app,
             &registration,
             request,
@@ -236,9 +255,29 @@ pub fn image_processing_release_temporary(
         .map_err(|error| command_error(("temporaryUnavailable", error)))
 }
 
+#[tauri::command]
+pub fn image_processing_release_memory_source(
+    memory: State<'_, NativeImageMemory>,
+    cache_key: String,
+) -> Result<bool, String> {
+    memory.release(&cache_key)
+}
+
+#[tauri::command]
+pub fn image_processing_release_preview_cache(
+    preview_cache: State<'_, NativePreviewCache>,
+    token: String,
+) -> Result<(), String> {
+    preview_cache
+        .release(&token)
+        .map_err(|error| command_error(("temporaryUnavailable", error)))
+}
+
 fn execute(
     store: NativeImageStore,
     temporary: NativeTemporaryStore,
+    preview_cache: NativePreviewCache,
+    memory: NativeImageMemory,
     app: &AppHandle,
     registration: &super::tasks::NativeTaskRegistration,
     request: NativeProcessRequest,
@@ -248,13 +287,17 @@ fn execute(
     let control = registration.control();
     checkpoint(control)?;
     emit_progress(app, &request.request_id, "resolvingSource", 0);
-    let source = resolve_source(&store, &request.source, inline)?;
+    let source = resolve_source(&store, &memory, &request.source, inline)?;
     checkpoint(control)?;
     emit_progress(app, &request.request_id, "resolvingSource", 1);
     match request.operation {
         NativeOperation::Inspect => {
             emit_progress(app, &request.request_id, "decoding", 0);
-            let metadata = inspect(&source).map_err(|error| ("decodeFailed", error.to_string()))?;
+            let metadata = match source.memory() {
+                Some(cached) => cached.decoded().metadata(cached.bytes().len()),
+                None => inspect(source.bytes()),
+            }
+            .map_err(|error| ("decodeFailed", error.to_string()))?;
             checkpoint(control)?;
             emit_progress(app, &request.request_id, "decoding", 1);
             let response = encode_response(
@@ -310,10 +353,14 @@ fn execute(
                 }
             };
             let output = match (automatic, planned) {
-                (true, true) => encode_auto_planned_with_control(&source, &encode_options, control),
-                (true, false) => encode_auto_with_control(&source, &encode_options, control),
-                (false, true) => encode_planned_with_control(&source, &encode_options, control),
-                (false, false) => encode_with_control(&source, &encode_options, control),
+                (true, true) => {
+                    encode_auto_planned_with_control(source.bytes(), &encode_options, control)
+                }
+                (true, false) => encode_auto_with_control(source.bytes(), &encode_options, control),
+                (false, true) => {
+                    encode_planned_with_control(source.bytes(), &encode_options, control)
+                }
+                (false, false) => encode_with_control(source.bytes(), &encode_options, control),
             }
             .map_err(native_error)?;
             emit_progress(app, &request.request_id, "encoding", 1);
@@ -345,25 +392,58 @@ fn execute(
                     "Preview options are required".to_string(),
                 )
             })?;
-            let output = render_preview_with_control(
-                &source,
-                &document,
-                NativeImageDimensions {
-                    width: options.max_width,
-                    height: options.max_height,
-                },
-                options.quality,
-                control,
-            )
+            let bounds = NativeImageDimensions {
+                width: options.max_width,
+                height: options.max_height,
+            };
+            let output = match source.memory() {
+                Some(source) => render_preview_from_decoded_with_control(
+                    source.decoded(),
+                    &document,
+                    bounds,
+                    options.quality,
+                    control,
+                ),
+                None => render_preview_with_control(
+                    source.bytes(),
+                    &document,
+                    bounds,
+                    options.quality,
+                    control,
+                ),
+            }
             .map_err(native_error)?;
+            let (payload, cache) = match request.destination {
+                NativeDestination::Memory => (output.bytes, None),
+                NativeDestination::Cache => {
+                    emit_progress(app, &request.request_id, "persisting", 0);
+                    checkpoint(control)?;
+                    let artifact = preview_cache
+                        .create(&output.bytes)
+                        .map_err(|error| ("persistenceFailed", error))?;
+                    if let Err(error) = checkpoint(control) {
+                        let _ = preview_cache.release(&artifact.token);
+                        return Err(error);
+                    }
+                    emit_progress(app, &request.request_id, "persisting", 1);
+                    (Vec::new(), Some(artifact))
+                }
+                NativeDestination::Temporary => {
+                    return Err((
+                        "invalidParameters",
+                        "Preview destination must be memory or cache".to_string(),
+                    ));
+                }
+            };
             let response = encode_payload_response(
                 &NativePreviewResponse {
                     width: output.width,
                     height: output.height,
-                    data_length: output.bytes.len(),
+                    data_length: payload.len(),
                     implementation: "picbind-image-native/1",
+                    cache,
                 },
-                output.bytes,
+                payload,
             )?;
             emit_progress(app, &request.request_id, "rendering", 1);
             emit_progress(app, &request.request_id, "completed", 1);
@@ -384,7 +464,7 @@ fn execute(
                 Some(NativeImageFormat::parse(&options.format).map_err(native_error)?)
             };
             let output = materialize_with_control(
-                &source,
+                source.bytes(),
                 &document,
                 format,
                 options.quality,
@@ -420,7 +500,7 @@ fn execute(
                 )
             })?;
             let assets = create_share_assets_with_control(
-                &source,
+                source.bytes(),
                 request.document.as_ref(),
                 NativeImageDimensions {
                     width: container.width,
@@ -451,10 +531,10 @@ fn execute(
                     "Assessed image source is required".to_string(),
                 )
             })?;
-            let assessed = resolve_source(&store, &assessed, assessed_inline)?;
+            let assessed = resolve_source(&store, &memory, &assessed, assessed_inline)?;
             checkpoint(control)?;
-            let analysis =
-                compare_quality_with_control(&source, &assessed, control).map_err(native_error)?;
+            let analysis = compare_quality_with_control(source.bytes(), assessed.bytes(), control)
+                .map_err(native_error)?;
             checkpoint(control)?;
             let response = encode_payload_response(
                 &NativeQualityResponse {
@@ -602,6 +682,12 @@ fn encode_response(
             }
             (Vec::new(), Some(artifact))
         }
+        NativeDestination::Cache => {
+            return Err((
+                "invalidParameters",
+                "Image output destination must be memory or temporary".to_string(),
+            ));
+        }
     };
     let response = NativeProcessResponse {
         metadata: NativeMetadataResponse {
@@ -682,6 +768,32 @@ mod tests {
         let (_, source, assessed) = decode_request(&InvokeBody::Raw(frame)).unwrap();
         assert_eq!(source, [1, 2]);
         assert_eq!(assessed, [3, 4, 5]);
+    }
+
+    #[test]
+    fn accepts_camel_case_memory_source_fields_from_typescript() {
+        let metadata = br#"{"apiVersion":1,"requestId":"test-memory","operation":"inspect","source":{"kind":"inline","cacheKey":"workspace:image:1"},"inlineLength":1}"#;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+        frame.extend_from_slice(metadata);
+        frame.push(1);
+        let (request, source, _) = decode_request(&InvokeBody::Raw(frame)).unwrap();
+        assert_eq!(source, [1]);
+        assert!(matches!(
+            request.source,
+            NativeSource::Inline { cache_key: Some(ref value) } if value == "workspace:image:1"
+        ));
+
+        let metadata = br#"{"apiVersion":1,"requestId":"test-stored","operation":"inspect","source":{"kind":"stored","scope":"room","scopeKey":"workspace","id":"image","variant":"original","revision":"1"},"inlineLength":0}"#;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+        frame.extend_from_slice(metadata);
+        let (request, source, _) = decode_request(&InvokeBody::Raw(frame)).unwrap();
+        assert!(source.is_empty());
+        assert!(matches!(
+            request.source,
+            NativeSource::Stored { ref scope_key, .. } if scope_key == "workspace"
+        ));
     }
 
     #[test]

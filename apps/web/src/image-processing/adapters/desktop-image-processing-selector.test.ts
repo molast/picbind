@@ -32,6 +32,8 @@ function recordingService(engine: ImageProcessingEngine, calls: string[]): Image
     compareQuality: () => record("compareQuality"),
     convert: () => record("convert"),
     createShareAssets: () => record("createShareAssets"),
+    releaseMemorySource: () => record("releaseMemorySource"),
+    releasePreviewCache: () => record("releasePreviewCache"),
     releaseTemporary: () => record("releaseTemporary"),
   };
 }

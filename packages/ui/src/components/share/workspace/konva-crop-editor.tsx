@@ -6,6 +6,8 @@ import type { NormalizedCrop } from "../../../utils/room-image-editing";
 
 type KonvaCropEditorProps = {
   imageUrl: string;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   aspect: number | null;
   initialCrop?: NormalizedCrop;
   onCropChange(crop: NormalizedCrop): void;
@@ -15,12 +17,15 @@ const PADDING = 18;
 
 export default function KonvaCropEditor({
   imageUrl,
+  posterUrl,
+  editorBaseReady = true,
   aspect,
   initialCrop,
   onCropChange,
 }: KonvaCropEditorProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const onCropChangeRef = React.useRef(onCropChange);
+  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
   onCropChangeRef.current = onCropChange;
 
   React.useEffect(() => {
@@ -130,6 +135,7 @@ export default function KonvaCropEditor({
       });
       cropRect.on("dragend", update);
       update();
+      setRenderedImageUrl(imageUrl);
     };
 
     image.onload = mount;
@@ -143,5 +149,5 @@ export default function KonvaCropEditor({
     };
   }, [aspect, imageUrl, initialCrop]);
 
-  return <div ref={containerRef} className="h-[min(52vh,430px)] min-h-72 w-full overflow-hidden rounded-md bg-slate-900" />;
+  return <div className="relative h-[min(52vh,430px)] min-h-72 w-full overflow-hidden rounded-md bg-slate-900"><div ref={containerRef} className="h-full w-full" />{posterUrl && (!editorBaseReady || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="absolute inset-0 z-20 h-full w-full cursor-wait select-none object-contain" aria-hidden="true" /> : null}</div>;
 }

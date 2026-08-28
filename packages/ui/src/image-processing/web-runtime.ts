@@ -97,6 +97,7 @@ export async function materializeWebImage(input: {
   mimeType: string;
   metadata: Pick<ImageMetadata, "width" | "height">;
   document: ImageParameterDocument;
+  quality?: number;
 }) {
   if (input.document.operations.length === 0) {
     return {
@@ -126,7 +127,13 @@ export async function materializeWebImage(input: {
       updatedAt: 0,
       source: input.blob,
     };
-    const result = await replayOperations(image, toWorkspaceOperations(input.document));
+    const result = await replayOperations(
+      image,
+      toWorkspaceOperations(input.document),
+      input.quality === undefined
+        ? undefined
+        : { quality: input.quality, compressionGain: 1, forceEncode: true },
+    );
     return { ...result, returnedOriginal: false };
   } catch (error) {
     if (error instanceof ImageProcessingError) throw error;
@@ -178,6 +185,7 @@ export async function convertWebImage(input: {
   format: ImageOutputFormat;
   signal: AbortSignal;
   allowAlphaLoss?: boolean;
+  quality?: number;
 }) {
   if (input.format === "jxl") {
     throw new ImageProcessingError(
@@ -193,6 +201,9 @@ export async function convertWebImage(input: {
       new File([input.blob], input.name, { type: input.blob.type }),
       input.format,
       input.signal,
+      input.quality === undefined
+        ? undefined
+        : { quality: input.quality, compressionGain: 1, forceEncode: true },
     );
   } catch (error) {
     if (error instanceof ImageProcessingError) throw error;

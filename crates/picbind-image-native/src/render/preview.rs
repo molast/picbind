@@ -1,8 +1,7 @@
-use image::GenericImageView;
 use serde_json::Value;
 
 use crate::{
-    MAX_DIMENSION, MAX_PIXELS, NativeImageDimensions, NativeImageError, NativeImageFormat,
+    MAX_DIMENSION, MAX_PIXELS, NativeDecodedImage, NativeImageDimensions, NativeImageError,
     NativeOperationType, NativeParameterDocument, NativeTaskControl, codecs, decode,
     operations::{replay_image, replay_image_with_control},
 };
@@ -28,6 +27,16 @@ pub fn render_preview_with_control(
     render_preview_inner(input, document, bounds, quality, Some(control))
 }
 
+pub fn render_preview_from_decoded_with_control(
+    source: &NativeDecodedImage,
+    document: &NativeParameterDocument,
+    bounds: NativeImageDimensions,
+    quality: u8,
+    control: &NativeTaskControl,
+) -> Result<NativePreviewOutput, NativeImageError> {
+    render_decoded_preview_inner(source, document, bounds, quality, Some(control))
+}
+
 fn render_preview_inner(
     input: &[u8],
     document: &NativeParameterDocument,
@@ -44,26 +53,77 @@ fn render_preview_inner(
             "preview quality must be between 1 and 100".into(),
         ));
     }
-    let (source_format, source) = decode::decode(input)?;
+    let source = decode::decode_image(input)?;
+    render_decoded_preview_inner(&source, document, bounds, quality, control)
+}
+
+fn render_decoded_preview_inner(
+    source: &NativeDecodedImage,
+    document: &NativeParameterDocument,
+    bounds: NativeImageDimensions,
+    quality: u8,
+    control: Option<&NativeTaskControl>,
+) -> Result<NativePreviewOutput, NativeImageError> {
+    validate_bounds(bounds)?;
+    if !(1..=100).contains(&quality) {
+        return Err(NativeImageError::InvalidParameters(
+            "preview quality must be between 1 and 100".into(),
+        ));
+    }
     if let Some(control) = control {
         control.checkpoint()?;
     }
-    let (logical_width, logical_height) = final_dimensions(source.dimensions(), document)?;
-    let scale = (f64::from(bounds.width) / f64::from(logical_width))
+    let source_format = source.format;
+    let source_dimensions = (source.width(), source.height());
+    let (logical_width, logical_height) = final_dimensions(source_dimensions, document)?;
+    let output_scale = (f64::from(bounds.width) / f64::from(logical_width))
         .min(f64::from(bounds.height) / f64::from(logical_height))
         .min(1.0);
-    let source_width = (f64::from(source.width()) * scale).round().max(1.0) as u32;
-    let source_height = (f64::from(source.height()) * scale).round().max(1.0) as u32;
-    let source = if source_width == source.width() && source_height == source.height() {
-        source
+    let cached_scale = (f64::from(source.image.width()) / f64::from(source_dimensions.0))
+        .min(f64::from(source.image.height()) / f64::from(source_dimensions.1))
+        .min(1.0);
+    let replay_scale = output_scale.min(cached_scale);
+    let replay_width = (f64::from(source_dimensions.0) * replay_scale)
+        .round()
+        .max(1.0) as u32;
+    let replay_height = (f64::from(source_dimensions.1) * replay_scale)
+        .round()
+        .max(1.0) as u32;
+    let preview_width = (f64::from(logical_width) * output_scale).round().max(1.0) as u32;
+    let preview_height = (f64::from(logical_height) * output_scale).round().max(1.0) as u32;
+
+    // The Original activity has no operations. Encode the already bounded
+    // cached pixels by reference instead of cloning and replaying them.
+    if document.operations.is_empty()
+        && replay_width == source.image.width()
+        && replay_height == source.image.height()
+        && preview_width == source.image.width()
+        && preview_height == source.image.height()
+    {
+        let bytes = codecs::webp::encode_preview(&source.image, quality)?;
+        if let Some(control) = control {
+            control.checkpoint()?;
+        }
+        return Ok(NativePreviewOutput {
+            bytes,
+            width: preview_width,
+            height: preview_height,
+        });
+    }
+
+    // Never copy a full-resolution cached image before downscaling. A prepared
+    // collaboration source is already bounded, so normal previews only clone
+    // a small pixel buffer before replaying operations.
+    let source = if replay_width == source.image.width() && replay_height == source.image.height() {
+        source.image.clone()
     } else {
-        source.resize_exact(
-            source_width,
-            source_height,
+        source.image.resize_exact(
+            replay_width,
+            replay_height,
             image::imageops::FilterType::Lanczos3,
         )
     };
-    let document = scaled_document(document, scale)?;
+    let document = scaled_document(document, replay_scale)?;
     let mut preview = match control {
         Some(control) => {
             replay_image_with_control(source, source_format, &document, Some(control))?
@@ -71,8 +131,6 @@ fn render_preview_inner(
         None => replay_image(source, source_format, &document)?,
     }
     .into_image();
-    let preview_width = (f64::from(logical_width) * scale).round().max(1.0) as u32;
-    let preview_height = (f64::from(logical_height) * scale).round().max(1.0) as u32;
     if preview.width() != preview_width || preview.height() != preview_height {
         preview = preview.resize_exact(
             preview_width,
@@ -80,7 +138,7 @@ fn render_preview_inner(
             image::imageops::FilterType::Lanczos3,
         );
     }
-    let bytes = codecs::encode(&preview, NativeImageFormat::WebP, quality, false)?;
+    let bytes = codecs::webp::encode_preview(&preview, quality)?;
     if let Some(control) = control {
         control.checkpoint()?;
     }

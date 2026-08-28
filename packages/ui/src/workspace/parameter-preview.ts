@@ -120,9 +120,14 @@ export async function renderWorkspaceParameterPreview(
     }
   }
 
+  const outputSize = fittedSize(logicalWidth, logicalHeight, maxWidth, maxHeight);
+  if (canvas.width !== outputSize.width || canvas.height !== outputSize.height) {
+    canvas = resizedCanvas(canvas, outputSize.width, outputSize.height);
+  }
+
   return {
     blob: await canvas.convertToBlob({ type: "image/webp", quality }),
-    width: Math.round(logicalWidth),
-    height: Math.round(logicalHeight),
+    width: canvas.width,
+    height: canvas.height,
   };
 }

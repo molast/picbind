@@ -14,6 +14,8 @@ type ColorAdjustmentPreviewProps = {
   adjustments: RoomColorAdjustments;
   labels: ShareRoomLabels;
   mode: ColorComparisonMode;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   samplingEnabled: boolean;
   onSample(color: string): void;
 };
@@ -22,7 +24,7 @@ function channelHex(value: number) {
   return Math.round(value).toString(16).padStart(2, "0");
 }
 
-export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, mode, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
+export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, mode, posterUrl, editorBaseReady = true, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const originalCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const editedCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -32,8 +34,10 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
   const previewTimerRef = React.useRef<number | null>(null);
   const lastPreviewAtRef = React.useRef(0);
   const [ready, setReady] = React.useState(false);
+  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
   const [showOriginal, setShowOriginal] = React.useState(false);
   const [split, setSplit] = React.useState(50);
+  adjustmentsRef.current = adjustments;
 
   React.useEffect(() => {
     setShowOriginal(false);
@@ -51,15 +55,27 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
       const scale = Math.min(1, 720 / image.naturalWidth, 420 / image.naturalHeight);
       const width = Math.max(1, Math.round(image.naturalWidth * scale));
       const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const sourceCanvas = document.createElement("canvas");
+      sourceCanvas.width = width;
+      sourceCanvas.height = height;
+      const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+      if (!sourceContext) return;
+      sourceContext.drawImage(image, 0, 0, width, height);
+      const source = sourceContext.getImageData(0, 0, width, height);
+      const edited = applyRoomColorAdjustments(
+        new ImageData(new Uint8ClampedArray(source.data), width, height),
+        adjustmentsRef.current,
+      );
       for (const canvas of [originalCanvas, editedCanvas]) {
         canvas.width = width;
         canvas.height = height;
-        canvas.getContext("2d", { willReadFrequently: true })?.drawImage(image, 0, 0, width, height);
       }
-      const context = originalCanvas.getContext("2d", { willReadFrequently: true });
-      if (!context) return;
-      sourceRef.current = context.getImageData(0, 0, width, height);
+      originalCanvas.getContext("2d")?.putImageData(source, 0, 0);
+      editedCanvas.getContext("2d")?.putImageData(edited, 0, 0);
+      sourceRef.current = source;
+      lastPreviewAtRef.current = performance.now();
       setReady(true);
+      setRenderedImageUrl(imageUrl);
     };
     image.src = imageUrl;
     return () => {
@@ -72,10 +88,6 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
       }
     };
   }, [imageUrl, mode]);
-
-  React.useEffect(() => {
-    adjustmentsRef.current = adjustments;
-  }, [adjustments]);
 
   React.useEffect(() => () => {
     if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
@@ -162,6 +174,7 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
           ) : null}
         </>
       )}
+      {posterUrl && (!editorBaseReady || !ready || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 z-20 h-full w-full select-none object-contain p-3" aria-hidden="true" /> : null}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  FiCheck,
   FiHome,
   FiLogIn,
   FiSettings,
@@ -46,7 +45,6 @@ type WorkspaceHeaderProps = {
   runtime: WorkspaceRuntimeState;
   onlinePeers: number;
   collaborationOpen: boolean;
-  copied: boolean;
   desktop: boolean;
   lang: Lang;
   onLanguageChange(lang: Lang): void;
@@ -62,7 +60,6 @@ export function WorkspaceHeader({
   runtime,
   onlinePeers,
   collaborationOpen,
-  copied,
   desktop,
   lang,
   onLanguageChange,
@@ -131,8 +128,8 @@ export function WorkspaceHeader({
         type="button"
         className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-black/5"
         onClick={onShare}
-        title={workspace.shareToken ? text("copyShareLink") : text("createShareLink")}
-      >{copied ? <FiCheck /> : <FiShare2 />}</button>
+        title={text("workspaceShare")}
+      ><FiShare2 /></button>
       <button
         type="button"
         className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-black/5"

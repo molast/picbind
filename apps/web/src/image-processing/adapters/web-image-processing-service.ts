@@ -100,6 +100,10 @@ export class WebImageProcessingService implements ImageProcessingService {
     return capabilities;
   }
 
+  async releaseMemorySource(_cacheKey: string) {
+    // Browser Blob sources are owned and released by the workspace container.
+  }
+
   async inspect(source: ImageProcessingSource, context?: ImageTaskContext) {
     const resolved = await resolveSource(source, context);
     report(context, "decoding");
@@ -129,6 +133,23 @@ export class WebImageProcessingService implements ImageProcessingService {
       quality: request.quality,
     });
     report(context, "completed");
+    if (request.destination === "cache") {
+      const url = URL.createObjectURL(preview.blob);
+      return {
+        artifact: {
+          kind: "cache" as const,
+          id: url,
+          url,
+          mimeType: "image/webp" as const,
+          sizeBytes: preview.blob.size,
+          engine: this.engine,
+        },
+        width: preview.width,
+        height: preview.height,
+        engine: this.engine,
+        documentVersion: 1 as const,
+      };
+    }
     return {
       artifact: { kind: "blob" as const, blob: preview.blob },
       width: preview.width,
@@ -136,6 +157,10 @@ export class WebImageProcessingService implements ImageProcessingService {
       engine: this.engine,
       documentVersion: 1 as const,
     };
+  }
+
+  async releasePreviewCache(artifact: Parameters<ImageProcessingService["releasePreviewCache"]>[0]) {
+    URL.revokeObjectURL(artifact.url);
   }
 
   async materialize(request: MaterializeImageRequest, context?: ImageTaskContext): Promise<ImageProcessingResult> {
@@ -157,6 +182,7 @@ export class WebImageProcessingService implements ImageProcessingService {
       ...resolved,
       metadata: sourceMetadata,
       document: request.document,
+      quality: request.output.quality,
     });
     const requestedFormat = request.output.format === "source"
       ? sourceMetadata.format
@@ -174,6 +200,7 @@ export class WebImageProcessingService implements ImageProcessingService {
         format: requestedFormat,
         signal,
         allowAlphaLoss: request.output.allowAlphaLoss,
+        quality: request.output.quality,
       });
       materialized = {
         ...materialized,

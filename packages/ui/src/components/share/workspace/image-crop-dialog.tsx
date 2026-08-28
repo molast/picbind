@@ -11,6 +11,8 @@ import KonvaCropEditor from "./konva-crop-editor";
 
 type ImageCropDialogProps = {
   image: RoomImage | null;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
@@ -23,31 +25,38 @@ type RatioValue = "free" | "original" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 
 const INITIAL_CROP: NormalizedCrop = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
-export default function ImageCropDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialCrop }: ImageCropDialogProps) {
+type ImageCropDialogContentProps = Omit<ImageCropDialogProps, "image"> & { image: RoomImage };
+
+function cropConfigurationKey(imageId: string, crop?: NormalizedCrop) {
+  return crop
+    ? `${imageId}:${crop.x}:${crop.y}:${crop.width}:${crop.height}`
+    : `${imageId}:initial`;
+}
+
+export default function ImageCropDialog(props: ImageCropDialogProps) {
+  if (!props.image) return null;
+  return <ImageCropDialogContent
+    key={cropConfigurationKey(props.image.id, props.initialCrop)}
+    {...props}
+    image={props.image}
+  />;
+}
+
+function ImageCropDialogContent({ image, posterUrl, editorBaseReady = true, labels, onClose, onSave, parameterAction, onApplyParameters, initialCrop }: ImageCropDialogContentProps) {
   const imageProcessing = useImageProcessing();
   const [ratioValue, setRatioValue] = React.useState<RatioValue>("free");
-  const [crop, setCrop] = React.useState<NormalizedCrop>(INITIAL_CROP);
+  const [crop, setCrop] = React.useState<NormalizedCrop>(() => initialCrop || INITIAL_CROP);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!image) return;
-    setRatioValue("free");
-    setCrop(initialCrop || INITIAL_CROP);
-    setWorking(false);
-    setError(null);
-  }, [image, initialCrop]);
-
-  React.useEffect(() => {
-    if (!image) return;
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !working) onClose();
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [image, onClose, working]);
+  }, [image.id, onClose, working]);
 
-  if (!image) return null;
   const ratios: Array<{ label: string; value: RatioValue; ratio: number | null }> = [
     { label: labels.freeCrop, value: "free", ratio: null },
     { label: labels.originalRatio, value: "original", ratio: -1 },
@@ -83,6 +92,8 @@ export default function ImageCropDialog({ image, labels, onClose, onSave, parame
 
           <KonvaCropEditor
             imageUrl={image.url}
+            posterUrl={posterUrl}
+            editorBaseReady={editorBaseReady}
             aspect={aspect}
             initialCrop={initialCrop}
             onCropChange={setCrop}

@@ -3,7 +3,9 @@
 /* OAuth avatars use dynamic provider hosts and need explicit load/fallback handling. */
 
 import React from "react";
-import { FiLoader, FiLogIn, FiLogOut } from "react-icons/fi";
+import { isTauri } from "@tauri-apps/api/core";
+import { FiLoader, FiLogIn, FiLogOut, FiPlus } from "react-icons/fi";
+import { WorkspaceShareIdEntryDialog } from "@picbind/ui/source";
 import { useAuth } from "./auth-provider";
 import type { Lang } from "@/locales";
 import { resolveAuthAvatar } from "@/utils/auth-service";
@@ -17,9 +19,17 @@ function initials(name: string | null | undefined, email: string | null | undefi
   return (value || "PB").toUpperCase();
 }
 
-export default function AccountControl({ lang }: { lang: Lang }) {
+export default function AccountControl({
+  lang,
+  showWorkspaceEntry = false,
+}: {
+  lang: Lang;
+  showWorkspaceEntry?: boolean;
+}) {
   const auth = useAuth();
   const [open, setOpen] = React.useState(false);
+  const [desktop, setDesktop] = React.useState(false);
+  const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
   const [avatarLoaded, setAvatarLoaded] = React.useState(false);
   const [avatarFailed, setAvatarFailed] = React.useState(false);
   const [avatarSource, setAvatarSource] = React.useState<string | null>(null);
@@ -27,6 +37,10 @@ export default function AccountControl({ lang }: { lang: Lang }) {
   const avatar = !avatarFailed ? avatarSource : null;
   const label = initials(user?.name, user?.email);
   const loading = auth.checking || auth.authenticating;
+
+  React.useEffect(() => {
+    if (showWorkspaceEntry) setDesktop(isTauri());
+  }, [showWorkspaceEntry]);
 
   React.useEffect(() => {
     let active = true;
@@ -54,7 +68,7 @@ export default function AccountControl({ lang }: { lang: Lang }) {
     );
   }
 
-  return (
+  return <>
     <div className="relative">
       <button type="button" aria-label={lang === "zh" ? "账户" : "Account"} aria-expanded={open} onClick={() => setOpen((value) => !value)} className="block h-10 w-10 rounded-full p-0.5 ring-2 ring-white/70 transition hover:ring-white">
         <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-[#2f65cf] text-[12px] font-bold text-white">
@@ -76,6 +90,12 @@ export default function AccountControl({ lang }: { lang: Lang }) {
                 {user.email ? <span className="mt-0.5 block truncate text-[12px] text-slate-500">{user.email}</span> : null}
               </div>
             </div>
+            {showWorkspaceEntry && desktop ? (
+              <button type="button" onClick={() => { setOpen(false); setWorkspaceEntryOpen(true); }} className="mt-2 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900">
+                <FiPlus className="h-4 w-4" aria-hidden="true" />
+                {lang === "zh" ? "进入工作区" : "Enter Workspace"}
+              </button>
+            ) : null}
             <button type="button" onClick={() => { setOpen(false); void auth.logout(); }} className="mt-2 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900">
               <FiLogOut className="h-4 w-4" aria-hidden="true" />
               {lang === "zh" ? "退出登录" : "Log out"}
@@ -84,5 +104,11 @@ export default function AccountControl({ lang }: { lang: Lang }) {
         </>
       ) : null}
     </div>
-  );
+    <WorkspaceShareIdEntryDialog
+      open={workspaceEntryOpen}
+      lang={lang}
+      desktop={desktop}
+      onClose={() => setWorkspaceEntryOpen(false)}
+    />
+  </>;
 }

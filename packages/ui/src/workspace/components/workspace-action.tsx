@@ -1,7 +1,7 @@
 import React from "react";
 
 export function WorkspaceAction({ icon, label, disabled, onClick }: { icon: React.ReactNode; label: string; disabled: boolean; onClick(): void }) {
-  return <button type="button" onClick={onClick} disabled={disabled} title={label} className="flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-md border border-[#dfe3e8] bg-white text-[10px] text-[#526078] hover:border-[#9bb8ec] hover:bg-[#f2f6fd] hover:text-[#2457bd] disabled:cursor-not-allowed disabled:opacity-35"><span className="text-[15px]">{icon}</span><span>{label}</span></button>;
+  return <button type="button" onClick={onClick} disabled={disabled} title={label} className="flex min-h-[54px] w-full min-w-0 flex-col items-center justify-center gap-1 rounded-md border border-[#dfe3e8] bg-white text-[10px] text-[#526078] hover:border-[#9bb8ec] hover:bg-[#f2f6fd] hover:text-[#2457bd] disabled:cursor-not-allowed disabled:opacity-35"><span className="text-[15px]">{icon}</span><span>{label}</span></button>;
 }
 
 export function ColorControl({ label, value, onChange }: { label: string; value: string; onChange(value: string): void }) {

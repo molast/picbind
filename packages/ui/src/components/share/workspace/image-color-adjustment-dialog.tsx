@@ -36,6 +36,8 @@ import type { ShareRoomLabels } from "../share-room-labels";
 
 type ImageColorAdjustmentDialogProps = {
   image: RoomImage | null;
+  posterUrl?: string | null;
+  editorBaseReady?: boolean;
   labels: ShareRoomLabels;
   onClose(): void;
   onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
@@ -76,7 +78,7 @@ function SliderRow({ label, value, min = -100, max = 100, suffix = "%", resetVal
   );
 }
 
-export default function ImageColorAdjustmentDialog({ image, labels, onClose, onSave, parameterAction, onApplyParameters, initialAdjustments }: ImageColorAdjustmentDialogProps) {
+export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBaseReady = true, labels, onClose, onSave, parameterAction, onApplyParameters, initialAdjustments }: ImageColorAdjustmentDialogProps) {
   const imageProcessing = useImageProcessing();
   const [category, setCategory] = React.useState<Category>("light");
   const [submenu, setSubmenu] = React.useState<Submenu>("tone");
@@ -97,13 +99,13 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
     setAdjustments(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
     setWorking(false);
     setError(null);
-  }, [image, initialAdjustments]);
+  }, [image?.id, initialAdjustments]);
   React.useEffect(() => {
     if (!image) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !working) onClose(); };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [image, onClose, working]);
+  }, [image?.id, onClose, working]);
 
   if (!image) return null;
   const copy = labels.colorTools;
@@ -148,7 +150,7 @@ export default function ImageColorAdjustmentDialog({ image, labels, onClose, onS
                 })}
               </div>
               <div className="min-h-0 flex-1 p-2">
-                <ColorAdjustmentPreview imageUrl={image.url} adjustments={adjustments} labels={labels} mode={comparisonMode} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => setAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
+                <ColorAdjustmentPreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} adjustments={adjustments} labels={labels} mode={comparisonMode} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => setAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
               </div>
             </div>
           </div>

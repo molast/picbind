@@ -4,6 +4,12 @@ import { saveCommit, saveWorkspaceImage } from "../repository";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
 import { cachedCommit } from "../utils/workspace-page-utils";
+import {
+  COLLABORATION_PREVIEW_MAX_HEIGHT,
+  COLLABORATION_PREVIEW_MAX_WIDTH,
+  COLLABORATION_PREVIEW_QUALITY,
+} from "../collaboration-image-container";
+import { emptyImageParameterDocument } from "../image-protocol";
 
 type PendingResult = { source: WorkspaceImage; result: ProcessedImageResult };
 
@@ -36,16 +42,21 @@ export function useWorkspaceProcessedResults({
     const imageId = `image_${crypto.randomUUID()}`;
     const initialCommitId = `initial_${imageId}`;
     const createdAt = Date.now();
-    const assets = await imageProcessing.createShareAssets({
+    const thumbnail = await imageProcessing.renderPreview({
       source: {
         kind: "blob",
         blob: result.blob,
         name: result.name,
         mimeType: result.blob.type || source.mimeType,
       },
-      container: { width: 320, height: 240 },
+      document: emptyImageParameterDocument(),
+      maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
+      maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
+      mimeType: "image/webp",
+      quality: COLLABORATION_PREVIEW_QUALITY,
     }, { requestId: `workspace-processed-thumbnail:${imageId}` });
-    const preview = assets.thumbnail.blob;
+    if (thumbnail.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
+    const preview = thumbnail.artifact.blob;
     const image: WorkspaceImage = {
       imageId, workspaceId: workspace.workspaceId, name: result.name,
       mimeType: result.blob.type || source.mimeType, size: result.blob.size,

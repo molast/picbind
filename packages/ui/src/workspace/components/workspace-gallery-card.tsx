@@ -5,7 +5,7 @@ import { getLang, getWorkspaceLabels } from "../../locales";
 import { workspaceRenderedDimensions } from "../utils/workspace-image-display";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 import { WorkspaceImageActionMenu, type WorkspaceCardOperation } from "./workspace-image-action-menu";
-import { BlobImageMedia, WorkspaceImageMedia } from "./workspace-image-media";
+import { ImageAddressMedia, WorkspaceImageMedia } from "./workspace-image-media";
 
 export type { WorkspaceCardOperation } from "./workspace-image-action-menu";
 
@@ -22,7 +22,8 @@ type WorkspaceGalleryCardProps = {
   selected: boolean;
   onlinePeers: number;
   requestingSource: boolean;
-  renderedBlob?: Blob;
+  processing: boolean;
+  previewUrl?: string;
   onSelect(): void;
   onPin(): void;
   onMoveToLibrary(): void;
@@ -33,7 +34,7 @@ type WorkspaceGalleryCardProps = {
 };
 
 export function WorkspaceGalleryCard({
-  image, role, selected, onlinePeers, requestingSource, renderedBlob,
+  image, role, selected, onlinePeers, requestingSource, processing, previewUrl,
   onSelect, onPin, onMoveToLibrary, onRequestSource, onDownload, onMaximize, onOperation,
 }: WorkspaceGalleryCardProps) {
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -67,9 +68,10 @@ export function WorkspaceGalleryCard({
 
   return <article className={`relative min-w-0 rounded-md border bg-white transition ${selected ? "border-[#2f65cf] shadow-[0_0_0_2px_#2f65cf]" : "border-slate-200 hover:border-slate-300"}`}>
     <div className="relative aspect-[5/3] overflow-hidden rounded-t-[5px] bg-slate-100" onClick={onSelect}>
-      {renderedBlob
-        ? <BlobImageMedia blob={renderedBlob} alt={image.name} fit="cover" />
-        : <WorkspaceImageMedia image={image} role={role} fit="cover" controls preferOriginal={role === "owner" && !image.shared} />}
+      {previewUrl
+        ? <ImageAddressMedia url={previewUrl} alt={image.name} fit="cover" />
+        : <WorkspaceImageMedia image={image} role={role} fit="cover" controls />}
+      {processing ? <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-slate-950/30" role="status" aria-label={text("workingProcessing")} aria-live="polite"><span className="flex h-9 w-9 items-center justify-center rounded-md bg-white/95 text-[#2f65cf] shadow"><FiLoader className="h-4 w-4 animate-spin" /></span></div> : null}
       <button type="button" onClick={(event) => { event.stopPropagation(); onPin(); }} className="absolute left-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur hover:text-[#2f65cf]" title={image.pinnedAt ? "Unpin image" : "Pin image"} aria-pressed={Boolean(image.pinnedAt)}>
         {image.pinnedAt ? <TbPinnedFilled className="h-3.5 w-3.5" /> : <TbPinned className="h-3.5 w-3.5" />}
       </button>

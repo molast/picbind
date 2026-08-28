@@ -2,10 +2,10 @@ import React from "react";
 import { REALTIME_LIMITS } from "@picbind/shared";
 import { SourceTransferRegistry } from "../source-transfer";
 import { readWorkspaceImageSource, saveWorkspaceImage } from "../repository";
-import { disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
+import type { CollaborationImageContainer } from "../collaboration-image-container";
 import type { WorkspaceImage } from "../types";
 
-export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationContainers, sourceRequestDialog, sourceRejectReason, setImages, setNewVersions, setSourceRequestDialog, setSourceRejectReason, setNotice, finishSourceRequest, syncCollaborationPreview, sendRealtime, sendRealtimeBinary, digestBlob, }: {
+export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationContainers, sourceRequestDialog, sourceRejectReason, setImages, setNewVersions, setSourceRequestDialog, setSourceRejectReason, setNotice, finishSourceRequest, syncCollaborationPreview, releaseCollaborationContainer, sendRealtime, sendRealtimeBinary, digestBlob, }: {
   images: WorkspaceImage[];
   imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   collaborationContainers: React.MutableRefObject<Map<string, CollaborationImageContainer>>;
@@ -18,6 +18,7 @@ export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationCon
   setNotice: (message: string) => void;
   finishSourceRequest: (value: { requestId?: string; eventId?: string; imageId?: string }) => void;
   syncCollaborationPreview: (image: WorkspaceImage, document: any, source?: Blob) => Promise<unknown>;
+  releaseCollaborationContainer: (imageId: string) => void;
   sendRealtime: (type: string, payload: Record<string, unknown>, options?: Record<string, unknown>) => void;
   sendRealtimeBinary: (type: string, payload: Record<string, unknown>, bytes: ArrayBuffer, options?: Record<string, unknown>) => void;
   digestBlob: (blob: Blob) => Promise<string>;
@@ -64,12 +65,10 @@ export function useWorkspaceSourceTransfer({ images, imagesRef, collaborationCon
     finishSourceRequest({ requestId, imageId: completed.imageId });
     setNewVersions((current) => { const next = { ...current }; delete next[completed.imageId]; return next; });
     if (persisted.shared) {
-      const previous = collaborationContainers.current.get(completed.imageId);
-      if (previous) disposeCollaborationImageContainer(previous);
-      collaborationContainers.current.delete(completed.imageId);
+      releaseCollaborationContainer(completed.imageId);
       await syncCollaborationPreview(cached, cached.parameterDocument, completed.source);
     }
-  }, [collaborationContainers, finishSourceRequest, imagesRef, setImages, setNewVersions, setNotice, syncCollaborationPreview]);
+  }, [finishSourceRequest, imagesRef, releaseCollaborationContainer, setImages, setNewVersions, setNotice, syncCollaborationPreview]);
 
   const acceptSourceRequest = React.useCallback(async (value: Record<string, unknown>) => {
     const image = images.find((item) => item.imageId === value.imageId);

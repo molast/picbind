@@ -1,24 +1,44 @@
 import React from "react";
-import { FiSave } from "react-icons/fi";
+import { FiCopy, FiLoader, FiRefreshCw } from "react-icons/fi";
 import { getLang, getWorkspaceLabels } from "../../locales";
+import type { CollaborationSaveChoice } from "../hooks/use-workspace-save-collaboration";
 
 const text = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
-export function WorkspaceSaveDialog({ open, saving, onClose, onSave }: {
+export function WorkspaceSavePopover({ open, saving, onClose, onSave }: {
   open: boolean;
   saving: boolean;
   onClose(): void;
-  onSave(choice: "replace" | "copy"): void;
+  onSave(choice: CollaborationSaveChoice): void;
 }) {
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape" && !saving) onClose();
+        return;
+      }
+      if (!saving && rootRef.current && !rootRef.current.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [onClose, open, saving]);
+
   if (!open) return null;
-  return <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
-    <section className="w-full max-w-sm rounded-lg bg-white p-5 shadow-2xl" role="alertdialog" aria-modal="true">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiSave /></div>
-        <h2 className="min-w-0 text-base font-semibold text-slate-900">{text("saveImageQuestion")}</h2>
-      </div>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{text("saveImageConfirmationDescription")}</p>
-      <footer className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" disabled={saving} onClick={onClose} className="h-9 rounded-md border px-4 text-sm disabled:opacity-40">{text("cancel")}</button><button type="button" disabled={saving} onClick={() => onSave("replace")} className="h-9 rounded-md border border-[#2f65cf] px-4 text-sm font-semibold text-[#2f65cf] disabled:opacity-50">{text("replaceOriginal")}</button><button type="button" disabled={saving} onClick={() => onSave("copy")} className="h-9 rounded-md bg-[#2f65cf] px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? text("saving") : text("saveAsNewImage")}</button></footer>
-    </section>
+  return <div ref={rootRef} className="absolute bottom-full right-0 z-[125] mb-2 w-[min(290px,calc(100vw-32px))] rounded-md border border-slate-200 bg-white p-2 shadow-xl" role="menu" aria-label={text("saveImageQuestion")}>
+    <button type="button" role="menuitem" disabled={saving} onClick={() => onSave("replace")} className="flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left hover:bg-slate-50 disabled:opacity-50">
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]">{saving ? <FiLoader className="animate-spin" /> : <FiRefreshCw />}</span>
+      <span className="min-w-0"><strong className="block text-xs text-slate-800">{text("replaceOriginal")}</strong><span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{text("replaceOriginalDescription")}</span></span>
+    </button>
+    <button type="button" role="menuitem" disabled={saving} onClick={() => onSave("copy")} className="mt-1 flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left hover:bg-slate-50 disabled:opacity-50">
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">{saving ? <FiLoader className="animate-spin" /> : <FiCopy />}</span>
+      <span className="min-w-0"><strong className="block text-xs text-slate-800">{text("saveAsNewImage")}</strong><span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{text("saveAsNewImageDescription")}</span></span>
+    </button>
   </div>;
 }

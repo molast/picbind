@@ -10,6 +10,8 @@ mod planner;
 mod render;
 mod task;
 
+pub use decode::{NativeDecodedImage, decode_image};
+
 pub use analysis::{
     NativeImageAnalysis, NativeImageQualityAnalysis, NativeImageQualityComparison, compare_quality,
     compare_quality_with_control,
@@ -35,7 +37,7 @@ pub use operations::{
 pub use planner::{NativeImageFeatures, predict_format};
 pub use render::{
     NativePreviewOutput, materialize, materialize_with_control, render_preview,
-    render_preview_with_control,
+    render_preview_from_decoded_with_control, render_preview_with_control,
 };
 pub use task::NativeTaskControl;
 

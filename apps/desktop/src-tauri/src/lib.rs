@@ -4,11 +4,38 @@ mod image_processing;
 mod messaging;
 mod storage;
 
-use tauri::Manager;
+use tauri::{Manager, http};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("picbind-preview", |context, request| {
+            if request.method() != http::Method::GET {
+                return http::Response::builder()
+                    .status(http::StatusCode::METHOD_NOT_ALLOWED)
+                    .body(Vec::new())
+                    .expect("valid preview method response");
+            }
+            let token = request.uri().path().trim_start_matches('/');
+            let cache = context
+                .app_handle()
+                .state::<image_processing::preview_cache::NativePreviewCache>();
+            match cache.read(token) {
+                Ok(file) => http::Response::builder()
+                    .header(http::header::CONTENT_TYPE, file.mime_type)
+                    .header(
+                        http::header::CACHE_CONTROL,
+                        "private, max-age=31536000, immutable",
+                    )
+                    .header(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .body(file.bytes)
+                    .expect("valid preview cache response"),
+                Err(_) => http::Response::builder()
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .expect("valid preview not-found response"),
+            }
+        })
         .plugin(tauri_plugin_single_instance::init(
             |app, arguments, _cwd| {
                 let _ = arguments;
@@ -27,6 +54,11 @@ pub fn run() {
                 storage::NativeImageStore::open(data_dir.clone()).map_err(std::io::Error::other)?;
             app.manage(store);
             app.manage(image_processing::tasks::NativeImageTasks::default());
+            app.manage(image_processing::memory::NativeImageMemory::default());
+            let preview_cache =
+                image_processing::preview_cache::NativePreviewCache::open(data_dir.clone())
+                    .map_err(std::io::Error::other)?;
+            app.manage(preview_cache);
             let temporary =
                 image_processing::temporary::NativeTemporaryStore::open(data_dir.clone())
                     .map_err(std::io::Error::other)?;
@@ -63,6 +95,8 @@ pub fn run() {
             image_processing::commands::image_processing_execute,
             image_processing::commands::image_processing_cancel,
             image_processing::commands::image_processing_release_temporary,
+            image_processing::commands::image_processing_release_memory_source,
+            image_processing::commands::image_processing_release_preview_cache,
             storage::commands::storage_put_image,
             storage::commands::storage_adopt_temporary,
             storage::commands::storage_get_image,

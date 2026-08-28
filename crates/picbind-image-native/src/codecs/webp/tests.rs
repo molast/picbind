@@ -29,6 +29,17 @@ fn custom_options_preserve_dimensions_and_alpha() {
 }
 
 #[test]
+fn preview_options_use_the_fast_libwebp_profile() {
+    let options = super::encoder::WebPEncoderOptions::preview(86);
+
+    assert_eq!(options.config.quality, 86.0);
+    assert_eq!(options.config.method, 0);
+    assert_eq!(options.config.thread_level, 1);
+    let bytes = super::encoder::encode_preview(&crate::tests::source_image(), 86).unwrap();
+    assert_eq!(super::decode(&bytes).unwrap().dimensions(), (24, 18));
+}
+
+#[test]
 fn libwebp_advanced_options_are_applied() {
     let mut options = super::encoder::WebPEncoderOptions::new(76);
     options.config.segments = 3;
