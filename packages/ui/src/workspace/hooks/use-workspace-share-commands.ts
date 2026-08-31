@@ -2,7 +2,7 @@ import React from "react";
 import type { RealtimeService, RealtimeSession } from "@picbind/shared";
 import { getRealtimeClientId } from "../../realtime";
 import { createWorkspaceShare, rotateWorkspaceShare } from "../api";
-import { promoteLocalWorkspace, saveWorkspace } from "../repository";
+import { listWorkspaceImages, promoteLocalWorkspace, saveWorkspace } from "../repository";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
 export function useWorkspaceShareCommands({ workspace, displayName, setWorkspace, setImages, realtimeRef, realtimeService, subscribe, transition, setNotice, }: {
@@ -24,7 +24,7 @@ export function useWorkspaceShareCommands({ workspace, displayName, setWorkspace
       ownerCapability: created.ownerCapability, updatedAt: Date.now() };
     await promoteLocalWorkspace(previousId, next);
     setWorkspace(next);
-    setImages((current) => current.map((image) => ({ ...image, workspaceId: next.workspaceId })));
+    setImages(await listWorkspaceImages(next.workspaceId));
     const realtime = await realtimeService.connect({
       workspaceId: next.workspaceId,
       role: next.role,

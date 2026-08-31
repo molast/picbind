@@ -36,6 +36,53 @@ pub fn run() {
                     .expect("valid preview not-found response"),
             }
         })
+        .register_uri_scheme_protocol("picbind-library", |context, request| {
+            if request.method() != http::Method::GET {
+                return http::Response::builder()
+                    .status(http::StatusCode::METHOD_NOT_ALLOWED)
+                    .body(Vec::new())
+                    .expect("valid library image method response");
+            }
+            let segments = request
+                .uri()
+                .path()
+                .trim_start_matches('/')
+                .split('/')
+                .map(|segment| urlencoding::decode(segment).map(|value| value.into_owned()))
+                .collect::<Result<Vec<_>, _>>();
+            let Ok(segments) = segments else {
+                return http::Response::builder()
+                    .status(http::StatusCode::BAD_REQUEST)
+                    .body(Vec::new())
+                    .expect("valid library image bad-request response");
+            };
+            if segments.len() != 4 {
+                return http::Response::builder()
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .expect("valid library image not-found response");
+            }
+            let store = context.app_handle().state::<storage::NativeImageStore>();
+            let (scope, scope_key, id, variant) =
+                (&segments[0], &segments[1], &segments[2], &segments[3]);
+            let mime_type = store
+                .get(scope, scope_key, id)
+                .ok()
+                .flatten()
+                .map(|record| record.mime_type);
+            match (mime_type, store.read(scope, scope_key, id, variant)) {
+                (Some(mime_type), Ok(bytes)) => http::Response::builder()
+                    .header(http::header::CONTENT_TYPE, mime_type)
+                    .header(http::header::CACHE_CONTROL, "private, no-cache")
+                    .header(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .body(bytes)
+                    .expect("valid library image response"),
+                _ => http::Response::builder()
+                    .status(http::StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .expect("valid library image not-found response"),
+            }
+        })
         .plugin(tauri_plugin_single_instance::init(
             |app, arguments, _cwd| {
                 let _ = arguments;
@@ -98,6 +145,8 @@ pub fn run() {
             image_processing::commands::image_processing_release_memory_source,
             image_processing::commands::image_processing_release_preview_cache,
             storage::commands::storage_put_image,
+            storage::commands::storage_pick_library_images,
+            storage::commands::storage_link_external_image,
             storage::commands::storage_adopt_temporary,
             storage::commands::storage_get_image,
             storage::commands::storage_list_images,

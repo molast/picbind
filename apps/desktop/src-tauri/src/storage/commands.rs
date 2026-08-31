@@ -1,14 +1,16 @@
 use super::NativeImageStore;
 use super::database::{
-    NativeImageRecord, PruneCachePolicy, PruneResult, PutImageRequest, RecoveryResult, StorageUsage,
+    LinkExternalImageRequest, NativeImageRecord, PruneCachePolicy, PruneResult, PutImageRequest,
+    RecoveryResult, StorageUsage,
 };
 use crate::image_processing::temporary::NativeTemporaryStore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{
-    State,
+    AppHandle, State,
     ipc::{InvokeBody, Request, Response},
 };
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 pub async fn storage_put_image(
@@ -18,6 +20,68 @@ pub async fn storage_put_image(
     let request = decode_put_request(request.body())?;
     let store = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || store.put(request))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeLibraryImage {
+    path: String,
+    name: String,
+    mime_type: String,
+    size: u64,
+}
+
+#[tauri::command]
+pub async fn storage_pick_library_images(
+    app: AppHandle,
+) -> Result<Vec<NativeLibraryImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let selected = app
+            .dialog()
+            .file()
+            .add_filter(
+                "Images",
+                &[
+                    "avif", "bmp", "gif", "jpeg", "jpg", "jxl", "png", "tif", "tiff", "webp",
+                ],
+            )
+            .blocking_pick_files()
+            .unwrap_or_default();
+        selected
+            .into_iter()
+            .map(|file| {
+                let path = file.into_path().map_err(|error| error.to_string())?;
+                let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
+                let name = path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| "selected image has an invalid file name".to_string())?
+                    .to_string();
+                let mime_type = image_mime_type(&path)
+                    .ok_or_else(|| format!("unsupported image format: {name}"))?
+                    .to_string();
+                Ok(NativeLibraryImage {
+                    path: path.to_string_lossy().into_owned(),
+                    name,
+                    mime_type,
+                    size: metadata.len(),
+                })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn storage_link_external_image(
+    state: State<'_, NativeImageStore>,
+    input: LinkExternalImageRequest,
+) -> Result<NativeImageRecord, String> {
+    let store = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.link_external(input))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -218,4 +282,18 @@ fn decode_put_request(body: &InvokeBody) -> Result<PutImageRequest, String> {
     request.data = (data_length > 0).then(|| frame[metadata_end..data_end].to_vec());
     request.thumbnail = (thumbnail_length > 0).then(|| frame[data_end..thumbnail_end].to_vec());
     Ok(request)
+}
+
+fn image_mime_type(path: &std::path::Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "avif" => Some("image/avif"),
+        "bmp" => Some("image/bmp"),
+        "gif" => Some("image/gif"),
+        "jpeg" | "jpg" => Some("image/jpeg"),
+        "jxl" => Some("image/jxl"),
+        "png" => Some("image/png"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
 }

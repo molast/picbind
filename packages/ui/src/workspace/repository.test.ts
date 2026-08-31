@@ -186,6 +186,31 @@ test("keeps only the latest 20 Commit snapshots for each image", async () => {
   assert.equal(await (await readWorkspaceCommitSnapshot(commits.at(-1)!))?.text(), "24");
 });
 
+test("resolves the initial Commit from the Library source without storing a duplicate snapshot", async () => {
+  await saveWorkspace(workspace("workspace"));
+  await saveWorkspaceImage(image("image", "workspace"));
+  await saveCommit({
+    commitId: "initial_image",
+    imageId: "image",
+    authorId: "owner",
+    parentCommitId: null,
+    mergeParentCommitIds: [],
+    operations: [],
+    snapshotCached: true,
+    snapshotName: "image.png",
+    snapshotMimeType: "image/png",
+    createdAt: Date.now(),
+  });
+
+  const [storedImage] = await listWorkspaceImages("workspace");
+  assert.equal(storedImage.sourceCached, true);
+  assert.equal(await (await readWorkspaceImageSource(storedImage))?.text(), String.fromCharCode(1));
+  const [initial] = await listCommits("image");
+  assert.equal(initial.snapshot, undefined);
+  assert.equal(initial.snapshotCached, true);
+  assert.equal(await (await readWorkspaceCommitSnapshot(initial))?.text(), String.fromCharCode(1));
+});
+
 test("deletes Commit history after a rollback target", async () => {
   await saveWorkspace(workspace("workspace"));
   await saveWorkspaceImage(image("image", "workspace"));

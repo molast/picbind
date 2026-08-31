@@ -1,9 +1,10 @@
 import Dexie, { type EntityTable } from "dexie";
+import type { ImageProcessingSource } from "@picbind/shared";
 import { defaultWorkspaceStyle, type WorkspaceActivity, type WorkspaceCommit, type WorkspaceIdentity, type WorkspaceImage, type WorkspaceProposal } from "./types";
 import { normalizeWorkspaceImageLocation } from "./image-flow";
 import { getImageStorageRepository } from "../database/repositories/image-storage-repository-selector";
 
-type StoredImage = Omit<WorkspaceImage, "source" | "preview"> & { source?: Blob; preview?: Blob };
+type StoredImage = Omit<WorkspaceImage, "source" | "preview" | "sourceAddress"> & { source?: Blob; preview?: Blob };
 type CacheEntry = { key: string; workspaceId: string; kind: "preview" | "source" | "commit" | "activity"; accessedAt: number; expiresAt: number | null };
 
 class WorkspaceDatabase extends Dexie {
@@ -176,10 +177,14 @@ export async function listWorkspaceImages(workspaceId: string) {
       || storageRecord?.thumbnailAvailable
       || cacheKeys.has(`preview:${workspaceId}:${image.imageId}`),
     );
+    const sourceAddress = sourceCached && repository.address
+      ? await repository.address("room", workspaceId, image.imageId, "original").catch(() => null)
+      : null;
     return {
       ...normalized,
       sourceCached,
       previewCached,
+      sourceAddress: sourceAddress || undefined,
       source: undefined,
       preview: undefined,
     };
@@ -187,6 +192,7 @@ export async function listWorkspaceImages(workspaceId: string) {
 }
 
 export async function readWorkspaceImageSource(image: WorkspaceImage) {
+  if (image.source) return image.source;
   try {
     const source = await getImageStorageRepository().read(
       "room", image.workspaceId, image.imageId, "original", image.mimeType,
@@ -196,6 +202,70 @@ export async function readWorkspaceImageSource(image: WorkspaceImage) {
     // IndexedDB is the compatibility fallback when file-backed storage is unavailable.
   }
   return (await getWorkspaceDatabase().images.get(image.imageId))?.source ?? null;
+}
+
+export async function getWorkspaceImageProcessingSource(
+  image: WorkspaceImage,
+): Promise<ImageProcessingSource | null> {
+  if (image.source) {
+    return {
+      kind: "blob",
+      blob: image.source,
+      name: image.name,
+      mimeType: image.source.type || image.mimeType,
+    };
+  }
+
+  const repository = getImageStorageRepository();
+  if (image.sourceCached && repository.address) {
+    const record = await repository.get("room", image.workspaceId, image.imageId).catch(() => null);
+    if (record && record.byteSize > 0) {
+      return {
+        kind: "stored",
+        asset: {
+          scope: "room",
+          scopeKey: image.workspaceId,
+          id: image.imageId,
+          variant: "original",
+          mimeType: record.mimeType || image.mimeType,
+          revision: record.revision,
+        },
+        name: image.name,
+      };
+    }
+  }
+
+  const source = await readWorkspaceImageSource(image);
+  return source
+    ? { kind: "blob", blob: source, name: image.name, mimeType: source.type || image.mimeType }
+    : null;
+}
+
+export async function getWorkspaceImageSourceAddress(image: WorkspaceImage) {
+  if (image.sourceAddress) return image.sourceAddress;
+  const repository = getImageStorageRepository();
+  return image.sourceCached && repository.address
+    ? repository.address("room", image.workspaceId, image.imageId, "original")
+    : null;
+}
+
+export async function saveExternalWorkspaceImage(image: WorkspaceImage, path: string) {
+  const { source, preview, sourceAddress: _sourceAddress, ...metadata } = image;
+  const repository = getImageStorageRepository();
+  if (!repository.linkExternal) throw new Error("External image links are unavailable");
+  await repository.linkExternal({
+    scope: "room",
+    scopeKey: image.workspaceId,
+    id: image.imageId,
+    metadata: metadata as unknown as Record<string, unknown>,
+    mimeType: image.mimeType,
+    path,
+    createdAt: image.createdAt,
+  });
+  await getWorkspaceDatabase().images.put(metadata);
+  return repository.address
+    ? repository.address("room", image.workspaceId, image.imageId, "original")
+    : null;
 }
 
 export async function readWorkspaceImagePreview(image: WorkspaceImage) {
@@ -213,7 +283,7 @@ export async function saveWorkspaceImage(
   image: WorkspaceImage,
   options: { writeBlobs?: boolean } = {},
 ) {
-  const { source, preview, ...rawMetadata } = image;
+  const { source, preview, sourceAddress: _sourceAddress, ...rawMetadata } = image;
   const writeBlobs = options.writeBlobs ?? true;
   const db = getWorkspaceDatabase();
   const existing = await db.images.get(image.imageId);
@@ -404,7 +474,11 @@ export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
   } catch {
     // Older databases may still contain the pre-file-cache Blob record.
   }
-  return (await getWorkspaceDatabase().commits.get(commit.commitId))?.snapshot ?? null;
+  const legacySnapshot = (await getWorkspaceDatabase().commits.get(commit.commitId))?.snapshot;
+  if (legacySnapshot) return legacySnapshot;
+  return commit.commitId.startsWith("initial_") && (image.sourceCached || image.source)
+    ? readWorkspaceImageSource(image)
+    : null;
 }
 type NewWorkspaceActivity = Omit<WorkspaceActivity, "scope"> & { scope?: WorkspaceActivity["scope"] };
 

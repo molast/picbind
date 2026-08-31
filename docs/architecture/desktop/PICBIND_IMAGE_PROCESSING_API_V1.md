@@ -554,7 +554,7 @@ export type CompressImageRequest = {
   source: ImageProcessingSource;
   options: {
     format: "auto" | ImageOutputFormat;
-    profile?: "planner" | "interactive";
+    profile?: "planner" | "interactive" | "messaging-fast";
     quality?: number;
     compressionGain?: number;
     allowAlphaLoss?: boolean;
@@ -565,14 +565,17 @@ export type CompressImageRequest = {
 };
 ```
 
-`profile` 用于保留两条已经存在且产品语义不同的 Web 压缩链路：
+`profile` 用于区分产品语义不同的压缩链路：
 
 - `planner` 是首页 PCE / Predictor、多候选与质量护栏链路；`format: "auto"` 表示由
   Predictor 选择最终格式。
 - `interactive` 是 Room / Workspace 的单次交互式压缩和目标尺寸链路，不启用首页的
   Butteraugli 外层多候选校验。
+- `messaging-fast` 是 Desktop Native 专用的消息发送极速压缩。它按经典 Luban 长短边分档
+  自行决定目标尺寸，不接受显式 `dimensions`；不透明图单次输出 JPEG，透明图单次输出
+  WebP。Web Adapter 必须返回 `capabilityUnavailable`，不能用 Web 算法静默替换。
 - 未传入时 Web Adapter 使用 `interactive`，调用方必须在需要首页 Planner 时显式选择
-  `planner`。Desktop Native 实现必须保持这两个 profile 的产品语义，但不要求复用 Web
+  `planner`。Desktop Native 实现必须保持各 profile 的产品语义，但不要求复用 Web
   Worker 或相同编码器。
 
 压缩规则继续遵循现有算法文档，包括：
@@ -880,6 +883,7 @@ crates/picbind-image-native/src/
 ├── error.rs
 ├── engine.rs
 ├── decode/
+├── messaging/        Desktop Native 消息极速压缩
 ├── codecs/
 │   ├── jpeg/
 │   │   ├── decoder/

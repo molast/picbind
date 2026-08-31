@@ -25,7 +25,9 @@
   v
 ImageProcessingService
   |-- 首页使用 planner profile
-  |-- Room / Workspace 使用 interactive profile
+  |-- Workspace 图片编辑使用 interactive profile
+  |-- Desktop 微信图片发送普通模式使用 planner profile
+  |-- Desktop 微信图片发送极速模式使用 messaging-fast profile
   |-- Web Adapter 选择对应的既有 Worker 链路
   v
 压缩调度器
@@ -62,8 +64,14 @@ PCE 前端入口
 ```
 
 React UI 现在通过 `ImageProcessingService` 发起压缩，不直接导入压缩 Worker。Web Adapter
-按请求中的 profile 选择既有实现：首页使用 `planner`，Room / Workspace 使用
-`interactive`。Tauri Desktop 对 JPEG、PNG、WebP、AVIF、JPEG XL 的固定目标和 `auto` 且不改变
+按请求中的 profile 选择既有实现：首页使用 `planner`，Workspace 图片编辑使用
+`interactive`。Desktop Workspace 微信图片选择器提供两种压缩模式：默认“极速压缩”使用
+Desktop Native 专用的 `messaging-fast`；“普通压缩”使用 `planner`，其中 JPEG、PNG 和 WebP
+使用同格式 Planner 压缩，AVIF 与 JPEG XL 为兼容 iLink 输出 WebP。GIF 当前不能进入两种压缩
+路径，只能发送原图。Working 中非协作图片的卡片快捷发送固定使用 `messaging-fast`，先保留卡片
+当前缩略图并显示压缩状态，压缩结果完成解码后展示实际发送预览，由用户确认后才上传；该入口
+不会打开聊天窗口，但仍写入同一消息列表。`messaging-fast` 的行为见 4.1 节；新增该 profile 不改变 Planner 候选、
+编码器、质量护栏、Compression Gain 或同格式不增大规则。Tauri Desktop 对 JPEG、PNG、WebP、AVIF、JPEG XL 的固定目标和 `auto` 且不改变
 尺寸的请求使用 Native Adapter：`interactive` 支持单次编码和目标尺寸缩放；`planner` 只对
 同格式 JPEG、PNG 和 AVIF 执行有界质量候选与 Native 质量护栏，WebP 和所有跨格式输出使用
 单候选快速路径，JPEG XL 始终使用无损单候选。`planner` 按现有契约不接受目标尺寸。Desktop 的参数预览、物化、
@@ -220,12 +228,42 @@ palette_colors'= palette_colors / sqrt(K)
 
 ## 4. 编码器选择矩阵
 
+### 4.1 Desktop 消息极速压缩
+
+`messaging-fast` 位于 `crates/picbind-image-native/src/messaging/`，只由 Desktop 图片发送调用，
+不属于首页或普通压缩 Planner。它参照经典 Luban 的移动端图片发送策略，当前固定 Options 为：
+
+- `ignore_below_bytes = 100 KiB`。
+- 不透明图 JPEG quality `60`。
+- 透明图 WebP quality `75`、libwebp method `0`、thread level `1`。
+
+尺寸算法先把宽高按偶数参与分档，令 `long` 为长边、`short` 为短边、
+`scale = short / long`：
+
+1. `scale > 0.5625` 时，长边 `<1664 / <4990 / <10240` 分别使用采样倍数 `1 / 2 / 4`；
+   更长图片使用 `max(long / 1280, 1)`。
+2. `0.5 < scale <= 0.5625` 时使用 `max(long / 1280, 1)`。
+3. `scale <= 0.5` 时使用 `ceil(long / (1280 / scale))`，最低为 `1`。
+4. 采样倍数大于 `1` 时按原始宽高分别除以倍数，使用 Triangle 过滤一次缩小且不放大。
+
+输入先由现有 Native decoder 解码。JPEG、PNG、WebP 小于等于 `100 KiB` 时直接返回原图；
+AVIF/JXL 即使是小文件也必须转成 iLink 支持的格式。不透明图使用 `image` crate 的快速 baseline
+JPEG 单次编码，透明图使用 fast WebP 单次编码，不能静默压平 Alpha。JPEG、PNG、WebP 的极速
+候选不小于原文件时返回原图；AVIF/JXL 由于原格式不能发送，始终返回 JPEG 或 WebP 候选。
+该模式不运行 Predictor、多候选、Compression Gain 或候选回读质量护栏，也不接受调用方传入
+`dimensions`。取消标记在解码、缩放、编码和结果交付边界检查。EXIF 方向仍遵循当前 Native
+decoder 的既有边界，不在消息算法中另行旋转。
+
+### 4.2 Web / WASM 编码器
+
 | 目标格式 | 主编码器 | 主要策略 | 感知校验 |
 |---|---|---|---|
 | JPEG | `mozjpeg-rs` / MozJPEG WASM | 自适应质量、渐进式、色度采样、Huffman 优化 | PCE 内建护栏；可选 Butteraugli |
 | PNG | `imagequant` + `lodepng` + `oxipng` WASM | 感知量化、索引色、Alpha 调色板、按内容抖动、无损后优化 | PCE 内建护栏；可选 Butteraugli |
 | WebP | `@jsquash/webp` / libwebp WASM | 有损 WebP、Sharp YUV、Alpha 单独高质量保存 | PCE 内建护栏，不走 Butteraugli |
 | AVIF | libavif + libaom WASM | 自适应质量候选、色度采样、分块和 Alpha 质量保护 | PCE 内建护栏，不走 Butteraugli |
+
+### 4.3 Desktop Native 编码器
 
 Desktop Native 固定目标格式使用另一套平台专用 codec：
 
@@ -702,6 +740,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |
 | Desktop Native 取消控制 | `crates/picbind-image-native/src/task.rs` |
 | Desktop Native 契约与实机验证 | `crates/picbind-image-native/tests/adapter_contract.rs`、`crates/picbind-image-native/examples/native_validation.rs` |
+| Desktop 消息极速压缩（Luban 分档） | `crates/picbind-image-native/src/messaging/` |
 | Desktop Native Tauri binding | `apps/desktop/src-tauri/src/image_processing/` |
 | Desktop Native / Web 能力路由 | `apps/web/src/image-processing/adapters/desktop-image-processing-selector.ts` |
 

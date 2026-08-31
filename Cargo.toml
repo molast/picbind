@@ -11,6 +11,15 @@ members = [
   "crates/picbind-storage",
 ]
 
+# Image codecs process full pixel buffers and are unusably slow at opt-level 0.
+# Keep application crates in the normal debuggable dev profile while compiling
+# third-party dependencies and the native image pipeline with runtime optimizations.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.picbind-image-native]
+opt-level = 3
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

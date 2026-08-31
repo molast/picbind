@@ -4,6 +4,7 @@ import CompressionSuggestionDialog from "../../components/share/workspace/compre
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { ShareRoomLabels } from "../../components/share/share-room-labels";
 import { getLang, getWorkspaceLabels } from "../../locales";
+import type { MessagingProviderSnapshot, MessagingService } from "../../messaging";
 import WorkspaceOperationLogDialog from "../workspace-operation-log-dialog";
 import type {
   WorkspaceActivity,
@@ -31,7 +32,6 @@ type WorkspaceDialogsProps = {
   removed: boolean;
   removingCollaborator: Collaborator | null;
   deleteImage: WorkspaceImage | null;
-  deleteChoice: "library" | "permanent";
   proposalPreview: { proposalId: string; imageId: string; original: Blob; resultUrl: string } | null;
   activityPreview: { activity: WorkspaceActivity; parameterDocument: { operations: unknown[] }; previewUrl: string } | null;
   previewRendering: boolean;
@@ -50,6 +50,10 @@ type WorkspaceDialogsProps = {
   resultSaving: boolean;
   settingsOpen: boolean;
   styleDraft: WorkspaceStyle;
+  desktop: boolean;
+  messagingService?: MessagingService;
+  messagingProviders: MessagingProviderSnapshot[];
+  messagingLabels: ShareRoomLabels;
   compressionSuggestionOpen: boolean;
   compressionSuggestionWeakNetwork: boolean;
   compressionLabels: ShareRoomLabels;
@@ -62,7 +66,6 @@ type WorkspaceDialogsProps = {
   onCloseRemoveCollaborator(): void;
   onConfirmRemoveCollaborator(): void;
   onCloseDelete(): void;
-  onDeleteChoice(choice: "library" | "permanent"): void;
   onConfirmDelete(): void;
   onCloseProposalPreview(): void;
   onRejectProposalPreview(): void;
@@ -88,16 +91,16 @@ type WorkspaceDialogsProps = {
 };
 
 export function WorkspaceDialogs({
-  workspace, runtime, leaveOpen, removed, removingCollaborator, deleteImage, deleteChoice, proposalPreview,
+  workspace, runtime, leaveOpen, removed, removingCollaborator, deleteImage, proposalPreview,
   activityPreview, activityPreviewIsCurrent, previewRendering, rollbackTarget, rollbackPreview,
   sourceRequest, sourceRequestImageName,
   sourceRejectReason, sourceRejectedNotice = null, rejectingProposal, proposalRejectReason,
   operationLogOpen, operationLogs, pendingResult, resultSaving, settingsOpen, styleDraft,
+  desktop, messagingService, messagingProviders, messagingLabels,
   compressionSuggestionOpen, compressionSuggestionWeakNetwork, compressionLabels,
   onCompressionContinue, onCompression, onCompressionCancel, onRemovedReturnHome,
   onCloseLeave, onConfirmLeave, onCloseRemoveCollaborator, onConfirmRemoveCollaborator,
-  onCloseDelete,
-  onDeleteChoice, onConfirmDelete, onCloseProposalPreview, onRejectProposalPreview,
+  onCloseDelete, onConfirmDelete, onCloseProposalPreview, onRejectProposalPreview,
   onApproveProposalPreview, onCloseActivityPreview, onRollbackActivity, onCloseRollback,
   onConfirmRollback, onSourceReasonChange,
   onRejectSource, onAcceptSource, onCloseSourceRejected = () => undefined,
@@ -114,11 +117,11 @@ export function WorkspaceDialogs({
     {!activityPreview ? <WorkspaceProposalPreviewDialog proposal={proposalPreview} role={workspace.role} onClose={onCloseProposalPreview} onReject={onRejectProposalPreview} onApprove={onApproveProposalPreview} /> : null}
     <WorkspaceActivityPreviewDialog preview={activityPreview} role={workspace.role} isCurrent={activityPreviewIsCurrent} onClose={onCloseActivityPreview} onRollback={onRollbackActivity} onApprove={() => { onCloseActivityPreview(); onApproveProposalPreview(); }} onReject={() => { onCloseActivityPreview(); onRejectProposalPreview(); }} />
     <WorkspaceRollbackDialog target={rollbackTarget} preview={rollbackPreview || undefined} role={workspace.role} onClose={onCloseRollback} onRollback={onConfirmRollback} />
-    <WorkspaceDeleteDialog image={deleteImage} choice={deleteChoice} onChoiceChange={onDeleteChoice} onClose={onCloseDelete} onConfirm={onConfirmDelete} />
+    <WorkspaceDeleteDialog image={deleteImage} onClose={onCloseDelete} onConfirm={onConfirmDelete} />
     <WorkspaceSourceRequestDialog request={sourceRequest} imageName={sourceRequestImageName} reason={sourceRejectReason} onReasonChange={onSourceReasonChange} onReject={onRejectSource} onAccept={onAcceptSource} />
     <WorkspaceSourceRejectedDialog notice={sourceRejectedNotice} imageName={sourceRejectedNotice?.imageId ? sourceRequestImageName : undefined} onClose={onCloseSourceRejected} />
     <WorkspaceProposalRejectDialog proposal={rejectingProposal} reason={proposalRejectReason} onReasonChange={onProposalReasonChange} onClose={onCloseRejectProposal} onReject={onRejectProposal} />
     <WorkspaceOperationLogDialog open={operationLogOpen} logs={operationLogs} onClose={onCloseOperationLog} onClear={onClearOperationLog} />
-    <WorkspaceSettingsDialog open={settingsOpen} workspace={workspace} runtime={runtime} styleDraft={styleDraft} onStyleChange={onStyleChange} onClose={onCloseSettings} onSave={onSaveStyle} />
+    <WorkspaceSettingsDialog open={settingsOpen} workspace={workspace} runtime={runtime} styleDraft={styleDraft} desktop={desktop} messagingService={messagingService} messagingProviders={messagingProviders} messagingLabels={messagingLabels} onStyleChange={onStyleChange} onClose={onCloseSettings} onSave={onSaveStyle} />
   </>;
 }

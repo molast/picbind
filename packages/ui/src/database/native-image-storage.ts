@@ -6,9 +6,17 @@ import type {
   ImageStorageRecord as NativeImageRecord,
   ImageStorageScope as NativeImageScope,
   PutImageStorageInput as PutNativeImageInput,
+  LinkExternalImageStorageInput,
 } from "./repositories/image-storage-repository";
 
 export type { NativeImageRecord, NativeImageScope, PutNativeImageInput };
+
+export type NativeLibraryImage = {
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+};
 
 export type NativeStorageUsage = {
   recordCount: number;
@@ -49,6 +57,16 @@ export async function putNativeImage<T extends Record<string, unknown>>(
   frame.set(data, 4 + metadata.byteLength);
   frame.set(thumbnail, 4 + metadata.byteLength + data.byteLength);
   return invoke<NativeImageRecord<T>>("storage_put_image", frame);
+}
+
+export function pickNativeLibraryImages() {
+  return invoke<NativeLibraryImage[]>("storage_pick_library_images");
+}
+
+export function linkNativeExternalImage<T extends Record<string, unknown>>(
+  input: LinkExternalImageStorageInput<T>,
+) {
+  return invoke<NativeImageRecord<T>>("storage_link_external_image", { input });
 }
 
 export function adoptNativeTemporaryImage<T extends Record<string, unknown>>(

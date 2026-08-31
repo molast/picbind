@@ -5,6 +5,17 @@ export type WorkspaceRuntimeState =
 export type ImageCollaborationState =
   | "private" | "shared" | "working" | "reviewing" | "committed";
 export type WorkspaceImageLocation = "library" | "working";
+export type WorkspaceMessagingCompressionMode = "fast" | "standard";
+export type WorkspacePreparedMessagingImage = {
+  imageId: string;
+  providerId: string;
+  file: File;
+  previewUrl: string;
+  originalSize: number;
+  width: number;
+  height: number;
+  returnedOriginal: boolean;
+};
 export type ProposalState =
   | "draft" | "submitted" | "pending" | "approved" | "rejected"
   | "later" | "failed" | "conflict";
@@ -65,7 +76,8 @@ export type WorkspaceImage = {
   updatedAt: number;
   sourceCached?: boolean;
   previewCached?: boolean;
-  // Blob values are transient and must only exist while an image is being processed.
+  // Addresses point at local/cache files; Blob values only bridge an import until persistence.
+  sourceAddress?: string;
   source?: Blob;
   preview?: Blob;
   placeholder?: { width: number; height: number; dominantColor: string; blurHash: string };

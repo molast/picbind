@@ -11,6 +11,8 @@ mod derived;
 #[cfg(feature = "codecs")]
 mod engine;
 mod error;
+#[cfg(feature = "codecs")]
+mod messaging;
 mod model;
 #[cfg(feature = "operations")]
 mod operations;
@@ -42,6 +44,10 @@ pub use engine::{
     inspect,
 };
 pub use error::NativeImageError;
+#[cfg(feature = "codecs")]
+pub use messaging::{
+    NativeMessagingCompressionOptions, compress_for_messaging, compress_for_messaging_with_control,
+};
 pub use model::{
     MAX_DIMENSION, MAX_INPUT_BYTES, MAX_PIXELS, NativeEncodeOptions, NativeImageDimensions,
     NativeImageFormat, NativeImageMetadata, NativeImageOutput,

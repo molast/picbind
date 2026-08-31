@@ -12,7 +12,7 @@ use std::{
 
 const MAX_LIST_LIMIT: u32 = 1_000;
 const MAX_PRUNE_LIMIT: u32 = 1_000;
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const DEFAULT_CACHE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const DEFAULT_CACHE_MAX_AGE_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -40,6 +40,19 @@ pub struct PutImageRequest {
     #[serde(skip)]
     pub thumbnail: Option<Vec<u8>>,
     pub thumbnail_mime_type: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkExternalImageRequest {
+    pub scope: String,
+    #[serde(default)]
+    pub scope_key: String,
+    pub id: String,
+    pub metadata: Value,
+    pub mime_type: String,
+    pub path: PathBuf,
     pub created_at: i64,
 }
 
@@ -143,6 +156,7 @@ impl NativeImageStore {
                    metadata_json TEXT NOT NULL,
                    mime_type TEXT NOT NULL,
                    file_path TEXT,
+                   external_path TEXT,
                    thumbnail_path TEXT,
                    byte_size INTEGER NOT NULL,
                    created_at INTEGER NOT NULL,
@@ -154,7 +168,7 @@ impl NativeImageStore {
                    ON image_cache(scope, scope_key, updated_at DESC);
                  CREATE INDEX IF NOT EXISTS image_cache_lru
                    ON image_cache(scope, last_accessed_at, updated_at);
-                 PRAGMA user_version = 2;
+                 PRAGMA user_version = 3;
                  COMMIT;",
                 )
                 .map_err(|error| error.to_string())?;
@@ -164,7 +178,17 @@ impl NativeImageStore {
                     "BEGIN IMMEDIATE;
                  CREATE INDEX IF NOT EXISTS image_cache_lru
                    ON image_cache(scope, last_accessed_at, updated_at);
-                 PRAGMA user_version = 2;
+                 ALTER TABLE image_cache ADD COLUMN external_path TEXT;
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+                )
+                .map_err(|error| error.to_string())?;
+        } else if schema_version == 2 {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                 ALTER TABLE image_cache ADD COLUMN external_path TEXT;
+                 PRAGMA user_version = 3;
                  COMMIT;",
                 )
                 .map_err(|error| error.to_string())?;
@@ -272,6 +296,10 @@ impl NativeImageStore {
                metadata_json = excluded.metadata_json,
                mime_type = excluded.mime_type,
                file_path = COALESCE(excluded.file_path, image_cache.file_path),
+               external_path = CASE
+                 WHEN excluded.file_path IS NULL THEN image_cache.external_path
+                 ELSE NULL
+               END,
                thumbnail_path = COALESCE(excluded.thumbnail_path, image_cache.thumbnail_path),
                byte_size = CASE
                  WHEN excluded.file_path IS NULL THEN image_cache.byte_size
@@ -327,6 +355,77 @@ impl NativeImageStore {
         drop(connection);
         self.get(&request.scope, &request.scope_key, &request.id)?
             .ok_or_else(|| "stored image metadata was not found".to_string())
+    }
+
+    pub fn link_external(
+        &self,
+        request: LinkExternalImageRequest,
+    ) -> Result<NativeImageRecord, String> {
+        validate_identity(&request.scope, &request.scope_key, &request.id)?;
+        if request.scope != "room" {
+            return Err("external image links are only supported for workspace images".to_string());
+        }
+        if !request.mime_type.starts_with("image/") {
+            return Err("image mime type is required".to_string());
+        }
+        let path = request
+            .path
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let file_metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+        if !file_metadata.is_file() {
+            return Err("external image path is not a file".to_string());
+        }
+        let byte_size = i64::try_from(file_metadata.len()).map_err(|error| error.to_string())?;
+        let metadata_json =
+            serde_json::to_string(&request.metadata).map_err(|error| error.to_string())?;
+        let external_path = path.to_string_lossy().into_owned();
+        let now = unix_millis()?;
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let previous_file = connection
+            .query_row(
+                "SELECT file_path FROM image_cache
+                 WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
+                params![request.scope, request.scope_key, request.id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+            .flatten();
+        connection
+            .execute(
+                "INSERT INTO image_cache (
+                   scope, scope_key, id, metadata_json, mime_type, file_path,
+                   external_path, thumbnail_path, byte_size, created_at, updated_at,
+                   last_accessed_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL, ?7, ?8, ?9, ?9)
+                 ON CONFLICT(scope, scope_key, id) DO UPDATE SET
+                   metadata_json = excluded.metadata_json,
+                   mime_type = excluded.mime_type,
+                   file_path = NULL,
+                   external_path = excluded.external_path,
+                   byte_size = excluded.byte_size,
+                   updated_at = excluded.updated_at,
+                   last_accessed_at = excluded.last_accessed_at",
+                params![
+                    request.scope,
+                    request.scope_key,
+                    request.id,
+                    metadata_json,
+                    request.mime_type,
+                    external_path,
+                    byte_size,
+                    request.created_at,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        if let Some(previous_file) = previous_file {
+            self.remove_if_unreferenced(&connection, &previous_file, "")?;
+        }
+        drop(connection);
+        self.get(&request.scope, &request.scope_key, &request.id)?
+            .ok_or_else(|| "linked image metadata was not found".to_string())
     }
 
     pub fn list(
@@ -460,20 +559,22 @@ impl NativeImageStore {
         validate_identity(scope, scope_key, id)?;
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let column = match variant {
-            "original" | "output" => "file_path",
-            "thumbnail" => "thumbnail_path",
+            "original" | "output" => "file_path, external_path",
+            "thumbnail" => "thumbnail_path, NULL",
             _ => return Err("unsupported image variant".to_string()),
         };
         let sql = format!(
             "SELECT {column} FROM image_cache WHERE scope = ?1 AND scope_key = ?2 AND id = ?3"
         );
-        let relative_path = connection
+        let (relative_path, external_path) = connection
             .query_row(&sql, params![scope, scope_key, id], |row| {
-                row.get::<_, Option<String>>(0)
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
             })
             .optional()
             .map_err(|error| error.to_string())?
-            .flatten()
             .ok_or_else(|| "cached image was not found".to_string())?;
         connection
             .execute(
@@ -482,7 +583,12 @@ impl NativeImageStore {
                 params![scope, scope_key, id, unix_millis()?],
             )
             .map_err(|error| error.to_string())?;
-        files::read(&self.root, &relative_path)
+        if let Some(relative_path) = relative_path {
+            return files::read(&self.root, &relative_path);
+        }
+        let external_path =
+            external_path.ok_or_else(|| "cached image file was not found".to_string())?;
+        fs::read(external_path).map_err(|error| error.to_string())
     }
 
     pub fn delete(&self, scope: &str, scope_key: &str, id: &str) -> Result<(), String> {
@@ -533,8 +639,32 @@ impl NativeImageStore {
         variant: &str,
     ) -> Result<(), String> {
         validate_identity(scope, scope_key, id)?;
+        if matches!(variant, "original" | "output") {
+            let connection = self.connection.lock().map_err(|error| error.to_string())?;
+            let managed_path = connection
+                .query_row(
+                    "SELECT file_path FROM image_cache
+                     WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
+                    params![scope, scope_key, id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .flatten();
+            connection
+                .execute(
+                    "UPDATE image_cache
+                     SET file_path = NULL, external_path = NULL, byte_size = 0
+                     WHERE scope = ?1 AND scope_key = ?2 AND id = ?3",
+                    params![scope, scope_key, id],
+                )
+                .map_err(|error| error.to_string())?;
+            if let Some(path) = managed_path {
+                self.remove_if_unreferenced(&connection, &path, "")?;
+            }
+            return Ok(());
+        }
         let column = match variant {
-            "original" | "output" => "file_path",
             "thumbnail" => "thumbnail_path",
             _ => return Err("unsupported image variant".to_string()),
         };
@@ -1038,6 +1168,39 @@ mod tests {
     }
 
     #[test]
+    fn links_external_workspace_images_without_copying_or_deleting_them() {
+        let root = test_root("external-link");
+        fs::create_dir_all(&root).expect("create test root");
+        let external = root.join("selected.png");
+        fs::write(&external, [7, 8, 9]).expect("write selected image");
+        let store = NativeImageStore::open(root.join("storage")).expect("open store");
+        store
+            .link_external(LinkExternalImageRequest {
+                scope: "room".to_string(),
+                scope_key: "workspace".to_string(),
+                id: "image".to_string(),
+                metadata: serde_json::json!({ "name": "selected.png" }),
+                mime_type: "image/png".to_string(),
+                path: external.clone(),
+                created_at: 10,
+            })
+            .expect("link selected image");
+        store
+            .put(request("room", "workspace", "image", None))
+            .expect("update linked image metadata");
+
+        assert_eq!(
+            store.read("room", "workspace", "image", "original"),
+            Ok(vec![7, 8, 9])
+        );
+        store
+            .delete("room", "workspace", "image")
+            .expect("delete image record");
+        assert!(external.exists());
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
     fn room_variants_expire_independently() {
         let root = test_root("room-variants");
         let store = NativeImageStore::open(root.clone()).expect("open store");
@@ -1141,7 +1304,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         let index_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master
@@ -1151,6 +1314,15 @@ mod tests {
             )
             .expect("lru index");
         assert_eq!(index_count, 1);
+        let external_path_columns: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('image_cache')
+                 WHERE name = 'external_path'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("external path column");
+        assert_eq!(external_path_columns, 1);
         drop(connection);
         fs::remove_dir_all(root).expect("remove test storage");
     }

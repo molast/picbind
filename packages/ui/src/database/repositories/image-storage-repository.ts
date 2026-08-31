@@ -32,6 +32,16 @@ export type PutImageStorageInput<T extends Record<string, unknown>> = {
   createdAt: number;
 };
 
+export type LinkExternalImageStorageInput<T extends Record<string, unknown>> = {
+  scope: ImageStorageScope;
+  scopeKey?: string;
+  id: string;
+  metadata: T;
+  mimeType: string;
+  path: string;
+  createdAt: number;
+};
+
 export type ImageCachePolicy = {
   maxBytes: number;
   maxAgeMillis?: number;
@@ -53,6 +63,17 @@ export interface ImageStorageRepository {
   put<T extends Record<string, unknown>>(
     input: PutImageStorageInput<T>,
   ): Promise<ImageStorageRecord<T>>;
+
+  linkExternal?<T extends Record<string, unknown>>(
+    input: LinkExternalImageStorageInput<T>,
+  ): Promise<ImageStorageRecord<T>>;
+
+  address?(
+    scope: ImageStorageScope,
+    scopeKey: string,
+    id: string,
+    variant: ImageStorageVariant,
+  ): Promise<string | null>;
 
   get<T extends Record<string, unknown>>(
     scope: ImageStorageScope,

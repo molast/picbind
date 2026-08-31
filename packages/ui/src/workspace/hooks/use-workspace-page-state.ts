@@ -7,6 +7,7 @@ export function useWorkspacePageState() {
   const [reactionCounts, setReactionCounts] = React.useState<Record<string, number>>({});
   const [message, setMessage] = React.useState("");
   const [pendingWorkingImageId, setPendingWorkingImageId] = React.useState<string | null>(null);
+  const [movingToWorkingImageIds, setMovingToWorkingImageIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [compressingToWorkingImageId, setCompressingToWorkingImageId] = React.useState<string | null>(null);
   const [compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork] = React.useState(false);
   const [collaborationOpen, setCollaborationOpen] = React.useState(false);
@@ -16,5 +17,5 @@ export function useWorkspacePageState() {
   const [notice, setNotice] = React.useState<string | null>(null);
   const [requestingSourceIds, setRequestingSourceIds] = React.useState<Set<string>>(() => new Set());
   const [newVersions, setNewVersions] = React.useState<Record<string, string>>({});
-  return { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, compressingToWorkingImageId, setCompressingToWorkingImageId, compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, notice, setNotice, requestingSourceIds, setRequestingSourceIds, newVersions, setNewVersions };
+  return { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, movingToWorkingImageIds, setMovingToWorkingImageIds, compressingToWorkingImageId, setCompressingToWorkingImageId, compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, notice, setNotice, requestingSourceIds, setRequestingSourceIds, newVersions, setNewVersions };
 }

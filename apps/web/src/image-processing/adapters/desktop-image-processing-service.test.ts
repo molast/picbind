@@ -163,6 +163,39 @@ test("Desktop Adapter returns and releases opaque temporary artifacts", async ()
   assert.deepEqual(released, ["opaque-token", "opaque-token"]);
 });
 
+test("Desktop Adapter forwards the Native fast messaging profile", async () => {
+  let request: ReturnType<typeof decodeRequest> | undefined;
+  const bridge: DesktopNativeBridge = {
+    randomUUID: () => "messaging-fast-request",
+    async listen() {
+      return () => undefined;
+    },
+    async invoke<T>(_command: string, args?: unknown) {
+      request = decodeRequest(args);
+      return response({
+        metadata: nativeMetadata({
+          format: "jpeg",
+          mimeType: "image/jpeg",
+          sizeBytes: 2,
+          hasAlpha: false,
+        }),
+        returnedOriginal: false,
+        implementation: "test-native",
+      }, new Uint8Array([1, 2])) as T;
+    },
+  };
+  const service = new DesktopImageProcessingService(bridge);
+  const result = await service.compress({
+    source: source(),
+    options: { format: "auto", profile: "messaging-fast" },
+    destination: "memory",
+  });
+
+  assert.deepEqual((request?.metadata.options as Record<string, unknown>).profile, "messaging-fast");
+  assert.equal(result.metadata.format, "jpeg");
+  assert.equal(result.artifact.kind, "blob");
+});
+
 test("Desktop Adapter returns preview cache file URLs without inline image bytes", async () => {
   const released: string[] = [];
   const bridge: DesktopNativeBridge = {

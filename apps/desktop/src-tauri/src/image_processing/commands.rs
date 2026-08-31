@@ -1,6 +1,7 @@
 use picbind_image_native::{
     NativeEncodeOptions, NativeImageDimensions, NativeImageError, NativeImageFormat,
-    NativeImageMetadata, NativeParameterDocument, NativeTaskControl, compare_quality_with_control,
+    NativeImageMetadata, NativeMessagingCompressionOptions, NativeParameterDocument,
+    NativeTaskControl, compare_quality_with_control, compress_for_messaging_with_control,
     create_share_assets_with_control, encode_auto_planned_with_control, encode_auto_with_control,
     encode_planned_with_control, encode_with_control, inspect, materialize_with_control,
     render_preview_from_decoded_with_control, render_preview_with_control,
@@ -319,50 +320,68 @@ fn execute(
                     "Encode options are required".to_string(),
                 )
             })?;
-            let automatic = options.format.eq_ignore_ascii_case("auto");
-            let format = if automatic {
-                NativeImageFormat::WebP
-            } else {
-                NativeImageFormat::parse(&options.format)
-                    .map_err(|error| ("unsupportedFormat", error.to_string()))?
-            };
-            let compression_gain = if options.compression_gain.is_finite() {
-                (options.compression_gain.clamp(0.25, 4.0) * 100.0).round() as u16
-            } else {
-                100
-            };
-            let encode_options = NativeEncodeOptions {
-                format,
-                quality: options.quality.clamp(1, 100),
-                compression_gain,
-                allow_alpha_loss: options.allow_alpha_loss,
-                force_encode: options.force_encode,
-                dimensions: options.dimensions.map(|dimensions| NativeImageDimensions {
-                    width: dimensions.width,
-                    height: dimensions.height,
-                }),
-            };
-            let planned = match options.profile.as_deref().unwrap_or("interactive") {
-                "interactive" => false,
-                "planner" => true,
-                _ => {
+            let profile = options.profile.as_deref().unwrap_or("interactive");
+            let output = if profile == "messaging-fast" {
+                if options.dimensions.is_some() {
                     return Err((
                         "invalidParameters",
-                        "Compression profile is invalid".to_string(),
+                        "Fast messaging compression calculates its own dimensions".to_string(),
                     ));
                 }
+                compress_for_messaging_with_control(
+                    source.bytes(),
+                    &NativeMessagingCompressionOptions::default(),
+                    control,
+                )
+                .map_err(native_error)?
+            } else {
+                let automatic = options.format.eq_ignore_ascii_case("auto");
+                let format = if automatic {
+                    NativeImageFormat::WebP
+                } else {
+                    NativeImageFormat::parse(&options.format)
+                        .map_err(|error| ("unsupportedFormat", error.to_string()))?
+                };
+                let compression_gain = if options.compression_gain.is_finite() {
+                    (options.compression_gain.clamp(0.25, 4.0) * 100.0).round() as u16
+                } else {
+                    100
+                };
+                let encode_options = NativeEncodeOptions {
+                    format,
+                    quality: options.quality.clamp(1, 100),
+                    compression_gain,
+                    allow_alpha_loss: options.allow_alpha_loss,
+                    force_encode: options.force_encode,
+                    dimensions: options.dimensions.map(|dimensions| NativeImageDimensions {
+                        width: dimensions.width,
+                        height: dimensions.height,
+                    }),
+                };
+                let planned = match profile {
+                    "interactive" => false,
+                    "planner" => true,
+                    _ => {
+                        return Err((
+                            "invalidParameters",
+                            "Compression profile is invalid".to_string(),
+                        ));
+                    }
+                };
+                match (automatic, planned) {
+                    (true, true) => {
+                        encode_auto_planned_with_control(source.bytes(), &encode_options, control)
+                    }
+                    (true, false) => {
+                        encode_auto_with_control(source.bytes(), &encode_options, control)
+                    }
+                    (false, true) => {
+                        encode_planned_with_control(source.bytes(), &encode_options, control)
+                    }
+                    (false, false) => encode_with_control(source.bytes(), &encode_options, control),
+                }
+                .map_err(native_error)?
             };
-            let output = match (automatic, planned) {
-                (true, true) => {
-                    encode_auto_planned_with_control(source.bytes(), &encode_options, control)
-                }
-                (true, false) => encode_auto_with_control(source.bytes(), &encode_options, control),
-                (false, true) => {
-                    encode_planned_with_control(source.bytes(), &encode_options, control)
-                }
-                (false, false) => encode_with_control(source.bytes(), &encode_options, control),
-            }
-            .map_err(native_error)?;
             emit_progress(app, &request.request_id, "encoding", 1);
             checkpoint(control)?;
             if request.destination == NativeDestination::Temporary {

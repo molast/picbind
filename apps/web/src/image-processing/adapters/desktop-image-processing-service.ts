@@ -450,7 +450,7 @@ export class DesktopImageProcessingService implements ImageProcessingService {
   ): Promise<ImageProcessingResult> {
     if (
       request.options.profile
-      && !["planner", "interactive"].includes(request.options.profile)
+      && !["planner", "interactive", "messaging-fast"].includes(request.options.profile)
     ) {
       throw new ImageProcessingError("invalidRequest", "Compression profile is invalid");
     }
@@ -467,10 +467,11 @@ export class DesktopImageProcessingService implements ImageProcessingService {
         "Compression dimensions exceed the native size limits",
       );
     }
-    if (request.options.profile === "planner" && request.options.dimensions) {
+    if (["planner", "messaging-fast"].includes(request.options.profile || "")
+      && request.options.dimensions) {
       throw new ImageProcessingError(
         "invalidRequest",
-        "Planner compression does not accept resize dimensions",
+        "The selected compression profile does not accept explicit resize dimensions",
       );
     }
     const quality = request.options.quality ?? 80;

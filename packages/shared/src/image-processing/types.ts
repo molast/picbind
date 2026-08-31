@@ -152,7 +152,7 @@ export type CompressImageRequest = {
   source: ImageProcessingSource;
   options: {
     format: "auto" | ImageOutputFormat;
-    profile?: "planner" | "interactive";
+    profile?: "planner" | "interactive" | "messaging-fast";
     quality?: number;
     compressionGain?: number;
     allowAlphaLoss?: boolean;

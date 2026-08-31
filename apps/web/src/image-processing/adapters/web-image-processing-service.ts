@@ -237,6 +237,12 @@ export class WebImageProcessingService implements ImageProcessingService {
     if (gain !== undefined && (!Number.isFinite(gain) || gain < 0.5 || gain > 2)) {
       throw new ImageProcessingError("invalidRequest", "Compression gain must be between 0.5 and 2.0");
     }
+    if (request.options.profile === "messaging-fast") {
+      throw new ImageProcessingError(
+        "capabilityUnavailable",
+        "Fast messaging compression is only available in the Desktop Native engine",
+      );
+    }
     if (request.options.profile && !["planner", "interactive"].includes(request.options.profile)) {
       throw new ImageProcessingError("invalidRequest", "Compression profile is invalid");
     }

@@ -8,6 +8,7 @@ import {
   deleteNativeImage,
   deleteNativeImageVariant,
   getNativeImage,
+  linkNativeExternalImage,
   listNativeImages,
   pruneNativeImageCache,
   putNativeImage,
@@ -17,6 +18,7 @@ import type {
   ImageStorageRepository,
   ImageStorageScope,
   ImageStorageVariant,
+  LinkExternalImageStorageInput,
   PutImageStorageInput,
 } from "./image-storage-repository";
 
@@ -27,6 +29,14 @@ export const tauriImageStorageRepository: ImageStorageRepository = {
 
   put<T extends Record<string, unknown>>(input: PutImageStorageInput<T>) {
     return putNativeImage(input);
+  },
+
+  linkExternal<T extends Record<string, unknown>>(input: LinkExternalImageStorageInput<T>) {
+    return linkNativeExternalImage<T>(input);
+  },
+
+  async address(scope, scopeKey, id, variant) {
+    return `picbind-library://localhost/${encodeURIComponent(scope)}/${encodeURIComponent(scopeKey)}/${encodeURIComponent(id)}/${encodeURIComponent(variant)}`;
   },
 
   get<T extends Record<string, unknown>>(

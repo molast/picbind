@@ -1,15 +1,11 @@
 import React from "react";
 import { useImageProcessing } from "../../image-processing";
 import {
-  clearWorkspaceImageHistory,
   deleteWorkspaceImage,
-  saveCommit,
+  getWorkspaceImageProcessingSource,
 } from "../repository";
-import { cachedCommit } from "../utils/workspace-page-utils";
 import { browserReportsWeakNetwork, canDeleteWorkspaceImage, shouldSuggestWorkspaceCompression } from "../image-flow";
 import { emptyImageParameterDocument } from "../image-protocol";
-import { dimensions } from "../utils/workspace-image-display";
-import { readWorkspaceImageSource } from "../repository";
 import type { CollaborationImageContainer } from "../collaboration-image-container";
 import {
   COLLABORATION_PREVIEW_MAX_HEIGHT,
@@ -30,10 +26,10 @@ type ImageCommandsOptions = {
   processingSource: { imageId: string } | null;
   activityPreview: { activity: { imageId?: string } } | null;
   rollbackTarget: { imageId: string } | null;
-  deleteChoice: "library" | "permanent";
   deletingImage: WorkspaceImage | null;
   setSelectedId: SetState<string | null>;
   setPendingWorkingImageId: SetState<string | null>;
+  setMovingToWorkingImageIds: SetState<ReadonlySet<string>>;
   setCompressionSuggestionWeakNetwork: SetState<boolean>;
   setImages: SetState<WorkspaceImage[]>;
   setCommits: SetState<WorkspaceCommit[]>;
@@ -48,25 +44,24 @@ type ImageCommandsOptions = {
   setRollbackTarget: SetState<any>;
   setRollbackPreview: SetState<any>;
   setDeletingImage: SetState<WorkspaceImage | null>;
-  setDeleteChoice: SetState<"library" | "permanent">;
   setNotice: (message: string) => void;
-  sendRealtime: (type: string, payload: Record<string, unknown>) => void;
   collaborationDeleteBlockedMessage: string;
+  imageActionFailedMessage: string;
   updateImage: (imageId: string, patch: Partial<WorkspaceImage>) => Promise<void>;
   persistWorkspaceLog: (workspaceId: string, kind: string, imageId?: string, detail?: unknown) => Promise<void>;
-  releaseProcessingSource: () => void;
   releaseCollaborationContainer: (imageId: string) => void;
 };
 
 export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
   const imageProcessing = useImageProcessing();
+  const movingToWorkingImageIdsRef = React.useRef(new Set<string>());
   const {
     workspace, imagesRef, collaborationContainers, selectedId, maximizedImageId,
-    processingSource, activityPreview, rollbackTarget, deleteChoice, deletingImage,
-    setSelectedId, setPendingWorkingImageId, setCompressionSuggestionWeakNetwork, setImages, setCommits, setActivities, setProposals, setNewVersions,
+    processingSource, activityPreview, rollbackTarget, deletingImage,
+    setSelectedId, setPendingWorkingImageId, setMovingToWorkingImageIds, setCompressionSuggestionWeakNetwork, setImages, setCommits, setActivities, setProposals, setNewVersions,
     setMaximizedImageId, setProcessingSource, setEditing, setReviewOpen, setActivityPreview,
-    setRollbackTarget, setRollbackPreview, setDeletingImage, setDeleteChoice, setNotice,
-    sendRealtime, collaborationDeleteBlockedMessage, updateImage, persistWorkspaceLog, releaseProcessingSource,
+    setRollbackTarget, setRollbackPreview, setDeletingImage, setNotice,
+    collaborationDeleteBlockedMessage, imageActionFailedMessage, updateImage, persistWorkspaceLog,
     releaseCollaborationContainer,
   } = options;
 
@@ -86,33 +81,54 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
   }, [activityPreview, maximizedImageId, processingSource, releaseCollaborationContainer, rollbackTarget, setActivityPreview, setEditing, setMaximizedImageId, setProcessingSource, setReviewOpen, setRollbackPreview, setRollbackTarget]);
 
   const moveImageToWorking = React.useCallback(async (image: WorkspaceImage) => {
-    if (!workspace || workspace.role !== "owner") return;
-    const source = image.sourceCached ? await readWorkspaceImageSource(image) : null;
-    let preview: Blob | undefined;
-    if (source) {
-      const result = await imageProcessing.renderPreview({
-        source: { kind: "blob", blob: source, name: image.name, mimeType: source.type || image.mimeType },
-        document: emptyImageParameterDocument(),
-        maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
-        maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
-        mimeType: "image/webp",
-        quality: COLLABORATION_PREVIEW_QUALITY,
-      }, { requestId: `workspace-working-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
-      if (result.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
-      preview = result.artifact.blob;
+    if (!workspace || workspace.role !== "owner" || image.workspaceLocation !== "library" || movingToWorkingImageIdsRef.current.has(image.imageId)) return false;
+    movingToWorkingImageIdsRef.current.add(image.imageId);
+    setMovingToWorkingImageIds((current) => new Set(current).add(image.imageId));
+    try {
+      const source = image.sourceCached ? await getWorkspaceImageProcessingSource(image) : null;
+      let preview: Blob | undefined;
+      let previewSize: { width: number; height: number } | undefined;
+      if (source) {
+        const result = await imageProcessing.renderPreview({
+          source,
+          document: emptyImageParameterDocument(),
+          maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
+          maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
+          mimeType: "image/webp",
+          quality: COLLABORATION_PREVIEW_QUALITY,
+        }, { requestId: `workspace-working-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
+        if (result.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
+        preview = result.artifact.blob;
+        previewSize = { width: result.width, height: result.height };
+      }
+      await updateImage(image.imageId, {
+        workspaceLocation: "working",
+        state: image.state === "private" ? "working" : image.state,
+        ...(preview ? {
+          preview,
+          previewCached: true,
+          previewRevision: image.previewRevision + 1,
+          width: previewSize!.width,
+          height: previewSize!.height,
+        } : {}),
+      });
+      setSelectedId(image.imageId);
+      await persistWorkspaceLog(workspace.workspaceId, "imageMovedToWorking", image.imageId);
+      return true;
+    } catch (error) {
+      console.error("Failed to move image to Working", error);
+      setNotice(imageActionFailedMessage);
+      return false;
+    } finally {
+      movingToWorkingImageIdsRef.current.delete(image.imageId);
+      setMovingToWorkingImageIds((current) => {
+        if (!current.has(image.imageId)) return current;
+        const next = new Set(current);
+        next.delete(image.imageId);
+        return next;
+      });
     }
-    await updateImage(image.imageId, {
-      workspaceLocation: "working",
-      state: image.state === "private" ? "working" : image.state,
-      ...(preview ? {
-        preview,
-        previewCached: true,
-        previewRevision: image.previewRevision + 1,
-      } : {}),
-    });
-    setSelectedId(image.imageId);
-    await persistWorkspaceLog(workspace.workspaceId, "imageMovedToWorking", image.imageId);
-  }, [imageProcessing, persistWorkspaceLog, setSelectedId, updateImage, workspace]);
+  }, [imageActionFailedMessage, imageProcessing, persistWorkspaceLog, setMovingToWorkingImageIds, setNotice, setSelectedId, updateImage, workspace]);
 
   const requestMoveImageToWorking = React.useCallback((image: WorkspaceImage) => {
     const weakNetwork = browserReportsWeakNetwork();
@@ -124,53 +140,18 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
     void moveImageToWorking(image);
   }, [moveImageToWorking, setCompressionSuggestionWeakNetwork, setPendingWorkingImageId]);
 
-  const moveImageToLibrary = React.useCallback(async (image: WorkspaceImage) => {
-    if (!workspace || workspace.role !== "owner") return;
-    if (image.shared) {
-      setNotice(collaborationDeleteBlockedMessage);
-      return;
-    }
-    sendRealtime("previewRemove", { imageId: image.imageId });
-    const source = image.sourceCached ? await readWorkspaceImageSource(image) : null;
-    const sourceSize = source ? await dimensions(source) : { width: image.width, height: image.height };
-    const initialCommitId = `initial_${image.imageId}`;
-    await clearWorkspaceImageHistory(image.imageId);
-    await updateImage(image.imageId, {
-      workspaceLocation: "library", shared: false, state: "private", currentCommitId: initialCommitId,
-      parameterDocument: emptyImageParameterDocument(), width: sourceSize.width, height: sourceSize.height,
-    });
-    const initialCommit: WorkspaceCommit = {
-      commitId: initialCommitId, imageId: image.imageId, authorId: "owner", parentCommitId: null,
-      mergeParentCommitIds: [], operations: [], createdAt: Date.now(),
-    };
-    await saveCommit(initialCommit);
-    setCommits((current) => [...current.filter((commit) => commit.imageId !== image.imageId), cachedCommit(initialCommit)]);
-    setActivities((current) => current.filter((activity) => activity.imageId !== image.imageId));
-    setProposals((current) => current.filter((proposal) => proposal.imageId !== image.imageId));
-    setNewVersions((current) => { const next = { ...current }; delete next[image.imageId]; return next; });
-    clearTransientState(image.imageId);
-    if (processingSource?.imageId === image.imageId) releaseProcessingSource();
-    setSelectedId(image.imageId);
-    await persistWorkspaceLog(workspace.workspaceId, "imageMovedToLibrary", image.imageId);
-  }, [clearTransientState, collaborationDeleteBlockedMessage, persistWorkspaceLog, processingSource, releaseProcessingSource, sendRealtime, setActivities, setCommits, setNewVersions, setNotice, setProposals, setSelectedId, updateImage, workspace]);
-
   const requestDeleteImage = React.useCallback((image: WorkspaceImage) => {
     if (!canDeleteWorkspaceImage(image)) {
       setNotice(collaborationDeleteBlockedMessage);
       return;
     }
-    setDeleteChoice(image.workspaceLocation === "working" ? "library" : "permanent");
     setDeletingImage(image);
-  }, [collaborationDeleteBlockedMessage, setDeleteChoice, setDeletingImage, setNotice]);
+  }, [collaborationDeleteBlockedMessage, setDeletingImage, setNotice]);
 
   const confirmDeleteImage = React.useCallback(async () => {
     if (!workspace || !deletingImage) return;
     const image = deletingImage;
     setDeletingImage(null);
-    if (deleteChoice === "library" && image.workspaceLocation === "working") {
-      await moveImageToLibrary(image);
-      return;
-    }
     await deleteWorkspaceImage(image.imageId);
     await persistWorkspaceLog(workspace.workspaceId, "imageDeleted", undefined, { imageId: image.imageId, name: image.name });
     setImages((current) => current.filter((item) => item.imageId !== image.imageId));
@@ -180,7 +161,7 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
     setNewVersions((current) => { const next = { ...current }; delete next[image.imageId]; return next; });
     clearTransientState(image.imageId);
     if (selectedId === image.imageId) setSelectedId(null);
-  }, [clearTransientState, deleteChoice, deletingImage, moveImageToLibrary, persistWorkspaceLog, selectedId, setActivities, setCommits, setDeletingImage, setImages, setNewVersions, setProposals, setSelectedId, workspace]);
+  }, [clearTransientState, deletingImage, persistWorkspaceLog, selectedId, setActivities, setCommits, setDeletingImage, setImages, setNewVersions, setProposals, setSelectedId, workspace]);
 
-  return { moveImageToWorking, requestMoveImageToWorking, moveImageToLibrary, requestDeleteImage, confirmDeleteImage };
+  return { moveImageToWorking, requestMoveImageToWorking, requestDeleteImage, confirmDeleteImage };
 }
