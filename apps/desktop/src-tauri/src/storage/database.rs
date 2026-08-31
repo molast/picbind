@@ -1201,6 +1201,43 @@ mod tests {
     }
 
     #[test]
+    fn overwriting_an_external_workspace_image_uses_managed_bytes() {
+        let root = test_root("external-overwrite");
+        fs::create_dir_all(&root).expect("create test root");
+        let external = root.join("selected.png");
+        fs::write(&external, [7, 8, 9]).expect("write selected image");
+        let store = NativeImageStore::open(root.join("storage")).expect("open store");
+        store
+            .link_external(LinkExternalImageRequest {
+                scope: "room".to_string(),
+                scope_key: "workspace".to_string(),
+                id: "image".to_string(),
+                metadata: serde_json::json!({ "name": "selected.png" }),
+                mime_type: "image/png".to_string(),
+                path: external.clone(),
+                created_at: 10,
+            })
+            .expect("link selected image");
+
+        let mut replacement = request("room", "workspace", "image", Some(vec![1, 2, 3, 4]));
+        replacement.thumbnail = Some(vec![5, 6]);
+        replacement.thumbnail_length = 2;
+        replacement.thumbnail_mime_type = Some("image/webp".to_string());
+        store.put(replacement).expect("overwrite linked image");
+
+        assert_eq!(
+            store.read("room", "workspace", "image", "original"),
+            Ok(vec![1, 2, 3, 4])
+        );
+        assert_eq!(
+            store.read("room", "workspace", "image", "thumbnail"),
+            Ok(vec![5, 6])
+        );
+        assert!(external.exists());
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
     fn room_variants_expire_independently() {
         let root = test_root("room-variants");
         let store = NativeImageStore::open(root.clone()).expect("open store");

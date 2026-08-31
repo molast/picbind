@@ -22,6 +22,15 @@ export {
   type ShareRoomLabels,
 } from "./locales";
 export type { ImagePlaceholderMetadata } from "./utils/share-placeholder";
+export {
+  compactUuid,
+  createCompactId,
+  createPrefixedId,
+  createUuid,
+  createWorkspaceCommitId,
+  initialWorkspaceCommitId,
+  isInitialWorkspaceCommitId,
+} from "./utils/id";
 export type {
   ReviewAnchor,
   ReviewAnnotation,

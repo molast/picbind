@@ -36,7 +36,11 @@ export const tauriImageStorageRepository: ImageStorageRepository = {
   },
 
   async address(scope, scopeKey, id, variant) {
-    return `picbind-library://localhost/${encodeURIComponent(scope)}/${encodeURIComponent(scopeKey)}/${encodeURIComponent(id)}/${encodeURIComponent(variant)}`;
+    const url = `picbind-library://localhost/${encodeURIComponent(scope)}/${encodeURIComponent(scopeKey)}/${encodeURIComponent(id)}/${encodeURIComponent(variant)}`;
+    const record = await getNativeImage(scope, scopeKey, id).catch(() => null);
+    return record?.revision
+      ? `${url}?revision=${encodeURIComponent(record.revision)}`
+      : url;
   },
 
   get<T extends Record<string, unknown>>(

@@ -121,8 +121,7 @@ async function putRoom<T extends Record<string, unknown>>(
         .first();
   let filePath = existing?.filePath ?? contentReference?.filePath ?? null;
   const data = input.data;
-  const shouldWriteFile = data && data.size > 0
-    && (!filePath || Boolean(existing?.placeholderOnly) || Boolean(existing?.previewOnly));
+  const shouldWriteFile = Boolean(data && data.size > 0);
   if (data && shouldWriteFile) {
     filePath = primaryPath("room", scopeKey, input.id);
     await fileStorage.write(filePath, data);

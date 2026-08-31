@@ -1,8 +1,7 @@
 import React from "react";
 import type { RealtimeSession } from "@picbind/shared";
 import type { Collaborator, WorkspaceIdentity, WorkspaceImage } from "../types";
-
-const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
+import { createPrefixedId } from "../../utils/id";
 
 export function useWorkspaceCollaborationCommands({ workspace, selected, onlinePeers, runtime, message, realtimeRef, pendingSourceRequests, finishSourceRequest, setMessages, setMessage, setReactionCounts, setNotice, setRequestingSourceIds, persistWorkspaceLog, showReaction, }: {
   workspace: WorkspaceIdentity | null;
@@ -31,7 +30,7 @@ export function useWorkspaceCollaborationCommands({ workspace, selected, onlineP
   const sendMessage = React.useCallback(() => {
     const text = message.trim();
     if (!text || !onlinePeers) return;
-    setMessages((current) => [...current, { id: id("message"), text, actor: "You" }]);
+    setMessages((current) => [...current, { id: createPrefixedId("message"), text, actor: "You" }]);
     realtimeRef.current?.send("message", { text }, { delivery: "ephemeral" });
     if (workspace) void persistWorkspaceLog(workspace.workspaceId, "message", selected?.imageId);
     setMessage("");
@@ -46,7 +45,7 @@ export function useWorkspaceCollaborationCommands({ workspace, selected, onlineP
     const image = value && "imageId" in value ? value : selected;
     if (!image || !image.shared || !realtimeRef.current || runtime !== "available"
       || [...pendingSourceRequests.current.values()].some((request) => request.imageId === image.imageId)) return;
-    const requestId = id("source");
+    const requestId = createPrefixedId("source");
     const eventId = realtimeRef.current.send("sourceRequest", { requestId, imageId: image.imageId }, { route: "owner", delivery: "reliable", dataClass: "collaborationEvent" });
     if (!eventId) return;
     const timer = window.setTimeout(() => { finishSourceRequest({ requestId }); setNotice("Source request timed out"); }, 30_000);

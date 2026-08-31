@@ -5,10 +5,9 @@ import { emptyImageParameterDocument, setImageOperation } from "../image-protoco
 import { protocolOperationType } from "../utils/workspace-operation-mapping";
 import { cachedCommit } from "../utils/workspace-page-utils";
 import { workspaceOperationStorageMode } from "../image-flow";
+import { createPrefixedId, createWorkspaceCommitId, initialWorkspaceCommitId, isInitialWorkspaceCommitId } from "../../utils/id";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage, WorkspaceOperation, WorkspaceProposal } from "../types";
-
-const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 export function useWorkspaceOperationCommands({ workspace, selected, images, imagesRef, collaborationContainers, setCommits, setProposals, setNotice, updateImage, saveProcessedCopy, syncCollaborationPreview, persistCollaborationActivity, sendRealtime, pendingProposalEvents, }: {
   workspace: WorkspaceIdentity | null;
@@ -36,8 +35,8 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
 
   const createOperation = React.useCallback(async (type: WorkspaceOperation["type"], parameters: Record<string, unknown> = {}, processed?: { blob: Blob; name: string; mimeType: string; width: number; height: number }) => {
     if (!workspace || !selected) return;
-    const operation: WorkspaceOperation = { operationId: id("operation"), imageId: selected.imageId, authorId: "local",
-      baseCommitId: selected.currentCommitId || `initial_${selected.imageId}`, type, parameters, createdAt: Date.now() };
+    const operation: WorkspaceOperation = { operationId: createPrefixedId("operation"), imageId: selected.imageId, authorId: "local",
+      baseCommitId: selected.currentCommitId || initialWorkspaceCommitId(selected.imageId), type, parameters, createdAt: Date.now() };
     if (workspaceOperationStorageMode(selected) === "newImage") {
       if (!processed) return;
       await saveProcessedCopy(selected, { blob: processed.blob, name: processed.name,
@@ -56,8 +55,8 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
       return;
     }
     if (workspace.role === "collaborator") {
-      const localCommit: WorkspaceCommit = { commitId: id("commit"), imageId: selected.imageId, authorId: "local", parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
-      const proposal: WorkspaceProposal = { proposalId: id("proposal"), workspaceId: workspace.workspaceId, imageId: selected.imageId,
+      const localCommit: WorkspaceCommit = { commitId: createWorkspaceCommitId(), imageId: selected.imageId, authorId: "local", parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
+      const proposal: WorkspaceProposal = { proposalId: createPrefixedId("proposal"), workspaceId: workspace.workspaceId, imageId: selected.imageId,
         authorId: "local", baseCommitId: operation.baseCommitId, operations: [operation], commit: localCommit, state: "draft", createdAt: Date.now() };
       await saveCommit(localCommit);
       setCommits((current) => [...current, cachedCommit(localCommit)]);
@@ -70,7 +69,7 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
       });
       return;
     }
-    const parameterCommit: WorkspaceCommit = { commitId: id("commit"), imageId: selected.imageId, authorId: "owner",
+    const parameterCommit: WorkspaceCommit = { commitId: createWorkspaceCommitId(), imageId: selected.imageId, authorId: "owner",
       parentCommitId: selected.currentCommitId, mergeParentCommitIds: [], operations: [operation], createdAt: Date.now() };
     await saveCommit(parameterCommit);
     setCommits((current) => [...current, cachedCommit(parameterCommit)]);
@@ -94,9 +93,8 @@ export function useWorkspaceOperationCommands({ workspace, selected, images, ima
     if (!container || container.disposed) {
       throw new Error("Proposal source is not loaded in collaboration memory");
     }
-    const initialCommitId = `initial_${image.imageId}`;
     let baseDocument = emptyImageParameterDocument();
-    if (proposal.baseCommitId !== initialCommitId) {
+    if (!isInitialWorkspaceCommitId(proposal.baseCommitId, image.imageId)) {
       if (image.currentCommitId === proposal.baseCommitId) {
         baseDocument = container.parameterDocument;
       } else {

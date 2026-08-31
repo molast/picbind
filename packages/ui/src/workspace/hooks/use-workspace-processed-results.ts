@@ -10,15 +10,17 @@ import {
   COLLABORATION_PREVIEW_QUALITY,
 } from "../collaboration-image-container";
 import { emptyImageParameterDocument } from "../image-protocol";
+import { createPrefixedId, initialWorkspaceCommitId } from "../../utils/id";
 
 type PendingResult = { source: WorkspaceImage; result: ProcessedImageResult };
 
 export function useWorkspaceProcessedResults({
-  workspace, setImages, setCommits, setSelectedId, setEditing, setCompressingToWorkingImageId,
+  workspace, imagesRef, setImages, setCommits, setSelectedId, setEditing, setCompressingToWorkingImageId,
   setPendingProcessedResult, setProcessedResultSaving, pendingProcessedResult, processedResultSaving,
   persistWorkspaceLog, releaseProcessingSource, setNotice,
 }: {
   workspace: WorkspaceIdentity | null;
+  imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   setImages: React.Dispatch<React.SetStateAction<WorkspaceImage[]>>;
   setCommits: React.Dispatch<React.SetStateAction<WorkspaceCommit[]>>;
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -39,8 +41,8 @@ export function useWorkspaceProcessedResults({
     destination: "library" | "working" = "working",
   ) => {
     if (!workspace || workspace.role !== "owner") return;
-    const imageId = `image_${crypto.randomUUID()}`;
-    const initialCommitId = `initial_${imageId}`;
+    const imageId = createPrefixedId("image");
+    const initialCommitId = initialWorkspaceCommitId(imageId);
     const createdAt = Date.now();
     const thumbnail = await imageProcessing.renderPreview({
       source: {
@@ -72,7 +74,10 @@ export function useWorkspaceProcessedResults({
     };
     await saveWorkspaceImage(image);
     await saveCommit(initialCommit);
-    setImages((current) => [...current, { ...image, source: undefined, preview: undefined }]);
+    const cachedImage = { ...image, source: undefined, preview: undefined };
+    const nextImages = [...imagesRef.current, cachedImage];
+    imagesRef.current = nextImages;
+    setImages(nextImages);
     setCommits((current) => [...current, cachedCommit(initialCommit)]);
     setSelectedId(imageId);
     setCompressingToWorkingImageId(null);
@@ -81,7 +86,7 @@ export function useWorkspaceProcessedResults({
       sourceImageId: source.imageId, operation: result.operation, destination,
     });
     return imageId;
-  }, [imageProcessing, persistWorkspaceLog, setCommits, setCompressingToWorkingImageId, setEditing, setImages, setSelectedId, workspace]);
+  }, [imageProcessing, imagesRef, persistWorkspaceLog, setCommits, setCompressingToWorkingImageId, setEditing, setImages, setSelectedId, workspace]);
 
   const queueProcessedResult = React.useCallback((source: WorkspaceImage, result: ProcessedImageResult) => {
     setEditing(null);

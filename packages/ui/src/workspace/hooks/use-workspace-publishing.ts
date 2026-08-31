@@ -3,6 +3,7 @@ import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImageSource } from "../repository";
 import { canStartImageCollaboration } from "../image-flow";
 import { emptyImageParameterDocument } from "../image-protocol";
+import { initialWorkspaceCommitId } from "../../utils/id";
 import type { CollaborationImageContainer } from "../collaboration-image-container";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
@@ -57,7 +58,7 @@ export function useWorkspacePublishing({ workspace, imagesRef, updateImage, sync
       await updateImage(image.imageId, {
         shared: false,
         state: currentImage.workspaceLocation === "working" ? "working" : "private",
-        currentCommitId: `initial_${image.imageId}`,
+        currentCommitId: initialWorkspaceCommitId(image.imageId),
         parameterDocument: emptyImageParameterDocument(),
       });
       releaseCollaborationContainer(image.imageId);

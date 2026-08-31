@@ -1,8 +1,8 @@
 import React from "react";
-import { FiBookmark, FiCheck, FiDownload, FiLoader, FiMaximize2, FiMoreHorizontal, FiSend, FiTrash2 } from "react-icons/fi";
+import { FiBookmark, FiCheck, FiDownload, FiLoader, FiMaximize2, FiMoreHorizontal, FiSend, FiTrash2, FiUsers } from "react-icons/fi";
 import { TbPinned, TbPinnedFilled } from "react-icons/tb";
 import { getLang, getWorkspaceLabels } from "../../locales";
-import { workspaceRenderedDimensions } from "../utils/workspace-image-display";
+import { hasPendingWorkspaceImageChanges } from "../image-flow";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 import { WorkspaceImageActionMenu, type WorkspaceCardOperation } from "./workspace-image-action-menu";
 import { ImageAddressMedia, WorkspaceImageMedia } from "./workspace-image-media";
@@ -53,7 +53,7 @@ export function WorkspaceGalleryCard({
   const downloadResetRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasSource = Boolean(image.sourceCached);
   const hasParameters = Boolean(image.parameterDocument?.operations.length);
-  const renderedDimensions = workspaceRenderedDimensions(image);
+  const hasPendingChanges = hasPendingWorkspaceImageChanges(image);
   const listView = viewMode === "list";
   const compactView = viewMode === "compact";
   const overlayButtonClass = compactView ? "h-6 w-6" : "h-7 w-7";
@@ -80,7 +80,15 @@ export function WorkspaceGalleryCard({
     }
   }, [downloadState, onDownload]);
 
-  return <article className={`relative min-w-0 rounded-md border bg-white transition ${listView ? "sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:grid-rows-[auto_auto]" : ""} ${selected ? "border-[#2f65cf] shadow-[0_0_0_2px_#2f65cf]" : "border-slate-200 hover:border-slate-300"}`}>
+  const selectionClass = selected
+    ? hasPendingChanges
+      ? "border-amber-400 shadow-[0_0_0_2px_#2f65cf]"
+      : "border-[#2f65cf] shadow-[0_0_0_2px_#2f65cf]"
+    : hasPendingChanges
+      ? "border-amber-300 shadow-[0_0_0_1px_#fcd34d] hover:border-amber-400"
+      : "border-slate-200 hover:border-slate-300";
+
+  return <article className={`relative min-w-0 rounded-md border bg-white transition ${listView ? "sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:grid-rows-[auto_auto]" : ""} ${selectionClass}`}>
     <div className={`relative overflow-hidden bg-slate-100 ${listView ? "aspect-[5/3] rounded-t-[5px] sm:row-span-2 sm:h-[112px] sm:aspect-auto sm:rounded-l-[5px] sm:rounded-tr-none" : "aspect-[5/3] rounded-t-[5px]"}`} onClick={onSelect}>
       {previewUrl
         ? <ImageAddressMedia url={previewUrl} alt={image.name} fit="cover" />
@@ -96,14 +104,20 @@ export function WorkspaceGalleryCard({
     </div>
     <button type="button" onClick={onSelect} className={`block w-full text-left ${compactView ? "px-2 pt-1.5" : listView ? "px-3 pt-3 sm:self-end sm:px-4" : "px-3 pt-3"}`}>
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <strong className={`truncate font-semibold text-slate-800 ${compactView ? "text-[11px]" : "text-sm"}`}>{image.name}</strong>
-        {image.shared ? <span className={`inline-flex h-5 shrink-0 items-center truncate rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-bold text-emerald-700 ${compactView ? "max-w-14" : ""}`}>{text("collaborating")}</span> : null}
+        <strong title={compactView ? image.name : undefined} className={`truncate font-semibold text-slate-800 ${compactView ? "text-[11px]" : "text-sm"}`}>{image.name}</strong>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {hasPendingChanges ? <span className="h-2.5 w-2.5 rounded-full border-2 border-amber-200 bg-amber-500" title={text("unsavedChanges")} aria-label={text("unsavedChanges")} role="status" /> : null}
+          {image.shared ? compactView
+            ? <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-emerald-200 bg-emerald-50 text-emerald-700" title={text("collaborating")} aria-label={text("collaborating")} role="status"><FiUsers className="h-3 w-3" aria-hidden="true" /></span>
+            : <span className="inline-flex h-5 items-center truncate rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-bold text-emerald-700">{text("collaborating")}</span>
+          : null}
+        </span>
       </div>
     </button>
     <div className={`flex text-slate-500 ${compactView ? "min-h-8 items-center justify-between gap-1 px-2 pb-1.5 pt-0.5 text-[9px] leading-3" : listView ? "min-h-12 items-center justify-between gap-2 px-3 pb-3 pt-1 text-xs sm:self-start sm:px-4" : "min-h-12 items-center justify-between gap-2 px-3 pb-3 pt-1 text-xs"}`}>
       <span className="min-w-0 overflow-hidden">
         <span className="block truncate">{!compactView && hasParameters ? `${text("sourceFileSize")} · ` : ""}{bytes(image.size)}</span>
-        <span className={`block truncate text-slate-400 ${compactView ? "text-[9px]" : "text-[10px]"}`}>{renderedDimensions.width} × {renderedDimensions.height}</span>
+        <span className={`block truncate text-slate-400 ${compactView ? "text-[9px]" : "text-[10px]"}`}>{image.width} × {image.height}</span>
       </span>
       <span className={`flex shrink-0 items-center ${compactView ? "gap-1" : "gap-1.5"}`}>
         {role !== "owner" && !hasSource ? <button type="button" onClick={onRequestSource} disabled={!onlinePeers || requestingSource} className={`flex ${footerButtonClass} items-center justify-center rounded-md bg-[#2f65cf] text-white disabled:opacity-60`} title={requestingSource ? text("requestingSource") : text("requestSource")} aria-label={requestingSource ? text("requestingSource") : text("requestSource")}>

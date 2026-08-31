@@ -114,7 +114,7 @@ export function WorkspaceHeader({
         <span className="hidden lg:inline">{text("join")}</span>
       </button> : null}
       <WorkspaceLanguageSwitcher lang={lang} onChange={onLanguageChange} />
-      <button
+      {onlinePeers > 0 ? <button
         type="button"
         className={`relative flex h-9 items-center justify-center gap-1 rounded-md px-2 hover:bg-black/5 ${collaborationOpen ? "bg-black/5" : ""}`}
         onClick={onToggleCollaboration}
@@ -122,8 +122,8 @@ export function WorkspaceHeader({
         aria-pressed={collaborationOpen}
       >
         <FiUsers className="h-[18px] w-[18px]" />
-        {onlinePeers ? <span className="min-w-3 text-[10px] font-bold">{onlinePeers}</span> : null}
-      </button>
+        <span className="min-w-3 text-[10px] font-bold">{onlinePeers}</span>
+      </button> : null}
       <button
         type="button"
         className="flex h-9 w-9 items-center justify-center rounded-md hover:bg-black/5"

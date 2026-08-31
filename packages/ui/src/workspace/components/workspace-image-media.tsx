@@ -61,7 +61,7 @@ export function WorkspaceImageMedia({ image, role, fit = "cover", controls = fal
       void readWorkspaceImageSource(image).then((value) => { if (active && value) setOriginal(value); });
     }
     return () => { active = false; };
-  }, [image.imageId, image.source, image.sourceAddress, image.sourceCached, libraryOriginal, preferOriginal]);
+  }, [image.imageId, image.previewRevision, image.source, image.sourceAddress, image.sourceCached, libraryOriginal, preferOriginal]);
   const previewUrl = useBlobUrl(preview);
   const originalUrl = useBlobUrl(original);
   const transientSourceUrl = useBlobUrl(image.source);

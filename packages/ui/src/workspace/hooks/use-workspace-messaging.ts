@@ -19,6 +19,7 @@ import type {
   WorkspaceMessagingCompressionMode,
   WorkspacePreparedMessagingImage,
 } from "../types";
+import { createPrefixedId } from "../../utils/id";
 
 const MAX_MESSAGES = 300;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -252,7 +253,7 @@ export function useWorkspaceMessaging({
     const provider = providers.find((candidate) => candidate.id === chatProviderIdRef.current);
     const text = textValue.trim().slice(0, 2000);
     if (!provider?.recipientId || provider.status !== "connected" || !service || !workspaceId || !text || sendingRef.current) return false;
-    const messageId = `message_${crypto.randomUUID()}`;
+    const messageId = createPrefixedId("message");
     const createdAt = Date.now();
     sendingRef.current = true;
     appendMessage({ id: messageId, providerId: provider.id, direction: "outgoing", type: "text", text, createdAt, status: "sending" });
@@ -349,7 +350,7 @@ export function useWorkspaceMessaging({
     if (!provider.recipientId || provider.status !== "connected" || !service || !workspaceId) {
       throw new Error(labels.messagingConnectionFailed);
     }
-    const temporaryId = `image_${crypto.randomUUID()}`;
+    const temporaryId = createPrefixedId("image");
     const createdAt = Date.now();
     const url = previewUrl || createUrl(prepared.file);
     appendMessage({

@@ -148,6 +148,44 @@ test("room metadata is sorted before offset pagination", async () => {
   assert.deepEqual(secondPage.map((record) => record.id), ["image-10"]);
 });
 
+test("room overwrite replaces existing source and thumbnail bytes", async () => {
+  const identity = {
+    scope: "room" as const,
+    scopeKey: "workspace",
+    id: "image",
+  };
+  await repository.put({
+    ...identity,
+    metadata: { id: "image", roomId: "workspace", name: "image.png", type: "image/png",
+      size: 6, direction: "sent", width: 4, height: 4, createdAt: 1, updatedAt: 1 },
+    mimeType: "image/png",
+    data: new Blob(["source"], { type: "image/png" }),
+    thumbnail: new Blob(["preview"], { type: "image/webp" }),
+    thumbnailMimeType: "image/webp",
+    createdAt: 1,
+  });
+
+  await repository.put({
+    ...identity,
+    metadata: { id: "image", roomId: "workspace", name: "image.png", type: "image/png",
+      size: 7, direction: "sent", width: 2, height: 2, createdAt: 1, updatedAt: 2 },
+    mimeType: "image/png",
+    data: new Blob(["updated"], { type: "image/png" }),
+    thumbnail: new Blob(["latest"], { type: "image/webp" }),
+    thumbnailMimeType: "image/webp",
+    createdAt: 1,
+  });
+
+  assert.equal(
+    await (await repository.read("room", "workspace", "image", "original", "image/png"))?.text(),
+    "updated",
+  );
+  assert.equal(
+    await (await repository.read("room", "workspace", "image", "thumbnail", "image/webp"))?.text(),
+    "latest",
+  );
+});
+
 test("content reads honor an already-aborted signal", async () => {
   const controller = new AbortController();
   controller.abort();

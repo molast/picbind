@@ -19,6 +19,7 @@ import {
   type CollaborationPreviewCacheEntry,
 } from "../collaboration-image-container";
 import { dimensions } from "../utils/workspace-image-display";
+import { workspaceMaterializeQuality } from "../utils/workspace-image-output";
 import type { WorkspaceImage } from "../types";
 
 function memorySource(container: CollaborationImageContainer) {
@@ -31,11 +32,12 @@ function memorySource(container: CollaborationImageContainer) {
   };
 }
 
-export function useWorkspaceCollaborationPreview({ imagesRef, collaborationContainers, refresh, processingSource, }: {
+export function useWorkspaceCollaborationPreview({ imagesRef, collaborationContainers, refresh, processingSource, updateImageDimensions, }: {
   imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   collaborationContainers: React.MutableRefObject<Map<string, CollaborationImageContainer>>;
   refresh: () => void;
   processingSource: { imageId: string; blob: Blob } | null;
+  updateImageDimensions: (imageId: string, width: number, height: number) => Promise<void>;
 }) {
   const imageProcessing = useImageProcessing();
   const renderSequence = React.useRef(0);
@@ -210,10 +212,27 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
         container = createContainer(image, source, original ? "source" : "preview", sourceSize.width, sourceSize.height);
         created = true;
       }
-      if (created && imageProcessing.engine === "desktop-native") {
-        await imageProcessing.inspect(memorySource(container), {
+      if (created) {
+        const sourceMetadata = imageProcessing.engine === "desktop-native"
+          ? await imageProcessing.inspect(memorySource(container), {
           requestId: `workspace-memory:${image.imageId}:${requestSequence}`,
-        });
+          })
+          : { width: container.originalWidth, height: container.originalHeight };
+        if (sourceMetadata.width !== container.originalWidth || sourceMetadata.height !== container.originalHeight) {
+          container = {
+            ...container,
+            originalWidth: sourceMetadata.width,
+            originalHeight: sourceMetadata.height,
+            width: sourceMetadata.width,
+            height: sourceMetadata.height,
+          };
+          collaborationContainers.current.set(image.imageId, container);
+          refresh();
+        }
+        if (container.sourceKind === "source"
+          && (image.width !== sourceMetadata.width || image.height !== sourceMetadata.height)) {
+          await updateImageDimensions(image.imageId, sourceMetadata.width, sourceMetadata.height);
+        }
       }
       if (imageParameterDocumentsEqual(container.parameterDocument, parameterDocument)) {
         refresh();
@@ -229,7 +248,10 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       const result = await imageProcessing.materialize({
         source: memorySource(container),
         document: parameterDocument,
-        output: { format: "source", quality: 100 },
+        output: {
+          format: "source",
+          quality: workspaceMaterializeQuality(container.originalBlob.type || container.mimeType),
+        },
         destination: "memory",
       }, { requestId: `workspace-working:${image.imageId}:${requestSequence}` });
       if (latestRenders.current.get(image.imageId) !== requestSequence) {

@@ -8,6 +8,8 @@ import {
   type CollaborationImageContainer,
 } from "../collaboration-image-container";
 import { emptyImageParameterDocument } from "../image-protocol";
+import { initialWorkspaceCommitId } from "../../utils/id";
+import { workspaceEditedImageName } from "../utils/workspace-image-output";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 
 export type CollaborationSaveChoice = "copy" | "replace";
@@ -42,6 +44,7 @@ export function useWorkspaceSaveCollaboration({
   broadcastWorkspaceSnapshot: () => Promise<void>;
 }) {
   const imageProcessing = useImageProcessing();
+  const saveInFlight = React.useRef(false);
 
   const currentRender = React.useCallback(async (image: WorkspaceImage) => {
     const container = await syncCollaborationContainer(
@@ -53,32 +56,35 @@ export function useWorkspaceSaveCollaboration({
   }, [syncCollaborationContainer]);
 
   const saveCollaborativeCopy = React.useCallback(async (image: WorkspaceImage) => {
-    if (!workspace || workspace.role !== "owner" || !image.shared || !image.sourceCached) return false;
+    if (!workspace || workspace.role !== "owner" || image.workspaceLocation !== "working" || !image.sourceCached) return null;
     const container = await currentRender(image);
     const result = {
       blob: container.workingBlob,
-      name: container.name,
+      name: workspaceEditedImageName(image.name, container.mimeType),
       mimeType: container.mimeType,
       width: container.width,
       height: container.height,
     };
-    await saveProcessedCopy(image, {
+    const savedImageId = await saveProcessedCopy(image, {
       ...result,
       operation: "adjust",
       parameters: {},
     } as ProcessedImageResult);
-    await persistCollaborationActivity(workspace.workspaceId, "collaborationSaved", image.imageId, {
-      mode: "copy",
-      commitId: image.currentCommitId,
-    }, "owner");
-    return true;
+    if (!savedImageId) return null;
+    if (image.shared) {
+      await persistCollaborationActivity(workspace.workspaceId, "collaborationSaved", image.imageId, {
+        mode: "copy",
+        commitId: image.currentCommitId,
+      }, "owner");
+    }
+    return savedImageId;
   }, [currentRender, persistCollaborationActivity, saveProcessedCopy, workspace]);
 
   const replaceCollaborativeImage = React.useCallback(async (
     image: WorkspaceImage,
     continueCollaboration: boolean,
   ) => {
-    if (!workspace || workspace.role !== "owner" || !image.shared || !image.sourceCached) return false;
+    if (!workspace || workspace.role !== "owner" || image.workspaceLocation !== "working" || !image.sourceCached) return null;
     const container = await currentRender(image);
     const rendered = container.workingBlob;
     const thumbnail = await imageProcessing.renderPreview({
@@ -93,13 +99,13 @@ export function useWorkspaceSaveCollaboration({
       maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
       mimeType: "image/webp",
       quality: COLLABORATION_PREVIEW_QUALITY,
-    }, { requestId: `workspace-collaboration-replace-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
+    }, { requestId: `workspace-image-replace-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
     if (thumbnail.artifact.kind !== "blob") {
       throw new Error("Working thumbnail did not return cache file bytes");
     }
 
     const parameterDocument = emptyImageParameterDocument();
-    const currentCommitId = `initial_${image.imageId}`;
+    const currentCommitId = initialWorkspaceCommitId(image.imageId);
     await updateImage(image.imageId, {
       source: rendered,
       sourceCached: true,
@@ -114,44 +120,54 @@ export function useWorkspaceSaveCollaboration({
       height: container.height,
       currentCommitId,
       parameterDocument,
-      state: "shared",
+      state: image.shared ? "shared" : "working",
     });
     await clearCollaborationHistory(image.imageId);
     releaseCollaborationContainer(image.imageId);
 
-    if (continueCollaboration) {
+    if (image.shared && continueCollaboration) {
       const rebased = imagesRef.current.find((candidate) => candidate.imageId === image.imageId);
       if (!rebased) throw new Error("Rebased image is unavailable");
       await syncCollaborationPreview(rebased, parameterDocument, rendered);
       await broadcastWorkspaceSnapshot();
     }
 
-    await persistCollaborationActivity(workspace.workspaceId, "collaborationSaved", image.imageId, {
-      mode: "replace",
-      commitId: currentCommitId,
-    }, "owner");
-    return true;
+    if (image.shared) {
+      await persistCollaborationActivity(workspace.workspaceId, "collaborationSaved", image.imageId, {
+        mode: "replace",
+        commitId: currentCommitId,
+      }, "owner");
+    }
+    return image.imageId;
   }, [broadcastWorkspaceSnapshot, clearCollaborationHistory, currentRender, imageProcessing, imagesRef, persistCollaborationActivity, releaseCollaborationContainer, syncCollaborationPreview, updateImage, workspace]);
 
-  const saveCollaborativeImage = React.useCallback(async (
+  const saveCurrentImage = React.useCallback(async (
     choice: CollaborationSaveChoice,
     image = selected,
     options: { continueCollaboration?: boolean } = {},
   ) => {
-    if (!image) return false;
+    if (!image || saveInFlight.current) return null;
     const current = imagesRef.current.find((candidate) => candidate.imageId === image.imageId) || image;
+    saveInFlight.current = true;
     setCollaborationSaving(true);
     try {
       return choice === "copy"
         ? await saveCollaborativeCopy(current)
         : await replaceCollaborativeImage(current, options.continueCollaboration !== false);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to save collaborative image");
-      return false;
+      setNotice(error instanceof Error ? error.message : "Unable to save image");
+      return null;
     } finally {
+      saveInFlight.current = false;
       setCollaborationSaving(false);
     }
   }, [imagesRef, replaceCollaborativeImage, saveCollaborativeCopy, selected, setCollaborationSaving, setNotice]);
 
-  return { saveCollaborativeImage };
+  const saveCollaborativeImage = React.useCallback(async (
+    choice: CollaborationSaveChoice,
+    image = selected,
+    options: { continueCollaboration?: boolean } = {},
+  ) => Boolean(await saveCurrentImage(choice, image, options)), [saveCurrentImage, selected]);
+
+  return { saveCollaborativeImage, saveCurrentImage };
 }

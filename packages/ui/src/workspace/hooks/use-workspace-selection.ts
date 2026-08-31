@@ -1,5 +1,6 @@
 import React from "react";
 import { collaborationActivitiesForImage, currentActivityEventId } from "../activity";
+import { initialWorkspaceCommitId } from "../../utils/id";
 import type { Collaborator, WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
 
 export function useWorkspaceSelection({ images, workspace, selectedId, pendingWorkingImageId, compressingToWorkingImageId, collaborators, runtime, activities, operationLogs, commits, activityPreviewEventId }: { images: WorkspaceImage[]; workspace: WorkspaceIdentity | null; selectedId: string | null; pendingWorkingImageId: string | null; compressingToWorkingImageId: string | null; collaborators: Collaborator[]; runtime: string; activities: WorkspaceActivity[]; operationLogs: WorkspaceActivity[]; commits: WorkspaceCommit[]; activityPreviewEventId?: string }) {
@@ -19,6 +20,6 @@ export function useWorkspaceSelection({ images, workspace, selectedId, pendingWo
   const currentCollaborationActivityId = currentActivityEventId(selectedCollaborationActivities, selected?.currentCommitId);
   const activityPreviewIsCurrent = activityPreviewEventId === currentCollaborationActivityId;
   const selectedImageCommits = selected ? commits.filter((commit) => commit.imageId === selected.imageId).sort((left, right) => left.createdAt - right.createdAt) : [];
-  const selectedOriginalCommit = selected ? selectedImageCommits.find((commit) => commit.commitId.startsWith("initial_")) || { commitId: `initial_${selected.imageId}`, imageId: selected.imageId, authorId: "owner", parentCommitId: null, mergeParentCommitIds: [], operations: [], createdAt: 0 } : undefined;
+  const selectedOriginalCommit = selected ? selectedImageCommits.find((commit) => commit.commitId.startsWith("initial_")) || { commitId: initialWorkspaceCommitId(selected.imageId), imageId: selected.imageId, authorId: "owner", parentCommitId: null, mergeParentCommitIds: [], operations: [], createdAt: 0 } : undefined;
   return { deduplicatedImages, selected, selectedIsLibrary, realtimeConnected, onlineCollaborators, onlinePeers, libraryImages, workingImages, workingImagesSorted, pendingWorkingImage, compressingToWorkingImage, completeOperationLog, selectedCollaborationActivities, currentCollaborationActivityId, activityPreviewIsCurrent, selectedImageCommits, selectedOriginalCommit };
 }

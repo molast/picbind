@@ -1,5 +1,6 @@
 import type { WorkspaceImage, WorkspaceOperation } from "../types";
 import type { ImageOperationType } from "../image-protocol";
+import { initialWorkspaceCommitId } from "../../utils/id";
 
 export function protocolOperationType(operation: WorkspaceOperation["type"], parameters: Record<string, unknown>): ImageOperationType {
   if (operation === "brightness" || operation === "contrast" || operation === "saturation") return "color";
@@ -19,7 +20,7 @@ export function parameterDocumentOperations(image: WorkspaceImage): WorkspaceOpe
           : operation.type === "draw" ? "other"
             : operation.type === "crop" || operation.type === "resize" || operation.type === "rotate" ? operation.type : "other";
     const { workspaceOperationType: _workspaceOperationType, ...parameters } = operation.params;
-    return { operationId: operation.id, imageId: image.imageId, authorId: operation.userId, baseCommitId: image.currentCommitId || `initial_${image.imageId}`, type, parameters, createdAt: operation.time };
+    return { operationId: operation.id, imageId: image.imageId, authorId: operation.userId, baseCommitId: image.currentCommitId || initialWorkspaceCommitId(image.imageId), type, parameters, createdAt: operation.time };
   });
 }
 

@@ -47,6 +47,14 @@ export function canDeleteWorkspaceImage(image: Pick<WorkspaceImage, "shared">) {
   return !image.shared;
 }
 
+export function hasPendingWorkspaceImageChanges(
+  image: Pick<WorkspaceImage, "shared" | "workspaceLocation" | "parameterDocument">,
+) {
+  return image.workspaceLocation === "working"
+    && !image.shared
+    && Boolean(image.parameterDocument?.operations.length);
+}
+
 export function workspaceOperationStorageMode(image: Pick<WorkspaceImage, "workspaceLocation">) {
   return image.workspaceLocation === "working" ? "parameters" as const : "newImage" as const;
 }

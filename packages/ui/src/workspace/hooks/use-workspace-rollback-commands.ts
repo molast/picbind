@@ -4,8 +4,6 @@ import { emptyImageParameterDocument, setImageOperation } from "../image-protoco
 import { protocolOperationType } from "../utils/workspace-operation-mapping";
 import type { WorkspaceActivity, WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
 
-const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
-
 export function useWorkspaceRollbackCommands({ workspace, selected, commits, selectedCollaborationActivities, activityPreview, rollbackTarget, setCommits, setActivities, setRollbackTarget, setRollbackPreview, setActivityPreview, setNotice, updateImage, syncCollaborationPreview, renderCollaborationPreviewSnapshot, clearCollaborationPreviewSnapshot, sendRealtime, currentActivityId, }: {
   workspace: WorkspaceIdentity | null;
   selected: WorkspaceImage | null;

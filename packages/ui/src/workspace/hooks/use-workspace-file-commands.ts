@@ -7,9 +7,8 @@ import {
   saveWorkspaceImage,
 } from "../repository";
 import { cachedCommit } from "../utils/workspace-page-utils";
+import { createPrefixedId, initialWorkspaceCommitId } from "../../utils/id";
 import type { WorkspaceCommit, WorkspaceIdentity, WorkspaceImage } from "../types";
-
-const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 type LibraryImport = {
   image: WorkspaceImage;
@@ -23,8 +22,8 @@ function libraryImport(
   source?: Blob,
   externalPath?: string,
 ): LibraryImport {
-  const imageId = id("image");
-  const initialCommitId = `initial_${imageId}`;
+  const imageId = createPrefixedId("image");
+  const initialCommitId = initialWorkspaceCommitId(imageId);
   const createdAt = Date.now();
   const image: WorkspaceImage = {
     imageId,

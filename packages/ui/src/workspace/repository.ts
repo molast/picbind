@@ -3,6 +3,7 @@ import type { ImageProcessingSource } from "@picbind/shared";
 import { defaultWorkspaceStyle, type WorkspaceActivity, type WorkspaceCommit, type WorkspaceIdentity, type WorkspaceImage, type WorkspaceProposal } from "./types";
 import { normalizeWorkspaceImageLocation } from "./image-flow";
 import { getImageStorageRepository } from "../database/repositories/image-storage-repository-selector";
+import { createPrefixedId } from "../utils/id";
 
 type StoredImage = Omit<WorkspaceImage, "source" | "preview" | "sourceAddress"> & { source?: Blob; preview?: Blob };
 type CacheEntry = { key: string; workspaceId: string; kind: "preview" | "source" | "commit" | "activity"; accessedAt: number; expiresAt: number | null };
@@ -47,7 +48,6 @@ export { WorkspaceDatabase };
 
 const LOCAL_WORKSPACE_KEY = "picbind.workspace.local-id";
 const DAY = 86_400_000;
-const id = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 export async function restoreLocalWorkspace(now = Date.now()): Promise<WorkspaceIdentity> {
   let workspaceId = localStorage.getItem(LOCAL_WORKSPACE_KEY);
@@ -55,7 +55,7 @@ export async function restoreLocalWorkspace(now = Date.now()): Promise<Workspace
     const restored = await getWorkspaceDatabase().workspaces.get(workspaceId);
     if (restored) return restored;
   }
-  workspaceId = id("local");
+  workspaceId = createPrefixedId("local");
   const workspace: WorkspaceIdentity = { workspaceId, name: "My Workspace", role: "owner", shareToken: null,
     ownerCapability: null, createdAt: now, updatedAt: now, style: defaultWorkspaceStyle() };
   await getWorkspaceDatabase().workspaces.put(workspace);

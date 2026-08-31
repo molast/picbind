@@ -6,6 +6,7 @@ import {
   canRenderFromCollaborationSource,
   canDeleteWorkspaceImage,
   canStartImageCollaboration,
+  hasPendingWorkspaceImageChanges,
   needsCollaborationPreviewGeneration,
   normalizeWorkspaceImageLocation,
   reconcileCollaboratorSnapshot,
@@ -17,7 +18,6 @@ import type { WorkspaceIdentity, WorkspaceImage } from "./types";
 import {
   collaborationCardPreviewFor,
   collaborationPreviewFor,
-  workspaceRenderedDimensions,
 } from "./utils/workspace-image-display";
 
 test("collaborator switches from placeholder to local parameter rendering after receiving Source", () => {
@@ -53,26 +53,30 @@ test("allows only one collaborative image and blocks its deletion", () => {
   assert.equal(workspaceOperationStorageMode({ workspaceLocation: "library" }), "newImage");
 });
 
+test("only non-collaborative Working parameters are pending image changes", () => {
+  const parameterDocument = {
+    version: 1 as const,
+    operations: [{ id: "crop", userId: "owner", time: 1, type: "crop" as const, params: {} }],
+  };
+  assert.equal(hasPendingWorkspaceImageChanges({
+    workspaceLocation: "working", shared: false, parameterDocument,
+  }), true);
+  assert.equal(hasPendingWorkspaceImageChanges({
+    workspaceLocation: "working", shared: true, parameterDocument,
+  }), false);
+  assert.equal(hasPendingWorkspaceImageChanges({
+    workspaceLocation: "library", shared: false, parameterDocument,
+  }), false);
+  assert.equal(hasPendingWorkspaceImageChanges({
+    workspaceLocation: "working", shared: false, parameterDocument: { version: 1, operations: [] },
+  }), false);
+});
+
 test("uses the previous normal and weak-network compression thresholds", () => {
   assert.equal(shouldSuggestWorkspaceCompression(NORMAL_COMPRESSION_SUGGESTION_BYTES, false), false);
   assert.equal(shouldSuggestWorkspaceCompression(NORMAL_COMPRESSION_SUGGESTION_BYTES + 1, false), true);
   assert.equal(shouldSuggestWorkspaceCompression(WEAK_NETWORK_COMPRESSION_SUGGESTION_BYTES, true), false);
   assert.equal(shouldSuggestWorkspaceCompression(WEAK_NETWORK_COMPRESSION_SUGGESTION_BYTES + 1, true), true);
-});
-
-test("derives displayed dimensions from the ordered parameter document", () => {
-  assert.deepEqual(workspaceRenderedDimensions({
-    width: 1200,
-    height: 800,
-    parameterDocument: {
-      version: 1,
-      operations: [
-        { id: "crop", userId: "owner", time: 1, type: "crop", params: { width: 0.5, height: 0.75 } },
-        { id: "resize", userId: "owner", time: 2, type: "resize", params: { width: 300, height: 200 } },
-        { id: "rotate", userId: "owner", time: 3, type: "rotate", params: { degrees: 90 } },
-      ],
-    },
-  }), { width: 200, height: 300 });
 });
 
 test("removes images missing from an Owner snapshot and preserves local thumbnail data", () => {

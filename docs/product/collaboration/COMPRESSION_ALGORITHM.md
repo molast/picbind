@@ -645,7 +645,7 @@ if source_format == target_format
   Workspace 协作源例外：A 源图使用受控 `cacheKey` 在 Rust 内保留原始编码字节和一份
   `960×720` 范围内的解码预览基线，后续预览只克隆该有界像素缓冲后重放参数，不再复制或
   Lanczos 缩放全尺寸 RGBA。Original 空参数预览直接借用该有界像素，不执行 clone 或参数重放；
-  B 不使用该有界预览基线，而是从 A 的完整编码字节应用当前参数，并按 A 的图片格式和最高质量档位
+  B 不使用该有界预览基线，而是从 A 的完整编码字节应用当前参数，并按 A 的图片格式和格式专用物化档位
   物化为唯一一份全尺寸 Blob。Native 历史预览的 WebP 交付使用 libwebp `method 0` 与线程级并行的快速档，不改变原图格式或正式压缩的 `method 5`。停止协作、替换源图、删除图片或离开 Workspace 时显式释放该缓存，
   最多保留 4 个源且按约 768 MB 上限淘汰旧项。普通预览与派生资源返回有界内存结果；Workspace
   当前 Commit 在 B 更新后异步从 B 生成保持宽高比、不放大且宽高分别不超过 `720×540`、quality
@@ -667,7 +667,10 @@ AVIF 并发单独限制为 1，是因为 RGBA 解码、libaom 编码和候选回
 - Blob URL 在替换、删除或页面卸载时调用 `URL.revokeObjectURL()`。
 - 原始 `File` 在该图片所有格式均不再处于 queued/processing 后，从 staged 内存缓存释放。
 - Image Workspace 的 A（不可变源 Blob）、B（A 加最新参数所得、保持 A 格式的唯一全尺寸 Blob）
-  和 C（Commit 预览文件 LRU）分别管理。B 使用最高质量档位，不经过预览降采样或预览质量压缩。
+  和 C（Commit 预览文件 LRU）分别管理。B 不经过预览降采样，始终使用 A 的原始编码格式；PNG
+  使用 quality `100` 并继续由 PNG encoder 比较无损/量化候选后执行 OxiPNG 优化，JPEG 与 WebP
+  使用 quality `82`，AVIF 使用 quality `58`，JPEG XL 保持当前无损编码（公开 quality 不改变其
+  码流参数）。因此 JPEG 不再因通用 quality `100` 进入 4:4:4 高质量重编码并产生不合理的体积膨胀。
   图片从 Library 进入 Working 时生成一份不进入 C LRU 的原始卡片缩略图；它与 C 使用相同的保持
   宽高比、不放大、最大 `720×540`、quality `0.80` WebP 档位，并作为 Repository thumbnail
   缓存文件保存，不进入协作容器，也不作为长期 Blob 保存在 UI 状态。
@@ -761,7 +764,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线保持 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色的既有顺序。弹窗使用 Konva Stage 展示宽高分别不超过 `720×420` 的有界像素面；WebGL2 fragment shader 负责实时颜色像素渲染，原图只上传一次纹理，滑块帧由 `requestAnimationFrame` 合并并只更新 uniform，拖动期间进一步限制在 `150000` 像素内，交互结束恢复完整有界预览。Konva 负责布局、上下/原位/分割对比、裁切和颜色取样；WebGL2 不可用时回退到有界 Canvas CPU 管线。两条预览路径都不创建 Blob，也不逐帧调用 WASM/Tauri IPC。用户提交后才由 Service 进入 Rust 参数重放与一次目标格式编码；Alpha 始终保持原值且不会被静默压平。全部设置保持默认值时禁止生成无意义结果。
 12. Review 标注线宽以图片归一化比例保存，渲染时乘以原图到当前适配画布的缩放比例。因此不同像素尺寸的图片在相同线宽档位和初始适配视图下具有一致的屏幕视觉粗细，同时图形自身拉伸不会放大描边。自由画笔、直线、箭头、矩形、圆形、虚线和圆点线共用该换算。Transformer 锚点、旋转手柄、旋转偏移和选框边框属于操作 UI，只按视口缩放反向补偿，不受原图分辨率影响。
 13. Review 的连续标注和放大镜效果只在 Konva 中实时渲染。保存图片时不读取 Konva 快照来拼接 Blob，也不创建全尺寸 `OffscreenCanvas`；UI 把结构化 `draw` 参数交给 `ImageProcessingService.materialize()`。Desktop Native 或 Web Rust/WASM 从源 Blob 解码，在全尺寸像素上重放标注，并以 quality `82` 按源格式编码一次；非 JPEG、PNG、WebP、AVIF 来源回退为 WebP。该非空参数文档不能退回原图，因为原图不包含新标注，也不再运行旧的超限后二次 WebP/AVIF 候选搜索。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
-14. 新版 Image Workspace 的裁剪、尺寸调整、色彩调整、旋转和 Doodle 仍只通过版本化 JSON 参数同步，不传输处理后的 B。实时编辑全部停留在 WebView 的 Konva/WebGL2 有界预览层，不创建 Blob；正式 Commit 或回退生效后，各端才从本端 A 进入 Service，并用共享 Rust operations Core 一次性重放当前完整参数队列，物化唯一一份全尺寸 B。B 保持 A 的图片格式，使用最高质量档位，不经过预览降采样或预览质量压缩。B 处理期间 Working 卡片保留上一张稳定 C 并显示 loading，B 完成后再异步生成保持宽高比、不放大且宽高分别不超过 `720×540` 的 quality `0.80` WebP C；Web 的 C 未命中路径同样先在 Rust/WASM 重放参数和约束尺寸，再编码一次。C 完成后原子切换卡片并移除 loading，最大化和正式协作画布始终读取 B。Owner 使用 `Apply changes`；Collaborator 使用 `Submit proposal`，Proposal 在 Owner 批准成为正式 Commit 前不会更新 B。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。
+14. 新版 Image Workspace 的裁剪、尺寸调整、色彩调整、旋转和 Doodle 仍只通过版本化 JSON 参数同步，不传输处理后的 B。实时编辑全部停留在 WebView 的 Konva/WebGL2 有界预览层，不创建 Blob；正式 Commit 或回退生效后，各端才从本端 A 进入 Service，并用共享 Rust operations Core 一次性重放当前完整参数队列，物化唯一一份全尺寸 B。B 保持 A 的图片格式且不经过预览降采样：PNG 使用 quality `100` 和 PNG 原生候选优化，JPEG/WebP 使用 quality `82`，AVIF 使用 quality `58`，JPEG XL 保持当前无损编码。Working 卡片的文件大小和宽高只显示当前已落盘文件的元数据，未保存参数不能预先改写或推算卡片尺寸。另存为直接复用 B 的实际 Blob、MIME、文件大小和编码后宽高，以 `-edited` 后缀创建新图片；新图片把 B 作为自身不可变 A，参数文档为空，不继承也不会再次应用原图参数。原图片的文件、文件元数据和编辑参数均保持不变。覆盖保存保留原图名称，用 B 替换 A，并在此时结束编辑状态、更新原卡片的文件大小和宽高。未协作且编辑中的右侧图片面板提供“还原为原图”，显式清空操作参数、释放 B/C 并重新显示 A，但不改写原图文件元数据。B 处理期间 Working 卡片保留上一张稳定 C 并显示 loading，B 完成后再异步生成保持宽高比、不放大且宽高分别不超过 `720×540` 的 quality `0.80` WebP C；Web 的 C 未命中路径同样先在 Rust/WASM 重放参数和约束尺寸，再编码一次。C 完成后原子切换卡片并移除 loading，最大化和正式协作画布始终读取 B。Owner 使用 `Apply changes`；Collaborator 使用 `Submit proposal`，Proposal 在 Owner 批准成为正式 Commit 前不会更新 B。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。
 
 关键实现：
 
