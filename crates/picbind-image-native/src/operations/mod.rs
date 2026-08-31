@@ -8,12 +8,15 @@ mod validation;
 
 use image::DynamicImage;
 
-use crate::{NativeImageError, NativeTaskControl, decode};
+#[cfg(feature = "codecs")]
+use crate::decode;
+use crate::{NativeImageError, NativeTaskControl};
 
 pub use model::{
     NativeImageOperation, NativeOperationType, NativeParameterDocument, NativeRenderedImage,
 };
 
+#[cfg(feature = "codecs")]
 pub fn replay_parameters(
     input: &[u8],
     document: &NativeParameterDocument,
@@ -22,6 +25,7 @@ pub fn replay_parameters(
     replay_image_with_control(image, source_format, document, None)
 }
 
+#[cfg(feature = "codecs")]
 pub fn replay_parameters_with_control(
     input: &[u8],
     document: &NativeParameterDocument,
@@ -33,20 +37,18 @@ pub fn replay_parameters_with_control(
     replay_image_with_control(image, source_format, document, Some(control))
 }
 
-pub(crate) fn replay_image(
+pub fn replay_dynamic_image(
     image: DynamicImage,
-    source_format: crate::NativeImageFormat,
     document: &NativeParameterDocument,
-) -> Result<NativeRenderedImage, NativeImageError> {
-    replay_image_with_control(image, source_format, document, None)
+) -> Result<DynamicImage, NativeImageError> {
+    replay_dynamic_image_with_control(image, document, None)
 }
 
-pub(crate) fn replay_image_with_control(
+fn replay_dynamic_image_with_control(
     mut image: DynamicImage,
-    source_format: crate::NativeImageFormat,
     document: &NativeParameterDocument,
     control: Option<&NativeTaskControl>,
-) -> Result<NativeRenderedImage, NativeImageError> {
+) -> Result<DynamicImage, NativeImageError> {
     validation::validate_document(document)?;
     for operation in &document.operations {
         if let Some(control) = control {
@@ -57,6 +59,26 @@ pub(crate) fn replay_image_with_control(
     if let Some(control) = control {
         control.checkpoint()?;
     }
+    Ok(image)
+}
+
+#[cfg(feature = "codecs")]
+pub(crate) fn replay_image(
+    image: DynamicImage,
+    source_format: crate::NativeImageFormat,
+    document: &NativeParameterDocument,
+) -> Result<NativeRenderedImage, NativeImageError> {
+    replay_image_with_control(image, source_format, document, None)
+}
+
+#[cfg(feature = "codecs")]
+pub(crate) fn replay_image_with_control(
+    image: DynamicImage,
+    source_format: crate::NativeImageFormat,
+    document: &NativeParameterDocument,
+    control: Option<&NativeTaskControl>,
+) -> Result<NativeRenderedImage, NativeImageError> {
+    let image = replay_dynamic_image_with_control(image, document, control)?;
     Ok(NativeRenderedImage {
         image,
         source_format,

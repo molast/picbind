@@ -12,6 +12,7 @@ type ToneCurveEditorProps = {
   points: ToneCurvePoint[];
   labels: ShareRoomLabels;
   onChange(points: ToneCurvePoint[]): void;
+  onInteractionChange?(active: boolean): void;
 };
 
 const WIDTH = 300;
@@ -22,7 +23,7 @@ function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
 }
 
-export default function ToneCurveEditor({ points, labels, onChange }: ToneCurveEditorProps) {
+export default function ToneCurveEditor({ points, labels, onChange, onInteractionChange }: ToneCurveEditorProps) {
   const svgRef = React.useRef<SVGSVGElement | null>(null);
   const dragIndexRef = React.useRef<number | null>(null);
   const [selectedIndex, setSelectedIndex] = React.useState<number | null>(null);
@@ -80,8 +81,8 @@ export default function ToneCurveEditor({ points, labels, onChange }: ToneCurveE
             onPointerMove={(event) => {
               if (dragIndexRef.current !== null) movePoint(dragIndexRef.current, event.clientX, event.clientY);
             }}
-            onPointerUp={() => { dragIndexRef.current = null; }}
-            onPointerCancel={() => { dragIndexRef.current = null; }}
+            onPointerUp={() => { dragIndexRef.current = null; onInteractionChange?.(false); }}
+            onPointerCancel={() => { dragIndexRef.current = null; onInteractionChange?.(false); }}
             onPointerDown={(event) => {
               event.preventDefault();
               if (event.target !== event.currentTarget || sorted.length >= 12) return;
@@ -108,12 +109,13 @@ export default function ToneCurveEditor({ points, labels, onChange }: ToneCurveE
             <path d={path} fill="none" stroke="#60a5fa" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
             {sorted.map((point, index) => (
               <g
-                key={`${index}-${point.x}`}
+                key={index}
                 className="cursor-move"
                 onPointerDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
                   dragIndexRef.current = index;
+                  onInteractionChange?.(true);
                   setSelectedIndex(index);
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }}

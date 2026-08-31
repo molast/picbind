@@ -25,18 +25,11 @@ export async function generateSharePlaceholder(
   image: Blob,
 ): Promise<ImagePlaceholderMetadata> {
   const mod = await initWasm();
-  try {
-    return await generateSampledPlaceholder(mod, image);
-  } catch (error) {
-    if (
-      image.type === "image/avif" ||
-      typeof mod.generate_share_placeholder !== "function"
-    ) {
-      throw error;
-    }
-    const input = new Uint8Array(await image.arrayBuffer());
-    return validatePlaceholderMetadata(mod.generate_share_placeholder(input));
+  if (typeof mod.generate_share_placeholder !== "function") {
+    throw new Error("WASM module does not expose generate_share_placeholder");
   }
+  const input = new Uint8Array(await image.arrayBuffer());
+  return validatePlaceholderMetadata(mod.generate_share_placeholder(input));
 }
 
 function validatePlaceholderMetadata(value: unknown): ImagePlaceholderMetadata {
@@ -55,44 +48,6 @@ function validatePlaceholderMetadata(value: unknown): ImagePlaceholderMetadata {
     throw new Error("WASM returned invalid placeholder metadata");
   }
   return metadata as ImagePlaceholderMetadata;
-}
-
-async function generateSampledPlaceholder(
-  mod: Record<string, unknown>,
-  image: Blob,
-): Promise<ImagePlaceholderMetadata> {
-  const generateFromRgba = mod.generate_share_placeholder_from_rgba;
-  if (typeof generateFromRgba !== "function") {
-    throw new Error(
-      "WASM module does not expose generate_share_placeholder_from_rgba",
-    );
-  }
-  const bitmap = await createImageBitmap(image);
-  try {
-    const scale = Math.min(1, 32 / Math.max(bitmap.width, bitmap.height));
-    const sampleWidth = Math.max(1, Math.round(bitmap.width * scale));
-    const sampleHeight = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = sampleWidth;
-    canvas.height = sampleHeight;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) {
-      throw new Error("Canvas is unavailable for placeholder sampling");
-    }
-    context.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight);
-    const rgba = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
-    return validatePlaceholderMetadata(
-      generateFromRgba(
-        bitmap.width,
-        bitmap.height,
-        sampleWidth,
-        sampleHeight,
-        rgba,
-      ),
-    );
-  } finally {
-    bitmap.close();
-  }
 }
 
 function decode83(value: string) {

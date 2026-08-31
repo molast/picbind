@@ -4,7 +4,6 @@ import {
   ImageProcessingError,
   validateImageParameterDocument,
   type ImageMetadata,
-  type ImageOperation,
   type ImageOutputFormat,
   type ImageParameterDocument,
 } from "@picbind/shared";
@@ -12,56 +11,60 @@ import { generateSharePlaceholder } from "../utils/share-placeholder";
 import { generateShareThumbnail } from "../utils/share-thumbnail";
 import { compressRoomImageTask } from "../utils/room-image-compression-task";
 import { convertRoomImageTask } from "../utils/room-image-conversion";
-import { renderWorkspaceParameterPreview } from "../workspace/parameter-preview";
-import { replayOperations } from "../workspace/utils/workspace-operation-replay";
-import { dimensions } from "../workspace/utils/workspace-image-display";
-import type { WorkspaceImage, WorkspaceOperation } from "../workspace/types";
+import { encodeRoomImageData, type RoomCompressionFormat } from "../utils/room-image-compression";
+import { initWasm } from "../utils/wasm-runtime";
 
-function inputFormat(mimeType: string): ImageMetadata["format"] {
-  const value = mimeType.toLowerCase();
-  if (value === "image/jpeg" || value === "image/jpg") return "jpeg";
-  if (value === "image/png") return "png";
-  if (value === "image/webp") return "webp";
-  if (value === "image/avif") return "avif";
-  if (value === "image/gif") return "gif";
-  if (value === "image/bmp") return "bmp";
-  if (value === "image/x-icon" || value === "image/vnd.microsoft.icon") return "ico";
-  return "unknown";
+type WasmImageMetadata = {
+  width: number;
+  height: number;
+  format: ImageMetadata["format"];
+};
+
+type MaterializedPixelsHandle = {
+  readonly bytes: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  free(): void;
+};
+
+function mimeTypeForFormat(format: ImageMetadata["format"], fallback: string) {
+  if (format === "jpeg") return "image/jpeg";
+  if (format === "png") return "image/png";
+  if (format === "webp") return "image/webp";
+  if (format === "avif") return "image/avif";
+  if (format === "gif") return "image/gif";
+  if (format === "bmp") return "image/bmp";
+  if (format === "ico") return "image/x-icon";
+  return fallback || "application/octet-stream";
 }
 
-function workspaceOperationType(operation: ImageOperation): WorkspaceOperation["type"] {
-  if (operation.type === "crop" || operation.type === "resize" || operation.type === "rotate") {
-    return operation.type;
+function imageDataFromHandle(handle: MaterializedPixelsHandle) {
+  try {
+    return new ImageData(
+      new Uint8ClampedArray(handle.bytes),
+      handle.width,
+      handle.height,
+    );
+  } finally {
+    handle.free();
   }
-  if (operation.type === "color") {
-    const legacy = operation.params.workspaceOperationType;
-    return legacy === "brightness" || legacy === "contrast" || legacy === "saturation"
-      ? legacy
-      : "brightness";
-  }
-  return "other";
-}
-
-export function toWorkspaceOperations(document: ImageParameterDocument): WorkspaceOperation[] {
-  validateImageParameterDocument(document);
-  return document.operations.map((operation) => ({
-    operationId: operation.id,
-    imageId: "image-processing",
-    authorId: operation.userId,
-    baseCommitId: "source",
-    type: workspaceOperationType(operation),
-    parameters: operation.params,
-    createdAt: operation.time,
-  }));
 }
 
 export async function inspectWebImage(blob: Blob): Promise<ImageMetadata> {
   try {
-    const size = await dimensions(blob);
+    const mod = await initWasm();
+    const metadata = mod.read_image_metadata(
+      new Uint8Array(await blob.arrayBuffer()),
+    ) as WasmImageMetadata;
+    if (!Number.isInteger(metadata.width) || metadata.width < 1
+      || !Number.isInteger(metadata.height) || metadata.height < 1) {
+      throw new Error("WASM returned invalid image dimensions");
+    }
     return {
-      ...size,
-      format: inputFormat(blob.type),
-      mimeType: blob.type || "application/octet-stream",
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+      mimeType: mimeTypeForFormat(metadata.format, blob.type),
       sizeBytes: blob.size,
       orientationApplied: true,
     };
@@ -72,19 +75,35 @@ export async function inspectWebImage(blob: Blob): Promise<ImageMetadata> {
 
 export async function renderWebImagePreview(input: {
   blob: Blob;
-  metadata: Pick<ImageMetadata, "width" | "height">;
   document: ImageParameterDocument;
   maxWidth: number;
   maxHeight: number;
   quality: number;
 }) {
   try {
-    return await renderWorkspaceParameterPreview(
-      input.blob,
-      input.metadata,
-      toWorkspaceOperations(input.document),
-      { maxWidth: input.maxWidth, maxHeight: input.maxHeight, quality: input.quality },
+    validateImageParameterDocument(input.document);
+    const mod = await initWasm();
+    const pixels = imageDataFromHandle(
+      mod.render_image_operations_preview_to_rgba(
+        new Uint8Array(await input.blob.arrayBuffer()),
+        JSON.stringify(input.document),
+        Math.round(input.maxWidth),
+        Math.round(input.maxHeight),
+      ) as MaterializedPixelsHandle,
     );
+    const result = await encodeRoomImageData(
+      pixels,
+      "webp",
+      "preview.webp",
+      input.blob.size,
+      undefined,
+      {
+        quality: Math.max(1, Math.min(100, Math.round(input.quality * 100))),
+        compressionGain: 1,
+        forceEncode: true,
+      },
+    );
+    return { blob: result.blob, width: pixels.width, height: pixels.height };
   } catch (error) {
     if (error instanceof ImageProcessingError) throw error;
     throw new ImageProcessingError("renderFailed", "The image preview could not be rendered", undefined, { cause: error });
@@ -110,31 +129,49 @@ export async function materializeWebImage(input: {
     };
   }
   try {
-    const image: WorkspaceImage = {
-      imageId: "image-processing",
-      workspaceId: "image-processing",
-      name: input.name,
-      mimeType: input.mimeType,
-      size: input.blob.size,
-      width: input.metadata.width,
-      height: input.metadata.height,
-      workspaceLocation: "working",
-      state: "working",
-      shared: false,
-      currentCommitId: null,
-      previewRevision: 0,
-      createdAt: 0,
-      updatedAt: 0,
-      source: input.blob,
-    };
-    const result = await replayOperations(
-      image,
-      toWorkspaceOperations(input.document),
-      input.quality === undefined
-        ? undefined
-        : { quality: input.quality, compressionGain: 1, forceEncode: true },
+    const format = (() => {
+      const mimeType = input.mimeType.toLowerCase();
+      if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpeg";
+      if (mimeType === "image/png") return "png";
+      if (mimeType === "image/webp") return "webp";
+      if (mimeType === "image/avif") return "avif";
+      return null;
+    })() satisfies Exclude<RoomCompressionFormat, "auto"> | null;
+    if (!format) throw new Error("The source format cannot be materialized");
+
+    const mod = await initWasm();
+    const documentJson = JSON.stringify(input.document);
+    const pixels = imageDataFromHandle(
+      mod.materialize_image_operations_to_rgba(
+        new Uint8Array(await input.blob.arrayBuffer()),
+        documentJson,
+      ) as MaterializedPixelsHandle,
     );
-    return { ...result, returnedOriginal: false };
+    const defaults = format === "avif"
+      ? { quality: 58, compressionGain: 1 }
+      : format === "png"
+        ? { quality: 78, compressionGain: 1.12 }
+        : { quality: 78, compressionGain: format === "jpeg" ? 1.08 : 1 };
+    const result = await encodeRoomImageData(
+      pixels,
+      format,
+      input.name,
+      input.blob.size,
+      undefined,
+      {
+        ...defaults,
+        ...(input.quality === undefined ? null : { quality: input.quality }),
+        forceEncode: true,
+      },
+    );
+    return {
+      blob: result.blob,
+      name: result.name,
+      mimeType: result.blob.type,
+      width: result.width,
+      height: result.height,
+      returnedOriginal: false,
+    };
   } catch (error) {
     if (error instanceof ImageProcessingError) throw error;
     throw new ImageProcessingError("renderFailed", "The image could not be materialized", undefined, { cause: error });

@@ -74,9 +74,15 @@ fn set(object: &Object, key: &str, value: JsValue) -> Result<(), JsValue> {
 pub fn metadata(input: &[u8]) -> Result<Object, JsValue> {
     let format =
         image::guess_format(input).map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let (width, height) = image::load_from_memory_with_format(input, format)
-        .map(|image| image.dimensions())
-        .unwrap_or((0, 0));
+    let (width, height) = if format == image::ImageFormat::Avif {
+        picbind_image_native::decode_avif(input)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?
+            .dimensions()
+    } else {
+        image::load_from_memory_with_format(input, format)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?
+            .dimensions()
+    };
     let object = Object::new();
     set(&object, "imageId", JsValue::from_str(&md5_hex(input)))?;
     set(&object, "width", JsValue::from_f64(width as f64))?;

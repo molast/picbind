@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useImageProcessing } from "../../../image-processing";
 import type { ShareRoomLabels } from "../share-room-labels";
 import type { RoomImage } from "../share-room-types";
 import type { RoomRole } from "../share-room-types";
@@ -130,6 +131,7 @@ export default function ReviewWorkspace({
   onResolveRejectedImage,
   onBack,
 }: ReviewWorkspaceProps) {
+  const imageProcessing = useImageProcessing();
   const [scale, setScale] = React.useState(1);
   const [offset, setOffset] = React.useState<ReviewViewportOffset>({ x: 0, y: 0 });
   const [dimensions, setDimensions] = React.useState({ width: 0, height: 0 });
@@ -873,15 +875,10 @@ export default function ReviewWorkspace({
       return;
     }
     const source = new File([image.blob], image.name, { type: image.type });
-    void generateReviewImage(source, annotationSnapshot)
-      .then((result) => setGeneratedImage({
-        ...result,
-        parameters: {
-          annotations,
-        },
-      }))
+    void generateReviewImage(imageProcessing, source, annotations)
+      .then(setGeneratedImage)
       .finally(() => setGeneratingImage(false));
-  }, [annotationSnapshot, annotations, generatingImage, image.blob, image.name, image.type, onApplyParameters, parameterAction]);
+  }, [annotations, generatingImage, image.blob, image.name, image.type, imageProcessing, onApplyParameters, parameterAction]);
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

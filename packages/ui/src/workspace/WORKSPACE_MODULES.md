@@ -74,6 +74,21 @@ Workspace 的页面控制器。负责加载 Workspace、本地状态组合、实
 - `use-workspace-editor-state.tsx`：编辑器初始参数和加载状态。
 - `use-workspace-rollback-commands.ts`：Owner 回退 Commit/Activity 栈，并同步 `historyRolledBack`。
 
+### 图片处理执行边界
+
+- 实时编辑预览属于 WebView：裁剪框、尺寸比例、颜色调整和 Doodle 使用 Konva，在有界预览面上
+  按交互帧更新。拖动或连续调参期间不得生成 Blob，不得调用 `renderPreview()` / `materialize()`，
+  Desktop 也不得逐帧调用 Tauri IPC。颜色调整由 WebGL2 shader 处理实时像素帧，Konva 只负责
+  Stage、布局、对比、裁切、取色和交互；WebGL2 不可用时才回退到有界 Canvas CPU 渲染。连续调参
+  不能在 React 组件中恢复逐帧 `getImageData()` / `putImageData()` 像素读写。
+- 任何需要读取 Blob 并产出新 Blob、缓存文件或正式图片的操作都通过
+  `ImageProcessingService`。Desktop 进入 Native Rust；Web 进入 Rust/WASM。两端共用
+  `picbind-image-native` 的参数重放 Core，并严格按参数文档顺序执行。
+- Web 的 Blob 参数预览在 Rust/WASM 中完成解码、完整参数回放和最大宽高约束，然后只编码一次；
+  正式物化在完整尺寸重放后只编码一次。不能恢复旧的 OffscreenCanvas 多步骤 Blob 回放链。
+- Konva 预览只用于即时反馈，不是 B 或 C。提交参数、生成 Commit、预热 C 或保存结果时，必须以
+  A/B 与版本化参数文档为准重新进入 Service，不能把预览画布当作正式源数据。
+
 ### 实时和协作控制
 
 - `use-workspace-collaboration-commands.ts`：加入/离开协作、协作者移除等命令。

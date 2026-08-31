@@ -149,8 +149,14 @@ export default function ReviewCanvas({
   const [remoteMagnifierPosition, setRemoteMagnifierPosition] =
     React.useState<MagnifierPosition | null>(null);
   const [containerSize, setContainerSize] = React.useState({ width: 0, height: 0 });
-  const [imageSize, setImageSize] = React.useState({ width: 0, height: 0 });
-  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
+  const [loadedImage, setLoadedImage] = React.useState({
+    url: "",
+    width: 0,
+    height: 0,
+  });
+  const imageSize = loadedImage.url === image.url
+    ? loadedImage
+    : { width: 0, height: 0 };
   const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(
     null,
   );
@@ -233,7 +239,6 @@ export default function ReviewCanvas({
   }, [onCanvasSizeChange]);
 
   React.useEffect(() => {
-    setImageSize({ width: 0, height: 0 });
     setAnnotationSnapshot(null);
     setTextEditor(null);
   }, [image.id]);
@@ -561,16 +566,17 @@ export default function ReviewCanvas({
           {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            key={image.url}
             src={image.url}
             alt={image.name}
             draggable={false}
             onLoad={(event) => {
+              if (event.currentTarget.getAttribute("src") !== image.url) return;
               const dimensions = {
                 width: event.currentTarget.naturalWidth,
                 height: event.currentTarget.naturalHeight,
               };
-              setImageSize(dimensions);
-              setRenderedImageUrl(image.url);
+              setLoadedImage({ url: image.url, ...dimensions });
               onDimensionsChange(dimensions);
             }}
             className="block h-full w-full select-none object-contain"
@@ -630,7 +636,6 @@ export default function ReviewCanvas({
               />
             </div>
           ) : null}
-          {posterUrl && (!editorBaseReady || renderedImageUrl !== image.url) ? <div className="absolute inset-0 z-30 cursor-wait" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}><img src={posterUrl} alt="" draggable={false} className="h-full w-full select-none object-contain" aria-hidden="true" /></div> : null}
           {textEditor && fitRatio ? (
             <textarea
               ref={textInputRef}
@@ -696,6 +701,7 @@ export default function ReviewCanvas({
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
+      {posterUrl && (!editorBaseReady || loadedImage.url !== image.url) ? <div className="absolute inset-0 z-30 flex cursor-wait items-center justify-center" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}><img src={posterUrl} alt="" draggable={false} className="h-full w-full select-none object-contain p-4" aria-hidden="true" /></div> : null}
       <ReviewLaserLayer controllerRef={laserLayerRef} />
       {magnifierPosition || remoteMagnifierPosition ? (
         <ReviewMagnifierLens

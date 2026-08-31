@@ -122,11 +122,9 @@ export class WebImageProcessingService implements ImageProcessingService {
     }
     const resolved = await resolveSource(request.source, context);
     report(context, "decoding");
-    const metadata = await metadataFor(resolved.blob);
     report(context, "rendering");
     const preview = await renderWebImagePreview({
       blob: resolved.blob,
-      metadata,
       document: request.document,
       maxWidth: request.maxWidth,
       maxHeight: request.maxHeight,

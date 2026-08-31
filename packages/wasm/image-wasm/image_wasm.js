@@ -59,6 +59,49 @@ export class CompressionResult {
 }
 if (Symbol.dispose) CompressionResult.prototype[Symbol.dispose] = CompressionResult.prototype.free;
 
+export class MaterializedPixels {
+    static __wrap(ptr) {
+        const obj = Object.create(MaterializedPixels.prototype);
+        obj.__wbg_ptr = ptr;
+        MaterializedPixelsFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MaterializedPixelsFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_materializedpixels_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get bytes() {
+        const ret = wasm.materializedpixels_bytes(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    get height() {
+        const ret = wasm.materializedpixels_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get width() {
+        const ret = wasm.materializedpixels_width(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+}
+if (Symbol.dispose) MaterializedPixels.prototype[Symbol.dispose] = MaterializedPixels.prototype.free;
+
 /**
  * @param {Uint8Array} input
  * @returns {any}
@@ -498,6 +541,42 @@ export function generate_share_thumbnail(input) {
 
 /**
  * @param {Uint8Array} input
+ * @param {string} document_json
+ * @returns {MaterializedPixels}
+ */
+export function materialize_image_operations_to_rgba(input, document_json) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(document_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.materialize_image_operations_to_rgba(ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return MaterializedPixels.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {string} document_json
+ * @returns {MaterializedPixels}
+ */
+export function materialize_rgba_operations_to_rgba(rgba, width, height, document_json) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(document_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.materialize_rgba_operations_to_rgba(ptr0, len0, width, height, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return MaterializedPixels.__wrap(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
  * @returns {any}
  */
 export function predict_compression(input) {
@@ -542,6 +621,25 @@ export function read_image_metadata(input) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {Uint8Array} input
+ * @param {string} document_json
+ * @param {number} max_width
+ * @param {number} max_height
+ * @returns {MaterializedPixels}
+ */
+export function render_image_operations_preview_to_rgba(input, document_json, max_width, max_height) {
+    const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(document_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.render_image_operations_preview_to_rgba(ptr0, len0, ptr1, len1, max_width, max_height);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return MaterializedPixels.__wrap(ret[0]);
 }
 
 /**
@@ -647,6 +745,9 @@ function __wbg_get_imports() {
 const CompressionResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_compressionresult_free(ptr, 1));
+const MaterializedPixelsFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_materializedpixels_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();

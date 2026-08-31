@@ -49,8 +49,9 @@ V1 采用以下设计：
 | --- | --- | --- |
 | 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF、JPEG XL 由 Native Planner / Encoder 执行；Desktop 格式选择器显式提供 JXL |
 | Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 五格式输入、固定格式与 `auto`、可选 resize 均可走 Native Rust；JPEG XL 仅由显式 API 请求输出 |
-| 参数实时预览 | Web Adapter 使用受限 Canvas / OffscreenCanvas | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
-| 最终参数重放 | Web Adapter 从不可变源图重放完整文档 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
+| 参数实时预览 | WebView 有界预览；Konva 管理交互，WebGL2 渲染颜色像素，不生成 Blob | 与 Web 相同，不逐帧调用 Native Rust |
+| Blob 参数预览 | Rust/WASM 重放完整文档、约束尺寸后编码一次 | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
+| 最终参数重放 | Rust/WASM 从不可变源图重放完整文档并一次编码 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
 | Metadata 与质量分析 | Web Adapter 调用 WASM / Analysis Worker | 五格式输入使用 Native Rust 分析与双图质量比较 |
 | placeholder / thumbnail | Web Adapter 调用现有 WASM 派生能力 | Native Rust 生成主色、BlurHash 和独立 WebP thumbnail |
 | 图片存储 | Dexie + OPFS Repository | Tauri IPC + SQLite + Native Files；Native codec 可直接解析受控存储引用 |
@@ -66,16 +67,18 @@ AVIF、JPEG XL 和 `crop`、`resize`、`rotate`、`color`、`draw` 路由到 Nat
 - `crates/picbind-core` 保存 Workspace、协作和图片领域状态，不是像素算法 crate。
 - `crates/picbind-image` 承担图片分析、压缩、格式处理、metadata、缩略图和 placeholder，
   但公开入口目前带有 `wasm_bindgen`、`JsValue` 和 `js_sys` 类型。
-- `crates/picbind-image-native` 是不依赖 Tauri、WASM 或 UI 类型的 Native codec，已实现
-  JPEG、PNG、WebP、AVIF、JPEG XL 的统一解码与 5×5 编码矩阵。
+- `crates/picbind-image-native` 是不依赖 Tauri、WASM 或 UI 类型的图片 Core。`operations`
+  feature 提供 crop、color、draw、rotate、resize 的纯 Rust 参数重放；`codecs` feature 在此基础上
+  提供 JPEG、PNG、WebP、AVIF、JPEG XL 的统一解码与 5×5 编码矩阵。
 - `apps/desktop/src-tauri/src/image_processing` 已提供受控来源解析和二进制图片处理命令。
 - WebP / AVIF 的部分 Web 编码能力位于 `packages/wasm/image-codecs`，不是纯 Rust Core。
 
-当前 Web 与 Desktop 使用不同 Rust codec：Web 保留现有 WASM PCE；Desktop 对五种受支持
+当前 Web 与 Desktop 使用不同 codec：Web 保留现有 WASM PCE；Desktop 对五种受支持
 格式使用 Native codec 执行 metadata、`interactive` / `planner` 压缩、`auto`、转换、参数
-预览、最终物化、派生资源和质量分析。受支持参数的纯 Rust 重放 Core 已实现并接入 Native
-Adapter。Web PCE 中可复用的 Planner 与参数重放模块尚未提取到双方共享 Core，这不影响
-Desktop 当前调用 Native Rust，但意味着阶段 4 的代码共享重构仍未全部完成。
+预览、最终物化、派生资源和质量分析。受支持参数的纯 Rust 重放 Core 已同时接入 Desktop
+Native 和 `picbind-image` WASM：Web 的 Blob 参数预览与最终物化先在 WASM 中解码并一次性重放
+完整参数文档，再交给既有目标格式编码器编码一次。双方的 Planner 与格式 codec 仍未合并，
+因此阶段 4 的代码共享重构尚未全部完成。
 
 ## 4. 目标与非目标
 
@@ -104,6 +107,7 @@ Desktop 当前调用 Native Rust，但意味着阶段 4 的代码共享重构仍
 ```mermaid
 flowchart TD
     UI["React UI / Workspace"] --> Port["ImageProcessingService Port"]
+    UI --> Konva["Konva Realtime Preview"]
     UI --> StoragePort["ImageStorageRepository Port"]
     App["apps/web Composition Root"] --> Selector["Runtime Selector"]
     Selector -- Browser --> WebAdapter["WebImageProcessingService"]
@@ -115,16 +119,18 @@ flowchart TD
     IPC --> NativeAdapter["Desktop Image Processing Commands"]
     NativeAdapter --> NativeStore["Native Store Source Resolver"]
     NativeAdapter --> NativeCore["Native Rust Image Engine"]
-    Wasm -. shared pure Rust modules .-> RustCore["crates/picbind-image Core"]
-    NativeCore -. shared pure Rust modules .-> RustCore
+    Wasm --> SharedOperations["picbind-image-native operations"]
+    NativeCore --> SharedOperations
 ```
 
 核心原则：
 
 > 共享的是业务语义和可复用的纯 Rust 模块，不是平台绑定层，也不是输出字节。
 
-图中的共享 Rust Core 虚线表示允许的提取方向；当前 Web PCE 与 Native codec 尚未完成该部分
-合并，实际运行时不会在两端之间跨引擎调用。
+WebView 只消费已解码的有界预览面：Konva 处理拖动、裁剪框、尺寸比例、对比布局和标注，WebGL2
+shader 处理颜色参数实时像素帧。连续交互不创建 Blob，也不调用 WASM 或 Tauri IPC。需要产出
+Blob、缓存文件或正式结果时才进入 `ImageProcessingService`。Web WASM 与 Desktop Native 共享
+参数重放 Core，但不会在运行时跨平台引擎调用；双方的 Planner 和 codec 仍保持平台专属实现。
 
 ### 5.1 Web 与 Desktop 当前执行差异
 
@@ -134,9 +140,10 @@ flowchart TD
 | 环节 | Web Adapter | Desktop Native Adapter | 必须共享的语义 |
 | --- | --- | --- | --- |
 | 输入解析 | 从 `Blob` 或 Web Storage Repository 读取 | Rust 直接解析 Native Store 引用；未落盘 Blob 使用原始二进制 IPC | 不接受任意绝对路径，处理期间源资产不可变 |
-| 解码与 metadata | 浏览器解码能力与 `picbind-image` WASM | Native Rust 解码器 | 方向修正、尺寸、格式和 Alpha 判定语义一致 |
-| 参数预览 | 受限尺寸 Canvas / OffscreenCanvas，必要时使用 WASM | 受限尺寸 Native 缓冲区，通过临时产物或小型二进制结果交给 WebView | 使用同一参数文档和操作顺序，不执行全尺寸压缩 Planner |
-| 最终物化 | 从源 Blob 全尺寸重放参数，再由 Web 编码器输出 | Rust 直接从 Native Store 源文件全尺寸重放参数并写受控输出 | 协作 B 在正式 Commit/回退后更新；其他结果在保存、覆盖、导出或下载时生成 |
+| 解码与 metadata | `picbind-image` Rust/WASM；压缩 codec 仍按格式使用既有实现 | Native Rust 解码器 | 方向修正、尺寸、格式和 Alpha 判定语义一致 |
+| 实时参数预览 | Konva 管理有界预览交互，WebGL2 渲染颜色像素；不生成 Blob、不调用处理 Service | 与 Web 相同 | 只更新交互帧，不执行全尺寸参数重放或编码 |
+| Blob 参数预览 | WASM 解码，调用共享 Rust operations 完整重放，按最大宽高等比缩小，再编码一次 WebP | 受限尺寸 Native 缓冲区，通过临时产物或小型二进制结果交给 WebView | 使用同一参数文档和操作顺序，不执行全尺寸压缩 Planner |
+| 最终物化 | WASM 从源 Blob 全尺寸重放完整参数，再由源格式编码器输出一次 | Rust 直接从 Native Store 源文件全尺寸重放参数并写受控输出 | 协作 B 在正式 Commit/回退后更新；其他结果在保存、覆盖、导出或下载时生成 |
 | JPEG / PNG 压缩 | 现有 Worker、WASM Planner 和编码器 | Native Rust Planner 和编码器 | Alpha、质量护栏、候选失败隔离和同格式不增大规则一致 |
 | WebP / AVIF 压缩 | 当前浏览器 codec 与 Worker 编排 | 可使用不同 Native codec、线程数和 effort | 输出格式与质量护栏一致，不要求字节或大小一致 |
 | placeholder / thumbnail | 当前 WASM 派生能力 | Native Rust 派生能力 | placeholder 与 thumbnail 分开生成，realtime 限制一致 |
@@ -493,11 +500,21 @@ WebP quality `0.80` 的原始卡片缩略图，并写入 Repository 的 thumbnai
 容器并同步状态。新建保留原 A 及其 thumbnail，同时在 Working 中写入独立的 B 源文件和 thumbnail。
 `Save & Stop` 在所选保存动作成功后再执行停止流程。
 
-预览规则：
+实时交互与 Blob 预览必须分开：
 
-- 在受限尺寸画布或 Native 预览缓冲区上应用参数。
+- 裁剪、尺寸、颜色和 Doodle 的连续交互由 Konva 在有界预览面上完成；每一帧只更新 WebView
+  显示状态，不生成 Blob、不执行编码，也不跨 WASM/Tauri 边界。颜色像素由 WebGL2 fragment
+  shader 实时渲染，原图纹理只上传一次，滑块帧只更新 uniform；Konva 负责 Stage、布局、对比、
+  裁切、取色和交互。WebGL2 不可用时才回退到有界 Canvas CPU 渲染，不在 React 组件中逐帧执行
+  `getImageData()` / `putImageData()`。
+- 只有 Commit 预热、历史预览、卡片缓存或用户提交等需要稳定产物的动作才调用
+  `renderPreview()` / `materialize()`。
+- Web Blob 预览在 Rust/WASM 中解码并重放完整参数，然后按请求最大宽高等比缩小；Desktop 在
+  Native 预览缓冲区执行对应流程。两端都只在参数回放结束后编码一次。
 - `memory` destination 返回受限大小 Blob；`cache` destination 在 Desktop Native 中直接写入
   `temp/image-preview-cache`，IPC 只返回不透明 token 和元数据，不返回图片字节或文件路径。
+- Review 的 Konva 标注快照只供放大镜和波纹等实时反馈使用；正式导出提交结构化 `draw` 参数，
+  由 `materialize()` 在 Rust 中从源图重放并编码，不能把快照与源 Blob 放回 OffscreenCanvas 合成。
 - Desktop Adapter 将 token 转成只读 `picbind-preview:` URL，WebView 的协议处理器只允许按
   已登记 token 读取 WebP。Web Adapter 使用可释放的对象 URL 实现同一地址型契约。
 - 不修改协作容器中的源图，不生成新的 Library / Working 图片。
@@ -748,16 +765,18 @@ apps/web/src/image-processing/
     └── desktop-image-processing-service.ts
 ```
 
-Web Adapter 包装现有行为，不重写算法：
+Web Adapter 当前行为：
 
 - 首页压缩继续调用当前 Planner、WASM、WebP / AVIF 编码器和质量护栏。
-- Workspace 预览继续使用受限尺寸 Canvas 路径。
-- 最终物化继续从源 Blob 重放参数文档。
-- placeholder 与 thumbnail 继续调用现有 WASM 导出。
+- Workspace 实时编辑预览由 WebView 内的 Konva 与 WebGL2 完成，不进入 Adapter。
+- Workspace 的 Blob 预览与最终物化由 `picbind-image` WASM 解码，并调用共享 Rust operations
+  一次性重放完整参数文档；预览随后按边界缩小，最终物化保持完整尺寸。
+- Web metadata、placeholder 与 thumbnail 直接调用 Rust/WASM 导出，不再先用浏览器 Canvas
+  解码 Blob。
 - Adapter 负责把现有不同结果类型统一为 `ImageProcessingResult`。
 
-原 Worker、WASM、Canvas 编码和参数重放实现保留为 Web Adapter 内部模块，UI 不再直接导入
-它们。
+目标格式编码仍复用既有 Web codec；参数重放结束后只编码一次。旧的 OffscreenCanvas 参数回放
+模块不再位于实际 Service 调用链中。
 
 ## 14. Desktop Adapter 与 Tauri IPC
 
@@ -1052,8 +1071,9 @@ libwebp；`WebPEncoderOptions` 包装完整 `WebPConfig`，默认有损 quality 
 quality 100，同时保留 lossless 和高级参数扩展点。现成 RGB8/RGBA8 缓冲直接借用，其他布局按
 Alpha 状态只转换一次；空图和无效配置分别映射为明确的输入或参数错误。
 `crates/picbind-image/src/lib.rs` 仍包含 WASM binding，Web PCE 与 Native codec 也仍保留各自
-的 Planner 和参数实现；阶段 4 后续只提取真正可共享的纯 Rust 模块，不改变已经生效的平台
-Port 与 Adapter 边界。
+的 Planner 和格式编码实现；crop、color、draw、rotate、resize 的参数实现已经提取到
+`picbind-image-native` 的 `operations` feature，由 Web WASM 与 Desktop Native 共用。阶段 4
+后续只提取仍有实际共享价值的模块，不改变已经生效的平台 Port 与 Adapter 边界。
 
 ## 19. 分阶段实施
 
@@ -1082,7 +1102,8 @@ Port 与 Adapter 边界。
 ### 阶段 3：从 UI 移除执行细节
 
 当前状态：已完成当前 Web UI 调用迁移。首页、Room 与 Workspace 通过 Provider 获取
-Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Adapter 内部实现保留。
+Service；实时编辑预览由 WebView 内的 Konva 与 WebGL2 处理，Blob 参数处理由 Adapter 进入
+Rust/WASM 或 Native Rust。
 
 - Workspace 参数预览改用 `renderPreview()`。
 - 保存、另存、覆盖和下载改用 `materialize()`。
@@ -1091,10 +1112,10 @@ Service；旧 Worker、WASM、Canvas 编码与参数重放模块只作为 Web Ad
 
 ### 阶段 4：拆分纯 Rust Core
 
-当前状态：部分完成。新增 `crates/picbind-image-native` 作为无 Tauri、无 `JsValue` 或 UI 类型的
-Native codec crate；其中 WebP encoder 通过 Rust wrapper 静态编译 vendored C libwebp，因此不把
-整个 crate 描述为纯 Rust。WASM crate 未改动，本阶段没有重新生成 WASM。现有 WASM PCE 中的
-共享 Planner 和参数重放仍待提取。
+当前状态：部分完成。`crates/picbind-image-native` 是无 Tauri、无 `JsValue` 或 UI 类型的图片
+Core；其中 WebP encoder 通过 Rust wrapper 静态编译 vendored C libwebp，因此不把整个 crate
+描述为纯 Rust。`operations` feature 已由 Web WASM 与 Desktop Native 共用，相关 WASM binding
+与生成文件已同步；双方 Planner 和格式 codec 仍保持独立。
 
 - 从 `crates/picbind-image/lib.rs` 移出 `JsValue` 和 `js_sys` 依赖。
 - 保留薄 WASM binding，确保 Web 输出和性能没有回归。
@@ -1247,8 +1268,8 @@ V1 完成必须同时满足：
 
 当前验收结论：上述 V1 产品与运行时迁移项已经完成。Desktop 对已声明 capability 使用
 Native Rust；兼容输入和未支持参数操作仍按第 3 节由 selector 显式路由到 Web，并不属于
-Native 失败后的静默降级。共享 Rust Core 的进一步提取和 macOS x86_64 补测作为后续工程项
-继续跟踪。
+Native 失败后的静默降级。Web 与 Desktop 已共享参数重放 Core；Planner/codec 的进一步提取和
+macOS x86_64 补测作为后续工程项继续跟踪。
 
 ## 22. 相关文档
 

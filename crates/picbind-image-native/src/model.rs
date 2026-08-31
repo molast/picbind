@@ -86,6 +86,7 @@ impl NativeEncodeOptions {
         }
     }
 
+    #[cfg(feature = "codecs")]
     pub(crate) fn effective_quality(&self) -> u8 {
         if self.quality == 100 {
             return 100;

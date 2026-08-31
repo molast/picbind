@@ -10,6 +10,15 @@ export class CompressionResult {
     readonly mime: string;
 }
 
+export class MaterializedPixels {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly bytes: Uint8Array;
+    readonly height: number;
+    readonly width: number;
+}
+
 export function analyze_image_metrics(input: Uint8Array): any;
 
 export function calculate_image_md5(input: Uint8Array): string;
@@ -60,11 +69,17 @@ export function generate_share_preview_thumbnail_from_rgba(width: number, height
 
 export function generate_share_thumbnail(input: Uint8Array): Uint8Array;
 
+export function materialize_image_operations_to_rgba(input: Uint8Array, document_json: string): MaterializedPixels;
+
+export function materialize_rgba_operations_to_rgba(rgba: Uint8Array, width: number, height: number, document_json: string): MaterializedPixels;
+
 export function predict_compression(input: Uint8Array): any;
 
 export function predict_compression_rgba(rgba: Uint8Array, width: number, height: number, source_size_bytes: number, source_format: string): any;
 
 export function read_image_metadata(input: Uint8Array): object;
+
+export function render_image_operations_preview_to_rgba(input: Uint8Array, document_json: string, max_width: number, max_height: number): MaterializedPixels;
 
 export function resize_image_to_rgba(input: Uint8Array, target_width: number, target_height: number): Uint8Array;
 
@@ -73,6 +88,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressionresult_free: (a: number, b: number) => void;
+    readonly __wbg_materializedpixels_free: (a: number, b: number) => void;
     readonly analyze_image_metrics: (a: number, b: number) => [number, number, number];
     readonly calculate_image_md5: (a: number, b: number) => [number, number, number, number];
     readonly calculate_image_quality_score: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -101,9 +117,15 @@ export interface InitOutput {
     readonly generate_share_preview_thumbnail: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_share_preview_thumbnail_from_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
+    readonly materialize_image_operations_to_rgba: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly materialize_rgba_operations_to_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly materializedpixels_bytes: (a: number) => [number, number];
+    readonly materializedpixels_height: (a: number) => number;
+    readonly materializedpixels_width: (a: number) => number;
     readonly predict_compression: (a: number, b: number) => [number, number, number];
     readonly predict_compression_rgba: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly read_image_metadata: (a: number, b: number) => [number, number, number];
+    readonly render_image_operations_preview_to_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly resize_image_to_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

@@ -1,7 +1,12 @@
 "use client";
 
+import {
+  emptyImageParameterDocument,
+  setImageOperation,
+  type ImageProcessingService,
+} from "@picbind/shared";
 import type { RoomCompressionFormat } from "./room-image-compression";
-import { compressRoomImageTask } from "./room-image-compression-task";
+import type { ReviewAnnotation } from "./review-collaboration";
 
 export type ReviewImageExport = {
   blob: Blob;
@@ -40,65 +45,41 @@ function reviewOutputName(
 }
 
 export async function generateReviewImage(
+  imageProcessing: ImageProcessingService,
   source: Blob & { name?: string },
-  annotationSnapshot: string | null,
+  annotations: ReviewAnnotation[],
   signal?: AbortSignal,
 ): Promise<ReviewImageExport> {
-  const sourceBitmap = await createImageBitmap(source);
-  let annotationBitmap: ImageBitmap | null = null;
-  try {
-    if (annotationSnapshot) {
-      const response = await fetch(annotationSnapshot);
-      annotationBitmap = await createImageBitmap(await response.blob());
-    }
-    const canvas = new OffscreenCanvas(sourceBitmap.width, sourceBitmap.height);
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas 2D context is unavailable");
-    context.drawImage(sourceBitmap, 0, 0);
-    if (annotationBitmap) {
-      context.drawImage(
-        annotationBitmap,
-        0,
-        0,
-        annotationBitmap.width,
-        annotationBitmap.height,
-        0,
-        0,
-        sourceBitmap.width,
-        sourceBitmap.height,
-      );
-    }
-    const composite = await canvas.convertToBlob({ type: "image/png" });
-    const controller = signal ? null : new AbortController();
-    const preferredFormat = reviewOutputFormat(source.type);
-    let compressed = await compressRoomImageTask(
-      new File([composite], source.name || "review.png", { type: composite.type }),
-      preferredFormat,
-      signal || controller!.signal,
-    );
-    const oversizedThreshold = Math.max(source.size * 1.5, source.size + 512 * 1024);
-    if (compressed.blob.size > oversizedThreshold) {
-      const fallbackFormat = preferredFormat === "webp" ? "avif" : "webp";
-      try {
-        const fallback = await compressRoomImageTask(
-          new File([composite], source.name || "review.png", { type: composite.type }),
-          fallbackFormat,
-          signal || controller!.signal,
-        );
-        if (fallback.blob.size < compressed.blob.size) compressed = fallback;
-      } catch {
-        // The preferred encoding remains valid when the optional fallback fails.
-      }
-    }
-    return {
-      blob: compressed.blob,
-      name: reviewOutputName(source.name, compressed.format),
-      width: sourceBitmap.width,
-      height: sourceBitmap.height,
-      format: compressed.format,
-    };
-  } finally {
-    annotationBitmap?.close();
-    sourceBitmap.close();
+  const format = reviewOutputFormat(source.type);
+  const result = await imageProcessing.materialize({
+    source: {
+      kind: "blob",
+      blob: source,
+      name: source.name || "image",
+      mimeType: source.type,
+    },
+    document: setImageOperation(emptyImageParameterDocument(), {
+      id: crypto.randomUUID(),
+      userId: "local",
+      time: Date.now(),
+      type: "draw",
+      params: { annotations },
+    }),
+    output: { format, quality: 82 },
+    destination: "memory",
+  }, {
+    requestId: `review-export:${crypto.randomUUID()}`,
+    signal,
+  });
+  if (result.artifact.kind !== "blob") {
+    throw new Error("Review export did not return an in-memory image");
   }
+  return {
+    blob: result.artifact.blob,
+    name: reviewOutputName(source.name, format),
+    width: result.metadata.width,
+    height: result.metadata.height,
+    format,
+    parameters: { annotations },
+  };
 }

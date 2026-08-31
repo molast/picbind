@@ -7,6 +7,7 @@ import { useImageProcessing } from "../../../image-processing";
 import type { RoomImage } from "../share-room-types";
 import type { ShareRoomLabels } from "../share-room-labels";
 import { type RoomImageEditResult } from "../../../utils/room-image-editing";
+import KonvaResizePreview from "./konva-resize-preview";
 
 type ImageResizeDialogProps = {
   image: RoomImage | null;
@@ -33,7 +34,6 @@ export default function ImageResizeDialog({ image, posterUrl, editorBaseReady = 
   const [locked, setLocked] = React.useState(true);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [renderedImageUrl, setRenderedImageUrl] = React.useState("");
   const ratioRef = React.useRef(1);
 
   React.useEffect(() => {
@@ -74,10 +74,7 @@ export default function ImageResizeDialog({ image, posterUrl, editorBaseReady = 
         </header>
 
         <div className="space-y-4 p-5">
-          <div className="relative h-36 overflow-hidden rounded-md bg-slate-100">
-            <img src={image.url} alt="" onLoad={() => setRenderedImageUrl(image.url)} className="h-full w-full object-contain" />
-            {posterUrl && (!editorBaseReady || renderedImageUrl !== image.url) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" aria-hidden="true" /> : null}
-          </div>
+          <KonvaResizePreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} targetWidth={width} targetHeight={height} />
           <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
             <label className="space-y-1.5 text-xs font-medium text-slate-600">
               <span>{labels.widthPx}</span>

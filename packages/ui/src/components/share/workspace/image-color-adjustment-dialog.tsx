@@ -67,11 +67,14 @@ type SliderRowProps = {
   onChange(value: number): void;
 };
 
+const SliderInteractionContext = React.createContext<(active: boolean) => void>(() => undefined);
+
 function SliderRow({ label, value, min = -100, max = 100, suffix = "%", resetValue = 0, resetLabel = (text) => text, onChange }: SliderRowProps) {
+  const setInteracting = React.useContext(SliderInteractionContext);
   return (
     <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_3.75rem_1.75rem] items-center gap-2.5">
       <span className="text-xs font-medium text-slate-600">{label}</span>
-      <input type="range" min={min} max={max} step={1} value={value} onChange={(event) => onChange(Number(event.target.value))} className="h-1.5 w-full cursor-pointer accent-[#2f65cf]" aria-label={label} />
+      <input type="range" min={min} max={max} step={1} value={value} onChange={(event) => onChange(Number(event.target.value))} onPointerDown={() => setInteracting(true)} onPointerUp={() => setInteracting(false)} onPointerCancel={() => setInteracting(false)} onKeyDown={() => setInteracting(true)} onKeyUp={() => setInteracting(false)} onBlur={() => setInteracting(false)} className="h-1.5 w-full cursor-pointer accent-[#2f65cf]" aria-label={label} />
       <span className="text-right text-[11px] tabular-nums text-slate-500">{value > 0 && min < 0 ? "+" : ""}{value}{suffix}</span>
       <button type="button" disabled={value === resetValue} onClick={() => onChange(resetValue)} className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 disabled:opacity-20" aria-label={resetLabel(label)} title={resetLabel(label)}><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" /></button>
     </div>
@@ -85,9 +88,43 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
   const [comparisonMode, setComparisonMode] = React.useState<ColorComparisonMode>("in-place");
   const [maximized, setMaximized] = React.useState(false);
   const [toneRange, setToneRange] = React.useState<ColorToneRange>("midtones");
-  const [adjustments, setAdjustments] = React.useState<RoomColorAdjustments>(DEFAULT_COLOR_ADJUSTMENTS);
+  const initialAdjustmentValue = initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS;
+  const [adjustments, setAdjustments] = React.useState<RoomColorAdjustments>(initialAdjustmentValue);
+  const adjustmentsRef = React.useRef(initialAdjustmentValue);
+  const adjustmentFrameRef = React.useRef<number | null>(null);
+  const [previewInteracting, setPreviewInteracting] = React.useState(false);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const replaceAdjustments = React.useCallback((next: RoomColorAdjustments) => {
+    if (adjustmentFrameRef.current !== null) {
+      window.cancelAnimationFrame(adjustmentFrameRef.current);
+      adjustmentFrameRef.current = null;
+    }
+    adjustmentsRef.current = next;
+    setAdjustments(next);
+  }, []);
+  const updateAdjustments = React.useCallback((
+    update: (current: RoomColorAdjustments) => RoomColorAdjustments,
+  ) => {
+    adjustmentsRef.current = update(adjustmentsRef.current);
+    if (adjustmentFrameRef.current !== null) return;
+    adjustmentFrameRef.current = window.requestAnimationFrame(() => {
+      adjustmentFrameRef.current = null;
+      setAdjustments(adjustmentsRef.current);
+    });
+  }, []);
+  const flushAdjustments = React.useCallback(() => {
+    if (adjustmentFrameRef.current !== null) {
+      window.cancelAnimationFrame(adjustmentFrameRef.current);
+      adjustmentFrameRef.current = null;
+    }
+    setAdjustments(adjustmentsRef.current);
+  }, []);
+  const setSliderInteracting = React.useCallback((active: boolean) => {
+    if (!active) flushAdjustments();
+    setPreviewInteracting(active);
+  }, [flushAdjustments]);
 
   React.useEffect(() => {
     if (!image) return;
@@ -96,10 +133,16 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
     setComparisonMode("in-place");
     setMaximized(false);
     setToneRange("midtones");
-    setAdjustments(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
+    replaceAdjustments(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
+    setPreviewInteracting(false);
     setWorking(false);
     setError(null);
-  }, [image?.id, initialAdjustments]);
+  }, [image?.id, initialAdjustments, replaceAdjustments]);
+  React.useEffect(() => () => {
+    if (adjustmentFrameRef.current !== null) {
+      window.cancelAnimationFrame(adjustmentFrameRef.current);
+    }
+  }, []);
   React.useEffect(() => {
     if (!image) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !working) onClose(); };
@@ -122,13 +165,14 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
     advanced: [{ value: "selective", label: copy.selective, icon: FiTarget }, { value: "replace", label: copy.replace, icon: FiRepeat }, { value: "channels", label: copy.channels, icon: FiLayers }, { value: "recolor", label: copy.recolor, icon: FiDroplet }],
   };
   const unchanged = JSON.stringify(adjustments) === JSON.stringify(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
-  const setValue = <Key extends keyof RoomColorAdjustments>(key: Key, value: RoomColorAdjustments[Key]) => setAdjustments((current) => ({ ...current, [key]: value }));
-  const setBalance = (key: keyof RoomColorAdjustments["balance"][ColorToneRange], value: number) => setAdjustments((current) => ({
+  const setValue = <Key extends keyof RoomColorAdjustments>(key: Key, value: RoomColorAdjustments[Key]) => updateAdjustments((current) => ({ ...current, [key]: value }));
+  const setBalance = (key: keyof RoomColorAdjustments["balance"][ColorToneRange], value: number) => updateAdjustments((current) => ({
     ...current,
     balance: { ...current.balance, [toneRange]: { ...current.balance[toneRange], [key]: value } },
   }));
 
   return (
+    <SliderInteractionContext.Provider value={setSliderInteracting}>
     <div className={`fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 ${maximized ? "p-0" : "p-4"}`}>
       <section className={`flex w-full flex-col overflow-hidden bg-white shadow-2xl transition-[width,height,border-radius] duration-200 ${maximized ? "h-screen max-w-none rounded-none" : "h-[min(760px,calc(100vh-2rem))] max-w-5xl rounded-lg"}`} role="dialog" aria-modal="true" aria-label={labels.colorAdjustDialog}>
         <header className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
@@ -150,7 +194,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
                 })}
               </div>
               <div className="min-h-0 flex-1 p-2">
-                <ColorAdjustmentPreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} adjustments={adjustments} labels={labels} mode={comparisonMode} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => setAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
+                <ColorAdjustmentPreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} adjustments={adjustments} labels={labels} mode={comparisonMode} interacting={previewInteracting} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => updateAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
               </div>
             </div>
           </div>
@@ -175,7 +219,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
               <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-5">
               {submenu === "tone" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.brightnessContrast}</h3><SliderRow label={copy.brightness} resetLabel={labels.resetSetting} value={adjustments.brightness} onChange={(value) => setValue("brightness", value)} /><SliderRow label={copy.contrast} resetLabel={labels.resetSetting} value={adjustments.contrast} min={-99} max={99} onChange={(value) => setValue("contrast", value)} /></div> : null}
               {submenu === "levels" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.levels}</h3><SliderRow label={copy.blackPoint} resetLabel={labels.resetSetting} value={adjustments.blackPoint} min={0} max={100} suffix="" onChange={(value) => setValue("blackPoint", Math.min(value, adjustments.whitePoint - 1))} /><SliderRow label={copy.midtone} resetLabel={labels.resetSetting} value={adjustments.midtone} onChange={(value) => setValue("midtone", value)} /><SliderRow label={copy.whitePoint} resetLabel={labels.resetSetting} value={adjustments.whitePoint} min={155} max={255} resetValue={255} suffix="" onChange={(value) => setValue("whitePoint", Math.max(value, adjustments.blackPoint + 1))} /></div> : null}
-              {submenu === "curves" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.toneCurve}</h3><ToneCurveEditor points={adjustments.curvePoints} labels={labels} onChange={(points) => setValue("curvePoints", points)} /></div> : null}
+              {submenu === "curves" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.toneCurve}</h3><ToneCurveEditor points={adjustments.curvePoints} labels={labels} onChange={(points) => setValue("curvePoints", points)} onInteractionChange={setSliderInteracting} /></div> : null}
               {submenu === "saturation" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.saturationGroup}</h3><SliderRow label={copy.saturation} resetLabel={labels.resetSetting} value={adjustments.saturation} onChange={(value) => setValue("saturation", value)} /><SliderRow label={copy.vibrance} resetLabel={labels.resetSetting} value={adjustments.vibrance} onChange={(value) => setValue("vibrance", value)} /></div> : null}
               {submenu === "temperature" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.temperatureGroup}</h3><SliderRow label={copy.hue} resetLabel={labels.resetSetting} value={adjustments.hue} min={-180} max={180} suffix="°" onChange={(value) => setValue("hue", value)} /><SliderRow label={copy.temperature} resetLabel={labels.resetSetting} value={adjustments.temperature} onChange={(value) => setValue("temperature", value)} /></div> : null}
               {submenu === "balance" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.balance}</h3><div className="grid grid-cols-3 rounded-md bg-slate-100 p-1">{(["shadows", "midtones", "highlights"] as const).map((tone) => <button key={tone} type="button" onClick={() => setToneRange(tone)} className={`h-8 rounded text-[11px] font-semibold ${toneRange === tone ? "bg-white text-[#2f65cf] shadow-sm" : "text-slate-500"}`}>{tone === "shadows" ? copy.shadows : tone === "midtones" ? copy.midtone : copy.highlights}</button>)}</div><SliderRow label={copy.cyanRed} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].cyanRed} onChange={(value) => setBalance("cyanRed", value)} /><SliderRow label={copy.magentaGreen} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].magentaGreen} onChange={(value) => setBalance("magentaGreen", value)} /><SliderRow label={copy.yellowBlue} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].yellowBlue} onChange={(value) => setBalance("yellowBlue", value)} /></div> : null}
@@ -189,16 +233,17 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
           </div>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => setAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => {
+        <footer className="flex items-center justify-between border-t border-slate-200 px-5 py-4"><button type="button" disabled={unchanged} onClick={() => replaceAdjustments(DEFAULT_COLOR_ADJUSTMENTS)} className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-[#2f65cf] hover:bg-blue-50 disabled:text-slate-300"><FiRotateCcw className="h-3.5 w-3.5" aria-hidden="true" />{labels.resetAll}</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={working} className="h-9 rounded-md border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{labels.cancel}</button><button type="button" disabled={unchanged || working} onClick={() => {
           setWorking(true);
           setError(null);
+          const submittedAdjustments = adjustmentsRef.current;
           const task = parameterAction && onApplyParameters
-            ? Promise.resolve().then(() => onApplyParameters(adjustments))
+            ? Promise.resolve().then(() => onApplyParameters(submittedAdjustments))
             : imageProcessing.materialize({
                 source: { kind: "blob", blob: image.blob, name: image.name, mimeType: image.type },
                 document: setImageOperation(emptyImageParameterDocument(), {
                   id: crypto.randomUUID(), userId: "local", time: Date.now(), type: "color",
-                  params: { ...adjustments, workspaceOperationType: "brightness" },
+                  params: { ...submittedAdjustments, workspaceOperationType: "brightness" },
                 }),
                 output: { format: "source" },
                 destination: "memory",
@@ -206,7 +251,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
                 if (result.artifact.kind !== "blob") throw new Error(labels.colorAdjustmentFailed);
                 return onSave(image, {
                   blob: result.artifact.blob, name: result.name, width: result.metadata.width,
-                  height: result.metadata.height, operation: "adjust", parameters: adjustments,
+                  height: result.metadata.height, operation: "adjust", parameters: submittedAdjustments,
                 });
               });
           void task.catch((reason) => setError(reason instanceof Error ? reason.message : labels.colorAdjustmentFailed)).finally(() => setWorking(false));
@@ -214,5 +259,6 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
         {error ? <p className="border-t border-red-100 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</p> : null}
       </section>
     </div>
+    </SliderInteractionContext.Provider>
   );
 }

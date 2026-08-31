@@ -170,7 +170,10 @@ Compression Planner
 - Predictor 解码或调用失败：回退到源格式，不能阻断压缩。
 - 自动任务在调度器中保守占用 AVIF 单并发槽位，避免多个任务同时被推荐为 AVIF 后造成内存峰值。
 
-普通 JPEG/PNG/WebP 直接通过 WASM 解码和预测。由于 Rust `image` 解码路径不负责 AVIF，AVIF 会先由浏览器解码成 RGBA，再调用 `predict_compression_rgba`，两条路径最后使用同一个 Predictor。
+普通 JPEG/PNG/WebP 直接通过 WASM 解码和预测。首页 Predictor 的 AVIF 压缩适配仍可以先由浏览器
+解码成 RGBA，再调用 `predict_compression_rgba`；Workspace 的 metadata、参数预览和正式物化已在
+`picbind-image` 中启用 `zenavif + rav1d-safe` Rust AVIF 解码，不再依赖浏览器 Canvas 才能读取
+AVIF Blob。
 
 预测值只用于编码决策，不会作为最终压缩结果展示或替代实际文件大小；最终结果仍由编码器和质量护栏决定。
 
@@ -328,7 +331,7 @@ Desktop Native `interactive` 收到目标尺寸时，在统一 RGBA 解码后使
 尺寸时视为未缩放，继续应用同格式不增大规则；目标尺寸发生变化时禁止返回原文件，否则会把
 原始宽高错误地伪装成缩放结果。Native Auto Predictor 使用缩放后的像素特征选择格式。
 
-Desktop Native Core 现已实现 `ImageParameterDocument` V1 的有序参数重放。源文件只解码
+共享图片 Core 现已实现 `ImageParameterDocument` V1 的有序参数重放。源文件只解码
 一次，crop、resize、rotate、color 和 draw 依次作用于同一个 RGBA 容器，不为中间步骤
 创建编码文件。Color 顺序与 Web 编辑器保持一致并保留 Alpha；draw 支持线、箭头、矩形、
 椭圆、自由笔迹、缩放、旋转、线型、填充、内嵌 Noto Sans 文字和固定 Twemoji 彩色 Emoji。
@@ -336,12 +339,14 @@ Desktop Native Core 现已实现 `ImageParameterDocument` V1 的有序参数重�
 深度、集合大小、有限数值、尺寸和颜色范围均在 Rust 边界重新校验。异常画布外坐标先裁剪到
 实际图像范围。
 
-`renderPreview()` 先计算有序参数队列的最终几何尺寸，再按请求边界统一缩小源缓冲以及
+Desktop `renderPreview()` 先计算有序参数队列的最终几何尺寸，再按请求边界统一缩小源缓冲以及
 resize/draw 的绝对坐标；归一化 crop 与操作顺序不变，最终只编码一个受限 WebP且不放大；
 `materialize()` 在完整分辨率重放并只在最终输出编码一次。空参数文档且输出格式为源格式时可
 直接返回原文件，存在任意操作时不得返回原文件。`filter`、`annotation`、`ai`、内嵌字体未覆盖
 的字符或未知 Emoji 会返回明确的 unsupported operation，Adapter 对完整文档使用 Web fallback，
-不能静默忽略或混合两端渲染。参数重放本身不改变压缩候选和同格式不增大规则。
+不能静默忽略或混合两端渲染。Web 的 Blob 参数预览和正式物化通过 `picbind-image` WASM 调用同一
+Rust operations Core：完整参数只回放一次，预览在 Rust 中按最大宽高等比缩小，最终物化返回
+完整 RGBA，随后由既有目标格式编码器编码一次。参数重放本身不改变压缩候选和同格式不增大规则。
 
 Native `createShareAssets()` 对同一个解码/参数重放结果分别生成两类派生资源：placeholder
 包含原渲染尺寸、线性 RGB 主色和 4×3 BlurHash；thumbnail 独立按容器等比缩小、不放大并
@@ -417,7 +422,8 @@ PNG 的核心不是简单 Deflate，而是“感知量化为索引色 + 无损�
 
 ### 6.2 跨格式转 PNG
 
-- AVIF 由浏览器 `createImageBitmap` 解码为 RGBA，再直接交给 WASM PNG 路径，避免 Rust `image` 解码器不支持 AVIF 时退化为普通 Canvas RGBA PNG。
+- 首页跨格式 AVIF 转 PNG 仍可使用浏览器 RGBA 适配；Workspace 的 Blob 参数处理使用
+  `zenavif + rav1d-safe` Rust 解码器进入共享 operations Core，不需要 Canvas PNG 载体。
 - JPEG 等不透明源图会被识别为无真实 Alpha；量化时按 RGB 语义处理。
 - 超过 800 万像素时，先将图像缩放采样到最多约 100 万像素来训练调色板，再使用缓存的颜色桶把原尺寸像素映射到 Palette，以控制浏览器内存和耗时。
 - 跨格式候选若保守护栏没有命中，仍会保留 imagequant 质量约束下的 256 色候选，保证格式转换可用。
@@ -690,6 +696,7 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 | WASM 目标格式调用链 | `crates/picbind-image/src/core/pipeline/to_format.rs` |
 | Desktop Native 五格式 codec 与参数矩阵 | `crates/picbind-image-native/src/codecs/`、`crates/picbind-image-native/src/codecs/README.md` |
 | Desktop Native Workspace 参数操作与重放（含 resize） | `crates/picbind-image-native/src/operations/` |
+| Web Rust/WASM 参数物化与有界预览 binding | `crates/picbind-image/src/lib.rs`、`packages/ui/src/image-processing/web-runtime.ts` |
 | Desktop Native 预览与物化 | `crates/picbind-image-native/src/render/` |
 | Desktop Native placeholder / thumbnail | `crates/picbind-image-native/src/derived/` |
 | Desktop Native 完整质量分析 | `crates/picbind-image-native/src/analysis/` |
@@ -709,13 +716,13 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 5. 压缩、转换和编辑结果统一进入结果弹窗。用户可选择“存储到本地”或“分享给对方”：本地存储会创建独立的根图片并进入左侧本地图片列表；分享会创建独立图片、生成 placeholder、发送接收确认请求，并在弹窗中依次展示准备、等待确认、传输和接收完成状态。对方拒绝时不会自动保存生成图，结果弹窗会提供“保存”和“不保存”，分别将临时图片移入左侧列表或彻底删除。图片 Blob 写入 OPFS，Dexie / IndexedDB 只记录图片元数据、工作区位置和关联字段。
 6. Room 当前不启用首页的 Butteraugli 外层多候选校验，也不复用首页 Worker 并发队列。每次 Room 压缩会创建一个专用的一次性 Worker，完成或失败后立即终止。
 7. Room 压缩弹窗允许在压缩期间终止任务。点击“取消压缩”会触发 `AbortController` 并直接终止当前压缩 Worker，但保留弹窗以便重新选择格式和启动压缩；关闭按钮或 `Esc` 会终止任务并关闭弹窗。点击遮罩不会关闭压缩、格式转换、裁剪、尺寸调整或色彩调整弹窗，避免编辑结果因误触丢失。正在执行的 WASM 编码和 Worker 内存会一起停止和释放，任务代次标记同时防止旧任务结果覆盖后续状态。
-8. Room 图片操作菜单提供裁剪和尺寸调整。裁剪选区由现有 Konva 画布和 Transformer 实现，支持自由比例、原始比例、1:1、4:3、3:4、16:9 和 9:16；尺寸调整支持锁定原始宽高比或自由输入宽高。裁剪、尺寸调整和色彩调整先通过 `OffscreenCanvas` 生成实际像素，Canvas PNG 仅作为短生命周期的无损像素载体，随后由 Room 专用 Worker 调用共享编码链重新编码为源格式：JPEG、PNG、WebP、AVIF 分别保持 JPEG、PNG、WebP、AVIF，不再因浏览器编码能力静默回退成其他格式。JPEG/PNG 使用 `image-wasm`（PNG 包含量化及 Oxipng/Zopfli 优化），WebP/AVIF 使用 `@picbind/image-codecs`；最终结果不会直接返回体积较大的 Canvas PNG。编码以原文件大小作为参考，并针对编辑输出执行一次格式专用编码：JPEG/WebP 使用质量 `78`，PNG 使用质量 `78` 与 Gain `1.12`，AVIF 使用质量 `58`；JPEG 使用 Gain `1.08`。编辑流程不执行串行多候选搜索，避免全尺寸色彩计算后重复运行高开销编码器。编辑结果不能套用同格式返回原 Blob 保护，因为原 Blob 不包含编辑内容；透明源格式仍保留 Alpha，JPEG 不引入 Alpha。编辑生成的临时 `ImageBitmap` 在完成或失败后关闭，每次编码 Worker 在完成或失败后立即终止。
+8. Room 图片操作菜单提供裁剪和尺寸调整。裁剪选区、尺寸比例和色彩连续调整都在 Konva 的有界预览面上更新，拖动期间不生成 Blob、不执行格式编码，也不调用 WASM/Tauri IPC。用户提交后统一调用 `ImageProcessingService.materialize()`：Desktop 在 Native Rust 中解码、按顺序重放完整参数并编码一次；Web 把源 Blob 送入 `picbind-image` WASM，调用共享 Rust operations Core 回放 crop、resize、rotate、color、draw，返回一次最终 RGBA，再由现有源格式编码器编码一次。JPEG、PNG、WebP、AVIF 分别保持源格式，透明度规则不变；编辑流程不执行逐操作编码或串行多候选搜索。
 9. Room 格式转换弹窗支持用户显式选择 JPEG、PNG、WebP 或 AVIF，并禁用当前源格式。转换任务复用 Room 专用压缩 Worker 和对应目标格式编码链，操作类型记录为 `convert`，不会进入自动格式推荐。跨格式转换不执行“结果必须小于源文件”保护，因为用户明确要求改变格式。普通压缩仍禁止静默丢失真实 Alpha；但用户在格式转换弹窗中显式选择 JPEG 时，转换任务会单独传入 `allowAlphaLoss=true`，将 WebP、PNG 或 AVIF 的透明区域与白色背景合成后再编码 JPEG。取消转换会直接终止 Worker 并保留弹窗，关闭弹窗则终止 Worker 后退出。
 10. Room 图片使用持久化的 `workspaceLocation` 区分左侧 `library` 与主区域 `outbox`，并使用 `outboxOrigin` 记录图片由 `library`、直接生成或对方接收进入右侧。新导入图片只进入 `library`，文件选择阶段不会生成 placeholder，也不会弹出压缩建议；用户点击加入待发送区域时才按正常网络 `1 MB`、弱网 `300 KB` 的阈值决定是否提示压缩，确认继续后再切换到 `outbox`、生成 placeholder 并通知对方。裁剪、尺寸调整、格式转换和色彩调整生成的新图片在选择分享时也经过相同阈值；已经由 Room 压缩弹窗生成的结果不重复提示，Review 输出遵循第 13 节的直接分享流程。选择压缩会直接打开 Room 内部压缩弹窗，不再离开房间跳转到首页；弹窗左侧固定展示原图及其文件信息，右侧作为压缩结果等待区，完成后展示结果图、格式、尺寸和体积变化。右侧统一使用垃圾桶按钮：`library` 来源点击后无需确认，直接移回左侧并通知对方删除对应占位；直接生成、分享成功或接收的图片点击后显示“取消 / 删除 / 移入左侧”，删除仅清理当前端，移入左侧也不会删除对端副本。接收图片移入左侧时会转换为具有新 ID 的本端独立图片，避免后续再次发送时与对端原对象冲突。待发送区卡片可以在当前端置顶，`pinnedAt` 持久化到 Dexie / IndexedDB；置顶项按最近置顶时间优先，未置顶项中带有 `wantedByPeer` 的提供方图片排在普通图片之前，其余继续按 `updatedAt` 倒序排列。置顶状态不向对端同步，取消“想要”会恢复普通排序。只有 `received` 图片允许点赞，自己的 `sent` 图片只展示对方产生的点赞数和红心动画。点击可点赞的图片区域会即时累计并持久化 `likeCount`，网络事件按图片进入内存队列，延迟 `2s` 后每批最多 `12` 张图片、单图最多 `100` 次增量通过 instruction 通道发送；只有成功写入通道的增量才从队列扣除，断线时保留并延迟重试。接收端按增量累加计数，并在图片容器内错峰生成本地红心动画，不传输动画帧。尚未收到原图的接收卡片可以切换“想要”状态，再次点击会取消；双方分别持久化 `wantedByMe` 和 `wantedByPeer`，并通过布尔事件同步高亮与取消。图片对象分别持久化不可变的创建时间 `createdAt` 和列表位置更新时间 `updatedAt`；只有新建对象及在 `library`、`outbox` 之间移动时才更新 `updatedAt`，传输进度和状态变化不会更新它。两个时间会随 placeholder、P2P/R2 元数据和处理图片分享请求发送，接收端在完整二进制替换占位时保持不变；左右列表及刷新恢复均按 `updatedAt` 倒序排列。分享接收确认弹窗会报告预览容器尺寸，并通过独立 thumbnail 通道接收缩略图；只有缩略图实际到达后才显示长按查看按钮。接收方确认接收分享后会立即创建合法空 Blob 的占位卡片，完整二进制到达后原位替换并保留互动字段。本次 Dexie 架构不迁移旧 SQLite 数据。
-11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线保持 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色的既有顺序。基础通道与光影步骤预编译为三个 `256` 项 LUT，逐像素循环只执行当前设置实际启用的 HSL、色彩平衡、滤镜、替换和重着色阶段；未启用阶段不再做浮点运算，也不再为每个像素创建 HSL 数组、色调权重对象或闭包。色调曲线支持添加、移动和删除控制点，端点保留且可调整输出值，控制点最多 `12` 个；处理时按输入值排序，经 Catmull-Rom 插值生成 `256` 项 LUT。弹窗在最长边不超过 `720×420` 的 Canvas 预览副本上执行同一像素函数，连续操作按约 `36 ms` 合并更新。最终输出的原始尺寸像素循环由独立 `room-color-adjustment.worker.ts` 执行，避免大图处理阻塞弹窗主线程；调整后的 RGBA 在同一个 Worker 内直接交给 PNG、WebP 或 AVIF 编码器，JPEG 因当前 WASM 未提供公开 RGBA 入口而在该 Worker 内使用一次临时 PNG 载体，不再把临时 PNG 传回主线程后启动第二个 Worker。颜色替换可从预览点击取样，Alpha 始终保持原值且不会被静默压平；生成结果记录为 `adjust`，后续由统一结果弹窗决定本地存储或分享。全部设置保持默认值时禁止生成无意义结果。
+11. Room 色彩调整按“基础光影、色彩属性、色调平衡、进阶重构”四类组织。实际像素管线保持 RGB 通道增益、亮度/对比度、黑点/中间调/白点色阶、RGB 色调曲线、全局色相/饱和度/自然饱和度、指定色域局部 HSL、色温、分区色彩平衡、照片滤镜、颜色替换以及黑白/棕褐/单色重着色的既有顺序。弹窗使用 Konva Stage 展示宽高分别不超过 `720×420` 的有界像素面；WebGL2 fragment shader 负责实时颜色像素渲染，原图只上传一次纹理，滑块帧由 `requestAnimationFrame` 合并并只更新 uniform，拖动期间进一步限制在 `150000` 像素内，交互结束恢复完整有界预览。Konva 负责布局、上下/原位/分割对比、裁切和颜色取样；WebGL2 不可用时回退到有界 Canvas CPU 管线。两条预览路径都不创建 Blob，也不逐帧调用 WASM/Tauri IPC。用户提交后才由 Service 进入 Rust 参数重放与一次目标格式编码；Alpha 始终保持原值且不会被静默压平。全部设置保持默认值时禁止生成无意义结果。
 12. Review 标注线宽以图片归一化比例保存，渲染时乘以原图到当前适配画布的缩放比例。因此不同像素尺寸的图片在相同线宽档位和初始适配视图下具有一致的屏幕视觉粗细，同时图形自身拉伸不会放大描边。自由画笔、直线、箭头、矩形、圆形、虚线和圆点线共用该换算。Transformer 锚点、旋转手柄、旋转偏移和选框边框属于操作 UI，只按视口缩放反向补偿，不受原图分辨率影响。
-13. Review 保存图片时先在全尺寸 `OffscreenCanvas` 合成原图与标注快照，但合成得到的 PNG 只作为临时无损像素载体，不再直接作为最终文件。随后通过一次性压缩 Worker 编码为源图格式：JPEG、PNG 使用共享 `image-wasm`，WebP、AVIF 使用 Room 现有对应编码器。若首选结果超过 `max(原图大小 × 1.5, 原图大小 + 512 KB)`，会额外尝试 WebP；WebP 源则尝试 AVIF，并选择两个有效结果中更小的一个。该护栏不能退回原图，因为原图不包含新标注。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
-14. 新版 Image Workspace 的裁剪、尺寸调整、色彩调整、旋转和 Doodle 仍只通过版本化 JSON 参数同步，不传输处理后的 B。正式 Commit 或回退生效后，各端分别从本端 A 重放当前完整参数队列，立即物化唯一一份全尺寸 B；B 保持 A 的图片格式，使用 quality `100`，不经过预览降采样或预览质量档位。Web 参数重放会把该 quality 覆盖传入裁剪、尺寸、色彩和最终格式恢复编码链；这只影响协作 B，不改变普通编辑结果第 8、11 条的默认 `78/58` 档位。B 处理期间 Working 卡片保留上一张稳定 C 并显示 loading，B 完成后再异步生成保持宽高比、不放大且宽高分别不超过 `720×540` 的 quality `0.80` WebP C；C 完成后原子切换卡片并移除 loading，最大化和正式协作画布始终读取 B。Owner 使用 `Apply changes`；Collaborator 使用 `Submit proposal`，Proposal 在 Owner 批准成为正式 Commit 前不会更新 B。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。未获得原图的 Collaborator 只能把已收到的干净预览作为本端 A；收到原图后会替换 A，并按当前参数重新生成 B/C。
+13. Review 的连续标注和放大镜效果只在 Konva 中实时渲染。保存图片时不读取 Konva 快照来拼接 Blob，也不创建全尺寸 `OffscreenCanvas`；UI 把结构化 `draw` 参数交给 `ImageProcessingService.materialize()`。Desktop Native 或 Web Rust/WASM 从源 Blob 解码，在全尺寸像素上重放标注，并以 quality `82` 按源格式编码一次；非 JPEG、PNG、WebP、AVIF 来源回退为 WebP。该非空参数文档不能退回原图，因为原图不包含新标注，也不再运行旧的超限后二次 WebP/AVIF 候选搜索。最终文件名在原文件主名称后添加 `-annotated`，并使用实际编码格式的扩展名。保存结果始终作为具有独立 ID、独立根节点和完整 Blob 的新图片写入，不会成为或替换原图版本。最终预览弹窗提供“保存”和“分享”：保存直接进入左侧本地图片列表；分享直接向对方发送接收请求，不再触发额外的大小压缩提示，且弹窗在等待确认和传输期间保持显示。对方接受后，弹窗展示传输阶段，成功时双方图片均位于待发送主区域；对方拒绝后，分享方可选择把生成图保存到左侧列表或丢弃临时图片。最终预览弹窗展示实际输出格式与压缩后体积，点击遮罩不会关闭弹窗。
+14. 新版 Image Workspace 的裁剪、尺寸调整、色彩调整、旋转和 Doodle 仍只通过版本化 JSON 参数同步，不传输处理后的 B。实时编辑全部停留在 WebView 的 Konva/WebGL2 有界预览层，不创建 Blob；正式 Commit 或回退生效后，各端才从本端 A 进入 Service，并用共享 Rust operations Core 一次性重放当前完整参数队列，物化唯一一份全尺寸 B。B 保持 A 的图片格式，使用最高质量档位，不经过预览降采样或预览质量压缩。B 处理期间 Working 卡片保留上一张稳定 C 并显示 loading，B 完成后再异步生成保持宽高比、不放大且宽高分别不超过 `720×540` 的 quality `0.80` WebP C；Web 的 C 未命中路径同样先在 Rust/WASM 重放参数和约束尺寸，再编码一次。C 完成后原子切换卡片并移除 loading，最大化和正式协作画布始终读取 B。Owner 使用 `Apply changes`；Collaborator 使用 `Submit proposal`，Proposal 在 Owner 批准成为正式 Commit 前不会更新 B。压缩和格式转换不进入协作参数栈，始终运行对应完整编码链并创建独立图片。
 
 关键实现：
 
@@ -726,14 +733,12 @@ Feature Extractor -> Analyzer -> Predictor -> Planner -> Gain -> Encoder -> Guar
 - 色彩调整 UI：`packages/ui/src/components/share/workspace/image-color-adjustment-dialog.tsx`
 - 色彩实时预览：`packages/ui/src/components/share/workspace/color-adjustment-preview.tsx`
 - 色调曲线编辑器：`packages/ui/src/components/share/workspace/tone-curve-editor.tsx`
-- 色彩全尺寸处理与直接编码 Worker：`packages/ui/src/workers/room-color-adjustment.worker.ts`
 - 处理结果动作弹窗：`packages/ui/src/components/share/workspace/image-result-dialog.tsx`
 - 本地图片列表：`packages/ui/src/components/share/workspace/local-image-list.tsx`
 - 色彩像素处理：`packages/ui/src/utils/room-color-adjustments.ts`
 - Room 格式转换适配：`packages/ui/src/utils/room-image-conversion.ts`
-- Room 图片编辑编码：`packages/ui/src/utils/room-image-editing.ts`
 - Review 标注渲染：`packages/ui/src/components/share/workspace/review-annotation-layer.tsx`
-- Review 图片合成与编码：`packages/ui/src/utils/review-image-export.ts`
-- Image Workspace 参数预览：`packages/ui/src/workspace/parameter-preview.ts`
+- Review Rust 参数物化入口：`packages/ui/src/utils/review-image-export.ts`
+- Web Blob 参数预览与物化：`packages/ui/src/image-processing/web-runtime.ts`、`crates/picbind-image/src/lib.rs`
 - Image Workspace 协作容器：`packages/ui/src/workspace/collaboration-image-container.ts`
 - 图片内容身份与 metadata：`crates/picbind-image/src/content_identity.rs`

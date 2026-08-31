@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_compressionresult_free: (a: number, b: number) => void;
+export const __wbg_materializedpixels_free: (a: number, b: number) => void;
 export const analyze_image_metrics: (a: number, b: number) => [number, number, number];
 export const calculate_image_md5: (a: number, b: number) => [number, number, number, number];
 export const calculate_image_quality_score: (a: number, b: number, c: number, d: number) => [number, number, number];
@@ -30,9 +31,15 @@ export const generate_share_placeholder_from_rgba: (a: number, b: number, c: num
 export const generate_share_preview_thumbnail: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const generate_share_preview_thumbnail_from_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const generate_share_thumbnail: (a: number, b: number) => [number, number, number, number];
+export const materialize_image_operations_to_rgba: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const materialize_rgba_operations_to_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const materializedpixels_bytes: (a: number) => [number, number];
+export const materializedpixels_height: (a: number) => number;
+export const materializedpixels_width: (a: number) => number;
 export const predict_compression: (a: number, b: number) => [number, number, number];
 export const predict_compression_rgba: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const read_image_metadata: (a: number, b: number) => [number, number, number];
+export const render_image_operations_preview_to_rgba: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const resize_image_to_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

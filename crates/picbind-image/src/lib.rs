@@ -16,6 +16,7 @@ const MAX_SHARE_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_SHARE_THUMBNAIL_BYTES: usize = 10 * 1024;
 const MAX_AVIF_INTERMEDIATE_BYTES: usize = 128 * 1024 * 1024;
 
+#[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
@@ -27,6 +28,18 @@ pub fn ensure_input_size_limit(input: &[u8]) -> Result<(), JsValue> {
         )));
     }
     Ok(())
+}
+
+fn decode_image(input: &[u8], operation: &str) -> Result<DynamicImage, JsValue> {
+    let format =
+        image::guess_format(input).map_err(|error| JsValue::from_str(&error.to_string()))?;
+    if format == ImageFormat::Avif {
+        return picbind_image_native::decode_avif(input).map_err(|error| {
+            JsValue::from_str(&format!("{operation} AVIF decode failed: {error}"))
+        });
+    }
+    image::load_from_memory_with_format(input, format)
+        .map_err(|error| JsValue::from_str(&format!("{operation} decode failed: {error}")))
 }
 
 #[wasm_bindgen]
@@ -96,6 +109,113 @@ impl CompressionResult {
     pub fn ext(&self) -> String {
         self.ext.clone()
     }
+}
+
+#[wasm_bindgen]
+pub struct MaterializedPixels {
+    bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+#[wasm_bindgen]
+impl MaterializedPixels {
+    #[wasm_bindgen(getter)]
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+fn materialize_dynamic_image_operations(
+    image: DynamicImage,
+    document_json: &str,
+) -> Result<MaterializedPixels, JsValue> {
+    let image = replay_dynamic_image_operations(image, document_json)?;
+    materialized_pixels(image)
+}
+
+fn replay_dynamic_image_operations(
+    image: DynamicImage,
+    document_json: &str,
+) -> Result<DynamicImage, JsValue> {
+    let document = serde_json::from_str(document_json).map_err(|error| {
+        JsValue::from_str(&format!("Invalid image parameter document: {error}"))
+    })?;
+    picbind_image_native::replay_dynamic_image(image, &document)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+fn materialized_pixels(image: DynamicImage) -> Result<MaterializedPixels, JsValue> {
+    ensure_target_pixel_limit(image.width(), image.height())?;
+    let image = image.to_rgba8();
+    Ok(MaterializedPixels {
+        width: image.width(),
+        height: image.height(),
+        bytes: image.into_raw(),
+    })
+}
+
+#[wasm_bindgen]
+pub fn materialize_image_operations_to_rgba(
+    input: &[u8],
+    document_json: &str,
+) -> Result<MaterializedPixels, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+    }
+    let image = decode_image(input, "Image")?;
+    materialize_dynamic_image_operations(image, document_json)
+}
+
+#[wasm_bindgen]
+pub fn materialize_rgba_operations_to_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    document_json: &str,
+) -> Result<MaterializedPixels, JsValue> {
+    let image = DynamicImage::ImageRgba8(rgba_image_from_bytes(rgba, width, height)?);
+    materialize_dynamic_image_operations(image, document_json)
+}
+
+#[wasm_bindgen]
+pub fn render_image_operations_preview_to_rgba(
+    input: &[u8],
+    document_json: &str,
+    max_width: u32,
+    max_height: u32,
+) -> Result<MaterializedPixels, JsValue> {
+    if input.len() > MAX_SHARE_IMAGE_BYTES {
+        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+    }
+    if max_width == 0 || max_height == 0 || max_width > 2048 || max_height > 2048 {
+        return Err(JsValue::from_str(
+            "Preview dimensions must be between 1 and 2048 pixels",
+        ));
+    }
+    let image = decode_image(input, "Image")?;
+    let image = replay_dynamic_image_operations(image, document_json)?;
+    let scale = (f64::from(max_width) / f64::from(image.width()))
+        .min(f64::from(max_height) / f64::from(image.height()))
+        .min(1.0);
+    let width = (f64::from(image.width()) * scale).round().max(1.0) as u32;
+    let height = (f64::from(image.height()) * scale).round().max(1.0) as u32;
+    let image = if image.width() == width && image.height() == height {
+        image
+    } else {
+        image.resize_exact(width, height, FilterType::Lanczos3)
+    };
+    materialized_pixels(image)
 }
 
 #[wasm_bindgen]
@@ -423,8 +543,7 @@ pub fn generate_share_thumbnail(input: &[u8]) -> Result<Vec<u8>, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
         return Err(JsValue::from_str("Share image must be 50 MB or smaller"));
     }
-    let decoded = image::load_from_memory(input)
-        .map_err(|err| JsValue::from_str(&format!("Thumbnail decode failed: {err}")))?;
+    let decoded = decode_image(input, "Thumbnail")?;
     generate_png_size(&square_crop(decoded), 32)
 }
 
@@ -455,8 +574,7 @@ pub fn generate_share_preview_thumbnail(
         return Err(JsValue::from_str("Thumbnail dimensions must be positive"));
     }
 
-    let decoded = image::load_from_memory(input)
-        .map_err(|err| JsValue::from_str(&format!("Thumbnail decode failed: {err}")))?;
+    let decoded = decode_image(input, "Thumbnail")?;
     generate_share_preview_thumbnail_from_image(decoded, container_width, container_height)
 }
 
@@ -506,8 +624,7 @@ pub fn generate_share_placeholder(input: &[u8]) -> Result<js_sys::Object, JsValu
     if input.len() > MAX_SHARE_IMAGE_BYTES {
         return Err(JsValue::from_str("Share image must be 50 MB or smaller"));
     }
-    let decoded = image::load_from_memory(input)
-        .map_err(|err| JsValue::from_str(&format!("Placeholder decode failed: {err}")))?;
+    let decoded = decode_image(input, "Placeholder")?;
     placeholder_to_js(share_placeholder::generate(&decoded))
 }
 
@@ -646,5 +763,28 @@ mod tests {
 
         assert!(thumbnail.len() <= MAX_SHARE_THUMBNAIL_BYTES);
         assert_eq!(decoded.dimensions(), (320, 240));
+    }
+
+    #[test]
+    fn operation_preview_replays_before_fitting_to_bounds() {
+        let source = DynamicImage::new_rgba8(400, 200);
+        let input = encode_png(&source).expect("encode source");
+        let document = serde_json::json!({
+            "version": 1,
+            "operations": [{
+                "id": "resize-1",
+                "userId": "test-user",
+                "time": 1,
+                "type": "resize",
+                "params": { "width": 300, "height": 600 }
+            }]
+        });
+
+        let preview =
+            render_image_operations_preview_to_rgba(&input, &document.to_string(), 100, 100)
+                .expect("render operation preview");
+
+        assert_eq!((preview.width, preview.height), (50, 100));
+        assert_eq!(preview.bytes.len(), 50 * 100 * 4);
     }
 }
