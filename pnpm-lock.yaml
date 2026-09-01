@@ -76,6 +76,9 @@ importers:
       '@tauri-apps/plugin-websocket':
         specifier: 2.4.2
         version: 2.4.2
+      '@zumer/snapdom':
+        specifier: ^2.22.0
+        version: 2.24.15
       class-variance-authority:
         specifier: ^0.7.0
         version: 0.7.1
@@ -3215,6 +3218,9 @@ packages:
 
   '@xtuc/long@4.2.2':
     resolution: {integrity: sha512-NuHqBY1PB/D8xU6s/thBgOAiAP7HOYDQ32+BFZILJ8ivkUkAHQnWfn6WhL79Owj1qmUnoN/YPhktdIoucipkAQ==}
+
+  '@zumer/snapdom@2.24.15':
+    resolution: {integrity: sha512-4YE+3ekbBFEAxMyHr++wxOSGt/k+n721eeNT9N9Map27A+ra5sBut3qkYyheYlRj9dJ3HtZaUN1/yrh/aCiuKw==}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -8435,6 +8441,8 @@ snapshots:
   '@xtuc/ieee754@1.2.0': {}
 
   '@xtuc/long@4.2.2': {}
+
+  '@zumer/snapdom@2.24.15': {}
 
   acorn-jsx@5.3.2(acorn@8.18.0):
     dependencies:

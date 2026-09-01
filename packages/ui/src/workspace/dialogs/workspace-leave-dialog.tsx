@@ -47,7 +47,7 @@ export function WorkspaceLeaveDialog({
         </h2>
       </div>
       <p className="mt-2 text-sm leading-6 text-slate-600">
-        {owner ? text("exitWorkspaceDescription") : text("leaveWorkspaceDescription")}
+        {owner ? text("ownerLeaveWorkspaceDescription") : text("leaveWorkspaceDescription")}
       </p>
       {owner ? <div className="mt-5 grid gap-2">
         <button type="button" disabled={pending} onClick={() => onTemporaryLeave?.(rememberChoice)} className="flex w-full items-start gap-3 rounded-md border border-slate-200 p-3 text-left hover:border-blue-200 hover:bg-blue-50/50 disabled:cursor-wait disabled:opacity-50">

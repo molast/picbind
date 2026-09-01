@@ -1,5 +1,5 @@
 import React from "react";
-import { FiMaximize2, FiPause } from "react-icons/fi";
+import { FiFolder, FiMaximize2 } from "react-icons/fi";
 import { getLang, getWorkspaceLabels } from "../../locales";
 import type { WorkspaceIdentity, WorkspaceRuntimeState } from "../types";
 
@@ -29,10 +29,10 @@ export function WorkspaceSuspendedDock({
   onRestore(): void;
 }) {
   return <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end bg-transparent p-4 sm:p-6">
-    <aside className="pointer-events-auto w-full max-w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.16)]" role="status">
+    <aside data-picbind-workspace-dock="true" className="pointer-events-auto w-full max-w-[360px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.16)]" role="status">
       <div className="flex items-center gap-3 p-4">
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]">
-          <FiPause className="h-5 w-5" aria-hidden="true" />
+          <FiFolder className="h-5 w-5" aria-hidden="true" />
           <span className={`absolute right-0 top-0 h-2.5 w-2.5 rounded-full border-2 border-white ${runtime === "connected" || runtime === "available" ? "bg-emerald-500" : "bg-amber-400"}`} />
         </span>
         <div className="min-w-0 flex-1">

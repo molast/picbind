@@ -17,6 +17,18 @@ import {
   retainDesktopRoute,
   type DesktopRoute,
 } from "./desktop-route";
+import {
+  captureWorkspaceBitmap,
+  WorkspaceElasticTextureTransition,
+} from "./workspace-elastic-texture-transition";
+
+type WorkspaceTransitionBitmap = ImageBitmap | HTMLImageElement | HTMLCanvasElement;
+
+function closeWorkspaceTransitionBitmap(bitmap: WorkspaceTransitionBitmap | null) {
+  if (bitmap && "close" in bitmap && typeof (bitmap as { close?: unknown }).close === "function") {
+    (bitmap as ImageBitmap).close();
+  }
+}
 
 const HomePageStack = React.lazy(() => import("@/components/home/home-page-stack"));
 const FaviconGeneratorPage = React.lazy(
@@ -30,15 +42,21 @@ function RouteLoading() {
 
 function RouteLayer({
   active,
+  transition,
+  workspaceLayer = false,
   children,
 }: {
   active: boolean;
+  transition?: "restoring" | null;
+  workspaceLayer?: boolean;
   children: React.ReactNode;
 }) {
+  const hiddenDuringRestore = active && transition === "restoring";
   return (
     <div
-      className={active ? "absolute inset-0 overflow-auto" : "hidden"}
-      aria-hidden={!active}
+      data-picbind-workspace-layer={workspaceLayer ? "true" : undefined}
+      className={`${active ? "absolute inset-0 overflow-auto" : "hidden"} ${hiddenDuringRestore ? "invisible pointer-events-none" : ""}`}
+      aria-hidden={!active || hiddenDuringRestore}
     >
       {children}
     </div>
@@ -57,6 +75,20 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
     runtime: WorkspaceRuntimeState;
     returnHref: string;
   } | null>(null);
+  const [workspaceTransition, setWorkspaceTransition] = React.useState<
+    "suspending" | "restoring" | null
+  >(null);
+  const [workspaceTransitionBitmap, setWorkspaceTransitionBitmap] = React.useState<WorkspaceTransitionBitmap | null>(null);
+  const workspaceTransitionCapture = React.useRef(0);
+  const setWorkspaceTransitionState = React.useCallback((transition: "suspending" | "restoring" | null) => {
+    setWorkspaceTransition(transition);
+  }, []);
+  const replaceWorkspaceTransitionBitmap = React.useCallback((next: WorkspaceTransitionBitmap | null) => {
+    setWorkspaceTransitionBitmap((current) => {
+      if (current && current !== next) closeWorkspaceTransitionBitmap(current);
+      return next;
+    });
+  }, []);
   const activeRoute = getDesktopRoute(pathname);
   React.useEffect(() => {
     setDesktop(isTauri());
@@ -83,8 +115,27 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
             returnHref: `${window.location.pathname}${window.location.search}${window.location.hash}`,
           };
         });
-        if (desktop && getDesktopRoute(window.location.pathname) === "workspace") {
-          router.push("/");
+        if (getDesktopRoute(window.location.pathname) === "workspace") {
+          const captureSequence = ++workspaceTransitionCapture.current;
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+            "[data-picbind-workspace-layer='true'], [data-picbind-workspace-content='true'], main",
+          ));
+          const layer = candidates.find((candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            const style = window.getComputedStyle(candidate);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          });
+          void (layer ? captureWorkspaceBitmap(layer) : Promise.resolve(null)).then((bitmap) => {
+            if (captureSequence !== workspaceTransitionCapture.current) {
+              closeWorkspaceTransitionBitmap(bitmap);
+              return;
+            }
+            if (bitmap) {
+              replaceWorkspaceTransitionBitmap(bitmap);
+              setWorkspaceTransitionState("suspending");
+            }
+            router.push("/");
+          }).catch(() => router.push("/"));
         }
       } else if (!detail.suspended) {
         setSuspendedWorkspace(null);
@@ -92,7 +143,12 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
     };
     window.addEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
     return () => window.removeEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
-  }, [desktop, router]);
+  }, [desktop, replaceWorkspaceTransitionBitmap, router, setWorkspaceTransitionState]);
+
+  React.useEffect(() => () => {
+    workspaceTransitionCapture.current += 1;
+    replaceWorkspaceTransitionBitmap(null);
+  }, [replaceWorkspaceTransitionBitmap]);
 
   React.useEffect(() => {
     if (!desktop) return;
@@ -103,6 +159,8 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
         if (!current || !workspaceId || current.workspace.workspaceId === workspaceId) return null;
         return current;
       });
+      setWorkspaceTransitionState(null);
+      replaceWorkspaceTransitionBitmap(null);
       setMountedRoutes((current) => {
         if (!current.has("workspace")) return current;
         const next = new Set(current);
@@ -113,18 +171,31 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
     };
     window.addEventListener(WORKSPACE_EXIT_EVENT, handleExit);
     return () => window.removeEventListener(WORKSPACE_EXIT_EVENT, handleExit);
-  }, [desktop]);
+  }, [desktop, replaceWorkspaceTransitionBitmap, setWorkspaceTransitionState]);
 
   const restoreSuspendedWorkspace = React.useCallback(() => {
     if (!suspendedWorkspace) return;
     const suspended = suspendedWorkspace;
     const target = suspended.returnHref || "/workspace";
-    setSuspendedWorkspace(null);
+    const animateRestore = Boolean(workspaceTransitionBitmap);
+    if (animateRestore) setWorkspaceTransitionState("restoring");
     window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
       detail: { suspended: false, workspace: suspended.workspace },
     }));
+    if (animateRestore) setSuspendedWorkspace(suspended);
+    else setSuspendedWorkspace(null);
     router.push(target);
-  }, [router, suspendedWorkspace]);
+  }, [router, setWorkspaceTransitionState, suspendedWorkspace, workspaceTransitionBitmap]);
+
+  const completeWorkspaceTransition = React.useCallback(() => {
+    if (workspaceTransition === "suspending") {
+      setWorkspaceTransitionState(null);
+      return;
+    }
+    setSuspendedWorkspace(null);
+    setWorkspaceTransitionState(null);
+    replaceWorkspaceTransitionBitmap(null);
+  }, [replaceWorkspaceTransitionBitmap, setWorkspaceTransitionState, workspaceTransition]);
 
   React.useEffect(() => {
     const handleNavigate = (event: Event) => {
@@ -167,6 +238,13 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
         onRestore={restoreSuspendedWorkspace}
       />
     ) : null}
+    {workspaceTransitionBitmap && workspaceTransition ? (
+      <WorkspaceElasticTextureTransition
+        bitmap={workspaceTransitionBitmap}
+        phase={workspaceTransition === "suspending" ? "out" : "in"}
+        onComplete={completeWorkspaceTransition}
+      />
+    ) : null}
   </div>;
 
   const shouldMount = (route: DesktopRoute) =>
@@ -196,7 +274,7 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
       ) : null}
 
       {shouldMount("workspace") ? (
-        <RouteLayer active={activeRoute === "workspace"}>
+        <RouteLayer active={activeRoute === "workspace"} transition={workspaceTransition === "restoring" ? "restoring" : null} workspaceLayer>
           <React.Suspense fallback={<RouteLoading />}>
             <WorkspaceRoute />
           </React.Suspense>
@@ -206,11 +284,18 @@ export default function DesktopRouteStack({ children }: { children: React.ReactN
       {activeRoute === null ? (
         <div className="absolute inset-0 overflow-auto">{children}</div>
       ) : null}
-      {suspendedWorkspace && activeRoute === "home" ? (
+      {suspendedWorkspace && (activeRoute === "home" || workspaceTransition === "suspending" || workspaceTransition === "restoring") ? (
         <WorkspaceSuspendedDock
           workspace={suspendedWorkspace.workspace}
           runtime={suspendedWorkspace.runtime}
           onRestore={restoreSuspendedWorkspace}
+        />
+      ) : null}
+      {workspaceTransitionBitmap && workspaceTransition ? (
+        <WorkspaceElasticTextureTransition
+          bitmap={workspaceTransitionBitmap}
+          phase={workspaceTransition === "suspending" ? "out" : "in"}
+          onComplete={completeWorkspaceTransition}
         />
       ) : null}
     </div>

@@ -38,7 +38,6 @@ import { WorkspaceHeader } from "../components/workspace-header";
 import {
   WORKSPACE_EXIT_EVENT,
   WORKSPACE_SUSPENSION_EVENT,
-  WorkspaceSuspendedDock,
   type WorkspaceExitEventDetail,
   type WorkspaceSuspensionEventDetail,
 } from "../components/workspace-suspended-dock";
@@ -92,7 +91,7 @@ import { createPrefixedId, initialWorkspaceCommitId } from "../../utils/id";
 const workspaceText = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
 
-export default function WorkspacePage({ shareToken, initialWorkspace, userDisplayName, publicSiteUrl, desktop = false, suspendedContent, onSuspend, onExit }: {
+export default function WorkspacePage({ shareToken, initialWorkspace, userDisplayName, publicSiteUrl, desktop = false, onSuspend, onExit }: {
   shareToken?: string;
   initialWorkspace?: WorkspaceIdentity;
   userDisplayName?: string | null;
@@ -116,7 +115,6 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const realtimeRef = React.useRef<RealtimeSession | null>(null);
   const realtimeEventRef = React.useRef<(value: WorkspaceEvent | Record<string, unknown>) => void>(() => undefined);
   const [workspace, setWorkspace] = React.useState<WorkspaceIdentity | null>(null);
-  const [workspaceSuspended, setWorkspaceSuspended] = React.useState(false);
   const [leavePreference, setLeavePreference] = React.useState<WorkspaceLeaveAction | null>(null);
   const [rememberLeaveChoice, setRememberLeaveChoice] = React.useState(false);
   const [images, setImages] = React.useState<WorkspaceImage[]>([]);
@@ -169,7 +167,6 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const suspendWorkspace = React.useCallback((remember = false) => {
     updateLeavePreference("suspend", remember);
     setLeaveConfirmOpen(false);
-    setWorkspaceSuspended(true);
     if (typeof window !== "undefined" && workspace) {
       window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
         detail: { suspended: true, workspace, runtime },
@@ -177,38 +174,9 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     }
     if (!desktop) onSuspend?.();
   }, [desktop, onSuspend, runtime, setLeaveConfirmOpen, updateLeavePreference, workspace]);
-  const restoreWorkspace = React.useCallback(() => {
-    setWorkspaceSuspended(false);
-    if (typeof window !== "undefined" && workspace) {
-      window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
-        detail: { suspended: false, workspace },
-      }));
-    }
-  }, [workspace]);
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleSuspension = (event: Event) => {
-      const detail = (event as CustomEvent<WorkspaceSuspensionEventDetail>).detail;
-      if (!detail || detail.suspended || (detail.workspace?.workspaceId && detail.workspace.workspaceId !== workspace?.workspaceId)) return;
-      setWorkspaceSuspended(false);
-    };
-    window.addEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
-    return () => window.removeEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
-  }, [workspace?.workspaceId]);
-  React.useEffect(() => {
-    if (typeof window === "undefined" || !workspaceSuspended || !workspace) return;
-    window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
-      detail: {
-        suspended: true,
-        workspace,
-        runtime,
-      },
-    }));
-  }, [runtime, workspace, workspaceSuspended]);
   const confirmLeaveWorkspace = React.useCallback((remember = false) => {
     if (leavingWorkspace) return;
     updateLeavePreference("exit", remember);
-    setWorkspaceSuspended(false);
     setLeaveConfirmOpen(false);
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent<WorkspaceExitEventDetail>(WORKSPACE_EXIT_EVENT, {
@@ -1068,14 +1036,10 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     : selected, [editorContainerDocument, selected]);
   const { editorImage, editorPosterUrl, editorBaseReady, initialColorAdjustments, initialCrop, initialResize, initialReviewAnnotations, labels, editorLoadingOverlay } = useWorkspaceEditorState({ workspace, selected: editorSelected, processingSource, editorPreparing, lang });
   const { saveProcessedResult } = useWorkspaceProcessedResultCommand({ workspace, selected, setEditing, createOperation, queueProcessedResult, releaseProcessingSource });
-  if(!workspace&&runtime==="unavailable")return <WorkspaceUnavailable notice={notice}/>;
-  if(!workspace)return <WorkspaceLoading/>;
-  if(workspaceSuspended && !desktop) return <main className="relative min-h-screen overflow-hidden bg-slate-50">
-    {suspendedContent || <div className="min-h-screen bg-slate-50" />}
-    <WorkspaceSuspendedDock workspace={workspace} runtime={runtime} onRestore={restoreWorkspace} />
-  </main>;
-  if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace workspaceId={workspace.workspaceId} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
-  return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
+  if(!workspace&&runtime==="unavailable")return <div data-picbind-workspace-content="true"><WorkspaceUnavailable notice={notice}/></div>;
+  if(!workspace)return <div data-picbind-workspace-content="true"><WorkspaceLoading/></div>;
+  if(reviewOpen&&editorImage)return <main data-picbind-workspace-content="true" className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace workspaceId={workspace.workspaceId} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
+  return <main data-picbind-workspace-content="true" className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
     <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} desktop={desktop} lang={lang} onLanguageChange={(nextLang)=>{persistLang(nextLang);setLanguage(nextLang);}} onEnterWorkspace={()=>setShareIdEntryOpen(true)} onLeave={requestLeave} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>setShareDialogOpen(true)} onSettings={()=>setSettingsOpen(true)} />
     <WorkspaceStatusBands workspace={workspace} runtime={runtime} notice={notice} imageCount={images.length} onDismissNotice={()=>setNotice(null)}/>
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:overflow-hidden">

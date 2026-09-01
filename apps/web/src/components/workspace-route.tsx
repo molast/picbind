@@ -69,7 +69,7 @@ export default function WorkspaceRoute() {
       publicSiteUrl={PUBLIC_WORKSPACE_SITE_URL}
       desktop={desktop}
       suspendedContent={<HomePageStack initialLang="en" />}
-      onSuspend={() => router.push("/")}
+      onSuspend={() => undefined}
       onExit={() => router.back()}
     />
   </RealtimeProviderRoot>;

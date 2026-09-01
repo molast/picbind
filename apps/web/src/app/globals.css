@@ -18,8 +18,6 @@
   animation: workspace-reaction-float 1.4s ease-out forwards;
 }
 
-
-
 @layer base {
   :root {
     /* --background: 0 0% 100%; */
