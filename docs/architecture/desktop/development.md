@@ -154,12 +154,12 @@ Native bulk IPC 性能与内存、Windows 和 Linux 尚未验证。
 ## 7. 当前限制
 
 - Tauri 仍复用现有 Web UI，但图片缓存已经使用 Rust Native Store。
-- 单图、ZIP、Room 图片和 favicon ZIP 通过统一 Download Repository 分流；Tauri 不依赖
+- 单图、ZIP、Workspace 图片和 favicon ZIP 通过统一 Download Repository 分流；Tauri 不依赖
   WKWebView 的 Blob `<a download>`。
 - 没有原生文件选择、菜单、托盘、通知或 Shell 权限。
 - Web/Tauri 的存储、图片处理和 realtime 差异只允许位于各自平台 Adapter；运行环境由应用
   组合层选择，不进入 Workspace 页面组件和业务 Store。
-- 压缩图、Room 和消息图片已使用分页元数据与按需 Blob 读取；兼容接口仍可显式恢复
+- 压缩图、Workspace 和消息图片已使用分页元数据与按需 Blob 读取；兼容接口仍可显式恢复
   完整列表。
 - 当前开发阶段不迁移旧 Dexie + OPFS 图片缓存；存储结构调整后直接清理开发缓存。
 - 消息缓存与派生缩略图使用 512 MB / 30 天 LRU，启动时执行 temp、孤儿和缺失记录恢复。

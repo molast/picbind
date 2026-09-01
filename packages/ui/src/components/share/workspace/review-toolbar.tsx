@@ -36,8 +36,8 @@ import {
   LuUsersRound,
 } from "react-icons/lu";
 import { PiHandPalmBold } from "react-icons/pi";
-import type { ShareRoomLabels } from "../share-room-labels";
-import { middleEllipsisFileName } from "../share-room-formatters";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import { middleEllipsisFileName } from "../workspace-formatters";
 import type {
   ReviewMode,
   ReviewStrokeStyle,
@@ -53,7 +53,7 @@ const LINE_THICKNESSES = [0.0015, 0.003, 0.005, 0.008] as const;
 type ReviewToolbarProps = {
   imageName: string;
   zoomPercent: number;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   activeTool: ReviewTool;
   canUndo: boolean;
   canRedo: boolean;

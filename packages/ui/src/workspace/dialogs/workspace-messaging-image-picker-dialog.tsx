@@ -2,7 +2,7 @@
 
 import React from "react";
 import { FiShield, FiZap } from "react-icons/fi";
-import type { ShareRoomLabels } from "../../locales";
+import type { WorkspaceEditorLabels } from "../../locales";
 import type { WorkspaceIdentity, WorkspaceImage, WorkspaceMessagingCompressionMode } from "../types";
 import { WorkspaceImagePickerDialog } from "./workspace-image-picker-dialog";
 
@@ -23,7 +23,7 @@ export function WorkspaceMessagingImagePickerDialog({
   workingImages: WorkspaceImage[];
   libraryImages: WorkspaceImage[];
   role: WorkspaceIdentity["role"];
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   sending: boolean;
   error?: string | null;
   onMoveToWorking(image: WorkspaceImage): Promise<boolean>;

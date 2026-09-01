@@ -5,13 +5,13 @@
 import { initWasm } from "./wasm-runtime";
 import { replaceFileExtension } from "./image-object";
 import { encodeWithLibavif, encodeWithLibwebp } from "@picbind/image-codecs";
-import { getLang, getShareRoomLabels, type Lang, type ShareRoomLabels } from "../locales";
+import { getLang, getWorkspaceEditorLabels, type Lang, type WorkspaceEditorLabels } from "../locales";
 
-export type RoomCompressionFormat = "auto" | "jpeg" | "png" | "webp" | "avif";
+export type WorkspaceCompressionFormat = "auto" | "jpeg" | "png" | "webp" | "avif";
 
-export type RoomCompressionResult = {
+export type WorkspaceCompressionResult = {
   blob: Blob;
-  format: Exclude<RoomCompressionFormat, "auto">;
+  format: Exclude<WorkspaceCompressionFormat, "auto">;
   name: string;
   width: number;
   height: number;
@@ -19,12 +19,12 @@ export type RoomCompressionResult = {
   parameters?: Record<string, unknown>;
 };
 
-export type RoomCompressionDimensions = {
+export type WorkspaceCompressionDimensions = {
   width: number;
   height: number;
 };
 
-export type RoomCompressionEncodingOptions = {
+export type WorkspaceCompressionEncodingOptions = {
   quality?: number;
   compressionGain?: number;
   sourceSizeBytes?: number;
@@ -97,10 +97,10 @@ function hasRealAlpha(image: ImageData) {
 async function encodeWasm(
   blob: Blob,
   format: "jpeg" | "png",
-  labels: ShareRoomLabels,
+  labels: WorkspaceEditorLabels,
   allowAlphaLoss: boolean,
-  dimensions?: RoomCompressionDimensions,
-  options: RoomCompressionEncodingOptions = {},
+  dimensions?: WorkspaceCompressionDimensions,
+  options: WorkspaceCompressionEncodingOptions = {},
 ) {
   const mod = await initWasm();
   const input = new Uint8Array(await blob.arrayBuffer());
@@ -212,15 +212,15 @@ async function encodeJsquash(
   return new Blob([bytes], { type: `image/${format}` });
 }
 
-export async function encodeRoomImageData(
+export async function encodeWorkspaceImageData(
   image: ImageData,
-  format: Exclude<RoomCompressionFormat, "auto">,
+  format: Exclude<WorkspaceCompressionFormat, "auto">,
   sourceName: string,
   sourceSizeBytes: number,
   lang: Lang = getLang(),
-  options: RoomCompressionEncodingOptions = {},
-): Promise<RoomCompressionResult> {
-  const labels = getShareRoomLabels(lang);
+  options: WorkspaceCompressionEncodingOptions = {},
+): Promise<WorkspaceCompressionResult> {
+  const labels = getWorkspaceEditorLabels(lang);
   const encodingOptions = {
     ...options,
     sourceSizeBytes,
@@ -298,15 +298,15 @@ async function recommendedFormat(blob: Blob, resizedImage?: ImageData) {
   }
 }
 
-export async function compressRoomImage(
+export async function compressWorkspaceImage(
   image: Blob & { name?: string },
-  requestedFormat: RoomCompressionFormat,
-  dimensions?: RoomCompressionDimensions,
+  requestedFormat: WorkspaceCompressionFormat,
+  dimensions?: WorkspaceCompressionDimensions,
   lang: Lang = getLang(),
   allowAlphaLoss = false,
-  encodingOptions: RoomCompressionEncodingOptions = {},
-): Promise<RoomCompressionResult> {
-  const labels = getShareRoomLabels(lang);
+  encodingOptions: WorkspaceCompressionEncodingOptions = {},
+): Promise<WorkspaceCompressionResult> {
+  const labels = getWorkspaceEditorLabels(lang);
   const decoded = await decodeImage(image);
   const targetWidth = Math.round(dimensions?.width ?? decoded.width);
   const targetHeight = Math.round(dimensions?.height ?? decoded.height);

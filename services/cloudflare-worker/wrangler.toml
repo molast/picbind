@@ -57,7 +57,7 @@ deleted_classes = ["ShareRoomObject"]
 DEV_MODE = "0"
 ADMIN_KEY = "64b5cdf2a1f5b998c54a045fb4f89006efb41513e94d16712bdb167a016010fc"
 # QINIU_ACCESS_KEY and QINIU_SECRET_KEY must be configured with Wrangler Secret.
-# QINIU_BUCKET and QINIU_UPLOAD_URL will be added when Qiniu room storage is enabled.
+# QINIU_BUCKET and QINIU_UPLOAD_URL will be added when Qiniu Workspace storage is enabled.
 SITE_URL = "https://picbind.com"
 OAUTH_CALLBACK_ORIGIN = "https://api.picbind.com"
 ALLOWED_ORIGINS = "https://picbind.com,https://www.picbind.com,http://localhost:3000,http://127.0.0.1:3000,tauri://localhost,http://tauri.localhost"

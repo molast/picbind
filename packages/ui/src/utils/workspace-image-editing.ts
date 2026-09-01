@@ -2,16 +2,16 @@
 
 import type { ImageObjectOperation } from "./image-object";
 import { appendFileNameSuffix } from "./image-object";
-import { getLang, getShareRoomLabels } from "../locales";
+import { getLang, getWorkspaceEditorLabels } from "../locales";
 import {
-  type RoomColorAdjustments,
-} from "./room-color-adjustments";
-import type { RoomCompressionEncodingOptions, RoomCompressionFormat } from "./room-image-compression";
-import { compressRoomImageTask } from "./room-image-compression-task";
+  type WorkspaceColorAdjustments,
+} from "./workspace-color-adjustments";
+import type { WorkspaceCompressionEncodingOptions, WorkspaceCompressionFormat } from "./workspace-image-compression";
+import { compressWorkspaceImageTask } from "./workspace-image-compression-task";
 import { getPicBindUiConfig } from "../config";
-export type { RoomColorAdjustments } from "./room-color-adjustments";
+export type { WorkspaceColorAdjustments } from "./workspace-color-adjustments";
 
-export type RoomImageEditResult = {
+export type WorkspaceImageEditResult = {
   blob: Blob;
   name: string;
   width: number;
@@ -38,7 +38,7 @@ function normalizedMime(type: string) {
   return type === "image/jpg" ? "image/jpeg" : type;
 }
 
-function outputFormat(sourceType: string): Exclude<RoomCompressionFormat, "auto"> | null {
+function outputFormat(sourceType: string): Exclude<WorkspaceCompressionFormat, "auto"> | null {
   const type = normalizedMime(sourceType);
   if (type === "image/jpeg") return "jpeg";
   if (type === "image/png") return "png";
@@ -47,7 +47,7 @@ function outputFormat(sourceType: string): Exclude<RoomCompressionFormat, "auto"
   return null;
 }
 
-function editingEncodingPreset(format: Exclude<RoomCompressionFormat, "auto">) {
+function editingEncodingPreset(format: Exclude<WorkspaceCompressionFormat, "auto">) {
   if (format === "avif") return { quality: 58, compressionGain: 1 };
   if (format === "png") return { quality: 78, compressionGain: 1.12 };
   return { quality: 78, compressionGain: format === "jpeg" ? 1.08 : 1 };
@@ -56,15 +56,15 @@ function editingEncodingPreset(format: Exclude<RoomCompressionFormat, "auto">) {
 async function encodeEditedPixels(
   pixels: Blob,
   source: Blob & { name?: string },
-  encodingOptions?: RoomCompressionEncodingOptions,
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
 ) {
   const format = outputFormat(source.type);
-  if (!format) throw new Error(getShareRoomLabels(getLang()).browserCannotEncode);
+  if (!format) throw new Error(getWorkspaceEditorLabels(getLang()).browserCannotEncode);
 
   const input = new File([pixels], source.name || "image.png", { type: pixels.type });
   const controller = new AbortController();
   const preset = editingEncodingPreset(format);
-  const result = await compressRoomImageTask(
+  const result = await compressWorkspaceImageTask(
     input,
     format,
     controller.signal,
@@ -83,7 +83,7 @@ async function encodeEditedPixels(
 async function encodeCanvas(
   canvas: OffscreenCanvas,
   source: Blob & { name?: string },
-  encodingOptions?: RoomCompressionEncodingOptions,
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
 ) {
   // Canvas PNG is only a short-lived lossless pixel carrier. The shared codec
   // chain performs the final source-format encoding and PNG optimization.
@@ -100,12 +100,12 @@ type ColorWorkerMessage =
 
 function adjustPixelsInWorker(
   image: File,
-  adjustments: RoomColorAdjustments,
-  format: Exclude<RoomCompressionFormat, "auto">,
-  encodingOptions?: RoomCompressionEncodingOptions,
+  adjustments: WorkspaceColorAdjustments,
+  format: Exclude<WorkspaceCompressionFormat, "auto">,
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
 ): Promise<{ blob: Blob; width: number; height: number }> {
   const worker = new Worker(
-    new URL("../workers/room-color-adjustment.worker.ts", import.meta.url),
+    new URL("../workers/workspace-color-adjustment.worker.ts", import.meta.url),
     { type: "module" },
   );
   return new Promise((resolve, reject) => {
@@ -156,12 +156,12 @@ function resultName(name: string, blob: Blob, suffix: string) {
   );
 }
 
-export async function resizeRoomImage(
+export async function resizeWorkspaceImage(
   image: Blob & { name?: string },
   width: number,
   height: number,
-  encodingOptions?: RoomCompressionEncodingOptions,
-): Promise<RoomImageEditResult> {
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
+): Promise<WorkspaceImageEditResult> {
   const targetWidth = Math.max(1, Math.round(width));
   const targetHeight = Math.max(1, Math.round(height));
   const bitmap = await decodeImage(image);
@@ -186,11 +186,11 @@ export async function resizeRoomImage(
   }
 }
 
-export async function cropRoomImage(
+export async function cropWorkspaceImage(
   image: Blob & { name?: string },
   crop: NormalizedCrop,
-  encodingOptions?: RoomCompressionEncodingOptions,
-): Promise<RoomImageEditResult> {
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
+): Promise<WorkspaceImageEditResult> {
   const bitmap = await decodeImage(image);
   try {
     const sourceX = Math.max(0, Math.min(bitmap.width - 1, Math.round(crop.x * bitmap.width)));
@@ -215,13 +215,13 @@ export async function cropRoomImage(
   }
 }
 
-export async function adjustRoomImage(
+export async function adjustWorkspaceImage(
   image: Blob & { name?: string },
-  adjustments: RoomColorAdjustments,
-  encodingOptions?: RoomCompressionEncodingOptions,
-): Promise<RoomImageEditResult> {
+  adjustments: WorkspaceColorAdjustments,
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
+): Promise<WorkspaceImageEditResult> {
   const format = outputFormat(image.type);
-  if (!format) throw new Error(getShareRoomLabels(getLang()).browserCannotEncode);
+  if (!format) throw new Error(getWorkspaceEditorLabels(getLang()).browserCannotEncode);
   const source = new File([image], image.name || "image", { type: image.type });
   const adjusted = await adjustPixelsInWorker(source, adjustments, format, encodingOptions);
   const blob = adjusted.blob;

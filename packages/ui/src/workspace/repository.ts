@@ -77,7 +77,13 @@ export async function restoreProvisionedWorkspace(workspace: WorkspaceIdentity) 
     return restored;
   }
   const local = await db.workspaces.get(localId);
-  if (local) {
+  // Only the anonymous local workspace may be promoted after login. A
+  // provisioned owner or collaborator Workspace must keep its own cache when
+  // the user opens another share ID.
+  const isAnonymousLocal = local
+    && local.shareToken === null
+    && local.ownerCapability === null;
+  if (isAnonymousLocal) {
     const promoted = { ...workspace, style: local.style };
     await promoteLocalWorkspace(localId, promoted);
     return promoted;
@@ -98,8 +104,8 @@ export async function promoteLocalWorkspace(previousId: string, workspace: Works
   const images = await Promise.all(stored.map(async (image) => {
     try {
       const [source, preview] = await Promise.all([
-        repository.read("room", previousId, image.imageId, "original", image.mimeType),
-        repository.read("room", previousId, image.imageId, "thumbnail", image.preview?.type || "image/webp"),
+        repository.read("workspace", previousId, image.imageId, "original", image.mimeType),
+        repository.read("workspace", previousId, image.imageId, "thumbnail", image.preview?.type || "image/webp"),
       ]);
       return { ...image, source: source || image.source, preview: preview || image.preview, workspaceId: workspace.workspaceId };
     } catch { return { ...image, workspaceId: workspace.workspaceId }; }
@@ -110,7 +116,7 @@ export async function promoteLocalWorkspace(previousId: string, workspace: Works
     if (!commit.snapshotCached && !commit.snapshot) return null;
     try {
       return await repository.read(
-        "room", previousId, `commit:${commit.commitId}`, "original",
+        "workspace", previousId, `commit:${commit.commitId}`, "original",
         commit.snapshotMimeType || "application/octet-stream",
       ) || commit.snapshot || null;
     } catch {
@@ -132,11 +138,11 @@ export async function promoteLocalWorkspace(previousId: string, workspace: Works
   });
   await Promise.all(images.map(async (image) => {
     await saveWorkspaceImage(image);
-    await repository.delete("room", previousId, image.imageId).catch(() => undefined);
+    await repository.delete("workspace", previousId, image.imageId).catch(() => undefined);
   }));
   await Promise.all(commits.map(async (commit, index) => {
     await saveCommit({ ...commit, snapshot: commitSnapshots[index] || undefined });
-    await repository.delete("room", previousId, `commit:${commit.commitId}`).catch(() => undefined);
+    await repository.delete("workspace", previousId, `commit:${commit.commitId}`).catch(() => undefined);
   }));
   localStorage.setItem(LOCAL_WORKSPACE_KEY, workspace.workspaceId);
 }
@@ -152,7 +158,7 @@ export async function listWorkspaceImages(workspaceId: string) {
   const repository = getImageStorageRepository();
   return Promise.all(values.map(async (image) => {
     const storageRecord = await repository.get<Record<string, unknown>>(
-      "room", workspaceId, image.imageId,
+      "workspace", workspaceId, image.imageId,
     ).catch(() => null);
     const storedMetadata = storageRecord?.metadata || {};
     const merged = {
@@ -178,7 +184,7 @@ export async function listWorkspaceImages(workspaceId: string) {
       || cacheKeys.has(`preview:${workspaceId}:${image.imageId}`),
     );
     const sourceAddress = sourceCached && repository.address
-      ? await repository.address("room", workspaceId, image.imageId, "original").catch(() => null)
+      ? await repository.address("workspace", workspaceId, image.imageId, "original").catch(() => null)
       : null;
     return {
       ...normalized,
@@ -195,7 +201,7 @@ export async function readWorkspaceImageSource(image: WorkspaceImage) {
   if (image.source) return image.source;
   try {
     const source = await getImageStorageRepository().read(
-      "room", image.workspaceId, image.imageId, "original", image.mimeType,
+      "workspace", image.workspaceId, image.imageId, "original", image.mimeType,
     );
     if (source) return source;
   } catch {
@@ -218,12 +224,12 @@ export async function getWorkspaceImageProcessingSource(
 
   const repository = getImageStorageRepository();
   if (image.sourceCached && repository.address) {
-    const record = await repository.get("room", image.workspaceId, image.imageId).catch(() => null);
+    const record = await repository.get("workspace", image.workspaceId, image.imageId).catch(() => null);
     if (record && record.byteSize > 0) {
       return {
         kind: "stored",
         asset: {
-          scope: "room",
+          scope: "workspace",
           scopeKey: image.workspaceId,
           id: image.imageId,
           variant: "original",
@@ -245,7 +251,7 @@ export async function getWorkspaceImageSourceAddress(image: WorkspaceImage) {
   if (image.sourceAddress) return image.sourceAddress;
   const repository = getImageStorageRepository();
   return image.sourceCached && repository.address
-    ? repository.address("room", image.workspaceId, image.imageId, "original")
+    ? repository.address("workspace", image.workspaceId, image.imageId, "original")
     : null;
 }
 
@@ -254,7 +260,7 @@ export async function saveExternalWorkspaceImage(image: WorkspaceImage, path: st
   const repository = getImageStorageRepository();
   if (!repository.linkExternal) throw new Error("External image links are unavailable");
   await repository.linkExternal({
-    scope: "room",
+    scope: "workspace",
     scopeKey: image.workspaceId,
     id: image.imageId,
     metadata: metadata as unknown as Record<string, unknown>,
@@ -264,14 +270,14 @@ export async function saveExternalWorkspaceImage(image: WorkspaceImage, path: st
   });
   await getWorkspaceDatabase().images.put(metadata);
   return repository.address
-    ? repository.address("room", image.workspaceId, image.imageId, "original")
+    ? repository.address("workspace", image.workspaceId, image.imageId, "original")
     : null;
 }
 
 export async function readWorkspaceImagePreview(image: WorkspaceImage) {
   try {
     const preview = await getImageStorageRepository().read(
-      "room", image.workspaceId, image.imageId, "thumbnail", "image/webp",
+      "workspace", image.workspaceId, image.imageId, "thumbnail", "image/webp",
     );
     if (preview) return preview;
   } catch {
@@ -295,7 +301,7 @@ export async function saveWorkspaceImage(
   if (!writeBlobs) {
     try {
       await getImageStorageRepository().put({
-        scope: "room",
+        scope: "workspace",
         scopeKey: image.workspaceId,
         id: image.imageId,
         metadata: metadata as unknown as Record<string, unknown>,
@@ -309,7 +315,7 @@ export async function saveWorkspaceImage(
     return;
   }
   try {
-    await getImageStorageRepository().put({ scope: "room", scopeKey: image.workspaceId, id: image.imageId,
+    await getImageStorageRepository().put({ scope: "workspace", scopeKey: image.workspaceId, id: image.imageId,
       metadata: metadata as unknown as Record<string, unknown>, mimeType: image.mimeType,
       data: writeBlobs ? source : undefined, thumbnail: writeBlobs ? preview : undefined,
       thumbnailMimeType: writeBlobs ? preview?.type : undefined, createdAt: image.createdAt });
@@ -326,7 +332,7 @@ export async function saveWorkspaceImage(
 export async function deleteWorkspaceImage(imageId: string) {
   const db = getWorkspaceDatabase();
   const image = await db.images.get(imageId);
-  if (image) await getImageStorageRepository().delete("room", image.workspaceId, imageId).catch(() => undefined);
+  if (image) await getImageStorageRepository().delete("workspace", image.workspaceId, imageId).catch(() => undefined);
   const commits = await db.commits.where("imageId").equals(imageId).toArray();
   const activities = image
     ? await db.activities.where("workspaceId").equals(image.workspaceId)
@@ -334,7 +340,7 @@ export async function deleteWorkspaceImage(imageId: string) {
       .toArray()
     : [];
   if (image) await Promise.all(commits.map((commit) =>
-    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
+    getImageStorageRepository().delete("workspace", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
   const cacheKeys = image
     ? (await db.cache.where("workspaceId").equals(image.workspaceId)
       .filter((entry) => (entry.kind === "preview" || entry.kind === "source")
@@ -366,7 +372,7 @@ export async function clearWorkspaceImageHistory(imageId: string) {
       .toArray(),
   ]);
   await Promise.all(commits.map((commit) =>
-    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
+    getImageStorageRepository().delete("workspace", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
   const cacheKeys = [
     ...commits.map((commit) => `commit:${image.workspaceId}:${commit.commitId}`),
     ...activities.map((activity) => `activity:${image.workspaceId}:${activity.eventId}`),
@@ -388,7 +394,7 @@ export async function saveCommit(value: WorkspaceCommit) {
   if (snapshot && image) {
     try {
       await getImageStorageRepository().put({
-        scope: "room",
+        scope: "workspace",
         scopeKey: image.workspaceId,
         id: `commit:${value.commitId}`,
         metadata: metadata as unknown as Record<string, unknown>,
@@ -411,7 +417,7 @@ export async function saveCommit(value: WorkspaceCommit) {
     const expired = commits.slice(0, commits.length - 20);
     await table.bulkDelete(expired.map((item) => item.commitId));
     if (image) await Promise.all(expired.map((item) =>
-      getImageStorageRepository().delete("room", image.workspaceId, `commit:${item.commitId}`).catch(() => undefined)));
+      getImageStorageRepository().delete("workspace", image.workspaceId, `commit:${item.commitId}`).catch(() => undefined)));
   }
   if(image)await getWorkspaceDatabase().cache.put({key:`commit:${image.workspaceId}:${value.commitId}`,workspaceId:image.workspaceId,kind:"commit",accessedAt:Date.now(),expiresAt:Date.now()+30*DAY});
 }
@@ -428,7 +434,7 @@ export async function deleteCommitsAfter(imageId: string, createdAt: number) {
     await db.cache.bulkDelete(removed.map((commit) => `commit:${image?.workspaceId || ""}:${commit.commitId}`));
   });
   if (image) await Promise.all(removed.map((commit) =>
-    getImageStorageRepository().delete("room", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
+    getImageStorageRepository().delete("workspace", image.workspaceId, `commit:${commit.commitId}`).catch(() => undefined)));
   return removed.map((commit) => commit.commitId);
 }
 export async function deleteCollaborationActivitiesAfter(
@@ -467,7 +473,7 @@ export async function readWorkspaceCommitSnapshot(commit: WorkspaceCommit) {
   if (!image) return null;
   try {
     const snapshot = await getImageStorageRepository().read(
-      "room", image.workspaceId, `commit:${commit.commitId}`, "original",
+      "workspace", image.workspaceId, `commit:${commit.commitId}`, "original",
       commit.snapshotMimeType || image.mimeType,
     );
     if (snapshot) return snapshot;
@@ -537,7 +543,7 @@ export async function purgeExpiredCache(now = Date.now()) {
   const db=getWorkspaceDatabase(),table = db.cache;
   const expired = await table.filter((item) => item.expiresAt !== null && item.expiresAt <= now).toArray();
   const repository = getImageStorageRepository();
-  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined,[entry.kind==="preview"?"previewCached":"sourceCached"]:false});await repository.deleteVariant("room",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit){await db.commits.put({...commit,snapshotCached:false,snapshot:undefined});await repository.delete("room",entry.workspaceId,`commit:${recordId}`).catch(()=>undefined);}}else if(entry.kind==="activity")await db.activities.delete(recordId);}
+  for(const entry of expired){const recordId=entry.key.split(":").at(-1)||"";if(entry.kind==="preview"||entry.kind==="source"){const image=await db.images.get(recordId);if(image){await db.images.put({...image,[entry.kind]:undefined,[entry.kind==="preview"?"previewCached":"sourceCached"]:false});await repository.deleteVariant("workspace",image.workspaceId,image.imageId,entry.kind==="preview"?"thumbnail":"original").catch(()=>undefined);}}else if(entry.kind==="commit"){const commit=await db.commits.get(recordId);if(commit){await db.commits.put({...commit,snapshotCached:false,snapshot:undefined});await repository.delete("workspace",entry.workspaceId,`commit:${recordId}`).catch(()=>undefined);}}else if(entry.kind==="activity")await db.activities.delete(recordId);}
   await table.bulkDelete(expired.map((item) => item.key));
   await repository.pruneCache({maxBytes:512*1024*1024,maxAgeMillis:90*DAY}).catch(()=>undefined);
   return expired.length;

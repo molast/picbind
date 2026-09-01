@@ -48,7 +48,7 @@ V1 采用以下设计：
 | 能力 | Web 当前实现 | Desktop 当前实现 |
 | --- | --- | --- |
 | 首页压缩 | Web Adapter 调用 Worker、WASM 和浏览器 WebP / AVIF 编码器 | JPEG、PNG、WebP、AVIF、JPEG XL 由 Native Planner / Encoder 执行；Desktop 格式选择器显式提供 JXL |
-| Room / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 五格式输入、固定格式与 `auto`、可选 resize 均可走 Native Rust；JPEG XL 仅由显式 API 请求输出 |
+| Workspace / Workspace 压缩与转换 | Web Adapter 保留既有 `interactive` 链路 | 五格式输入、固定格式与 `auto`、可选 resize 均可走 Native Rust；JPEG XL 仅由显式 API 请求输出 |
 | 参数实时预览 | WebView 有界预览；Konva 管理交互，WebGL2 渲染颜色像素，不生成 Blob | 与 Web 相同，不逐帧调用 Native Rust |
 | Blob 参数预览 | Rust/WASM 重放完整文档、约束尺寸后编码一次 | 受支持格式和参数操作使用 Native Rust 生成受限 WebP 预览 |
 | 最终参数重放 | Rust/WASM 从不可变源图重放完整文档并一次编码 | 受支持格式和参数操作由 Native Rust 全尺寸重放并一次编码 |
@@ -207,7 +207,7 @@ export type ImageMetadata = {
 
 ```ts
 export type ImageAssetReference = {
-  scope: "compressed" | "queued" | "room" | "messaging";
+  scope: "compressed" | "queued" | "workspace" | "messaging";
   scopeKey: string;
   id: string;
   variant: "original" | "output" | "thumbnail";
@@ -569,7 +569,7 @@ export type CompressImageRequest = {
 
 - `planner` 是首页 PCE / Predictor、多候选与质量护栏链路；`format: "auto"` 表示由
   Predictor 选择最终格式。
-- `interactive` 是 Room / Workspace 的单次交互式压缩和目标尺寸链路，不启用首页的
+- `interactive` 是 Workspace / Workspace 的单次交互式压缩和目标尺寸链路，不启用首页的
   Butteraugli 外层多候选校验。
 - `messaging-fast` 是 Desktop Native 专用的消息发送极速压缩。它按经典 Luban 长短边分档
   自行决定目标尺寸，不接受显式 `dimensions`；不透明图单次输出 JPEG，透明图单次输出
@@ -1096,16 +1096,16 @@ Alpha 状态只转换一次；空图和无效配置分别映射为明确的输�
 
 ### 阶段 2：包装现有 Web 实现
 
-当前状态：已完成。Web Adapter 保留首页 `planner` 与 Room / Workspace `interactive` 两条
+当前状态：已完成。Web Adapter 保留首页 `planner` 与 Workspace / Workspace `interactive` 两条
 既有压缩链路，并包装预览、物化、转换、质量分析和协作派生资源。
 
 - 实现 `WebImageProcessingService`，只做适配，不改变算法。
 - 把现有 Worker 取消和资源释放映射到 `ImageTaskContext`。
-- 让首页、Room 和 Workspace 逐步通过 Service 调用现有实现。
+- 让首页、Workspace 和 Workspace 逐步通过 Service 调用现有实现。
 
 ### 阶段 3：从 UI 移除执行细节
 
-当前状态：已完成当前 Web UI 调用迁移。首页、Room 与 Workspace 通过 Provider 获取
+当前状态：已完成当前 Web UI 调用迁移。首页、Workspace 与 Workspace 通过 Provider 获取
 Service；实时编辑预览由 WebView 内的 Konva 与 WebGL2 处理，Blob 参数处理由 Adapter 进入
 Rust/WASM 或 Native Rust。
 
@@ -1258,7 +1258,7 @@ artifact 生命周期已经通过 Rust 与 TypeScript 检查；Apple Silicon 性
 
 V1 完成必须同时满足：
 
-1. 首页、Room 和 Workspace UI 不再直接调用 WASM、Worker、Canvas 编码器或 Native 图片
+1. 首页、Workspace 和 Workspace UI 不再直接调用 WASM、Worker、Canvas 编码器或 Native 图片
    command。
 2. Web 所有现有图片处理行为和压缩算法回归测试通过。
 3. Desktop selector 只启用已经实现并通过契约测试的 Native capabilities。

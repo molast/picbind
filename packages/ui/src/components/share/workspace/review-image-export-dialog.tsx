@@ -11,24 +11,24 @@ import {
   FiUser,
   FiX,
 } from "react-icons/fi";
-import { formatBytes } from "../share-room-formatters";
+import { formatBytes } from "../workspace-formatters";
 import type {
   ReviewImageExport,
   ReviewImageExportOutcome,
   ReviewImageExportStage,
 } from "../../../utils/review-image-export";
-import type { ShareRoomLabels } from "../share-room-labels";
-import type { ShareRecipient } from "./share-recipient-dialog";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import type { WorkspaceShareRecipient } from "./workspace-share-recipient";
 
 type ReviewImageExportDialogProps = {
   result: ReviewImageExport | null;
-  labels: ShareRoomLabels;
-  shareRecipients: ShareRecipient[];
+  labels: WorkspaceEditorLabels;
+  shareRecipients: WorkspaceShareRecipient[];
   onClose(): void;
   onSave(
     share: boolean,
     report: (stage: ReviewImageExportStage) => void,
-    recipient?: ShareRecipient,
+    recipient?: WorkspaceShareRecipient,
   ): Promise<ReviewImageExportOutcome>;
   onResolveRejected(imageId: string, save: boolean): Promise<void>;
 };
@@ -144,11 +144,11 @@ export default function ReviewImageExportDialog({
             </div>
             {shareRecipients.length === 1 ? (
               <div className="flex h-10 min-w-0 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-700">
-                {shareRecipients[0].kind === "room"
+                {shareRecipients[0].kind === "workspace"
                   ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                 <span className="truncate font-medium">
-                  {shareRecipients[0].kind === "room"
+                  {shareRecipients[0].kind === "workspace"
                     ? shareRecipients[0].member.role === "owner"
                       ? labels.owner
                       : labels.guest
@@ -167,11 +167,11 @@ export default function ReviewImageExportDialog({
                       onClick={() => setSelectedRecipientId(recipient.id)}
                       className={`flex h-10 min-w-0 items-center gap-2 rounded-md border px-2.5 text-left text-xs transition-colors ${selected ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                     >
-                      {recipient.kind === "room"
+                      {recipient.kind === "workspace"
                         ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                       <span className="truncate">
-                        {recipient.kind === "room"
+                        {recipient.kind === "workspace"
                           ? recipient.member.role === "owner"
                             ? labels.owner
                             : `${labels.guest} ${index + 1}`

@@ -1,6 +1,6 @@
 "use client";
 
-// Owns the browser WebP runtime shared by Web and Room workers.
+// Owns the browser WebP runtime shared by Web and Workspace workers.
 
 import webpEncoderWasmUrl from "@jsquash/webp/codec/enc/webp_enc.wasm?url";
 import webpEncoderSimdWasmUrl from "@jsquash/webp/codec/enc/webp_enc_simd.wasm?url";

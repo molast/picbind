@@ -3,9 +3,9 @@
 import React from "react";
 import Konva from "konva";
 import {
-  type RoomColorAdjustments,
-} from "../../../utils/room-color-adjustments";
-import type { ShareRoomLabels } from "../share-room-labels";
+  type WorkspaceColorAdjustments,
+} from "../../../utils/workspace-color-adjustments";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 import {
   createColorPreviewRenderer,
   type ColorPreviewRenderer,
@@ -15,8 +15,8 @@ export type ColorComparisonMode = "stacked" | "in-place" | "split";
 
 type ColorAdjustmentPreviewProps = {
   imageUrl: string;
-  adjustments: RoomColorAdjustments;
-  labels: ShareRoomLabels;
+  adjustments: WorkspaceColorAdjustments;
+  labels: WorkspaceEditorLabels;
   mode: ColorComparisonMode;
   posterUrl?: string | null;
   editorBaseReady?: boolean;

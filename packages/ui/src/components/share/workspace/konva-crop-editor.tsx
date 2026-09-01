@@ -2,7 +2,7 @@
 
 import React from "react";
 import Konva from "konva";
-import type { NormalizedCrop } from "../../../utils/room-image-editing";
+import type { NormalizedCrop } from "../../../utils/workspace-image-editing";
 
 type KonvaCropEditorProps = {
   imageUrl: string;

@@ -16,10 +16,10 @@ export {
 export * from "./messaging";
 export {
   getLang,
-  getShareRoomLabels,
+  getWorkspaceEditorLabels,
   setLang,
   type Lang,
-  type ShareRoomLabels,
+  type WorkspaceEditorLabels,
 } from "./locales";
 export type { ImagePlaceholderMetadata } from "./utils/share-placeholder";
 export {

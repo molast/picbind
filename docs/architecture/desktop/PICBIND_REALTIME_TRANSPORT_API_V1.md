@@ -2,7 +2,7 @@
 
 > 文档状态：阶段 1-6 代码已实施，阶段 17 本地自动化验证已完成；macOS Web Owner 与 Rust Native Collaborator 的真实链路 smoke test 已通过，阶段 0 其余性能/互操作 spike 与阶段 7 发布验证待执行
 > 适用范围：当前 Workspace Realtime V2 的 Web 与 Tauri Desktop 实时协作链路
-> 明确排除：已弃用的 Share Room、旧 Room 页面及其弱网 WebSocket / WebRTC 实现
+> 明确排除：已弃用的旧共享协作页面及其弱网 WebSocket / WebRTC 实现
 > 最后校对：2026-08-28
 
 ## 1. 文档目的
@@ -27,7 +27,7 @@ PicBind 的 Web 与 Desktop 复用 Workspace UI 和协作业务，但不再强�
 V1 采用以下设计：
 
 1. 只迁移当前 `WorkspaceRealtimeClient` 对应的 Workspace Realtime V2。
-2. 已弃用的 Share Room 不进入 V1 契约；遗留 Room 网络代码已删除，不建立兼容层。
+2. 已弃用的旧共享协作实现不进入 V1 契约；遗留网络代码已删除，不建立兼容层。
 3. 对外接口命名为 `RealtimeService` 和 `RealtimeSession`，Workspace 页面不直接创建
    `WebSocket`、`RTCPeerConnection` 或 Tauri WebSocket。
 4. 平台选择只在 `apps/web` 的应用组合根发生一次。
@@ -71,14 +71,14 @@ V1 采用以下设计：
 
 这条行为必须作为迁移契约保留，不能按照旧文档把 WebSocket 误当作一次性 RTC 握手通道。
 
-### 3.2 已弃用 Room 的处理
+### 3.2 已弃用旧协作实现的处理
 
-旧 Share Room 的 Web 页面、UI 入口、SDK wrapper、HTTP signaling、弱网 socket、R2 transfer、
+旧共享协作 Web 页面、UI 入口、SDK wrapper、HTTP signaling、弱网 socket、R2 transfer、
 Worker route 和 `ShareRoomObject` 实现已经删除。Cloudflare `wrangler.toml` 只保留历史 `v2`
 创建 migration，并通过 `v6 deleted_classes = ["ShareRoomObject"]` 下线已部署 class。
 
-Workspace 仍使用的图片编辑、review、存储和历史数据类型按实际引用保留；部分内部类型仍带
-`RoomImage` 等历史名称，但不包含旧 Room 网络或产品入口。TURN 凭据生成已迁到
+Workspace 仍使用的图片编辑、Review、存储和历史数据模块按实际引用保留，并已统一为
+Workspace 文件名、类型名与存储 scope。TURN 凭据生成已迁到
 `services/cloudflare-worker/src/realtime/turn-credentials.ts`，只服务 Workspace Realtime。
 
 ### 3.3 当前 Rust 边界
@@ -145,13 +145,13 @@ Adapter”。如果未来要求 WebSocket 和 WebRTC 的完整会话状态机都
 
 ### 4.2 非目标
 
-- V1 不迁移、恢复或兼容旧版 Share Room。
+- V1 不迁移、恢复或兼容已弃用的旧共享协作协议。
 - V1 不改变 Worker 的 Workspace Realtime V2 协议和 endpoint。
 - V1 不引入音频、视频或屏幕共享；Rust WebRTC 只使用 DataChannel。
 - V1 不把业务事件改造成另一套协议。
 - V1 不承诺 Web 与 Desktop 使用同一底层 WebRTC 库或产生完全相同的 SDP 文本。
 - V1 不允许 UI 根据平台选择不同业务流程。
-- V1 不在首个步骤同时删除所有历史 `room` 命名的存储 scope 或数据库字段。
+- 存储命名迁移独立实施，并为既有本地数据提供一次性兼容升级。
 
 ## 5. V1 架构
 
@@ -719,7 +719,7 @@ export function createRealtimeService(): RealtimeService {
 ### 阶段 0：冻结范围与完成 spike
 
 - [x] 确认 Workspace Realtime V2 是唯一产品链路。
-- [x] 通过引用、route 和构建检查列出并删除旧 Room 网络代码。
+- [x] 通过引用、route 和构建检查列出并删除旧共享协作网络代码。
 - [x] 冻结当前 WebSocket/RTC route、ACK/NACK、probe、health 与 reconnect 行为。
 - [x] 通过 Adapter 测试和 macOS 编译验证 Tauri WebSocket 的 Text/Binary、close、FIFO 和 capability。
 - [ ] 验证 Rust `webrtc` 与 Browser WebRTC 的 DataChannel 互操作。
@@ -778,16 +778,17 @@ export function createRealtimeService(): RealtimeService {
 
 完成条件：Web 与 Desktop 在相同输入下产生等价 transport 选择和业务事件。
 
-### 阶段 6：清理旧 Room 和平台泄漏
+### 阶段 6：清理旧协作实现和平台泄漏
 
-- [x] 删除确认不可达的旧 Room WebSocket/WebRTC、route、export 和测试。
-- [ ] 保留仍被 Workspace 使用的通用 review、图片和存储模块，并按真实职责重命名。
+- [x] 删除确认不可达的旧 WebSocket/WebRTC、route、export 和测试。
+- [x] 保留仍被 Workspace 使用的通用 Review、图片和存储模块，并按真实职责重命名。
 - [x] 检查 `packages/ui` 不再导入 Tauri network API。
 - [x] 检查业务代码没有 `isTauri()` 网络分支。
 - [x] 更新仓库结构和 Desktop 开发文档。
 
-未勾选的重命名项仅指仍被 Workspace 使用的历史 `RoomImage` 等内部名称；旧 Room 网络实现和
-生产入口已经清零，不影响唯一协议边界。
+仍在使用的编辑、Review、Worker 和存储模块已经完成 Workspace 命名统一；旧网络实现和
+生产入口已经清零，不影响唯一协议边界。旧 `room` 字符串只允许存在于明确的数据迁移和
+Cloudflare Durable Object 删除记录中。
 
 完成条件：仓库只有一套在用的 Workspace Realtime 业务协议和一套跨平台 Service 契约。
 
@@ -893,7 +894,7 @@ Browser/Worker 的互操作，不等价于完整 Desktop 页面、Tauri IPC、�
 
 ## 18. Review 清单
 
-- [ ] 是否只覆盖 Workspace Realtime V2，没有把旧 Room 带回契约。
+- [ ] 是否只覆盖 Workspace Realtime V2，没有把已弃用协议带回契约。
 - [ ] `packages/ui` 是否完全不导入 Tauri network API。
 - [ ] 平台选择是否只发生一次。
 - [ ] Desktop 是否没有创建 WebView `RTCPeerConnection`。
@@ -917,7 +918,7 @@ V1 只有满足以下条件才算完成：
 - Desktop 使用 Tauri WebSocket plugin + Rust WebRTC。
 - Desktop 的 Rust WebRTC、Tauri bridge 和 plugin 注册入口归 `crates/picbind-network`。
 - Desktop app crate 没有网络状态机或协议实现。
-- 旧 Share Room 没有进入新 API，确认不可达的遗留网络代码已删除。
+- 已弃用的旧共享协作实现没有进入新 API，确认不可达的遗留网络代码已删除。
 - Text/Binary、可靠队列、ACK/NACK、sequence、路由、晋升、回退和重连语义一致。
 - 三种端间组合和三种 Desktop OS 验证通过。
 - 大 Binary Native RTC IPC 通过性能与内存门槛。

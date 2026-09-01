@@ -2,7 +2,7 @@
 
 import type { AdoptTemporaryImageInput } from "@picbind/shared";
 
-export type ImageStorageScope = "compressed" | "queued" | "room" | "messaging";
+export type ImageStorageScope = "compressed" | "queued" | "workspace" | "messaging";
 export type ImageStorageVariant = "original" | "output" | "thumbnail";
 
 export type ImageStorageRecord<

@@ -1,24 +1,24 @@
 /// <reference lib="webworker" />
 
 import {
-  applyRoomColorAdjustments,
-  type RoomColorAdjustments,
-} from "../utils/room-color-adjustments";
+  applyWorkspaceColorAdjustments,
+  type WorkspaceColorAdjustments,
+} from "../utils/workspace-color-adjustments";
 import { configurePicBindUi } from "../config";
 import type { Lang } from "../locales";
 import {
-  encodeRoomImageData,
-  type RoomCompressionEncodingOptions,
-  type RoomCompressionFormat,
-} from "../utils/room-image-compression";
+  encodeWorkspaceImageData,
+  type WorkspaceCompressionEncodingOptions,
+  type WorkspaceCompressionFormat,
+} from "../utils/workspace-image-compression";
 
 type ColorAdjustmentRequest = {
   image: File;
-  adjustments: RoomColorAdjustments;
-  format: Exclude<RoomCompressionFormat, "auto">;
+  adjustments: WorkspaceColorAdjustments;
+  format: Exclude<WorkspaceCompressionFormat, "auto">;
   lang: Lang;
   sourceSizeBytes: number;
-  encodingOptions: RoomCompressionEncodingOptions;
+  encodingOptions: WorkspaceCompressionEncodingOptions;
   wasmBaseUrl?: string;
 };
 
@@ -40,8 +40,8 @@ self.onmessage = async (event: MessageEvent<ColorAdjustmentRequest>) => {
     if (!context) throw new Error("Canvas 2D context is unavailable");
     context.drawImage(bitmap, 0, 0);
     const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height);
-    const result = await encodeRoomImageData(
-      applyRoomColorAdjustments(pixels, event.data.adjustments),
+    const result = await encodeWorkspaceImageData(
+      applyWorkspaceColorAdjustments(pixels, event.data.adjustments),
       event.data.format,
       event.data.image.name,
       event.data.sourceSizeBytes,

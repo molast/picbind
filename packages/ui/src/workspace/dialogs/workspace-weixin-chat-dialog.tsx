@@ -5,7 +5,7 @@ import EmojiPicker, { EmojiStyle, Theme } from "emoji-picker-react";
 import { FaWeixin } from "react-icons/fa";
 import { FiCheck, FiChevronLeft, FiChevronRight, FiImage, FiLoader, FiPlusSquare, FiSend, FiSmile, FiX } from "react-icons/fi";
 import type { MessagingProviderSnapshot } from "../../messaging";
-import type { ShareRoomLabels } from "../../locales";
+import type { WorkspaceEditorLabels } from "../../locales";
 
 export type WeixinChatItem = {
   id: string;
@@ -37,7 +37,7 @@ export function WorkspaceWeixinChatDialog({ open, provider, messages, labels, se
   open: boolean;
   provider: MessagingProviderSnapshot | null;
   messages: WeixinChatItem[];
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   sending: boolean;
   sendingImage: boolean;
   canMoveImages: boolean;

@@ -6,17 +6,17 @@ import {
   type ImagePlaceholderMetadata,
 } from "../../utils/share-placeholder";
 
-type RoomImageMediaProps = {
+type WorkspacePlaceholderMediaProps = {
   alt: string;
   src?: string;
   placeholder: ImagePlaceholderMetadata;
 };
 
-export default function RoomImageMedia({
+export default function WorkspacePlaceholderMedia({
   alt,
   src,
   placeholder,
-}: RoomImageMediaProps) {
+}: WorkspacePlaceholderMediaProps) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null);
   const loaded = Boolean(src && loadedSrc === src);

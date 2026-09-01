@@ -19,7 +19,7 @@ import {
   type WorkspaceCommit, type WorkspaceEvent, type WorkspaceIdentity, type WorkspaceImage,
   type WorkspaceOperation, type WorkspaceProposal, type WorkspaceStyle,
 } from "../types";
-import { getLang, getShareRoomLabels, getWorkspaceLabels, setLang as persistLang, type Lang } from "../../locales";
+import { getLang, getWorkspaceEditorLabels, getWorkspaceLabels, setLang as persistLang, type Lang } from "../../locales";
 import { useImageProcessing } from "../../image-processing";
 import type { ProcessedImageResult } from "../../components/share/workspace/image-result-dialog";
 import ReviewWorkspace from "../../components/share/workspace/review-workspace";
@@ -129,6 +129,24 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
       if (previewRenderSequence.current === sequence) setPreviewRendering(false);
     }
   }, [setPreviewRendering]);
+
+  React.useEffect(() => {
+    // Clear the previous target before resolving the new cache or share ID.
+    // This prevents stale images from flashing while the asynchronous load runs.
+    imagesRef.current = [];
+    setWorkspace(null);
+    setImages([]);
+    setActivities([]);
+    setOperationLogs([]);
+    setProposals([]);
+    setCommits([]);
+    setCollaborators([]);
+    setSelectedId(null);
+    setMessages([]);
+    setReactionCounts({});
+    setNotice(null);
+    setStyleDraft(defaultWorkspaceStyle());
+  }, [initialWorkspace?.workspaceId, setMessages, setNotice, setReactionCounts, setSelectedId, setStyleDraft, shareToken]);
   const confirmLeaveWorkspace = React.useCallback(() => {
     setLeaveConfirmOpen(false);
     const realtime = realtimeRef.current;
@@ -273,7 +291,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const { addFiles, chooseFiles, downloadImage } = useWorkspaceFileCommands({
     workspace, desktop, inputRef, setImages, setCommits, setSelectedId, persistWorkspaceLog, loadSource, setNotice,
   });
-  const messagingLabels = React.useMemo(() => getShareRoomLabels(lang), [lang]);
+  const messagingLabels = React.useMemo(() => getWorkspaceEditorLabels(lang), [lang]);
   const workspaceMessaging = useWorkspaceMessaging({
     desktop,
     workspaceId: workspace?.workspaceId,
@@ -971,7 +989,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const { saveProcessedResult } = useWorkspaceProcessedResultCommand({ workspace, selected, setEditing, createOperation, queueProcessedResult, releaseProcessingSource });
   if(!workspace&&runtime==="unavailable")return <WorkspaceUnavailable notice={notice}/>;
   if(!workspace)return <WorkspaceLoading/>;
-  if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace roomId={workspace.workspaceId} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
+  if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace workspaceId={workspace.workspaceId} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
     <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} desktop={desktop} lang={lang} onLanguageChange={(nextLang)=>{persistLang(nextLang);setLanguage(nextLang);}} onEnterWorkspace={()=>setShareIdEntryOpen(true)} onLeave={()=>setLeaveConfirmOpen(true)} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>setShareDialogOpen(true)} onSettings={()=>setSettingsOpen(true)} />
     <WorkspaceStatusBands workspace={workspace} runtime={runtime} notice={notice} imageCount={images.length} onDismissNotice={()=>setNotice(null)}/>

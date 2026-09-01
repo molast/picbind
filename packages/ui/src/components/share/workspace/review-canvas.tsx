@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import type { RoomImage } from "../share-room-types";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 import type {
   ReviewAnchor,
   ReviewAnnotation,
@@ -51,10 +51,10 @@ type MagnifierPosition = {
 };
 
 type ReviewCanvasProps = {
-  image: RoomImage;
+  image: WorkspaceEditorImage;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   scale: number;
   offset: ReviewViewportOffset;
   activeTool: ReviewTool;

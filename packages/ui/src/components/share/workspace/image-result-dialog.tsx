@@ -2,14 +2,14 @@
 
 import React from "react";
 import { FiCheckCircle, FiHardDrive, FiLoader, FiMessageCircle, FiSend, FiUser, FiX, FiXCircle } from "react-icons/fi";
-import type { RoomImage } from "../share-room-types";
-import { formatBytes } from "../share-room-formatters";
-import type { RoomCompressionResult } from "../../../utils/room-image-compression";
-import type { RoomImageEditResult } from "../../../utils/room-image-editing";
-import type { ShareRoomLabels } from "../share-room-labels";
-import type { ShareRecipient } from "./share-recipient-dialog";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import { formatBytes } from "../workspace-formatters";
+import type { WorkspaceCompressionResult } from "../../../utils/workspace-image-compression";
+import type { WorkspaceImageEditResult } from "../../../utils/workspace-image-editing";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import type { WorkspaceShareRecipient } from "./workspace-share-recipient";
 
-export type ProcessedImageResult = RoomCompressionResult | RoomImageEditResult;
+export type ProcessedImageResult = WorkspaceCompressionResult | WorkspaceImageEditResult;
 export type ProcessedImageAction = "store" | "share";
 export type ProcessedImageActionStage = "preparing" | "waiting" | "transferring" | "complete";
 export type ProcessedImageActionOutcome = {
@@ -18,17 +18,17 @@ export type ProcessedImageActionOutcome = {
 };
 
 type ImageResultDialogProps = {
-  source: RoomImage | null;
-  labels: ShareRoomLabels;
+  source: WorkspaceEditorImage | null;
+  labels: WorkspaceEditorLabels;
   result: ProcessedImageResult | null;
-  shareRecipients: ShareRecipient[];
+  shareRecipients: WorkspaceShareRecipient[];
   onClose(): void;
   onAction(
-    source: RoomImage,
+    source: WorkspaceEditorImage,
     result: ProcessedImageResult,
     action: ProcessedImageAction,
     report: (stage: ProcessedImageActionStage) => void,
-    recipient?: ShareRecipient,
+    recipient?: WorkspaceShareRecipient,
   ): Promise<ProcessedImageActionOutcome>;
   onResolveRejected(imageId: string, save: boolean): Promise<void>;
 };
@@ -125,11 +125,11 @@ export default function ImageResultDialog({ source, result, labels, shareRecipie
               </div>
               {shareRecipients.length === 1 ? (
                 <div className="flex h-10 min-w-0 items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-700">
-                  {shareRecipients[0].kind === "room"
+                  {shareRecipients[0].kind === "workspace"
                     ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                   <span className="truncate font-medium">
-                    {shareRecipients[0].kind === "room"
+                    {shareRecipients[0].kind === "workspace"
                       ? shareRecipients[0].member.role === "owner"
                         ? labels.owner
                         : labels.guest
@@ -148,11 +148,11 @@ export default function ImageResultDialog({ source, result, labels, shareRecipie
                       onClick={() => setSelectedRecipientId(recipient.id)}
                       className={`flex h-10 min-w-0 items-center gap-2 rounded-md border px-2.5 text-left text-xs transition-colors ${selected ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                     >
-                      {recipient.kind === "room"
+                      {recipient.kind === "workspace"
                         ? <FiUser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         : <FiMessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                       <span className="truncate">
-                        {recipient.kind === "room"
+                        {recipient.kind === "workspace"
                           ? recipient.member.role === "owner"
                             ? labels.owner
                             : `${labels.guest} ${index + 1}`

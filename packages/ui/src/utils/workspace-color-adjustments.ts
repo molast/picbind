@@ -9,7 +9,7 @@ export type ColorBalanceAxes = {
   yellowBlue: number;
 };
 
-export type RoomColorAdjustments = {
+export type WorkspaceColorAdjustments = {
   brightness: number;
   contrast: number;
   blackPoint: number;
@@ -41,7 +41,7 @@ export type RoomColorAdjustments = {
 
 const EMPTY_BALANCE: ColorBalanceAxes = { cyanRed: 0, magentaGreen: 0, yellowBlue: 0 };
 
-export const DEFAULT_COLOR_ADJUSTMENTS: RoomColorAdjustments = {
+export const DEFAULT_COLOR_ADJUSTMENTS: WorkspaceColorAdjustments = {
   brightness: 0,
   contrast: 0,
   blackPoint: 0,
@@ -109,7 +109,7 @@ const RANGE_HUES: Record<SelectiveColorRange, number> = {
 
 const BALANCE_TONES = ["shadows", "midtones", "highlights"] as const;
 
-export function isRoomColorAdjustmentsNeutral(settings: RoomColorAdjustments) {
+export function isWorkspaceColorAdjustmentsNeutral(settings: WorkspaceColorAdjustments) {
   const balanceIsNeutral = (Object.keys(settings.balance) as ColorToneRange[]).every((tone) => {
     const axes = settings.balance[tone];
     return axes.cyanRed === 0 && axes.magentaGreen === 0 && axes.yellowBlue === 0;
@@ -181,8 +181,8 @@ export function buildToneCurveLut(points: ToneCurvePoint[]) {
   return lut;
 }
 
-export function applyRoomColorAdjustments(imageData: ImageData, settings: RoomColorAdjustments) {
-  if (isRoomColorAdjustmentsNeutral(settings)) return imageData;
+export function applyWorkspaceColorAdjustments(imageData: ImageData, settings: WorkspaceColorAdjustments) {
+  if (isWorkspaceColorAdjustmentsNeutral(settings)) return imageData;
   const data = imageData.data;
   const contrast = Math.max(-99, Math.min(99, settings.contrast));
   const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));

@@ -21,19 +21,19 @@ PicBind 3.0 将 `Image Workspace` 从辅助功能升级为产品核心。
 7. Owner 通过 Apply / Reject / Defer 管理协作修改。
 8. 每次 Owner 接受修改后形成新的 Commit。
 9. Workspace 外观通过 Style JSON 管理。
-10. Room 不再作为用户侧一级产品概念，退化为协作连接/会话层。
+10. Workspace 不再作为用户侧一级产品概念，退化为协作连接/会话层。
 11. 登录只用于保存用户资料，不作为 Workspace 创建、分享或协作的前置条件。
 12. Worker 只负责分享链接登记、连接协调和不透明消息转发，不理解业务载荷。
 
 ### 1.1 Workspace 入口与路由
 
 - 主导航中的 Image Workspace 直接进入 `/workspace`。
-- 进入 Workspace 不创建 Room，也不要求先建立协作会话。
-- Workspace 页面必须在没有 Room 的情况下独立完成图片添加、处理、审阅和下载。
-- 主 Workspace 页面不展示 Room ID、创建 Room、复制 Room 链接、最小化 Room 或离开 Room 等入口。
+- 进入 Workspace 不创建 Workspace，也不要求先建立协作会话。
+- Workspace 页面必须在没有 Workspace 的情况下独立完成图片添加、处理、审阅和下载。
+- 主 Workspace 页面不展示 Workspace ID、创建 Workspace、复制 Workspace 链接、最小化 Workspace 或离开 Workspace 等入口。
 - `/workspace` 始终进入当前设备自己的本地 Workspace。
 - `/workspace/{share_token}` 进入对应的共享 Workspace；未登录用户以访客身份加入。
-- `/share?roomId=...` 仅作为旧分享链接的兼容入口，不属于 3.0 主产品流程。
+- `/share?workspaceId=...` 仅作为旧分享链接的兼容入口，不属于 3.0 主产品流程。
 
 ---
 
@@ -51,7 +51,7 @@ PicBind
     ├── Context Panel
     │   ├── Selected Image Context
     │   ├── Quick Actions
-    │   └── Share Workspace
+    │   └── Workspace Share
     │
     ├── Collaboration Panel
     │   ├── Collaborators
@@ -147,7 +147,7 @@ Workspace
 
 `/workspace/share_2338ad6356a03fff2b45dcd88e189fd51a02b0fd0f293150`
 
-- Share Link 默认长期有效，不使用旧 Room 的 30 分钟过期规则。
+- Share Link 默认长期有效，不使用旧共享流程的 30 分钟过期规则。
 - Owner 可以主动重新生成链接；新链接生效后旧链接立即失效。
 - 重新生成 Share Link 不改变 Workspace ID，也不迁移或删除本地数据。
 - 访客无需登录，Worker 不通过 Cookie、用户 Session 或 Realtime Grant 决定能否加入。
@@ -238,7 +238,7 @@ Regenerate Share Link
 
 ### 4.3 任务
 
-- [x] 新增 `/workspace` 直接入口，且不创建或加入 Room。
+- [x] 新增 `/workspace` 直接入口，且不创建或加入 Workspace。
 - [x] 支持本地图片添加、处理、审阅、下载和持久化恢复。
 - [x] 显示 Workspace 名称、本地/共享状态、概览和图片统计。
 - [x] 完成 Workspace 主布局。

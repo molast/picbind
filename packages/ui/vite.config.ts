@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
               entry: "src/library.ts",
               formats: ["es"],
               fileName: () => "index.js",
+              cssFileName: "picbind-workspace",
             },
             rollupOptions: {
               external: ["react", "react-dom", "react/jsx-runtime"],
@@ -34,7 +35,6 @@ export default defineConfig(({ mode }) => {
                 banner: '"use client";',
               },
             },
-            cssFileName: "picbind-room",
             emptyOutDir: true,
           }
         : undefined,

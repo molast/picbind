@@ -1,13 +1,13 @@
 "use client";
 
 import { FiArrowRight, FiZap } from "react-icons/fi";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 import { useDialogEscape } from "../use-dialog-escape";
 
 type CompressionSuggestionDialogProps = {
   open: boolean;
   weakNetwork: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onContinue(): void;
   onCompress(): void | Promise<void>;
   onCancel(): void;

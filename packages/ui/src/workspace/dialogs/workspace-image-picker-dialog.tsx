@@ -2,7 +2,7 @@
 
 import React from "react";
 import { FiCheck, FiChevronLeft, FiImage, FiLoader, FiX } from "react-icons/fi";
-import { formatBytes, middleEllipsisFileName } from "../../components/share/share-room-formatters";
+import { formatBytes, middleEllipsisFileName } from "../../components/share/workspace-formatters";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 import { WorkspaceImageMedia } from "../components/workspace-image-media";
 

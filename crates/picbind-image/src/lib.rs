@@ -45,7 +45,7 @@ fn decode_image(input: &[u8], operation: &str) -> Result<DynamicImage, JsValue> 
 #[wasm_bindgen]
 pub fn calculate_image_md5(input: &[u8]) -> Result<String, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
-        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+        return Err(JsValue::from_str("Workspace image exceeds 50 MB"));
     }
     Ok(content_identity::md5_hex(input))
 }
@@ -53,7 +53,7 @@ pub fn calculate_image_md5(input: &[u8]) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn read_image_metadata(input: &[u8]) -> Result<js_sys::Object, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
-        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+        return Err(JsValue::from_str("Workspace image exceeds 50 MB"));
     }
     content_identity::metadata(input)
 }
@@ -171,7 +171,7 @@ pub fn materialize_image_operations_to_rgba(
     document_json: &str,
 ) -> Result<MaterializedPixels, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
-        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+        return Err(JsValue::from_str("Workspace image exceeds 50 MB"));
     }
     let image = decode_image(input, "Image")?;
     materialize_dynamic_image_operations(image, document_json)
@@ -196,7 +196,7 @@ pub fn render_image_operations_preview_to_rgba(
     max_height: u32,
 ) -> Result<MaterializedPixels, JsValue> {
     if input.len() > MAX_SHARE_IMAGE_BYTES {
-        return Err(JsValue::from_str("Room image exceeds 50 MB"));
+        return Err(JsValue::from_str("Workspace image exceeds 50 MB"));
     }
     if max_width == 0 || max_height == 0 || max_width > 2048 || max_height > 2048 {
         return Err(JsValue::from_str(

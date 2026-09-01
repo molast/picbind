@@ -2,7 +2,7 @@ import React from "react";
 import { FaWeixin } from "react-icons/fa";
 import { FiArrowRight, FiChevronLeft, FiChevronRight, FiGrid, FiImage, FiList } from "react-icons/fi";
 import { TbGridDots } from "react-icons/tb";
-import { getLang, getWorkspaceLabels, type ShareRoomLabels } from "../../locales";
+import { getLang, getWorkspaceLabels, type WorkspaceEditorLabels } from "../../locales";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
 import {
   WorkspaceGalleryCard,
@@ -71,7 +71,7 @@ export function WorkspaceGallery({
   messagingConnected: boolean;
   messagingUnreadCount: number;
   messagingBusy: boolean;
-  messagingLabels: ShareRoomLabels;
+  messagingLabels: WorkspaceEditorLabels;
   onToggleLibrary(): void;
   onUpload(): void;
   onImageDimensions(image: WorkspaceImage, width: number, height: number): void;

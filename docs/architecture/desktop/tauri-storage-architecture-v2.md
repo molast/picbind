@@ -27,12 +27,12 @@ V2 实施前的主要性能问题不是“缺少 Repository”，而是 Reposito
 
 - 列表查询曾一次性读取全部图片 Blob。
 - 多张图片曾通过无上限 `Promise.all` 并发读取。
-- Room 图片和压缩结果曾缺少分页、懒加载和统一容量上限。
+- Workspace 图片和压缩结果曾缺少分页、懒加载和统一容量上限。
 - Web 与 Tauri 的存储差异曾散落在业务 Repository 的条件分支中。
 
 当前业务 Repository 只依赖统一 `ImageStorageRepository` 接口。运行时选择器只执行一次
 平台判断：Web 使用独立的 Dexie + OPFS Repository，Tauri 使用独立的 IPC + Native Store
-Repository。压缩图、Room 和消息图片已经提供分页元数据与按 ID/variant 读取接口；旧的
+Repository。压缩图、Workspace 和消息图片已经提供分页元数据与按 ID/variant 读取接口；旧的
 完整 Blob 列表函数只作为业务便捷方法保留。
 
 ## 3. 当前实现
@@ -41,7 +41,7 @@ Repository。压缩图、Room 和消息图片已经提供分页元数据与按 I
 
 ```mermaid
 flowchart TD
-    UI["React / Next.js / Room SDK"] --> DomainRepo["Domain Image Repositories"]
+    UI["React / Next.js / PicBind UI"] --> DomainRepo["Domain Image Repositories"]
     DomainRepo --> Contract["ImageStorageRepository"]
     Contract --> Runtime{"Repository Selector"}
     Runtime -- Web --> WebRepo["WebImageStorageRepository"]
@@ -71,7 +71,8 @@ packages/ui/src/database/
     ├── tauri-image-storage-repository.ts
     ├── compressed-image-repository.ts
     ├── queued-file-repository.ts
-    ├── room-image-repository.ts
+    ├── web-image-storage-repository.ts
+    ├── tauri-image-storage-repository.ts
     └── messaging-image-repository.ts
 ```
 
@@ -81,11 +82,11 @@ packages/ui/src/database/
 | --- | --- | --- | --- |
 | 待压缩原图 | Dexie `queuedFiles` | OPFS `temp/compression/` | Queued File Repository |
 | 压缩结果 | Dexie `compressedImages` | OPFS `files/compressed/` | Compressed Image Repository |
-| Room 图片 | Dexie `roomImages` | OPFS `files/images/` | Room Image Repository |
-| Room 缩略图 | `roomImages.thumbnailPath` | OPFS `thumbnails/images/` | Room Image Repository |
-| 消息图片 | Dexie `messagingImages` | OPFS `cache/messaging/` | Messaging Image Repository |
+| Workspace 图片 | Dexie `workspaceImages` | OPFS `files/images/` | Workspace Repository + Image Storage Repository |
+| Workspace 缩略图 | `workspaceImages.thumbnailPath` | OPFS `thumbnails/images/` | Workspace Repository + Image Storage Repository |
+| 消息图片 | Dexie `workspaceMessagingImages` | OPFS `cache/messaging/` | Messaging Image Repository |
 
-在 Tauri 中，上述四类图片分别使用 `compressed`、`queued`、`room`、`messaging` scope。
+在 Tauri 中，上述四类图片分别使用 `compressed`、`queued`、`workspace`、`messaging` scope。
 SQLite 保存业务元数据和相对文件路径，二进制保存到应用数据目录；Web 表中的路径和
 OPFS 目录保持不变。
 
@@ -95,12 +96,12 @@ Blob、Base64 或图片内容。
 ### 3.3 当前 Tauri 行为
 
 Tauri 仍直接运行现有 Web 前端，但图片 Repository 会通过官方 Tauri API 检测运行
-环境。Tauri 中的压缩结果、待处理原图、Room 图片/缩略图和消息图片使用 Native
+环境。Tauri 中的压缩结果、待处理原图、Workspace 图片/缩略图和消息图片使用 Native
 Store；Review History、Operation Log、页面状态等非图片数据仍保持原存储方式。
 
 Native Store 当前已经实现：
 
-- Rust `rusqlite 0.39.0` 管理 SQLite 元数据，schema `user_version = 2`。
+- Rust `rusqlite 0.39.0` 管理 SQLite 元数据，schema `user_version = 4`。
 - 图片写入应用数据目录，文件名使用 SHA-256 内容哈希。
 - 待处理原图写入 `temp/queued/`，消息图片写入 `cache/messaging/`，其余图片按资产和
   派生文件分类保存。
@@ -118,7 +119,7 @@ origin 的 IndexedDB/OPFS 数据彼此隔离，不能假设开发缓存会自动
 1. 列表阶段不再隐式读取全部原图；新 UI 使用元数据分页和按需内容读取。
 2. 可见项加载和兼容批量读取均使用有界并发，页面切换可通过 `AbortSignal` 停止后续读取。
 3. 消息缓存和派生缩略图受 512 MB、30 天和单批 250 项的 LRU 策略约束。
-4. Web 图片存储的 Dexie schema 由 Room SDK 单点维护，当前版本为 V5。
+4. Web 图片存储的 Dexie schema 由 `packages/ui` 单点维护，当前版本为 V7。
 5. Web 和 Tauri 各自实现 `ImageStorageRepository`，业务 Repository 不再包含平台条件分支。
 
 ## 4. V2 目标与非目标
@@ -139,7 +140,7 @@ origin 的 IndexedDB/OPFS 数据彼此隔离，不能假设开发缓存会自动
 - 本文档不决定由 WASM 还是 Rust Native 执行图片压缩。
 - 本文档不新增账号、项目管理、云同步或上传队列。
 - 本文档不定义签名、自动更新或多平台安装包流程。
-- 本文档不处理语言、房间 Token、页面恢复等 localStorage/sessionStorage 状态。
+- 本文档不处理语言、工作区 Token、页面恢复等 localStorage/sessionStorage 状态。
 - 开发阶段不迁移旧 Dexie/OPFS 或旧 Native Store 图片缓存；切换实现后直接清理缓存。
 
 如果后续由 Rust Native 接管编码器或压缩流程，必须作为独立任务设计，并同步更新
@@ -220,7 +221,7 @@ interface ImageStorageRepository {
 | Temporary File | 压缩交接、未完成写入、中间产物 | 成功后删除，异常退出后回收 |
 
 当前 Desktop 可删除缓存的默认上限为 512 MB，最长保留 30 天，单次清理最多处理
-250 项；消息图片仍同时遵守“每个 Room 最多 100 张”。Managed Asset 不受这些上限影响。
+250 项；消息图片仍同时遵守“每个 Workspace 最多 100 张”。Managed Asset 不受这些上限影响。
 后续如调整这些值，应把它们提升为显式产品配置并同步更新本文档。
 
 ## 8. Desktop 文件目录
@@ -276,6 +277,7 @@ id                TEXT NOT NULL
 metadata_json     TEXT NOT NULL
 mime_type         TEXT NOT NULL
 file_path         TEXT
+external_path     TEXT
 thumbnail_path    TEXT
 byte_size         INTEGER NOT NULL
 created_at        INTEGER NOT NULL
@@ -284,7 +286,7 @@ last_accessed_at  INTEGER
 PRIMARY KEY (scope, scope_key, id)
 ```
 
-`file_path` 和 `thumbnail_path` 只保存相对于应用数据目录的路径。Room 占位记录允许
+`file_path` 和 `thumbnail_path` 只保存相对于应用数据目录的路径。Workspace 占位记录允许
 `file_path` 为空，后续收到原图时更新同一记录。相同内容通过哈希文件名自然共享，删除
 记录时只有路径不再被其他记录引用才删除文件。
 
@@ -296,7 +298,9 @@ V2 保持单表 `image_cache`。当前没有迁移 checkpoint 表，不拆分 `i
 
 ### 9.3 Schema 版本
 
-- 当前 SQLite schema 为 `user_version = 2`，启动时会显式把 V1 迁移到 V2。
+- 当前 SQLite schema 为 `user_version = 4`：V1/V2 会先补齐 LRU 索引和
+  `external_path`，V3/V4 升级会把旧图片 scope 迁移为 `workspace`。旧文件相对路径保持
+  可读，新写入文件统一进入 `assets/workspace/`。
 - 后续版本必须使用显式、单调递增的 migration，并提供失败回滚或恢复路径。
 - Rust 层是 Desktop schema 的唯一所有者，前端不得直接执行任意 SQL。
 - Web Dexie schema 和 Desktop SQLite schema 可以采用不同物理结构，但业务语义必须
@@ -354,7 +358,7 @@ V2 当前提供以下能力：
 - Managed Asset 永不参与自动清理。
 - Derived Asset 和 Message Cache 可以按策略清理。
 - 启动时清理无数据库引用的 temp 文件。
-- 启动时扫描数据库记录与文件目录：消息/压缩/queued 主文件缺失时删除失效记录，Room
+- 启动时扫描数据库记录与文件目录：消息/压缩/queued 主文件缺失时删除失效记录，Workspace
   主文件缺失时保留元数据并降级为占位记录，缩略图缺失时清空引用，管理目录中的无引用
   文件直接回收。
 - 磁盘空间不足时停止新写入并返回明确错误，不静默删除用户资产。
@@ -365,12 +369,12 @@ V2 当前提供以下能力：
 
 Web 继续使用 Dexie + OPFS，不回退到 IndexedDB Blob。当前已经完成：
 
-1. 新增 `listRoomMetadata()`、`listCompressedMetadata()`、
-   `listMessagingImageMetadata()`，旧完整列表接口保留为兼容层。
+1. `ImageStorageRepository.list()` 提供统一元数据分页；Workspace 业务通过
+   `listWorkspaceImages()` 恢复图片，消息业务通过 `listMessagingImageMetadata()` 恢复缓存。
 2. 增加按 ID 和 variant 读取图片的接口。
 3. 为列表增加 offset/limit，并保证先排序再分页。
 4. 为缩略图读取增加有界并发和取消。
-5. Web 图片 schema 统一由 Room SDK 的 Dexie database 模块维护。
+5. Web 图片 schema 统一由 `packages/ui` 的 Dexie database 模块维护。
 6. Web 应用通过 SDK 共享入口使用 compressed/queued 业务 Repository，不再维护重复实现。
 7. Web 与 Tauri 分别实现 `ImageStorageRepository`，运行环境只由 selector 判断一次。
 
@@ -456,13 +460,13 @@ SQLite 的 `user_version` 升级仍然保留。它只管理 Native Store 数据�
 - Rust SQLite metadata store。
 - 应用数据目录 binary store。
 - 二进制 IPC、原子写入、参数化查询和无引用文件删除。
-- compressed、queued、room、messaging 四类图片接入。
+- compressed、queued、workspace、messaging 四类图片接入。
 
 ### Phase C：元数据列表与按需读取（已完成）
 
 - 元数据列表与 Blob 读取分离。
 - 增加分页、懒加载、取消和有界并发。
-- 对齐 Web 与 Room SDK schema。
+- 对齐 Web 与 PicBind UI package schema。
 - 增加 Repository 契约测试。
 
 ### Phase D：开发数据切换（已完成）
@@ -484,9 +488,9 @@ Rust Native 图片编码和后台同步不属于上述阶段，需单独立项�
 
 ### 17.1 当前已通过
 
-- Web 与 Room SDK TypeScript 检查通过。
+- Web 与 PicBind UI package TypeScript 检查通过。
 - Rust 格式、编译检查和 Native Store 单元测试通过。
-- macOS Tauri 客户端已启动，应用数据目录和 SQLite V2 schema 初始化成功。
+- macOS Tauri 客户端的应用数据目录和 SQLite V4 schema 已通过自动化存储测试。
 - 业务 Repository 只依赖统一接口；Web 使用独立 Dexie + OPFS Repository，Tauri 使用
   独立 Native Store Repository。
 - SQLite 不保存图片 Blob，文件只写入 PicBind 应用数据目录。
@@ -508,7 +512,7 @@ Rust Native 图片编码和后台同步不属于上述阶段，需单独立项�
 
 - 继续使用 Dexie + OPFS。
 - Web 构建和 Cloudflare Pages 部署方式不变。
-- 压缩、Room、Review 和消息图片流程无行为回归。
+- 压缩、Workspace、Review 和消息图片流程无行为回归。
 - 同格式不增大和 Alpha 保护等压缩规则不受影响。
 
 ### 17.4 Desktop
@@ -533,7 +537,7 @@ Rust Native 图片编码和后台同步不属于上述阶段，需单独立项�
 1. V2 对应的 Tauri 产品版本号。
 2. 第一批支持的操作系统和架构。
 3. 512 MB / 30 天缓存策略是否需要改为用户可配置。
-4. 是否需要从当前 schema V2 进一步演进到状态化 object 模型。
+4. 是否需要从当前 schema V4 进一步演进到状态化 object 模型。
 5. Desktop 图片展示采用的 scoped URL 机制。
 6. 正式发布前是否需要重新引入可验证的旧缓存迁移方案。
 

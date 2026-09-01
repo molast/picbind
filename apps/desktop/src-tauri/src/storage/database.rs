@@ -12,9 +12,12 @@ use std::{
 
 const MAX_LIST_LIMIT: u32 = 1_000;
 const MAX_PRUNE_LIMIT: u32 = 1_000;
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const DEFAULT_CACHE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const DEFAULT_CACHE_MAX_AGE_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const WORKSPACE_ASSET_DIR: &str = "assets/workspace";
+// Existing installations can still reference files written before the scope rename.
+const LEGACY_WORKSPACE_ASSET_DIR: &str = "assets/room";
 
 #[derive(Clone)]
 pub struct NativeImageStore {
@@ -123,7 +126,7 @@ impl NativeImageStore {
         fs::create_dir_all(root.join("database")).map_err(|error| error.to_string())?;
         for directory in [
             "assets/compressed",
-            "assets/room",
+            WORKSPACE_ASSET_DIR,
             "cache/messaging",
             "derived/thumbnails",
             "temp",
@@ -168,7 +171,7 @@ impl NativeImageStore {
                    ON image_cache(scope, scope_key, updated_at DESC);
                  CREATE INDEX IF NOT EXISTS image_cache_lru
                    ON image_cache(scope, last_accessed_at, updated_at);
-                 PRAGMA user_version = 3;
+                 PRAGMA user_version = 4;
                  COMMIT;",
                 )
                 .map_err(|error| error.to_string())?;
@@ -189,6 +192,24 @@ impl NativeImageStore {
                     "BEGIN IMMEDIATE;
                  ALTER TABLE image_cache ADD COLUMN external_path TEXT;
                  PRAGMA user_version = 3;
+                 COMMIT;",
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if (1..=3).contains(&schema_version) {
+            connection
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                 DELETE FROM image_cache AS legacy
+                   WHERE legacy.scope = 'room'
+                     AND EXISTS (
+                       SELECT 1 FROM image_cache AS current
+                        WHERE current.scope = 'workspace'
+                          AND current.scope_key = legacy.scope_key
+                          AND current.id = legacy.id
+                     );
+                 UPDATE image_cache SET scope = 'workspace' WHERE scope = 'room';
+                 PRAGMA user_version = 4;
                  COMMIT;",
                 )
                 .map_err(|error| error.to_string())?;
@@ -215,7 +236,7 @@ impl NativeImageStore {
         let category = match request.scope.as_str() {
             "compressed" => "assets/compressed",
             "queued" => "temp/queued",
-            "room" => "assets/room",
+            "workspace" => WORKSPACE_ASSET_DIR,
             "messaging" => "cache/messaging",
             _ => return Err("unsupported image storage scope".to_string()),
         };
@@ -256,7 +277,7 @@ impl NativeImageStore {
             )
             .optional()
             .map_err(|error| error.to_string())?;
-        let fallback = if request.scope == "room"
+        let fallback = if request.scope == "workspace"
             && stored.is_none()
             && previous
                 .as_ref()
@@ -266,7 +287,7 @@ impl NativeImageStore {
             connection
                 .query_row(
                     "SELECT file_path, byte_size FROM image_cache
-                     WHERE scope = 'room' AND id = ?1 AND file_path IS NOT NULL
+                     WHERE scope = 'workspace' AND id = ?1 AND file_path IS NOT NULL
                      LIMIT 1",
                     [&request.id],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -362,7 +383,7 @@ impl NativeImageStore {
         request: LinkExternalImageRequest,
     ) -> Result<NativeImageRecord, String> {
         validate_identity(&request.scope, &request.scope_key, &request.id)?;
-        if request.scope != "room" {
+        if request.scope != "workspace" {
             return Err("external image links are only supported for workspace images".to_string());
         }
         if !request.mime_type.starts_with("image/") {
@@ -789,7 +810,8 @@ impl NativeImageStore {
             &self.root,
             &[
                 "assets/compressed",
-                "assets/room",
+                WORKSPACE_ASSET_DIR,
+                LEGACY_WORKSPACE_ASSET_DIR,
                 "cache/messaging",
                 "derived/thumbnails",
                 "temp",
@@ -938,7 +960,7 @@ impl NativeImageStore {
             if let Some(path) = file_path
                 && files::metadata(&self.root, path)?.is_none()
             {
-                if scope == "room" {
+                if scope == "workspace" {
                     let connection = self.connection.lock().map_err(|error| error.to_string())?;
                     connection
                         .execute(
@@ -973,7 +995,8 @@ impl NativeImageStore {
             &self.root,
             &[
                 "assets/compressed",
-                "assets/room",
+                WORKSPACE_ASSET_DIR,
+                LEGACY_WORKSPACE_ASSET_DIR,
                 "cache/messaging",
                 "derived/thumbnails",
             ],
@@ -1065,7 +1088,7 @@ fn validate_identity(scope: &str, scope_key: &str, id: &str) -> Result<(), Strin
     {
         return Err("invalid image storage identity".to_string());
     }
-    if !matches!(scope, "compressed" | "queued" | "room" | "messaging") {
+    if !matches!(scope, "compressed" | "queued" | "workspace" | "messaging") {
         return Err("unsupported image storage scope".to_string());
     }
     Ok(())
@@ -1139,26 +1162,31 @@ mod tests {
     }
 
     #[test]
-    fn room_metadata_update_preserves_existing_binary() {
-        let root = test_root("room-update");
+    fn workspace_metadata_update_preserves_existing_binary() {
+        let root = test_root("workspace-update");
         let store = NativeImageStore::open(root.clone()).expect("open store");
         store
-            .put(request("room", "room-1", "image-1", None))
+            .put(request("workspace", "workspace-1", "image-1", None))
             .expect("put placeholder");
         store
-            .put(request("room", "room-1", "image-1", Some(vec![4, 5, 6])))
+            .put(request(
+                "workspace",
+                "workspace-1",
+                "image-1",
+                Some(vec![4, 5, 6]),
+            ))
             .expect("put binary");
         store
-            .put(request("room", "room-1", "image-1", None))
+            .put(request("workspace", "workspace-1", "image-1", None))
             .expect("update metadata");
 
         assert_eq!(
-            store.read("room", "room-1", "image-1", "original"),
+            store.read("workspace", "workspace-1", "image-1", "original"),
             Ok(vec![4, 5, 6])
         );
         assert_eq!(
             store
-                .get("room", "room-1", "image-1")
+                .get("workspace", "workspace-1", "image-1")
                 .expect("get")
                 .expect("record")
                 .byte_size,
@@ -1176,7 +1204,7 @@ mod tests {
         let store = NativeImageStore::open(root.join("storage")).expect("open store");
         store
             .link_external(LinkExternalImageRequest {
-                scope: "room".to_string(),
+                scope: "workspace".to_string(),
                 scope_key: "workspace".to_string(),
                 id: "image".to_string(),
                 metadata: serde_json::json!({ "name": "selected.png" }),
@@ -1186,15 +1214,15 @@ mod tests {
             })
             .expect("link selected image");
         store
-            .put(request("room", "workspace", "image", None))
+            .put(request("workspace", "workspace", "image", None))
             .expect("update linked image metadata");
 
         assert_eq!(
-            store.read("room", "workspace", "image", "original"),
+            store.read("workspace", "workspace", "image", "original"),
             Ok(vec![7, 8, 9])
         );
         store
-            .delete("room", "workspace", "image")
+            .delete("workspace", "workspace", "image")
             .expect("delete image record");
         assert!(external.exists());
         fs::remove_dir_all(root).expect("remove test storage");
@@ -1209,7 +1237,7 @@ mod tests {
         let store = NativeImageStore::open(root.join("storage")).expect("open store");
         store
             .link_external(LinkExternalImageRequest {
-                scope: "room".to_string(),
+                scope: "workspace".to_string(),
                 scope_key: "workspace".to_string(),
                 id: "image".to_string(),
                 metadata: serde_json::json!({ "name": "selected.png" }),
@@ -1219,18 +1247,18 @@ mod tests {
             })
             .expect("link selected image");
 
-        let mut replacement = request("room", "workspace", "image", Some(vec![1, 2, 3, 4]));
+        let mut replacement = request("workspace", "workspace", "image", Some(vec![1, 2, 3, 4]));
         replacement.thumbnail = Some(vec![5, 6]);
         replacement.thumbnail_length = 2;
         replacement.thumbnail_mime_type = Some("image/webp".to_string());
         store.put(replacement).expect("overwrite linked image");
 
         assert_eq!(
-            store.read("room", "workspace", "image", "original"),
+            store.read("workspace", "workspace", "image", "original"),
             Ok(vec![1, 2, 3, 4])
         );
         assert_eq!(
-            store.read("room", "workspace", "image", "thumbnail"),
+            store.read("workspace", "workspace", "image", "thumbnail"),
             Ok(vec![5, 6])
         );
         assert!(external.exists());
@@ -1238,38 +1266,38 @@ mod tests {
     }
 
     #[test]
-    fn room_variants_expire_independently() {
-        let root = test_root("room-variants");
+    fn workspace_variants_expire_independently() {
+        let root = test_root("workspace-variants");
         let store = NativeImageStore::open(root.clone()).expect("open store");
-        let mut value = request("room", "workspace", "image", Some(vec![1, 2, 3]));
+        let mut value = request("workspace", "workspace", "image", Some(vec![1, 2, 3]));
         value.thumbnail = Some(vec![4, 5]);
         value.thumbnail_length = 2;
-        store.put(value).expect("put room variants");
+        store.put(value).expect("put workspace variants");
 
         store
-            .delete_variant("room", "workspace", "image", "thumbnail")
+            .delete_variant("workspace", "workspace", "image", "thumbnail")
             .expect("delete thumbnail");
         assert!(
             store
-                .read("room", "workspace", "image", "thumbnail")
+                .read("workspace", "workspace", "image", "thumbnail")
                 .is_err()
         );
         assert_eq!(
-            store.read("room", "workspace", "image", "original"),
+            store.read("workspace", "workspace", "image", "original"),
             Ok(vec![1, 2, 3])
         );
 
         store
-            .delete_variant("room", "workspace", "image", "original")
+            .delete_variant("workspace", "workspace", "image", "original")
             .expect("delete source");
         assert!(
             store
-                .read("room", "workspace", "image", "original")
+                .read("workspace", "workspace", "image", "original")
                 .is_err()
         );
         assert!(
             store
-                .get("room", "workspace", "image")
+                .get("workspace", "workspace", "image")
                 .expect("get metadata")
                 .is_some()
         );
@@ -1293,25 +1321,30 @@ mod tests {
     }
 
     #[test]
-    fn room_placeholder_reuses_binary_from_another_room() {
-        let root = test_root("room-reference");
+    fn workspace_placeholder_reuses_binary_from_another_workspace() {
+        let root = test_root("workspace-reference");
         let store = NativeImageStore::open(root.clone()).expect("open store");
         store
-            .put(request("room", "room-1", "image-1", Some(vec![7, 8, 9])))
+            .put(request(
+                "workspace",
+                "workspace-1",
+                "image-1",
+                Some(vec![7, 8, 9]),
+            ))
             .expect("put source image");
         store
-            .put(request("room", "room-2", "image-1", None))
+            .put(request("workspace", "workspace-2", "image-1", None))
             .expect("put referenced image");
 
         assert_eq!(
-            store.read("room", "room-2", "image-1", "original"),
+            store.read("workspace", "workspace-2", "image-1", "original"),
             Ok(vec![7, 8, 9])
         );
         store
-            .delete("room", "room-1", "image-1")
+            .delete("workspace", "workspace-1", "image-1")
             .expect("delete source reference");
         assert_eq!(
-            store.read("room", "room-2", "image-1", "original"),
+            store.read("workspace", "workspace-2", "image-1", "original"),
             Ok(vec![7, 8, 9])
         );
         fs::remove_dir_all(root).expect("remove test storage");
@@ -1341,7 +1374,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
         let index_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master
@@ -1365,6 +1398,58 @@ mod tests {
     }
 
     #[test]
+    fn migrates_legacy_scope_to_workspace() {
+        let root = test_root("workspace-scope-migration");
+        fs::create_dir_all(root.join("database")).expect("create database directory");
+        let connection = Connection::open(root.join("database/picbind.sqlite")).expect("open db");
+        connection
+            .execute_batch(
+                "CREATE TABLE image_cache (
+                   scope TEXT NOT NULL, scope_key TEXT NOT NULL, id TEXT NOT NULL,
+                   metadata_json TEXT NOT NULL, mime_type TEXT NOT NULL,
+                   file_path TEXT, external_path TEXT, thumbnail_path TEXT,
+                   byte_size INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL, last_accessed_at INTEGER,
+                   PRIMARY KEY (scope, scope_key, id)
+                 );
+                 CREATE INDEX image_cache_scope_updated
+                   ON image_cache(scope, scope_key, updated_at DESC);
+                 CREATE INDEX image_cache_lru
+                   ON image_cache(scope, last_accessed_at, updated_at);
+                 INSERT INTO image_cache (
+                   scope, scope_key, id, metadata_json, mime_type, file_path,
+                   external_path, thumbnail_path, byte_size, created_at, updated_at,
+                   last_accessed_at
+                 ) VALUES (
+                   'room', 'workspace-1', 'image-1', '{}', 'image/png', NULL,
+                   NULL, NULL, 0, 1, 1, 1
+                 );
+                 PRAGMA user_version = 3;",
+            )
+            .expect("create legacy schema");
+        drop(connection);
+
+        let store = NativeImageStore::open(root.clone()).expect("migrate store");
+        assert!(
+            store
+                .get("workspace", "workspace-1", "image-1")
+                .expect("get migrated workspace image")
+                .is_some()
+        );
+        let connection = store.connection.lock().expect("lock db");
+        let legacy_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM image_cache WHERE scope = 'room'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("legacy scope count");
+        assert_eq!(legacy_count, 0);
+        drop(connection);
+        fs::remove_dir_all(root).expect("remove test storage");
+    }
+
+    #[test]
     fn prune_only_removes_cache_and_derived_files() {
         let root = test_root("prune");
         let store = NativeImageStore::open(root.clone()).expect("open store");
@@ -1372,12 +1457,22 @@ mod tests {
             .put(request("compressed", "", "asset", Some(vec![1, 2, 3])))
             .expect("put managed asset");
         store
-            .put(request("messaging", "room", "message", Some(vec![4, 5, 6])))
+            .put(request(
+                "messaging",
+                "workspace",
+                "message",
+                Some(vec![4, 5, 6]),
+            ))
             .expect("put message cache");
-        let mut room = request("room", "room", "room-image", Some(vec![7, 8, 9]));
-        room.thumbnail = Some(vec![10, 11]);
-        room.thumbnail_length = 2;
-        store.put(room).expect("put derived thumbnail");
+        let mut workspace = request(
+            "workspace",
+            "workspace",
+            "workspace-image",
+            Some(vec![7, 8, 9]),
+        );
+        workspace.thumbnail = Some(vec![10, 11]);
+        workspace.thumbnail_length = 2;
+        store.put(workspace).expect("put derived thumbnail");
 
         let result = store
             .prune(PruneCachePolicy {
@@ -1396,8 +1491,8 @@ mod tests {
         );
         assert!(
             store
-                .get("room", "room", "room-image")
-                .expect("get room image")
+                .get("workspace", "workspace", "workspace-image")
+                .expect("get workspace image")
                 .is_some()
         );
         fs::remove_dir_all(root).expect("remove test storage");
@@ -1408,7 +1503,12 @@ mod tests {
         let root = test_root("recovery");
         let store = NativeImageStore::open(root.clone()).expect("open store");
         store
-            .put(request("messaging", "room", "message", Some(vec![1, 2, 3])))
+            .put(request(
+                "messaging",
+                "workspace",
+                "message",
+                Some(vec![1, 2, 3]),
+            ))
             .expect("put message");
         let path: String = store
             .connection

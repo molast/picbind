@@ -64,6 +64,21 @@ test("promotes local Workspace data into an authenticated provisioned Workspace"
   assert.equal(await database.workspaces.get(local.workspaceId), undefined);
 });
 
+test("switching to another owned Workspace never promotes its existing cache", async () => {
+  const first = { ...workspace("workspace-a"), shareToken: "share-a", ownerCapability: "owner-a" };
+  const second = { ...workspace("workspace-b"), shareToken: "share-b", ownerCapability: "owner-b" };
+  await saveWorkspace(first);
+  await saveWorkspaceImage(image("first-image", first.workspaceId));
+  localStorage.setItem("picbind.workspace.local-id", first.workspaceId);
+
+  const restored = await restoreProvisionedWorkspace(second);
+
+  assert.equal(restored.workspaceId, second.workspaceId);
+  assert.deepEqual(await listWorkspaceImages(second.workspaceId), []);
+  assert.deepEqual((await listWorkspaceImages(first.workspaceId)).map((value) => value.imageId), ["first-image"]);
+  assert.equal(await database.workspaces.get(first.workspaceId) !== undefined, true);
+});
+
 test("isolates image content by Workspace", async () => {
   await saveWorkspaceImage(image("a", "workspace-a"));
   await saveWorkspaceImage(image("b", "workspace-b"));

@@ -1,6 +1,6 @@
 import React from "react";
 import { FiRefreshCw, FiX } from "react-icons/fi";
-import { getLang, getWorkspaceLabels, type ShareRoomLabels } from "../../locales";
+import { getLang, getWorkspaceLabels, type WorkspaceEditorLabels } from "../../locales";
 import type { MessagingProviderSnapshot, MessagingService } from "../../messaging";
 import { ColorControl } from "../components/workspace-action";
 import { defaultWorkspaceStyle, type WorkspaceIdentity, type WorkspaceRuntimeState, type WorkspaceStyle } from "../types";
@@ -36,7 +36,7 @@ export function WorkspaceSettingsDialog({
   desktop: boolean;
   messagingService?: MessagingService;
   messagingProviders: MessagingProviderSnapshot[];
-  messagingLabels: ShareRoomLabels;
+  messagingLabels: WorkspaceEditorLabels;
   onStyleChange: React.Dispatch<React.SetStateAction<WorkspaceStyle>>;
   onClose(): void;
   onSave(): void;

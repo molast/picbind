@@ -5,12 +5,12 @@ import { FiRotateCcw, FiTrash2 } from "react-icons/fi";
 import {
   buildToneCurveLut,
   type ToneCurvePoint,
-} from "../../../utils/room-color-adjustments";
-import type { ShareRoomLabels } from "../share-room-labels";
+} from "../../../utils/workspace-color-adjustments";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 
 type ToneCurveEditorProps = {
   points: ToneCurvePoint[];
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onChange(points: ToneCurvePoint[]): void;
   onInteractionChange?(active: boolean): void;
 };

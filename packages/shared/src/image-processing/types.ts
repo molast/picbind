@@ -27,7 +27,7 @@ export type ImageMetadata = {
 };
 
 export type ImageAssetReference = {
-  scope: "compressed" | "queued" | "room" | "messaging";
+  scope: "compressed" | "queued" | "workspace" | "messaging";
   scopeKey: string;
   id: string;
   variant: "original" | "output" | "thumbnail";

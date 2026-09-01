@@ -803,7 +803,7 @@ mod tests {
             NativeSource::Inline { cache_key: Some(ref value) } if value == "workspace:image:1"
         ));
 
-        let metadata = br#"{"apiVersion":1,"requestId":"test-stored","operation":"inspect","source":{"kind":"stored","scope":"room","scopeKey":"workspace","id":"image","variant":"original","revision":"1"},"inlineLength":0}"#;
+        let metadata = br#"{"apiVersion":1,"requestId":"test-stored","operation":"inspect","source":{"kind":"stored","scope":"workspace","scopeKey":"workspace","id":"image","variant":"original","revision":"1"},"inlineLength":0}"#;
         let mut frame = Vec::new();
         frame.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
         frame.extend_from_slice(metadata);

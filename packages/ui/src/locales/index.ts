@@ -4,7 +4,7 @@ export type { WorkspaceLabels } from "./workspace";
 import zh from "./zh";
 
 export type Lang = "en" | "zh";
-export type ShareRoomLabels = typeof zh;
+export type WorkspaceEditorLabels = typeof zh;
 
 const LANG_KEY = "ai-translator-lang-v2";
 const LANG_COOKIE_KEY = "picbind-lang";
@@ -44,10 +44,10 @@ export function setLang(lang: Lang) {
   document.cookie = `${LANG_COOKIE_KEY}=${lang}; Path=/; Max-Age=31536000; SameSite=Lax`;
 }
 
-export function getShareRoomLabels(
+export function getWorkspaceEditorLabels(
   lang: Lang,
   maxImageTransferSize: number | null = null,
-): ShareRoomLabels {
+): WorkspaceEditorLabels {
   const labels = lang === "zh" ? zh : en;
   if (!maxImageTransferSize) return labels;
 

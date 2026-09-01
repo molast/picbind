@@ -10,7 +10,7 @@ import type {
   MessagingService,
   WeixinIlinkProvider,
 } from "../../messaging";
-import type { ShareRoomLabels } from "../../locales";
+import type { WorkspaceEditorLabels } from "../../locales";
 
 type DisplayProvider = MessagingProviderSnapshot & { configured: boolean };
 
@@ -21,7 +21,7 @@ export function WorkspaceMessagingServiceSettings({
 }: {
   service?: MessagingService;
   providers: MessagingProviderSnapshot[];
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
 }) {
   const [pendingProviderId, setPendingProviderId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);

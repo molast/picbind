@@ -6,7 +6,7 @@ import {
   type CompressedImageRecord,
   type MessagingImageRecord,
   type QueuedFileRecord,
-  type RoomImageRecord,
+  type WorkspaceImageRecord,
 } from "../database";
 import { fileStorage } from "../file-storage";
 import type {
@@ -27,14 +27,14 @@ function primaryPath(scope: ImageStorageScope, scopeKey: string, id: string) {
       return `files/compressed/${segment(id)}`;
     case "queued":
       return `temp/compression/${segment(id)}`;
-    case "room":
+    case "workspace":
       return `files/images/${segment(id)}`;
     case "messaging":
       return `cache/messaging/${segment(scopeKey)}/${segment(id)}`;
   }
 }
 
-function roomThumbnailPath(id: string) {
+function workspaceThumbnailPath(id: string) {
   return `thumbnails/images/${segment(id)}.webp`;
 }
 
@@ -106,15 +106,15 @@ async function putQueued<T extends Record<string, unknown>>(
   return storageRecord({ ...input, byteSize: input.data.size });
 }
 
-async function putRoom<T extends Record<string, unknown>>(
+async function putWorkspace<T extends Record<string, unknown>>(
   input: PutImageStorageInput<T>,
 ) {
   const database = getDatabase();
   const scopeKey = input.scopeKey ?? "";
-  const existing = await database.roomImages.get([scopeKey, input.id]);
+  const existing = await database.workspaceImages.get([scopeKey, input.id]);
   const contentReference = existing?.filePath
     ? existing
-    : await database.roomImages
+    : await database.workspaceImages
         .where("id")
         .equals(input.id)
         .filter((record) => Boolean(record.filePath))
@@ -123,25 +123,25 @@ async function putRoom<T extends Record<string, unknown>>(
   const data = input.data;
   const shouldWriteFile = Boolean(data && data.size > 0);
   if (data && shouldWriteFile) {
-    filePath = primaryPath("room", scopeKey, input.id);
+    filePath = primaryPath("workspace", scopeKey, input.id);
     await fileStorage.write(filePath, data);
   }
   let thumbnailPath = existing?.thumbnailPath ?? null;
   if (input.thumbnail) {
-    thumbnailPath = roomThumbnailPath(input.id);
+    thumbnailPath = workspaceThumbnailPath(input.id);
     await fileStorage.write(thumbnailPath, input.thumbnail);
   }
   const updatedAt = Number(input.metadata.updatedAt ?? input.createdAt);
-  await database.roomImages.put({
+  await database.workspaceImages.put({
     ...input.metadata,
     id: input.id,
-    roomId: scopeKey,
+    workspaceId: scopeKey,
     type: input.mimeType,
     createdAt: input.createdAt,
     updatedAt,
     filePath,
     thumbnailPath,
-  } as unknown as RoomImageRecord);
+  } as unknown as WorkspaceImageRecord);
   return storageRecord({
     ...input,
     scopeKey,
@@ -158,9 +158,9 @@ async function putMessaging<T extends Record<string, unknown>>(
   const scopeKey = input.scopeKey ?? "";
   const path = primaryPath("messaging", scopeKey, input.id);
   await fileStorage.write(path, input.data);
-  await getDatabase().messagingImages.put({
+  await getDatabase().workspaceMessagingImages.put({
     ...input.metadata,
-    roomId: scopeKey,
+    workspaceId: scopeKey,
     mimeType: input.mimeType,
     size: input.data.size,
     createdAt: input.createdAt,
@@ -199,8 +199,8 @@ async function getRecord<T extends Record<string, unknown>>(
       createdAt: record.createdAt,
     });
   }
-  if (scope === "room") {
-    const record = await database.roomImages.get([scopeKey, id]);
+  if (scope === "workspace") {
+    const record = await database.workspaceImages.get([scopeKey, id]);
     if (!record) return null;
     return storageRecord({
       scope,
@@ -215,7 +215,7 @@ async function getRecord<T extends Record<string, unknown>>(
     });
   }
   const [providerId, messageId] = JSON.parse(id) as [string, string];
-  const record = await database.messagingImages.get([scopeKey, providerId, messageId]);
+  const record = await database.workspaceMessagingImages.get([scopeKey, providerId, messageId]);
   if (!record) return null;
   return storageRecord({
     scope,
@@ -260,8 +260,8 @@ async function listRecords<T extends Record<string, unknown>>(
       createdAt: record.createdAt,
     }));
   }
-  if (scope === "room") {
-    const records = await database.roomImages.where("[roomId+updatedAt]")
+  if (scope === "workspace") {
+    const records = await database.workspaceImages.where("[workspaceId+updatedAt]")
       .between([scopeKey, Dexie.minKey], [scopeKey, Dexie.maxKey], true, true)
       .reverse().offset(offset).limit(pageSize).toArray();
     return records.map((record) => storageRecord({
@@ -276,7 +276,7 @@ async function listRecords<T extends Record<string, unknown>>(
       updatedAt: record.updatedAt,
     }));
   }
-  const records = await database.messagingImages.where("[roomId+createdAt]")
+  const records = await database.workspaceMessagingImages.where("[workspaceId+createdAt]")
     .between([scopeKey, Dexie.minKey], [scopeKey, Dexie.maxKey], true, true)
     .reverse().offset(offset).limit(pageSize).toArray();
   return records.map((record) => storageRecord({
@@ -303,13 +303,13 @@ async function readRecord(
   let path: string | null | undefined;
   if (scope === "compressed") path = (await database.compressedImages.get(id))?.filePath;
   if (scope === "queued") path = (await database.queuedFiles.get(id))?.filePath;
-  if (scope === "room") {
-    const record = await database.roomImages.get([scopeKey, id]);
+  if (scope === "workspace") {
+    const record = await database.workspaceImages.get([scopeKey, id]);
     path = variant === "thumbnail" ? record?.thumbnailPath : record?.filePath;
   }
   if (scope === "messaging") {
     const [providerId, messageId] = JSON.parse(id) as [string, string];
-    path = (await database.messagingImages.get([scopeKey, providerId, messageId]))?.filePath;
+    path = (await database.workspaceMessagingImages.get([scopeKey, providerId, messageId]))?.filePath;
   }
   if (!path) return null;
   try {
@@ -322,7 +322,7 @@ async function readRecord(
     if (scope === "queued") await database.queuedFiles.delete(id);
     if (scope === "messaging") {
       const [providerId, messageId] = JSON.parse(id) as [string, string];
-      await database.messagingImages.delete([scopeKey, providerId, messageId]);
+      await database.workspaceMessagingImages.delete([scopeKey, providerId, messageId]);
     }
     return null;
   }
@@ -342,10 +342,10 @@ async function deleteRecord(scope: ImageStorageScope, scopeKey: string, id: stri
     await fileStorage.remove(record?.filePath ?? primaryPath(scope, scopeKey, id));
     return;
   }
-  if (scope === "room") {
-    const record = await database.roomImages.get([scopeKey, id]);
-    await database.roomImages.delete([scopeKey, id]);
-    if (await database.roomImages.where("id").equals(id).count() === 0) {
+  if (scope === "workspace") {
+    const record = await database.workspaceImages.get([scopeKey, id]);
+    await database.workspaceImages.delete([scopeKey, id]);
+    if (await database.workspaceImages.where("id").equals(id).count() === 0) {
       await Promise.all([
         fileStorage.remove(record?.filePath),
         fileStorage.remove(record?.thumbnailPath),
@@ -354,8 +354,8 @@ async function deleteRecord(scope: ImageStorageScope, scopeKey: string, id: stri
     return;
   }
   const [providerId, messageId] = JSON.parse(id) as [string, string];
-  const record = await database.messagingImages.get([scopeKey, providerId, messageId]);
-  await database.messagingImages.delete([scopeKey, providerId, messageId]);
+  const record = await database.workspaceMessagingImages.get([scopeKey, providerId, messageId]);
+  await database.workspaceMessagingImages.delete([scopeKey, providerId, messageId]);
   await fileStorage.remove(record?.filePath);
 }
 
@@ -365,20 +365,20 @@ async function deleteVariant(
   id: string,
   variant: ImageStorageVariant,
 ) {
-  if (scope !== "room") {
+  if (scope !== "workspace") {
     await deleteRecord(scope, scopeKey, id);
     return;
   }
   const database = getDatabase();
-  const record = await database.roomImages.get([scopeKey, id]);
+  const record = await database.workspaceImages.get([scopeKey, id]);
   if (!record) return;
   const thumbnail = variant === "thumbnail";
   const path = thumbnail ? record.thumbnailPath : record.filePath;
   if (!path) return;
-  await database.roomImages.update([scopeKey, id], thumbnail
+  await database.workspaceImages.update([scopeKey, id], thumbnail
     ? { thumbnailPath: null }
     : { filePath: null });
-  const stillReferenced = await database.roomImages
+  const stillReferenced = await database.workspaceImages
     .filter((candidate) => candidate.filePath === path || candidate.thumbnailPath === path)
     .count();
   if (stillReferenced === 0) await fileStorage.remove(path);
@@ -398,21 +398,21 @@ async function clearRecords(scope: ImageStorageScope, scopeKey?: string) {
     await Promise.all(records.map((record) => fileStorage.remove(record.filePath)));
     return;
   }
-  if (scope === "room") {
+  if (scope === "workspace") {
     const records = scopeKey === undefined
-      ? await database.roomImages.toArray()
-      : await database.roomImages.where("roomId").equals(scopeKey).toArray();
+      ? await database.workspaceImages.toArray()
+      : await database.workspaceImages.where("workspaceId").equals(scopeKey).toArray();
     await Promise.all(records.map((record) =>
-      deleteRecord(scope, record.roomId, record.id)));
+      deleteRecord(scope, record.workspaceId, record.id)));
     return;
   }
   const records = scopeKey === undefined
-    ? await database.messagingImages.toArray()
-    : await database.messagingImages.where("roomId").equals(scopeKey).toArray();
+    ? await database.workspaceMessagingImages.toArray()
+    : await database.workspaceMessagingImages.where("workspaceId").equals(scopeKey).toArray();
   await Promise.all(records.map((record) =>
     deleteRecord(
       scope,
-      record.roomId,
+      record.workspaceId,
       JSON.stringify([record.providerId, record.messageId]),
     )));
 }
@@ -421,7 +421,7 @@ export const webImageStorageRepository: ImageStorageRepository = {
   put(input) {
     if (input.scope === "compressed") return putCompressed(input);
     if (input.scope === "queued") return putQueued(input);
-    if (input.scope === "room") return putRoom(input);
+    if (input.scope === "workspace") return putWorkspace(input);
     return putMessaging(input);
   },
   get: getRecord,

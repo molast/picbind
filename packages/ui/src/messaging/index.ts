@@ -5,7 +5,7 @@ export type {
   MessagingChannel,
   NormalizedMessage,
   NormalizedMessageType,
-  RoomChannelBinding,
+  WorkspaceChannelBinding,
 } from "./core/message";
 export type {
   MessageProvider,

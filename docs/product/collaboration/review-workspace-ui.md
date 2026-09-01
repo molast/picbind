@@ -1,7 +1,7 @@
 # PicBind UI/UX 设计文档（V2）
 
 > Version: 2.0
-> Module: Share Room / Review Workspace
+> Module: Workspace / Review Workspace
 > Status: Draft
 
 ---
@@ -37,7 +37,7 @@ Review 负责图片协作。
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │                                                               │
-│  Workspace                              Room Panel            │
+│  Workspace                              Workspace Panel            │
 │                                                               │
 │                                       ┌───────────────────┐   │
 │                                       │ Participants      │   │
@@ -54,7 +54,7 @@ Review 负责图片协作。
 
 左侧负责图片。
 
-右侧负责房间。
+右侧负责工作区。
 
 ---
 
@@ -421,14 +421,14 @@ Compressed
 
 ---
 
-# 十四、Room Panel
+# 十四、Workspace Panel
 
-Room Panel 不再定义为聊天区域。
+Workspace Panel 不再定义为聊天区域。
 
 统一升级为：
 
 ```
-Room Panel
+Workspace Panel
 ```
 
 包含：
@@ -486,7 +486,7 @@ Latency
 
 # 十六、Activity
 
-Activity 用于展示整个房间事件。
+Activity 用于展示整个工作区事件。
 
 例如：
 
@@ -566,10 +566,10 @@ Activity 不可编辑。
 
 ## Step 1
 
-创建房间。
+创建工作区。
 
 ```
-Create Room
+Create Workspace
 ```
 
 ---
@@ -711,11 +711,11 @@ Review Workspace 后续可直接扩展：
 
 ---
 
-## Room Panel
+## Workspace Panel
 
 负责：
 
-> 房间信息。
+> 工作区信息。
 
 不承担图片编辑。
 
@@ -747,4 +747,4 @@ PicBind 的核心体验应遵循一条简单自然的用户路径：
 继续分享下一张图片
 ```
 
-整个产品围绕这一条主流程展开，而不是演变成复杂的聊天软件或通用白板工具。Review Workspace 是 PicBind 的核心价值，Gallery 是入口，Room Panel 是协作辅助，两者共同构成一套轻量、高效、专注于图片协作的实时工作空间。
+整个产品围绕这一条主流程展开，而不是演变成复杂的聊天软件或通用白板工具。Review Workspace 是 PicBind 的核心价值，Gallery 是入口，Workspace Panel 是协作辅助，两者共同构成一套轻量、高效、专注于图片协作的实时工作空间。

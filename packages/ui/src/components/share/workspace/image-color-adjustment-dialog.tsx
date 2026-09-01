@@ -23,27 +23,27 @@ import {
   FiTrendingUp,
   FiX,
 } from "react-icons/fi";
-import type { RoomImage } from "../share-room-types";
-import { type RoomImageEditResult } from "../../../utils/room-image-editing";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import { type WorkspaceImageEditResult } from "../../../utils/workspace-image-editing";
 import {
   DEFAULT_COLOR_ADJUSTMENTS,
   type ColorToneRange,
-  type RoomColorAdjustments,
-} from "../../../utils/room-color-adjustments";
+  type WorkspaceColorAdjustments,
+} from "../../../utils/workspace-color-adjustments";
 import ColorAdjustmentPreview, { type ColorComparisonMode } from "./color-adjustment-preview";
 import ToneCurveEditor from "./tone-curve-editor";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 
 type ImageColorAdjustmentDialogProps = {
-  image: RoomImage | null;
+  image: WorkspaceEditorImage | null;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onClose(): void;
-  onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  onSave(source: WorkspaceEditorImage, result: WorkspaceImageEditResult): void | Promise<void>;
   parameterAction?: "apply" | "proposal";
-  onApplyParameters?(adjustments: RoomColorAdjustments): void | Promise<void>;
-  initialAdjustments?: RoomColorAdjustments;
+  onApplyParameters?(adjustments: WorkspaceColorAdjustments): void | Promise<void>;
+  initialAdjustments?: WorkspaceColorAdjustments;
 };
 
 type Category = "light" | "color" | "balance" | "advanced";
@@ -89,14 +89,14 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
   const [maximized, setMaximized] = React.useState(false);
   const [toneRange, setToneRange] = React.useState<ColorToneRange>("midtones");
   const initialAdjustmentValue = initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS;
-  const [adjustments, setAdjustments] = React.useState<RoomColorAdjustments>(initialAdjustmentValue);
+  const [adjustments, setAdjustments] = React.useState<WorkspaceColorAdjustments>(initialAdjustmentValue);
   const adjustmentsRef = React.useRef(initialAdjustmentValue);
   const adjustmentFrameRef = React.useRef<number | null>(null);
   const [previewInteracting, setPreviewInteracting] = React.useState(false);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const replaceAdjustments = React.useCallback((next: RoomColorAdjustments) => {
+  const replaceAdjustments = React.useCallback((next: WorkspaceColorAdjustments) => {
     if (adjustmentFrameRef.current !== null) {
       window.cancelAnimationFrame(adjustmentFrameRef.current);
       adjustmentFrameRef.current = null;
@@ -105,7 +105,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
     setAdjustments(next);
   }, []);
   const updateAdjustments = React.useCallback((
-    update: (current: RoomColorAdjustments) => RoomColorAdjustments,
+    update: (current: WorkspaceColorAdjustments) => WorkspaceColorAdjustments,
   ) => {
     adjustmentsRef.current = update(adjustmentsRef.current);
     if (adjustmentFrameRef.current !== null) return;
@@ -165,8 +165,8 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
     advanced: [{ value: "selective", label: copy.selective, icon: FiTarget }, { value: "replace", label: copy.replace, icon: FiRepeat }, { value: "channels", label: copy.channels, icon: FiLayers }, { value: "recolor", label: copy.recolor, icon: FiDroplet }],
   };
   const unchanged = JSON.stringify(adjustments) === JSON.stringify(initialAdjustments || DEFAULT_COLOR_ADJUSTMENTS);
-  const setValue = <Key extends keyof RoomColorAdjustments>(key: Key, value: RoomColorAdjustments[Key]) => updateAdjustments((current) => ({ ...current, [key]: value }));
-  const setBalance = (key: keyof RoomColorAdjustments["balance"][ColorToneRange], value: number) => updateAdjustments((current) => ({
+  const setValue = <Key extends keyof WorkspaceColorAdjustments>(key: Key, value: WorkspaceColorAdjustments[Key]) => updateAdjustments((current) => ({ ...current, [key]: value }));
+  const setBalance = (key: keyof WorkspaceColorAdjustments["balance"][ColorToneRange], value: number) => updateAdjustments((current) => ({
     ...current,
     balance: { ...current.balance, [toneRange]: { ...current.balance[toneRange], [key]: value } },
   }));
@@ -224,7 +224,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
               {submenu === "temperature" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.temperatureGroup}</h3><SliderRow label={copy.hue} resetLabel={labels.resetSetting} value={adjustments.hue} min={-180} max={180} suffix="°" onChange={(value) => setValue("hue", value)} /><SliderRow label={copy.temperature} resetLabel={labels.resetSetting} value={adjustments.temperature} onChange={(value) => setValue("temperature", value)} /></div> : null}
               {submenu === "balance" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.balance}</h3><div className="grid grid-cols-3 rounded-md bg-slate-100 p-1">{(["shadows", "midtones", "highlights"] as const).map((tone) => <button key={tone} type="button" onClick={() => setToneRange(tone)} className={`h-8 rounded text-[11px] font-semibold ${toneRange === tone ? "bg-white text-[#2f65cf] shadow-sm" : "text-slate-500"}`}>{tone === "shadows" ? copy.shadows : tone === "midtones" ? copy.midtone : copy.highlights}</button>)}</div><SliderRow label={copy.cyanRed} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].cyanRed} onChange={(value) => setBalance("cyanRed", value)} /><SliderRow label={copy.magentaGreen} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].magentaGreen} onChange={(value) => setBalance("magentaGreen", value)} /><SliderRow label={copy.yellowBlue} resetLabel={labels.resetSetting} value={adjustments.balance[toneRange].yellowBlue} onChange={(value) => setBalance("yellowBlue", value)} /></div> : null}
               {submenu === "photo" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.photoFilter}</h3><div className="grid grid-cols-[5.5rem_1fr] items-center gap-3"><span className="text-xs text-slate-600">{copy.filterColor}</span><input type="color" value={adjustments.photoFilterColor} onChange={(event) => setValue("photoFilterColor", event.target.value)} className="h-9 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-1" /></div><SliderRow label={copy.density} resetLabel={labels.resetSetting} value={adjustments.photoFilterDensity} min={0} max={100} onChange={(value) => setValue("photoFilterDensity", value)} /></div> : null}
-              {submenu === "selective" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.selective}</h3><select value={adjustments.selectiveRange} onChange={(event) => setValue("selectiveRange", event.target.value as RoomColorAdjustments["selectiveRange"])} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-600"><option value="reds">{copy.red}</option><option value="yellows">{copy.yellow}</option><option value="greens">{copy.green}</option><option value="cyans">{copy.cyan}</option><option value="blues">{copy.blue}</option><option value="magentas">{copy.magenta}</option></select><SliderRow label={copy.selectiveHue} resetLabel={labels.resetSetting} value={adjustments.selectiveHue} min={-180} max={180} suffix="°" onChange={(value) => setValue("selectiveHue", value)} /><SliderRow label={copy.selectiveSaturation} resetLabel={labels.resetSetting} value={adjustments.selectiveSaturation} onChange={(value) => setValue("selectiveSaturation", value)} /><SliderRow label={copy.selectiveLightness} resetLabel={labels.resetSetting} value={adjustments.selectiveLightness} onChange={(value) => setValue("selectiveLightness", value)} /></div> : null}
+              {submenu === "selective" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.selective}</h3><select value={adjustments.selectiveRange} onChange={(event) => setValue("selectiveRange", event.target.value as WorkspaceColorAdjustments["selectiveRange"])} className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-600"><option value="reds">{copy.red}</option><option value="yellows">{copy.yellow}</option><option value="greens">{copy.green}</option><option value="cyans">{copy.cyan}</option><option value="blues">{copy.blue}</option><option value="magentas">{copy.magenta}</option></select><SliderRow label={copy.selectiveHue} resetLabel={labels.resetSetting} value={adjustments.selectiveHue} min={-180} max={180} suffix="°" onChange={(value) => setValue("selectiveHue", value)} /><SliderRow label={copy.selectiveSaturation} resetLabel={labels.resetSetting} value={adjustments.selectiveSaturation} onChange={(value) => setValue("selectiveSaturation", value)} /><SliderRow label={copy.selectiveLightness} resetLabel={labels.resetSetting} value={adjustments.selectiveLightness} onChange={(value) => setValue("selectiveLightness", value)} /></div> : null}
               {submenu === "replace" ? <div className="space-y-4"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-800">{copy.replace}</h3><input type="checkbox" checked={adjustments.replaceEnabled} onChange={(event) => setValue("replaceEnabled", event.target.checked)} className="h-4 w-4 accent-[#2f65cf]" /></div><div className="grid grid-cols-2 gap-3"><label className="text-[11px] text-slate-500">{copy.sourceColor}<input type="color" value={adjustments.replaceSource} onChange={(event) => setValue("replaceSource", event.target.value)} className="mt-1 h-9 w-full rounded-md border border-slate-200 p-1" /></label><label className="text-[11px] text-slate-500">{copy.targetColor}<input type="color" value={adjustments.replaceTarget} onChange={(event) => setValue("replaceTarget", event.target.value)} className="mt-1 h-9 w-full rounded-md border border-slate-200 p-1" /></label></div><SliderRow label={copy.tolerance} resetLabel={labels.resetSetting} value={adjustments.replaceTolerance} min={1} max={100} resetValue={20} onChange={(value) => setValue("replaceTolerance", value)} /><SliderRow label={copy.replaceStrength} resetLabel={labels.resetSetting} value={adjustments.replaceStrength} min={0} max={100} resetValue={100} onChange={(value) => setValue("replaceStrength", value)} /></div> : null}
               {submenu === "channels" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.channels}</h3><SliderRow label={copy.redChannel} resetLabel={labels.resetSetting} value={adjustments.redChannel} onChange={(value) => setValue("redChannel", value)} /><SliderRow label={copy.greenChannel} resetLabel={labels.resetSetting} value={adjustments.greenChannel} onChange={(value) => setValue("greenChannel", value)} /><SliderRow label={copy.blueChannel} resetLabel={labels.resetSetting} value={adjustments.blueChannel} onChange={(value) => setValue("blueChannel", value)} /></div> : null}
               {submenu === "recolor" ? <div className="space-y-4"><h3 className="text-sm font-semibold text-slate-800">{copy.recolor}</h3><div className="grid grid-cols-4 gap-1 rounded-md bg-slate-100 p-1">{(["color", "grayscale", "sepia", "monochrome"] as const).map((mode) => <button key={mode} type="button" onClick={() => setValue("recolorMode", mode)} className={`h-9 rounded text-[10px] font-semibold ${adjustments.recolorMode === mode ? "bg-white text-[#2f65cf] shadow-sm" : "text-slate-500"}`}>{copy[mode]}</button>)}</div>{adjustments.recolorMode === "monochrome" ? <input type="color" value={adjustments.monochromeColor} onChange={(event) => setValue("monochromeColor", event.target.value)} className="h-9 w-full rounded-md border border-slate-200 p-1" /> : null}</div> : null}
@@ -247,7 +247,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
                 }),
                 output: { format: "source" },
                 destination: "memory",
-              }, { requestId: `room-adjust:${crypto.randomUUID()}` }).then((result) => {
+              }, { requestId: `workspace-adjust:${crypto.randomUUID()}` }).then((result) => {
                 if (result.artifact.kind !== "blob") throw new Error(labels.colorAdjustmentFailed);
                 return onSave(image, {
                   blob: result.artifact.blob, name: result.name, width: result.metadata.width,

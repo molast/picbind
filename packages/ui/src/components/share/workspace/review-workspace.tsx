@@ -2,9 +2,9 @@
 
 import React from "react";
 import { useImageProcessing } from "../../../image-processing";
-import type { ShareRoomLabels } from "../share-room-labels";
-import type { RoomImage } from "../share-room-types";
-import type { RoomRole } from "../share-room-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorRole } from "../workspace-editor-types";
 import type {
   ReviewAnchor,
   ReviewAnnotation,
@@ -25,12 +25,12 @@ import ReviewStatusBar from "./review-status-bar";
 import ReviewToolbar from "./review-toolbar";
 import ReviewClearCommentsDialog from "./review-clear-comments-dialog";
 import ReviewImageExportDialog from "./review-image-export-dialog";
-import type { ShareRecipient } from "./share-recipient-dialog";
+import type { WorkspaceShareRecipient } from "./workspace-share-recipient";
 import { useReviewHistory } from "./use-review-history";
 import {
   loadReviewHistory,
   saveReviewHistory,
-} from "../../../utils/realtime-review-history-store";
+} from "../../../utils/workspace-review-history-store";
 import {
   generateReviewImage,
   type ReviewImageExport,
@@ -39,17 +39,17 @@ import {
 } from "../../../utils/review-image-export";
 
 type ReviewWorkspaceProps = {
-  roomId: string;
-  image: RoomImage;
+  workspaceId: string;
+  image: WorkspaceEditorImage;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   actorId: string;
-  role: RoomRole | null;
+  role: WorkspaceEditorRole | null;
   fullscreen: boolean;
   collaborationEnabled?: boolean;
   showCommentAnchors?: boolean;
-  shareRecipients: ShareRecipient[];
+  shareRecipients: WorkspaceShareRecipient[];
   subscribeMessages(
     listener: (event: {
       sequence: number;
@@ -65,11 +65,11 @@ type ReviewWorkspaceProps = {
   onReviewEditingChange(imageId: string, operationCount: number): void;
   onFullscreenChange(fullscreen: boolean): void;
   onGenerateImage(
-    source: RoomImage,
+    source: WorkspaceEditorImage,
     result: ReviewImageExport,
     share: boolean,
     report: (stage: ReviewImageExportStage) => void,
-    recipient?: ShareRecipient,
+    recipient?: WorkspaceShareRecipient,
   ): Promise<ReviewImageExportOutcome>;
   parameterAction?: "apply" | "proposal";
   onApplyParameters?(parameters: { annotations: ReviewAnnotation[] }): void | Promise<void>;
@@ -108,7 +108,7 @@ function mergeReviewAnchors(primary: ReviewAnchor[], secondary: ReviewAnchor[]) 
 }
 
 export default function ReviewWorkspace({
-  roomId,
+  workspaceId,
   image,
   posterUrl,
   editorBaseReady = true,
@@ -311,7 +311,7 @@ export default function ReviewWorkspace({
   }, []);
 
   React.useEffect(() => {
-    const cacheKey = `${roomId}:${image.id}`;
+    const cacheKey = `${workspaceId}:${image.id}`;
     let cancelled = false;
     resetViewport();
     setDimensions({ width: 0, height: 0 });
@@ -346,7 +346,7 @@ export default function ReviewWorkspace({
       }
       let cached: Awaited<ReturnType<typeof loadReviewHistory>> = null;
       try {
-        cached = await loadReviewHistory(roomId, image.id);
+        cached = await loadReviewHistory(workspaceId, image.id);
       } catch {
         cached = null;
       }
@@ -399,29 +399,29 @@ export default function ReviewWorkspace({
     operationsRef,
     replace,
     resetViewport,
-    roomId,
+    workspaceId,
     parameterAction,
   ]);
 
   React.useEffect(() => {
-    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
-    void saveReviewHistory(roomId, image.id, operations, cursor, anchors).catch(() => undefined);
-  }, [anchors, cursor, hydratedHistoryKey, image.id, operations, roomId]);
+    if (hydratedHistoryKey !== `${workspaceId}:${image.id}`) return;
+    void saveReviewHistory(workspaceId, image.id, operations, cursor, anchors).catch(() => undefined);
+  }, [anchors, cursor, hydratedHistoryKey, image.id, operations, workspaceId]);
 
   React.useEffect(() => {
-    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
+    if (hydratedHistoryKey !== `${workspaceId}:${image.id}`) return;
     onReviewEditingChange(image.id, operations.length);
-  }, [hydratedHistoryKey, image.id, onReviewEditingChange, operations.length, roomId]);
+  }, [hydratedHistoryKey, image.id, onReviewEditingChange, operations.length, workspaceId]);
 
   React.useEffect(() => {
-    if (hydratedHistoryKey !== `${roomId}:${image.id}`) return;
+    if (hydratedHistoryKey !== `${workspaceId}:${image.id}`) return;
     const status = visibleAnchors.length
       ? visibleAnchors.every((anchor) => anchor.resolved)
         ? "approved"
         : "in-review"
       : undefined;
     onReviewStatusChange(image.id, status, visibleAnchors.length);
-  }, [hydratedHistoryKey, image.id, onReviewStatusChange, roomId, visibleAnchors]);
+  }, [hydratedHistoryKey, image.id, onReviewStatusChange, workspaceId, visibleAnchors]);
 
   React.useEffect(() => {
     if (localMode !== "present") return;

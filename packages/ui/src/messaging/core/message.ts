@@ -34,9 +34,9 @@ export type ExternalMessageIdentity = {
   createdAt: number;
 };
 
-export type RoomChannelBinding = {
+export type WorkspaceChannelBinding = {
   id: string;
-  roomId: string;
+  workspaceId: string;
   userId: string;
   channel: MessagingChannel;
   createdAt: number;

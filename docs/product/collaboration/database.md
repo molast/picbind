@@ -15,7 +15,7 @@
 ## 二、整体架构
 
 ```text
-React / Next.js / Room SDK
+React / Next.js / PicBind UI
              │
              ▼
       Repository Layer
@@ -48,9 +48,9 @@ Dexie 保存：
 
 - 压缩图片关联元数据
 - 待处理文件元数据
-- Room 图片关联和传输状态
+- Workspace 图片关联和传输状态
 - Review 操作历史及评论锚点
-- Room 操作日志
+- Workspace 操作日志
 
 OPFS 保存：
 
@@ -65,8 +65,8 @@ Dexie 使用 `database.version(n).stores(...)` 管理 schema 版本。后续表�
 必须增加版本，不得在同一版本下直接修改已发布 schema。升级逻辑仅用于 Dexie
 自身结构演进，不迁移旧 SQLite 数据。
 
-Web 与 Room SDK 使用相同的数据库名 `picbind-local`、相同版本和完整 store
-声明，保证 Room 被 Web 引入时可以共享压缩结果元数据。
+Web 与 PicBind UI package 使用相同的数据库名 `picbind-local`、相同版本和完整 store
+声明，保证 Workspace 被 Web 引入时可以共享压缩结果元数据。
 
 ## 六、Repository 规则
 
@@ -80,5 +80,5 @@ Web 与 Room SDK 使用相同的数据库名 `picbind-local`、相同版本和�
 
 ## 七、远端数据库边界
 
-本架构只替换浏览器端 SQLite。本次调整不修改 Cloudflare Worker、D1、远端房间
+本架构只替换浏览器端 SQLite。本次调整不修改 Cloudflare Worker、D1、远端工作区
 状态或线上 API。远端数据库与本地 Dexie 之间不存在自动迁移关系。

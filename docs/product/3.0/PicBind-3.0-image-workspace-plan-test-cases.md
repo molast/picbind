@@ -51,7 +51,7 @@
 
 | ID | 优先级 | 测试场景 | 操作步骤 | 预期结果 |
 | --- | --- | --- | --- | --- |
-| WS-001 | P0 | 未登录进入 Workspace | 清除登录态后打开 `/workspace` | 直接创建或恢复当前设备的本地 Workspace，不创建 Room，不要求登录 |
+| WS-001 | P0 | 未登录进入 Workspace | 清除登录态后打开 `/workspace` | 直接创建或恢复当前设备的本地 Workspace，不创建 Workspace，不要求登录 |
 | WS-002 | P0 | 本地 Workspace 添加图片 | 上传合法图片并刷新页面 | 图片可处理且从当前 Workspace 本地缓存恢复 |
 | WS-003 | P0 | 登录状态解耦 | 本地 Workspace 有图片时登录、退出并重新进入 | Workspace ID、图片和业务能力均不因登录状态改变 |
 | WS-004 | P0 | Owner Capability 隔离 | 创建分享链接后只复制 Share URL 到另一个浏览器 | Share URL 不包含 Capability；访客不能读取 Owner 详情、重建链接或签发 Owner Ticket |

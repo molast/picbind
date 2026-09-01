@@ -53,7 +53,7 @@ PicBind Realtime V1 是：
 
 # 4. 功能范围
 
-## 4.1 创建分享房间
+## 4.1 创建分享工作区
 
 用户 A 打开 PicBind。
 
@@ -63,25 +63,25 @@ PicBind Realtime V1 是：
 Share Images
 ```
 
-系统创建一个临时分享房间。
+系统创建一个临时分享工作区。
 
 生成：
 
 ```
-Room ID
+Workspace ID
 ```
 
 以及分享链接：
 
 ```
-https://picbind.com/share?roomId={roomId}
+https://picbind.com/share?workspaceId={workspaceId}
 ```
 
 用户可以复制链接发送给其他人。
 
 ---
 
-## 4.2 加入分享房间
+## 4.2 加入分享工作区
 
 用户 B 打开分享链接。
 
@@ -96,7 +96,7 @@ https://picbind.com/share?roomId={roomId}
 
 ↓
 
-加入 Room
+加入 Workspace
 
 ↓
 
@@ -125,7 +125,7 @@ Owner
 Guest
 ```
 
-只有创建房间的用户可以发送图片。
+只有创建工作区的用户可以发送图片。
 
 流程：
 
@@ -312,7 +312,7 @@ Browser
 
         Durable Object    Realtime SFU
 
-        Room Manager      DataChannel
+        Workspace Manager      DataChannel
 
 
                               |
@@ -342,23 +342,27 @@ Browser
 负责：
 
 * API 入口
-* 创建房间
-* 获取房间信息
+* 创建工作区
+* 获取工作区信息
 * 生成连接凭证
 * 调用 Durable Object
 
 例如：
 
 ```
-POST /api/realtime/room/create
+POST /api/workspaces
 ```
 
 返回：
 
 ```json
 {
-  "roomId": "abc123",
-  "token": "xxx"
+  "workspace": {
+    "id": "workspace_abc123",
+    "shareId": "share_xxx",
+    "name": "My Workspace"
+  },
+  "ownerCapability": "owner_xxx"
 }
 ```
 
@@ -368,11 +372,11 @@ POST /api/realtime/room/create
 
 负责：
 
-房间状态管理。
+工作区状态管理。
 
 包括：
 
-* Room 生命周期
+* Workspace 生命周期
 * 用户加入
 * 用户退出
 * 在线状态
@@ -382,7 +386,7 @@ POST /api/realtime/room/create
 
 ```json
 {
-  "roomId": "abc123",
+  "workspaceId": "abc123",
   "users": [
     {
       "id": "user-a",
@@ -566,11 +570,11 @@ DTLS 加密
 
 ---
 
-## 房间安全
+## 工作区安全
 
 采用：
 
-随机 Room ID。
+随机 Workspace ID。
 
 例如：
 
@@ -581,17 +585,17 @@ DTLS 加密
 避免：
 
 ```
-room=1
-room=2
+workspace=1
+workspace=2
 ```
 
 等容易猜测的地址。
 
 ---
 
-## 房间生命周期
+## 工作区生命周期
 
-临时房间：
+临时工作区：
 
 默认：
 
@@ -610,7 +614,7 @@ V1 不保存图片数据。
 Durable Object 仅保存：
 
 ```
-Room Metadata
+Workspace Metadata
 Connection State
 User Presence
 ```
@@ -672,7 +676,7 @@ Owner
 
 ## 基础连接
 
-* [ ] 用户 A 创建分享房间
+* [ ] 用户 A 创建分享工作区
 * [ ] 用户 B 通过链接加入
 * [ ] 双方成功建立 Realtime 连接
 
@@ -692,8 +696,8 @@ Owner
 ## 安全
 
 * [ ] 图片不经过服务器存储
-* [ ] 房间随机 ID
-* [ ] 房间自动过期
+* [ ] 工作区随机 ID
+* [ ] 工作区自动过期
 
 ---
 

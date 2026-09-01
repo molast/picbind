@@ -121,7 +121,7 @@ Notes:
 - `TURN_API_TOKEN`: Cloudflare TURN API token used to generate short-lived ICE credentials.
 - `QINIU_ACCESS_KEY`: Qiniu server access key. Configure as a Worker secret.
 - `QINIU_SECRET_KEY`: Qiniu server secret key. Configure as a Worker secret.
-- `QINIU_BUCKET`: Qiniu bucket used for future room file storage.
+- `QINIU_BUCKET`: Qiniu bucket reserved for future Workspace file storage.
 - `QINIU_UPLOAD_URL`: Qiniu upload endpoint for the bucket region.
 - `QINIU_DOWNLOAD_URL`: Qiniu download/CDN domain used to build download URLs.
 
@@ -228,7 +228,7 @@ upload tokens. The full SDK entrypoint is intentionally not bundled because its
 Node HTTP stack is incompatible with Cloudflare Workers. AK/SK must never be
 exposed through client build variables or returned to the browser. The
 browser will receive only an object key, upload endpoint, and short-lived upload
-token when Qiniu room storage is enabled.
+token when Qiniu Workspace storage is enabled.
 
 Set `TURN_TOKEN_ID` as a Worker environment variable. The Worker generates
 one-hour ICE credentials and relays SDP signaling through the Workspace Durable

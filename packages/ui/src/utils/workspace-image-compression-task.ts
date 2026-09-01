@@ -1,19 +1,19 @@
 "use client";
 
 import { getPicBindUiConfig } from "../config";
-import { getLang, getShareRoomLabels } from "../locales";
+import { getLang, getWorkspaceEditorLabels } from "../locales";
 import type {
-  RoomCompressionDimensions,
-  RoomCompressionEncodingOptions,
-  RoomCompressionFormat,
-  RoomCompressionResult,
-} from "./room-image-compression";
+  WorkspaceCompressionDimensions,
+  WorkspaceCompressionEncodingOptions,
+  WorkspaceCompressionFormat,
+  WorkspaceCompressionResult,
+} from "./workspace-image-compression";
 
 type WorkerSuccessMessage = {
   ok: true;
   bytes: ArrayBuffer;
   mime: string;
-  format: RoomCompressionResult["format"];
+  format: WorkspaceCompressionResult["format"];
   name: string;
   width: number;
   height: number;
@@ -27,21 +27,21 @@ type WorkerErrorMessage = {
 type WorkerMessage = WorkerSuccessMessage | WorkerErrorMessage;
 
 function abortError() {
-  return new DOMException(getShareRoomLabels(getLang()).compressionCancelled, "AbortError");
+  return new DOMException(getWorkspaceEditorLabels(getLang()).compressionCancelled, "AbortError");
 }
 
-export function compressRoomImageTask(
+export function compressWorkspaceImageTask(
   image: File,
-  requestedFormat: RoomCompressionFormat,
+  requestedFormat: WorkspaceCompressionFormat,
   signal: AbortSignal,
-  dimensions?: RoomCompressionDimensions,
+  dimensions?: WorkspaceCompressionDimensions,
   allowAlphaLoss = false,
-  encodingOptions?: RoomCompressionEncodingOptions,
-): Promise<RoomCompressionResult> {
+  encodingOptions?: WorkspaceCompressionEncodingOptions,
+): Promise<WorkspaceCompressionResult> {
   if (signal.aborted) return Promise.reject(abortError());
 
   const worker = new Worker(
-    new URL("../workers/room-image-compression.worker.ts", import.meta.url),
+    new URL("../workers/workspace-image-compression.worker.ts", import.meta.url),
     { type: "module" },
   );
 
@@ -76,7 +76,7 @@ export function compressRoomImageTask(
     };
     worker.onerror = (event) => {
       finish(() =>
-        reject(event.error || new Error(event.message || getShareRoomLabels(getLang()).compressionWorkerFailed)),
+        reject(event.error || new Error(event.message || getWorkspaceEditorLabels(getLang()).compressionWorkerFailed)),
       );
     };
 

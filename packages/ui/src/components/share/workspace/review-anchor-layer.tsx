@@ -12,7 +12,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import type { ReviewAnchor, ReviewAnchorKind } from "../../../utils/review-collaboration";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 import ReviewStickyNote from "./review-sticky-note";
 
 type ReviewAnchorLayerProps = {
@@ -25,7 +25,7 @@ type ReviewAnchorLayerProps = {
   commentMode: boolean;
   readOnly: boolean;
   anchors: ReviewAnchor[];
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onUpsert(anchor: ReviewAnchor): void;
   onDelete(anchor: ReviewAnchor): void;
 };
@@ -384,7 +384,7 @@ function AnchorKindButton({ icon: Icon, label, onClick }: { icon: typeof FiSmile
   );
 }
 
-function AnchorStatusMenu({ anchor, labels, onUpdate }: { anchor: ReviewAnchor; labels: ShareRoomLabels; onUpdate(patch: Partial<ReviewAnchor>): void }) {
+function AnchorStatusMenu({ anchor, labels, onUpdate }: { anchor: ReviewAnchor; labels: WorkspaceEditorLabels; onUpdate(patch: Partial<ReviewAnchor>): void }) {
   return (
     <div className="absolute left-10 top-0 flex w-40 flex-col rounded-md border border-slate-200 bg-white p-1.5 text-xs shadow-xl" onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" onClick={() => onUpdate({ resolved: !anchor.resolved })} className="flex h-8 items-center gap-2 rounded px-2 text-left font-semibold text-slate-700 hover:bg-slate-100">
@@ -399,7 +399,7 @@ function AnchorDeleteMenu({
   labels,
   onDelete,
 }: {
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onDelete(): void;
 }) {
   return (

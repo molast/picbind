@@ -1,8 +1,8 @@
-import type { RoomColorAdjustments, NormalizedCrop } from "../../utils/room-image-editing";
-import { adjustRoomImage, cropRoomImage, resizeRoomImage } from "../../utils/room-image-editing";
-import type { RoomCompressionEncodingOptions } from "../../utils/room-image-compression";
-import { convertRoomImageTask, type RoomConversionFormat } from "../../utils/room-image-conversion";
-import { compressRoomImageTask } from "../../utils/room-image-compression-task";
+import type { WorkspaceColorAdjustments, NormalizedCrop } from "../../utils/workspace-image-editing";
+import { adjustWorkspaceImage, cropWorkspaceImage, resizeWorkspaceImage } from "../../utils/workspace-image-editing";
+import type { WorkspaceCompressionEncodingOptions } from "../../utils/workspace-image-compression";
+import { convertWorkspaceImageTask, type WorkspaceConversionFormat } from "../../utils/workspace-image-conversion";
+import { compressWorkspaceImageTask } from "../../utils/workspace-image-compression-task";
 import { renderReviewAnnotations } from "../../components/share/workspace/review-annotation-layer";
 import type { ReviewAnnotation } from "../../utils/review-collaboration";
 import type { WorkspaceImage, WorkspaceOperation } from "../types";
@@ -26,7 +26,7 @@ export async function rotateImage(source: Blob, name: string, degrees: number) {
   } finally { bitmap.close(); }
 }
 
-export async function replayOperations(image: WorkspaceImage, operations: WorkspaceOperation[], encodingOptions?: RoomCompressionEncodingOptions) {
+export async function replayOperations(image: WorkspaceImage, operations: WorkspaceOperation[], encodingOptions?: WorkspaceCompressionEncodingOptions) {
   if (!image.source) throw new Error("Source data is unavailable");
   let current = new File([image.source], image.name, { type: image.mimeType });
   let width = image.width, height = image.height;
@@ -34,23 +34,23 @@ export async function replayOperations(image: WorkspaceImage, operations: Worksp
     if (operation.type === "crop") {
       const crop = { x: numberParameter(operation.parameters, "x"), y: numberParameter(operation.parameters, "y"), width: numberParameter(operation.parameters, "width"), height: numberParameter(operation.parameters, "height") };
       if (crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0 || crop.x + crop.width > 1 || crop.y + crop.height > 1) throw new Error("Invalid crop operation");
-      const result = await cropRoomImage(current, crop as NormalizedCrop, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
+      const result = await cropWorkspaceImage(current, crop as NormalizedCrop, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
     } else if (operation.type === "resize") {
       const targetWidth = numberParameter(operation.parameters, "width"), targetHeight = numberParameter(operation.parameters, "height");
       if (targetWidth < 1 || targetHeight < 1 || targetWidth > 16384 || targetHeight > 16384) throw new Error("Invalid resize operation");
-      const result = await resizeRoomImage(current, targetWidth, targetHeight, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
+      const result = await resizeWorkspaceImage(current, targetWidth, targetHeight, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
     } else if (operation.type === "rotate") {
       const result = await rotateImage(current, current.name, numberParameter(operation.parameters, "degrees")); current = new File([result.blob], result.name, { type: result.mimeType }); width = result.width; height = result.height;
     } else if (["brightness", "contrast", "saturation"].includes(operation.type)) {
-      const result = await adjustRoomImage(current, operation.parameters as unknown as RoomColorAdjustments, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
+      const result = await adjustWorkspaceImage(current, operation.parameters as unknown as WorkspaceColorAdjustments, encodingOptions); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
     } else if (operation.type === "compression") {
-      const format = String(operation.parameters.format || "auto") as "auto" | RoomConversionFormat;
+      const format = String(operation.parameters.format || "auto") as "auto" | WorkspaceConversionFormat;
       if (!["auto", "jpeg", "png", "webp", "avif"].includes(format)) throw new Error("Invalid compression format");
-      const result = await compressRoomImageTask(current, format, new AbortController().signal); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
+      const result = await compressWorkspaceImageTask(current, format, new AbortController().signal); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
     } else if (operation.type === "other" && operation.parameters.format) {
-      const format = String(operation.parameters.format) as RoomConversionFormat;
+      const format = String(operation.parameters.format) as WorkspaceConversionFormat;
       if (!["jpeg", "png", "webp", "avif"].includes(format)) throw new Error("Invalid conversion format");
-      const result = await convertRoomImageTask(current, format, new AbortController().signal); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
+      const result = await convertWorkspaceImageTask(current, format, new AbortController().signal); current = new File([result.blob], result.name, { type: result.blob.type }); width = result.width; height = result.height;
     } else if (operation.type === "other" && operation.parameters.review && Array.isArray(operation.parameters.annotations)) {
       const overlay = await renderReviewAnnotations(operation.parameters.annotations as ReviewAnnotation[], width, height);
       const [sourceBitmap, overlayBitmap] = await Promise.all([createImageBitmap(current), createImageBitmap(overlay)]);

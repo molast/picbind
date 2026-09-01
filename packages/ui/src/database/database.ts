@@ -1,11 +1,10 @@
 "use client";
 
 import Dexie, { type Table } from "dexie";
-import type { RoomEventItem } from "../utils/room-event";
 import { fileStorage } from "./file-storage";
 import type {
   CachedCompressedImage,
-  CachedRoomImage,
+  CachedWorkspaceImage,
   StoredReviewHistory,
 } from "./types/storage";
 
@@ -22,24 +21,20 @@ export type QueuedFileRecord = {
   createdAt: number;
 };
 
-export type RoomImageRecord = Omit<CachedRoomImage, "blob" | "thumbnail"> & {
+export type WorkspaceImageRecord = Omit<CachedWorkspaceImage, "blob" | "thumbnail"> & {
   filePath: string | null;
   thumbnailPath: string | null;
   updatedAt: number;
 };
 
 export type ReviewHistoryRecord = StoredReviewHistory & {
-  roomId: string;
+  workspaceId: string;
   imageId: string;
   updatedAt: number;
 };
 
-export type OperationLogRecord = RoomEventItem & {
-  roomId: string;
-};
-
 export type MessagingImageRecord = {
-  roomId: string;
+  workspaceId: string;
   providerId: string;
   messageId: string;
   fileName: string;
@@ -50,40 +45,20 @@ export type MessagingImageRecord = {
   filePath: string;
 };
 
-export type ImageDeliveryStatus =
-  | "pending"
-  | "sending"
-  | "delivered"
-  | "failed"
-  | "cancelled";
+type LegacyWorkspaceRecord = { roomId: string } & Record<string, unknown>;
 
-export type ImageDeliveryRecord = {
-  id: string;
-  roomId: string;
-  imageId: string;
-  recipientId: string;
-  recipientType: "room" | "messaging";
-  recipientLabel: string;
-  status: ImageDeliveryStatus;
-  transport?: "p2p" | "r2" | "messaging";
-  retryCount: number;
-  error?: string;
-  createdAt: number;
-  updatedAt: number;
-  deliveredAt?: number;
-};
-
-class PicbindDatabase extends Dexie {
+export class PicbindDatabase extends Dexie {
   compressedImages!: Table<CompressedImageRecord, string>;
   queuedFiles!: Table<QueuedFileRecord, string>;
-  roomImages!: Table<RoomImageRecord, [string, string]>;
-  reviewHistories!: Table<ReviewHistoryRecord, [string, string]>;
-  operationLogs!: Table<OperationLogRecord, [string, string]>;
-  messagingImages!: Table<MessagingImageRecord, [string, string, string]>;
-  imageDeliveries!: Table<ImageDeliveryRecord, [string, string]>;
+  workspaceImages!: Table<WorkspaceImageRecord, [string, string]>;
+  workspaceReviewHistories!: Table<ReviewHistoryRecord, [string, string]>;
+  workspaceMessagingImages!: Table<MessagingImageRecord, [string, string, string]>;
 
-  constructor() {
-    super("picbind-local");
+  constructor(name = "picbind-local") {
+    super(name);
+
+    // Versions 1-5 describe the released legacy schema exactly so Dexie can
+    // open an existing database before the Workspace migration runs.
     this.version(1).stores({
       compressedImages: "id, sourceId, createdAt",
       queuedFiles: "id, createdAt",
@@ -97,8 +72,7 @@ class PicbindDatabase extends Dexie {
       roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
       reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
       operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
-      messagingImages:
-        "[providerId+messageId], providerId, messageId, createdAt",
+      messagingImages: "[providerId+messageId], providerId, messageId, createdAt",
     });
     this.version(3).stores({
       compressedImages: "id, sourceId, createdAt",
@@ -106,8 +80,7 @@ class PicbindDatabase extends Dexie {
       roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
       reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
       operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
-      messagingImages:
-        "[providerId+messageId], providerId, messageId, createdAt",
+      messagingImages: "[providerId+messageId], providerId, messageId, createdAt",
       imageDeliveries:
         "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
     });
@@ -142,6 +115,65 @@ class PicbindDatabase extends Dexie {
         "[roomId+providerId+messageId], roomId, providerId, messageId, [roomId+createdAt], createdAt",
       imageDeliveries:
         "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
+    });
+
+    this.version(6)
+      .stores({
+        compressedImages: "id, sourceId, createdAt",
+        queuedFiles: "id, createdAt",
+        roomImages: "[roomId+id], roomId, id, [roomId+updatedAt], updatedAt",
+        reviewHistories: "[roomId+imageId], roomId, imageId, updatedAt",
+        operationLogs: "[roomId+id], roomId, [roomId+createdAt], createdAt",
+        messagingImages:
+          "[roomId+providerId+messageId], roomId, providerId, messageId, [roomId+createdAt], createdAt",
+        imageDeliveries:
+          "[roomId+id], roomId, imageId, recipientId, [roomId+imageId], [roomId+recipientId], updatedAt",
+        workspaceImages:
+          "[workspaceId+id], workspaceId, id, [workspaceId+updatedAt], updatedAt",
+        workspaceReviewHistories:
+          "[workspaceId+imageId], workspaceId, imageId, updatedAt",
+        workspaceMessagingImages:
+          "[workspaceId+providerId+messageId], workspaceId, providerId, messageId, [workspaceId+createdAt], createdAt",
+        workspaceImageDeliveries:
+          "[workspaceId+id], workspaceId, imageId, recipientId, [workspaceId+imageId], [workspaceId+recipientId], updatedAt",
+      })
+      .upgrade(async (transaction) => {
+        const migrate = async (legacyTable: string, workspaceTable: string) => {
+          const records = await transaction.table(legacyTable).toArray() as LegacyWorkspaceRecord[];
+          if (!records.length) return;
+          await transaction.table(workspaceTable).bulkPut(records.map((record) => {
+            const { roomId, ...value } = record;
+            return { ...value, workspaceId: roomId };
+          }));
+        };
+        await migrate("roomImages", "workspaceImages");
+        await migrate("reviewHistories", "workspaceReviewHistories");
+        await migrate("messagingImages", "workspaceMessagingImages");
+        await migrate("imageDeliveries", "workspaceImageDeliveries");
+      });
+
+    this.version(7).stores({
+      compressedImages: "id, sourceId, createdAt",
+      queuedFiles: "id, createdAt",
+      roomImages: null,
+      reviewHistories: null,
+      operationLogs: null,
+      messagingImages: null,
+      imageDeliveries: null,
+      workspaceImages:
+        "[workspaceId+id], workspaceId, id, [workspaceId+updatedAt], updatedAt",
+      workspaceReviewHistories:
+        "[workspaceId+imageId], workspaceId, imageId, updatedAt",
+      workspaceMessagingImages:
+        "[workspaceId+providerId+messageId], workspaceId, providerId, messageId, [workspaceId+createdAt], createdAt",
+      workspaceImageDeliveries:
+        "[workspaceId+id], workspaceId, imageId, recipientId, [workspaceId+imageId], [workspaceId+recipientId], updatedAt",
+    });
+
+    // V8 removes the unused image-delivery table. It remains in the V1-V7
+    // declarations only so databases that already reached those versions can upgrade safely.
+    this.version(8).stores({
+      workspaceImageDeliveries: null,
     });
   }
 }

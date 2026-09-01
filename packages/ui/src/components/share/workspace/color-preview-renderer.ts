@@ -1,10 +1,10 @@
 import {
-  applyRoomColorAdjustments,
+  applyWorkspaceColorAdjustments,
   buildToneCurveLut,
-  isRoomColorAdjustmentsNeutral,
+  isWorkspaceColorAdjustmentsNeutral,
   type ColorToneRange,
-  type RoomColorAdjustments,
-} from "../../../utils/room-color-adjustments";
+  type WorkspaceColorAdjustments,
+} from "../../../utils/workspace-color-adjustments";
 
 export type ColorPreviewQuality = "interactive" | "settled";
 
@@ -18,7 +18,7 @@ export type ColorPreviewRenderer = {
   readonly canvas: HTMLCanvasElement;
   readonly engine: "webgl2" | "canvas2d";
   render(
-    adjustments: RoomColorAdjustments,
+    adjustments: WorkspaceColorAdjustments,
     quality: ColorPreviewQuality,
   ): ColorPreviewRenderResult;
   dispose(): void;
@@ -76,7 +76,7 @@ class CanvasColorPreviewRenderer implements ColorPreviewRenderer {
     this.baseContext = baseContext;
   }
 
-  render(adjustments: RoomColorAdjustments, quality: ColorPreviewQuality) {
+  render(adjustments: WorkspaceColorAdjustments, quality: ColorPreviewQuality) {
     const size = colorPreviewOutputSize(this.source.width, this.source.height, quality);
     const resized = this.canvas.width !== size.width || this.canvas.height !== size.height;
     if (resized || !this.basePixels) {
@@ -94,7 +94,7 @@ class CanvasColorPreviewRenderer implements ColorPreviewRenderer {
       size.height,
     );
     this.outputContext.putImageData(
-      applyRoomColorAdjustments(pixels, adjustments),
+      applyWorkspaceColorAdjustments(pixels, adjustments),
       0,
       0,
     );
@@ -321,7 +321,7 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
 }
 
 function balanceVector(
-  settings: RoomColorAdjustments,
+  settings: WorkspaceColorAdjustments,
   tone: ColorToneRange,
 ): [number, number, number] {
   const value = settings.balance[tone];
@@ -427,7 +427,7 @@ class WebGlColorPreviewRenderer implements ColorPreviewRenderer {
     return location;
   }
 
-  render(adjustments: RoomColorAdjustments, quality: ColorPreviewQuality) {
+  render(adjustments: WorkspaceColorAdjustments, quality: ColorPreviewQuality) {
     const gl = this.gl;
     const size = colorPreviewOutputSize(this.source.width, this.source.height, quality);
     const resized = this.canvas.width !== size.width || this.canvas.height !== size.height;
@@ -488,7 +488,7 @@ class WebGlColorPreviewRenderer implements ColorPreviewRenderer {
       gl.uniform3f(this.uniform(name), value[0], value[1], value[2]);
     };
 
-    set1i("uNeutral", isRoomColorAdjustmentsNeutral(adjustments) ? 1 : 0);
+    set1i("uNeutral", isWorkspaceColorAdjustmentsNeutral(adjustments) ? 1 : 0);
     set1f("uContrastFactor", (259 * (contrast + 255)) / (255 * (259 - contrast)));
     set1f("uGamma", Math.pow(2, -adjustments.midtone / 100));
     set1f("uBlackPoint", adjustments.blackPoint);

@@ -6,7 +6,11 @@ import { isTauri } from "@tauri-apps/api/core";
 import { defaultWorkspaceStyle, WorkspacePage, type WorkspaceIdentity } from "@picbind/ui/source";
 import { useAuth } from "./auth/auth-provider";
 import { RealtimeProviderRoot } from "@/realtime/realtime-provider-root";
-import { resolveGuestShareToken } from "./workspace-route-mode";
+import {
+  resolveGuestShareToken,
+  selectOwnerWorkspace,
+  workspaceEntryKey,
+} from "./workspace-route-mode";
 
 const PUBLIC_WORKSPACE_SITE_URL = process.env.NODE_ENV === "production"
   ? process.env.NEXT_PUBLIC_SITE_URL || "https://picbind.com"
@@ -23,7 +27,7 @@ export default function WorkspaceRoute() {
   const shareToken = searchParams.get("share");
   const workspaceMode = searchParams.get("mode");
   const initialWorkspace = React.useMemo<WorkspaceIdentity | undefined>(() => {
-    const workspace = auth.state.workspaces[0];
+    const workspace = selectOwnerWorkspace(auth.state.workspaces, shareToken);
     if (!auth.state.authenticated || !workspace) return undefined;
     return {
       workspaceId: workspace.id,
@@ -35,7 +39,7 @@ export default function WorkspaceRoute() {
       updatedAt: Date.parse(workspace.updatedAt),
       style: defaultWorkspaceStyle(),
     };
-  }, [auth.state.authenticated, auth.state.workspaces]);
+  }, [auth.state.authenticated, auth.state.workspaces, shareToken]);
   const guestShareToken = resolveGuestShareToken(
     shareToken,
     initialWorkspace?.shareToken,
@@ -46,6 +50,12 @@ export default function WorkspaceRoute() {
   }
   return <RealtimeProviderRoot>
     <WorkspacePage
+      key={workspaceEntryKey(
+        shareToken,
+        initialWorkspace?.shareToken,
+        workspaceMode,
+        initialWorkspace?.workspaceId,
+      )}
       shareToken={guestShareToken}
       initialWorkspace={initialWorkspace}
       userDisplayName={auth.state.user?.name || auth.state.user?.email}

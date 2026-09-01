@@ -1,13 +1,13 @@
 "use client";
 
 import { FiTrash2 } from "react-icons/fi";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 import { useDialogEscape } from "../use-dialog-escape";
 
 type ReviewClearCommentsDialogProps = {
   open: boolean;
   count: number;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onCancel(): void;
   onConfirm(): void;
 };

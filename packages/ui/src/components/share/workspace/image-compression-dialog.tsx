@@ -3,19 +3,19 @@
 import React from "react";
 import { FiCheck, FiLink, FiLoader, FiX } from "react-icons/fi";
 import { useImageProcessing } from "../../../image-processing";
-import type { RoomImage } from "../share-room-types";
-import type { ShareRoomLabels } from "../share-room-labels";
-import { formatBytes } from "../share-room-formatters";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import { formatBytes } from "../workspace-formatters";
 import {
-  type RoomCompressionFormat,
-  type RoomCompressionResult,
-} from "../../../utils/room-image-compression";
+  type WorkspaceCompressionFormat,
+  type WorkspaceCompressionResult,
+} from "../../../utils/workspace-image-compression";
 
 type ImageCompressionDialogProps = {
-  image: RoomImage | null;
-  labels: ShareRoomLabels;
+  image: WorkspaceEditorImage | null;
+  labels: WorkspaceEditorLabels;
   onClose(): void;
-  onSave(source: RoomImage, result: RoomCompressionResult): void | Promise<void>;
+  onSave(source: WorkspaceEditorImage, result: WorkspaceCompressionResult): void | Promise<void>;
 };
 
 const MAX_DIMENSION = 16384;
@@ -31,8 +31,8 @@ export default function ImageCompressionDialog({
   onSave,
 }: ImageCompressionDialogProps) {
   const imageProcessing = useImageProcessing();
-  const [format, setFormat] = React.useState<RoomCompressionFormat>("auto");
-  const [result, setResult] = React.useState<RoomCompressionResult | null>(null);
+  const [format, setFormat] = React.useState<WorkspaceCompressionFormat>("auto");
+  const [result, setResult] = React.useState<WorkspaceCompressionResult | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [working, setWorking] = React.useState(false);
   const [width, setWidth] = React.useState(1);
@@ -97,7 +97,7 @@ export default function ImageCompressionDialog({
   const savedPercent = image.size ? (savedBytes / image.size) * 100 : 0;
   const validSize = validDimension(width) && validDimension(height);
   const resized = width !== image.width || height !== image.height;
-  const formats: Array<{ value: RoomCompressionFormat; label: string }> = [
+  const formats: Array<{ value: WorkspaceCompressionFormat; label: string }> = [
     { value: "auto", label: labels.automatic },
     { value: "jpeg", label: "JPEG" },
     { value: "png", label: "PNG" },
@@ -208,7 +208,7 @@ export default function ImageCompressionDialog({
                 options: { format, profile: "interactive", dimensions: { width, height } },
                 destination: "memory",
               }, {
-                requestId: `room-compress:${crypto.randomUUID()}`,
+                requestId: `workspace-compress:${crypto.randomUUID()}`,
                 signal: abortController.signal,
               }).then((nextResult) => {
                 if (compressionGenerationRef.current !== generation || nextResult.artifact.kind !== "blob") return;

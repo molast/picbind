@@ -70,7 +70,7 @@ Tauri 工程位于 `apps/desktop/`，本地开发和验证方式见 `docs/archit
 - 图片压缩和格式处理流程。
 - Rust/WASM 图片处理能力。
 - 本地数据存储方式。
-- 现有网络请求和 Room 能力。
+- 现有网络请求和 Workspace 能力。
 
 Tauri 只提供桌面窗口和运行容器，不创建另一套前端实现。
 

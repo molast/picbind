@@ -2,7 +2,7 @@
 
 import React from "react";
 import { FiAlertTriangle, FiX } from "react-icons/fi";
-import { getLang, getShareRoomLabels } from "../../locales";
+import { getLang, getWorkspaceEditorLabels } from "../../locales";
 import {
   subscribeWorkerVersionMismatch,
   type WorkerVersionMismatch,
@@ -30,7 +30,7 @@ export default function WorkerVersionWarning() {
 
   if (!mismatch) return null;
 
-  const labels = getShareRoomLabels(getLang());
+  const labels = getWorkspaceEditorLabels(getLang());
   const detail = mismatch.actual
     ? labels.workerVersionMismatchDetail(mismatch.actual, mismatch.expected)
     : labels.workerVersionMissingDetail(mismatch.expected);

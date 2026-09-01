@@ -5,10 +5,10 @@ import type { StoredReviewHistory } from "../types/storage";
 import type { ReviewAnchor, ReviewOperation } from "../../utils/review-collaboration";
 
 export async function loadHistory(
-  roomId: string,
+  workspaceId: string,
   imageId: string,
 ): Promise<StoredReviewHistory | null> {
-  const record = await getDatabase().reviewHistories.get([roomId, imageId]);
+  const record = await getDatabase().workspaceReviewHistories.get([workspaceId, imageId]);
   if (!record) return null;
   return {
     operations: record.operations,
@@ -18,14 +18,14 @@ export async function loadHistory(
 }
 
 export async function saveHistory(
-  roomId: string,
+  workspaceId: string,
   imageId: string,
   operations: ReviewOperation[],
   cursor: number,
   anchors: ReviewAnchor[],
 ) {
-  await getDatabase().reviewHistories.put({
-    roomId,
+  await getDatabase().workspaceReviewHistories.put({
+    workspaceId,
     imageId,
     operations,
     anchors,
@@ -34,6 +34,6 @@ export async function saveHistory(
   });
 }
 
-export async function deleteHistory(roomId: string, imageId: string) {
-  await getDatabase().reviewHistories.delete([roomId, imageId]);
+export async function deleteHistory(workspaceId: string, imageId: string) {
+  await getDatabase().workspaceReviewHistories.delete([workspaceId, imageId]);
 }

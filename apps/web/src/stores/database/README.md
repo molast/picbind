@@ -15,5 +15,5 @@ Responsibilities:
 - IndexedDB stores compression and queued-file metadata.
 - Image bytes are stored as OPFS files, never as Dexie records.
 
-The Web app and Room SDK use the same `picbind-local` database name and schema
-version. Session and transient UI state remain outside this database layer.
+The Web app and PicBind UI package use the same `picbind-local` database name and
+V8 schema. Session and transient UI state remain outside this database layer.

@@ -15,9 +15,9 @@ export type CachedCompressedImage = {
   createdAt: number;
 };
 
-export type CachedRoomImage = ImageObjectMetadata & {
+export type CachedWorkspaceImage = ImageObjectMetadata & {
   id: string;
-  roomId: string;
+  workspaceId: string;
   name: string;
   type: string;
   size: number;

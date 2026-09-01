@@ -1,6 +1,6 @@
 "use client";
 
-// Owns the browser AVIF runtime shared by Web and Room workers.
+// Owns the browser AVIF runtime shared by Web and Workspace workers.
 
 export type LibavifEncodeOptions = {
   quality: number;

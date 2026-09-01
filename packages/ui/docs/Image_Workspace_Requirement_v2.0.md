@@ -1,4 +1,4 @@
-# PicBind Room v2.0 - Image Workspace 需求文档
+# PicBind Workspace v2.0 - Image Workspace 需求文档
 
 ## 1. 文档信息
 
@@ -7,7 +7,7 @@
 | 版本 | v2.0 |
 | 状态 | 需求草案 |
 | 模块 | `packages/ui` |
-| 产品目标 | 将 Room 从图片传输空间升级为实时图片处理协作工作台 |
+| 产品目标 | 将 Workspace 从图片传输空间升级为实时图片处理协作工作台 |
 
 本文描述 Image Workspace 的目标、核心对象、交互流程、协作协议和实施阶段。文中“当前能力”指仓库已经具备的能力；“v2.0 需求”均为后续需要实现并验收的能力。
 
@@ -16,20 +16,20 @@
 ### 2.1 当前流程
 
 ```text
-图片压缩 -> 选择图片 -> 进入 Room -> 发送图片
+图片压缩 -> 选择图片 -> 进入 Workspace -> 发送图片
 ```
 
 ### 2.2 当前能力
 
-- Room 支持图片选择、占位图、缩略图和原图传输。
-- Room 支持 P2P、WebSocket 指令转发和 R2 文件中转。
+- Workspace 支持图片选择、占位图、缩略图和原图传输。
+- Workspace 支持 P2P、WebSocket 指令转发和 R2 文件中转。
 - Gallery 支持图片预览、下载和进入 Review Workspace。
 - Review 支持标注、评论、涂鸦和实时协作。
-- Room 状态、消息和图片传输状态可在当前浏览器恢复。
+- Workspace 状态、消息和图片传输状态可在当前浏览器恢复。
 
 ### 2.3 主要问题
 
-1. 图片进入 Room 后仍主要作为静态文件存在，没有统一的图片对象模型。
+1. 图片进入 Workspace 后仍主要作为静态文件存在，没有统一的图片对象模型。
 2. 图片处理结果与源图片之间缺少明确的版本关系。
 3. 发送方和接收方无法围绕同一图片继续压缩、转换或生成新版本。
 4. Review 中的绘制结果无法导出为新的图片版本。
@@ -39,7 +39,7 @@
 
 ### 3.1 产品目标
 
-Room 升级为 **Image Workspace**，提供以下能力：
+Workspace 升级为 **Image Workspace**，提供以下能力：
 
 - 图片对象管理
 - 图片处理
@@ -68,7 +68,7 @@ Room 升级为 **Image Workspace**，提供以下能力：
 
 ### 4.1 Image Object
 
-每张进入 Room 的图片都必须转换为一个 `ImageObject`。原图和每个处理结果都是独立对象，通过版本字段建立关系。
+每张进入 Workspace 的图片都必须转换为一个 `ImageObject`。原图和每个处理结果都是独立对象，通过版本字段建立关系。
 
 建议数据结构：
 
@@ -77,7 +77,7 @@ type ImageObject = {
   imageId: string;
   rootImageId: string;
   parentImageId: string | null;
-  roomId: string;
+  workspaceId: string;
   ownerId: string;
   name: string;
   mimeType: string;
@@ -97,7 +97,7 @@ type ImageObject = {
 - `imageId`：当前文件二进制内容的唯一 ID。
 - `rootImageId`：整条版本链的原始图片 ID。
 - `parentImageId`：直接生成当前版本的上一个图片 ID；原图为 `null`。
-- `ownerId`：创建当前版本的 Room 用户 ID。
+- `ownerId`：创建当前版本的 Workspace 用户 ID。
 - `version`：同一版本链内递增，不允许覆盖已有版本。
 
 ### 4.2 图片唯一 ID
@@ -113,7 +113,7 @@ Image Binary -> Rust WASM -> MD5 -> imageId
 - 相同二进制文件在不同设备上必须得到相同 `imageId`。
 - 不同处理结果必须重新计算 `imageId`。
 - MD5 仅用于内容标识和去重，不用于安全校验或身份认证。
-- 发现相同 `imageId` 时不得重复保存同一份 Blob，但可以建立新的 Room 关联记录。
+- 发现相同 `imageId` 时不得重复保存同一份 Blob，但可以建立新的 Workspace 关联记录。
 
 ### 4.3 图片版本
 
@@ -137,11 +137,11 @@ Original
 
 ## 5. 存储边界
 
-- Dexie / IndexedDB 只记录图片对象、版本关系、操作记录和 Room 关联数据。
+- Dexie / IndexedDB 只记录图片对象、版本关系、操作记录和 Workspace 关联数据。
 - 原图、处理结果和导出图片的 Blob 必须存储在 OPFS，不得写入 Dexie。
 - 临时预览 URL 使用完毕后必须调用 `URL.revokeObjectURL`。
 - 页面卸载、任务取消或失败后必须释放临时 Blob、`ImageBitmap`、Worker 和 WASM 资源。
-- Room 缓存恢复时先恢复元数据，再按需从 OPFS 读取 Blob，避免一次性加载所有图片。
+- Workspace 缓存恢复时先恢复元数据，再按需从 OPFS 读取 Blob，避免一次性加载所有图片。
 
 ## 6. Image Workspace UI
 
@@ -204,7 +204,7 @@ Original
 - 减少的字节数和百分比
 - 图片尺寸
 - 预览按钮
-- 分享到 Room 按钮
+- 分享到 Workspace 按钮
 
 压缩成功后立即创建本地 `ImageObject` 和版本关系，但在对方接受之前不得自动发送文件。
 
@@ -283,7 +283,7 @@ Review Workspace 新增 `Generate Image` 按钮，用于将当前画布生成新
 - 文件格式
 - 文件大小
 - 图片尺寸
-- 保存到 Room
+- 保存到 Workspace
 - 分享给对方
 - 取消
 
@@ -335,7 +335,7 @@ type ImageShareResponse = {
 
 - 所有消息必须包含可去重的 `requestId`。
 - 重复收到同一请求时不得重复弹窗或重复创建版本。
-- 对方离线、离开房间或房间解散时，待确认请求必须进入失败或取消状态。
+- 对方离线、离开工作区或工作区解散时，待确认请求必须进入失败或取消状态。
 - 接受分享后使用现有 `IMAGE_START`、`IMAGE_COMPLETE`、`IMAGE_RECEIVED`、`IMAGE_CANCEL` 和 `IMAGE_FAILED` 等消息完成传输。
 
 ## 11. WASM 模块职责
@@ -344,7 +344,7 @@ v2.0 在共享 `packages/wasm/image-wasm` 中补充以下能力：
 
 - MD5 内容哈希
 - 图片 metadata 提取
-- Room 图片压缩调用所需的既有压缩能力
+- Workspace 图片压缩调用所需的既有压缩能力
 
 后续能力：
 
@@ -368,7 +368,7 @@ v2.0 在共享 `packages/wasm/image-wasm` 中补充以下能力：
 
 - 图片卡片提供统一操作入口。
 - 压缩入口可用，其他未实现入口禁用。
-- 操作面板组件化，不将逻辑继续堆入 `share-room-page.tsx`。
+- 操作面板组件化，不将逻辑继续堆入 `share-workspace-page.tsx`。
 
 ### Phase 3：压缩协作
 
@@ -387,4 +387,4 @@ v2.0 在共享 `packages/wasm/image-wasm` 中补充以下能力：
 
 ## 13. 最终验收目标
 
-PicBind Room 不再只是图片传输工具，而是一个支持图片对象管理、非破坏性处理、版本追踪、实时 Review 和处理结果分享的实时图片协作平台。
+PicBind Workspace 不再只是图片传输工具，而是一个支持图片对象管理、非破坏性处理、版本追踪、实时 Review 和处理结果分享的实时图片协作平台。

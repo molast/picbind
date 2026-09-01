@@ -1,23 +1,23 @@
 /// <reference lib="webworker" />
 
 import { configurePicBindUi } from "../config";
-import { getShareRoomLabels } from "../locales";
+import { getWorkspaceEditorLabels } from "../locales";
 import type { Lang } from "../locales";
 import {
-  compressRoomImage,
-  type RoomCompressionEncodingOptions,
-  type RoomCompressionFormat,
-} from "../utils/room-image-compression";
+  compressWorkspaceImage,
+  type WorkspaceCompressionEncodingOptions,
+  type WorkspaceCompressionFormat,
+} from "../utils/workspace-image-compression";
 
 type CompressionRequest = {
   image: File;
   lang: Lang;
   allowAlphaLoss?: boolean;
-  requestedFormat: RoomCompressionFormat;
+  requestedFormat: WorkspaceCompressionFormat;
   targetWidth?: number;
   targetHeight?: number;
   wasmBaseUrl?: string;
-  encodingOptions?: RoomCompressionEncodingOptions;
+  encodingOptions?: WorkspaceCompressionEncodingOptions;
 };
 
 self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
@@ -28,7 +28,7 @@ self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
       targetWidth !== undefined && targetHeight !== undefined
         ? { width: targetWidth, height: targetHeight }
         : undefined;
-    const result = await compressRoomImage(
+    const result = await compressWorkspaceImage(
       image,
       requestedFormat,
       dimensions,
@@ -52,7 +52,7 @@ self.onmessage = async (event: MessageEvent<CompressionRequest>) => {
   } catch (reason) {
     self.postMessage({
       ok: false,
-      error: reason instanceof Error ? reason.message : getShareRoomLabels(lang).compressionFailed,
+      error: reason instanceof Error ? reason.message : getWorkspaceEditorLabels(lang).compressionFailed,
     });
   }
 };

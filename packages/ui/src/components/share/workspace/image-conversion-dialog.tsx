@@ -3,42 +3,42 @@
 import React from "react";
 import { FiCheck, FiLoader, FiX } from "react-icons/fi";
 import { useImageProcessing } from "../../../image-processing";
-import type { RoomImage } from "../share-room-types";
-import type { ShareRoomLabels } from "../share-room-labels";
-import { formatBytes } from "../share-room-formatters";
-import { type RoomConversionFormat } from "../../../utils/room-image-conversion";
-import type { RoomImageEditResult } from "../../../utils/room-image-editing";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import { formatBytes } from "../workspace-formatters";
+import { type WorkspaceConversionFormat } from "../../../utils/workspace-image-conversion";
+import type { WorkspaceImageEditResult } from "../../../utils/workspace-image-editing";
 
 type ImageConversionDialogProps = {
-  image: RoomImage | null;
-  labels: ShareRoomLabels;
+  image: WorkspaceEditorImage | null;
+  labels: WorkspaceEditorLabels;
   onClose(): void;
-  onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  onSave(source: WorkspaceEditorImage, result: WorkspaceImageEditResult): void | Promise<void>;
 };
 
-const FORMATS: Array<{ value: RoomConversionFormat; label: string }> = [
+const FORMATS: Array<{ value: WorkspaceConversionFormat; label: string }> = [
   { value: "jpeg", label: "JPEG" },
   { value: "png", label: "PNG" },
   { value: "webp", label: "WebP" },
   { value: "avif", label: "AVIF" },
 ];
 
-function formatFromMime(type: string): RoomConversionFormat {
+function formatFromMime(type: string): WorkspaceConversionFormat {
   const subtype = type.split("/")[1]?.toLowerCase();
   if (subtype === "jpg" || subtype === "jpeg") return "jpeg";
   if (subtype === "png" || subtype === "webp" || subtype === "avif") return subtype;
   return "jpeg";
 }
 
-function defaultTarget(source: RoomConversionFormat): RoomConversionFormat {
+function defaultTarget(source: WorkspaceConversionFormat): WorkspaceConversionFormat {
   return source === "webp" ? "avif" : "webp";
 }
 
 export default function ImageConversionDialog({ image, labels, onClose, onSave }: ImageConversionDialogProps) {
   const imageProcessing = useImageProcessing();
   const sourceFormat = image ? formatFromMime(image.type) : "jpeg";
-  const [format, setFormat] = React.useState<RoomConversionFormat>("webp");
-  const [result, setResult] = React.useState<RoomImageEditResult | null>(null);
+  const [format, setFormat] = React.useState<WorkspaceConversionFormat>("webp");
+  const [result, setResult] = React.useState<WorkspaceImageEditResult | null>(null);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const generationRef = React.useRef(0);
@@ -89,7 +89,7 @@ export default function ImageConversionDialog({ image, labels, onClose, onSave }
       allowAlphaLoss: format === "jpeg",
       destination: "memory",
     }, {
-      requestId: `room-convert:${crypto.randomUUID()}`,
+      requestId: `workspace-convert:${crypto.randomUUID()}`,
       signal: abortController.signal,
     }).then((nextResult) => {
       if (generationRef.current !== generation || nextResult.artifact.kind !== "blob") return;

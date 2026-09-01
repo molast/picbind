@@ -2,8 +2,8 @@
 
 import React from "react";
 import { FiLoader, FiSend, FiX, FiZap } from "react-icons/fi";
-import type { ShareRoomLabels } from "../../locales";
-import { formatBytes, middleEllipsisFileName } from "../../components/share/share-room-formatters";
+import type { WorkspaceEditorLabels } from "../../locales";
+import { formatBytes, middleEllipsisFileName } from "../../components/share/workspace-formatters";
 import type { WorkspacePreparedMessagingImage } from "../types";
 
 export function WorkspaceMessagingQuickSendDialog({
@@ -15,7 +15,7 @@ export function WorkspaceMessagingQuickSendDialog({
   onClose,
 }: {
   prepared: WorkspacePreparedMessagingImage | null;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   sending: boolean;
   error?: string | null;
   onConfirm(): boolean | void | Promise<boolean | void>;

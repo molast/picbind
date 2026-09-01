@@ -58,8 +58,8 @@ controls. On Desktop, iLink configuration and connection controls live in
 Workspace Settings; the Weixin chat entry lives in the Working panel header.
 Neither control occupies the global Workspace header.
 
-The Cloudflare Worker continues to provide Room signaling, WebSocket fallback,
-metrics, and R2 room-transfer services. It has no Weixin route and does not need
+The Cloudflare Worker continues to provide Workspace signaling, WebSocket fallback,
+metrics, and R2 workspace-transfer services. It has no Weixin route and does not need
 to understand messaging payloads.
 
 ## 3. Code Ownership
@@ -207,7 +207,7 @@ an idle iLink long poll can remain quiet for roughly 30 seconds.
   those payload formats in this flow.
 - Unknown or invalid image data is rejected instead of being silently stored.
 
-This media path is separate from Room R2 transfer and does not use Worker R2
+This media path is separate from Workspace R2 transfer and does not use Worker R2
 credentials or browser-facing upload URLs.
 
 ## 8. Verification

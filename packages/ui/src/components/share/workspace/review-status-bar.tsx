@@ -1,8 +1,8 @@
-import type { RoomImage } from "../share-room-types";
-import { formatBytes } from "../share-room-formatters";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import { formatBytes } from "../workspace-formatters";
 
 type ReviewStatusBarProps = {
-  image: RoomImage;
+  image: WorkspaceEditorImage;
   dimensions: { width: number; height: number } | null;
 };
 

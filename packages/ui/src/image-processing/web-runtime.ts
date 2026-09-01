@@ -9,9 +9,9 @@ import {
 } from "@picbind/shared";
 import { generateSharePlaceholder } from "../utils/share-placeholder";
 import { generateShareThumbnail } from "../utils/share-thumbnail";
-import { compressRoomImageTask } from "../utils/room-image-compression-task";
-import { convertRoomImageTask } from "../utils/room-image-conversion";
-import { encodeRoomImageData, type RoomCompressionFormat } from "../utils/room-image-compression";
+import { compressWorkspaceImageTask } from "../utils/workspace-image-compression-task";
+import { convertWorkspaceImageTask } from "../utils/workspace-image-conversion";
+import { encodeWorkspaceImageData, type WorkspaceCompressionFormat } from "../utils/workspace-image-compression";
 import { initWasm } from "../utils/wasm-runtime";
 
 type WasmImageMetadata = {
@@ -91,7 +91,7 @@ export async function renderWebImagePreview(input: {
         Math.round(input.maxHeight),
       ) as MaterializedPixelsHandle,
     );
-    const result = await encodeRoomImageData(
+    const result = await encodeWorkspaceImageData(
       pixels,
       "webp",
       "preview.webp",
@@ -136,7 +136,7 @@ export async function materializeWebImage(input: {
       if (mimeType === "image/webp") return "webp";
       if (mimeType === "image/avif") return "avif";
       return null;
-    })() satisfies Exclude<RoomCompressionFormat, "auto"> | null;
+    })() satisfies Exclude<WorkspaceCompressionFormat, "auto"> | null;
     if (!format) throw new Error("The source format cannot be materialized");
 
     const mod = await initWasm();
@@ -152,7 +152,7 @@ export async function materializeWebImage(input: {
       : format === "png"
         ? { quality: 78, compressionGain: 1.12 }
         : { quality: 78, compressionGain: format === "jpeg" ? 1.08 : 1 };
-    const result = await encodeRoomImageData(
+    const result = await encodeWorkspaceImageData(
       pixels,
       format,
       input.name,
@@ -196,7 +196,7 @@ export async function compressWebImage(input: {
     );
   }
   try {
-    return await compressRoomImageTask(
+    return await compressWorkspaceImageTask(
       new File([input.blob], input.name, { type: input.blob.type }),
       input.format,
       input.signal,
@@ -234,7 +234,7 @@ export async function convertWebImage(input: {
     if (input.format === "jpeg" && !input.allowAlphaLoss) {
       return await compressWebImage({ ...input, signal: input.signal });
     }
-    return await convertRoomImageTask(
+    return await convertWorkspaceImageTask(
       new File([input.blob], input.name, { type: input.blob.type }),
       input.format,
       input.signal,

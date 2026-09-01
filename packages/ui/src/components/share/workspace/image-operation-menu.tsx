@@ -7,11 +7,11 @@ import {
   FiSliders,
 } from "react-icons/fi";
 import { TbArrowsExchange, TbArrowsMinimize, TbDimensions } from "react-icons/tb";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 
 type ImageOperationMenuProps = {
   disabled: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onConvert(): void;
   onCompress(): void;
   onCrop(): void;

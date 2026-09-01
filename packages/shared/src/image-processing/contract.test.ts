@@ -57,7 +57,7 @@ test("stored sources require opaque revisions", () => {
       kind: "stored",
       name: "image.png",
       asset: {
-        scope: "room",
+        scope: "workspace",
         scopeKey: "workspace",
         id: "image",
         variant: "original",

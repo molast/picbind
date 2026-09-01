@@ -5,7 +5,7 @@ import {
   WeixinIlinkProvider,
   type MessagingProviderSnapshot,
 } from "../../messaging";
-import type { ShareRoomLabels } from "../../locales";
+import type { WorkspaceEditorLabels } from "../../locales";
 import { useImageProcessing } from "../../image-processing";
 import {
   listMessagingImageMetadata,
@@ -67,7 +67,7 @@ export function useWorkspaceMessaging({
   desktop: boolean;
   workspaceId?: string;
   canAddImages: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   addFiles(files: File[]): Promise<void>;
   onError(message: string): void;
 }) {
@@ -206,7 +206,7 @@ export function useWorkspaceMessaging({
           : message.payload.mimeType || "image/jpeg";
         const typedBlob = blob.type === mimeType ? blob : new Blob([blob], { type: mimeType });
         await storeMessagingImage({
-          roomId: workspaceId,
+          workspaceId,
           providerId,
           messageId: message.id,
           fileName: message.payload.fileName || labels.messagingImage,
@@ -375,7 +375,7 @@ export function useWorkspaceMessaging({
         ? { ...message, id: messageId, status: "sent" }
         : message));
       await storeMessagingImage({
-        roomId: workspaceId,
+        workspaceId,
         providerId: provider.id,
         messageId,
         fileName: prepared.file.name,

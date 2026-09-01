@@ -2,13 +2,13 @@
 
 import React from "react";
 import { FiCheck, FiX } from "react-icons/fi";
-import type { ShareRoomLabels } from "../share-room-labels";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
 
 type ReviewStickyNoteProps = {
   initialValue: string;
   initialTodo: boolean;
   resolved: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onSave(value: string, todo: boolean): void;
   onCancel(): void;
   onResolvedChange?(resolved: boolean): void;

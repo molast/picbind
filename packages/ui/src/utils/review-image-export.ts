@@ -5,7 +5,7 @@ import {
   setImageOperation,
   type ImageProcessingService,
 } from "@picbind/shared";
-import type { RoomCompressionFormat } from "./room-image-compression";
+import type { WorkspaceCompressionFormat } from "./workspace-image-compression";
 import type { ReviewAnnotation } from "./review-collaboration";
 
 export type ReviewImageExport = {
@@ -13,7 +13,7 @@ export type ReviewImageExport = {
   name: string;
   width: number;
   height: number;
-  format: Exclude<RoomCompressionFormat, "auto">;
+  format: Exclude<WorkspaceCompressionFormat, "auto">;
   parameters?: Record<string, unknown>;
 };
 
@@ -28,7 +28,7 @@ export type ReviewImageExportOutcome = {
   imageId: string;
 };
 
-function reviewOutputFormat(type: string): Exclude<RoomCompressionFormat, "auto"> {
+function reviewOutputFormat(type: string): Exclude<WorkspaceCompressionFormat, "auto"> {
   const subtype = type.split("/")[1]?.toLowerCase();
   if (subtype === "jpg" || subtype === "jpeg") return "jpeg";
   if (subtype === "png" || subtype === "webp" || subtype === "avif") return subtype;
@@ -37,7 +37,7 @@ function reviewOutputFormat(type: string): Exclude<RoomCompressionFormat, "auto"
 
 function reviewOutputName(
   name: string | undefined,
-  format: Exclude<RoomCompressionFormat, "auto">,
+  format: Exclude<WorkspaceCompressionFormat, "auto">,
 ) {
   const stem = (name || "image").replace(/\.[^.]+$/, "") || "image";
   const extension = format === "jpeg" ? "jpg" : format;

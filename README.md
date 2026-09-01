@@ -43,7 +43,7 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 ```
 
 Web 端持久化文件统一写入 OPFS，SQLite 仅保存业务元数据和评审历史，页面通过
-Repository 访问数据。语言、房间会话和页面恢复等短期状态仍使用
+Repository 访问数据。语言、工作区会话和页面恢复等短期状态仍使用
 `localStorage/sessionStorage`。
 
 ## Web 应用
@@ -84,7 +84,7 @@ macOS、Linux、Git Bash 和 WSL 下的脚本会显示阻塞式菜单，可以�
 Desktop 开发环境、仅启动 Desktop app、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
 模式下由根目录进程管理器复用 3000 端口已有的 Web 服务，或启动并跟踪唯一的 Web 服务；
 确认开发启动页可访问后才启动 Tauri。任何受管理进程停止时，其余受管理进程及子进程会被
-回收，复用的外部 Web 服务不会被停止。Room、Durable Object、R2、KV 和其他 Worker API 统一
+回收，复用的外部 Web 服务不会被停止。Workspace、Durable Object、R2、KV 和其他 Worker API 统一
 请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
 
 ```bash

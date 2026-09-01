@@ -1,6 +1,6 @@
 import React from "react";
 import { FiImage, FiRefreshCw } from "react-icons/fi";
-import RoomImageMedia from "../../components/share/room-image-media";
+import WorkspacePlaceholderMedia from "../../components/share/workspace-placeholder-media";
 import { useImageProcessing } from "../../image-processing";
 import { readWorkspaceImagePreview, readWorkspaceImageSource, saveWorkspaceImage } from "../repository";
 import type { WorkspaceIdentity, WorkspaceImage } from "../types";
@@ -72,7 +72,7 @@ export function WorkspaceImageMedia({ image, role, fit = "cover", controls = fal
     ? <ImageAddressMedia url={directSourceUrl} alt={image.name} fit={fit} onDimensions={onDimensions} />
     : <div className="flex h-full items-center justify-center text-slate-300"><FiRefreshCw className="h-5 w-5 animate-spin" /></div>;
   return <div className="relative h-full w-full overflow-hidden" style={{ background: image.placeholder?.dominantColor }}>
-    {libraryOriginal || (role === "owner" && preferOriginal) ? originalMedia : role === "owner" && previewUrl ? <ImageAddressMedia url={previewUrl} alt={image.name} fit={fit} onDimensions={onDimensions} /> : image.placeholder ? <RoomImageMedia alt={image.name} placeholder={image.placeholder} /> : previewUrl ? <ImageAddressMedia url={previewUrl} alt={image.name} fit={fit} onDimensions={onDimensions} /> : <div className="flex h-full items-center justify-center text-slate-400"><FiImage className="h-8 w-8" /></div>}
+    {libraryOriginal || (role === "owner" && preferOriginal) ? originalMedia : role === "owner" && previewUrl ? <ImageAddressMedia url={previewUrl} alt={image.name} fit={fit} onDimensions={onDimensions} /> : image.placeholder ? <WorkspacePlaceholderMedia alt={image.name} placeholder={image.placeholder} /> : previewUrl ? <ImageAddressMedia url={previewUrl} alt={image.name} fit={fit} onDimensions={onDimensions} /> : <div className="flex h-full items-center justify-center text-slate-400"><FiImage className="h-8 w-8" /></div>}
     {role !== "owner" && showPreview && previewUrl ? <img src={previewUrl} alt="" className={`pointer-events-none absolute inset-0 z-[5] h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`} aria-hidden="true" /> : null}
     {role !== "owner" && controls && previewUrl ? <button type="button" className="absolute bottom-2 left-2 z-10 flex h-7 w-7 touch-none items-center justify-center rounded-md bg-white/90 text-slate-600 shadow-sm backdrop-blur transition hover:bg-white hover:text-[#2f65cf]" aria-label="Hold to preview" title="Hold to preview" onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); setShowPreview(true); }} onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); stopPreview(); }} onPointerCancel={stopPreview} onKeyDown={(event) => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); setShowPreview(true); } }} onKeyUp={(event) => { if (event.key === " " || event.key === "Enter") stopPreview(); }} onBlur={stopPreview}><FiImage className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
   </div>;

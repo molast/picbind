@@ -1,6 +1,6 @@
 import { renderReviewAnnotations } from "../components/share/workspace/review-annotation-layer";
 import type { ReviewAnnotation } from "../utils/review-collaboration";
-import { applyRoomColorAdjustments, type RoomColorAdjustments } from "../utils/room-color-adjustments";
+import { applyWorkspaceColorAdjustments, type WorkspaceColorAdjustments } from "../utils/workspace-color-adjustments";
 import type { WorkspaceImage, WorkspaceOperation } from "./types";
 import { decodeWorkspaceImage } from "./image-decoder";
 
@@ -102,7 +102,7 @@ export async function renderWorkspaceParameterPreview(
       const context = canvas.getContext("2d", { willReadFrequently: true });
       if (!context) throw new Error("Canvas is unavailable");
       const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      context.putImageData(applyRoomColorAdjustments(pixels, operation.parameters as unknown as RoomColorAdjustments), 0, 0);
+      context.putImageData(applyWorkspaceColorAdjustments(pixels, operation.parameters as unknown as WorkspaceColorAdjustments), 0, 0);
     } else if (operation.type === "other" && operation.parameters.review && Array.isArray(operation.parameters.annotations)) {
       const overlay = await renderReviewAnnotations(
         operation.parameters.annotations as ReviewAnnotation[],

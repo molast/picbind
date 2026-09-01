@@ -4,18 +4,18 @@ import React from "react";
 import { FiLoader, FiX } from "react-icons/fi";
 import { emptyImageParameterDocument, setImageOperation } from "@picbind/shared";
 import { useImageProcessing } from "../../../image-processing";
-import type { RoomImage } from "../share-room-types";
-import type { ShareRoomLabels } from "../share-room-labels";
-import { type NormalizedCrop, type RoomImageEditResult } from "../../../utils/room-image-editing";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import { type NormalizedCrop, type WorkspaceImageEditResult } from "../../../utils/workspace-image-editing";
 import KonvaCropEditor from "./konva-crop-editor";
 
 type ImageCropDialogProps = {
-  image: RoomImage | null;
+  image: WorkspaceEditorImage | null;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onClose(): void;
-  onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  onSave(source: WorkspaceEditorImage, result: WorkspaceImageEditResult): void | Promise<void>;
   parameterAction?: "apply" | "proposal";
   onApplyParameters?(crop: NormalizedCrop): void | Promise<void>;
   initialCrop?: NormalizedCrop;
@@ -25,7 +25,7 @@ type RatioValue = "free" | "original" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 
 const INITIAL_CROP: NormalizedCrop = { x: 0.09, y: 0.09, width: 0.82, height: 0.82 };
 
-type ImageCropDialogContentProps = Omit<ImageCropDialogProps, "image"> & { image: RoomImage };
+type ImageCropDialogContentProps = Omit<ImageCropDialogProps, "image"> & { image: WorkspaceEditorImage };
 
 function cropConfigurationKey(imageId: string, crop?: NormalizedCrop) {
   return crop
@@ -120,7 +120,7 @@ function ImageCropDialogContent({ image, posterUrl, editorBaseReady = true, labe
                   }),
                   output: { format: "source" },
                   destination: "memory",
-                }, { requestId: `room-crop:${crypto.randomUUID()}` }).then((result) => {
+                }, { requestId: `workspace-crop:${crypto.randomUUID()}` }).then((result) => {
                   if (result.artifact.kind !== "blob") throw new Error(labels.cropFailed);
                   return onSave(image, {
                     blob: result.artifact.blob, name: result.name, width: result.metadata.width,

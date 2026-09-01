@@ -4,18 +4,18 @@ import React from "react";
 import { FiLink, FiLoader, FiUnlock, FiX } from "react-icons/fi";
 import { emptyImageParameterDocument, setImageOperation } from "@picbind/shared";
 import { useImageProcessing } from "../../../image-processing";
-import type { RoomImage } from "../share-room-types";
-import type { ShareRoomLabels } from "../share-room-labels";
-import { type RoomImageEditResult } from "../../../utils/room-image-editing";
+import type { WorkspaceEditorImage } from "../workspace-editor-types";
+import type { WorkspaceEditorLabels } from "../workspace-editor-labels";
+import { type WorkspaceImageEditResult } from "../../../utils/workspace-image-editing";
 import KonvaResizePreview from "./konva-resize-preview";
 
 type ImageResizeDialogProps = {
-  image: RoomImage | null;
+  image: WorkspaceEditorImage | null;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
-  labels: ShareRoomLabels;
+  labels: WorkspaceEditorLabels;
   onClose(): void;
-  onSave(source: RoomImage, result: RoomImageEditResult): void | Promise<void>;
+  onSave(source: WorkspaceEditorImage, result: WorkspaceImageEditResult): void | Promise<void>;
   parameterAction?: "apply" | "proposal";
   onApplyParameters?(size: { width: number; height: number }): void | Promise<void>;
   initialSize?: { width: number; height: number };
@@ -111,7 +111,7 @@ export default function ImageResizeDialog({ image, posterUrl, editorBaseReady = 
                   }),
                   output: { format: "source" },
                   destination: "memory",
-                }, { requestId: `room-resize:${crypto.randomUUID()}` }).then((result) => {
+                }, { requestId: `workspace-resize:${crypto.randomUUID()}` }).then((result) => {
                   if (result.artifact.kind !== "blob") throw new Error(labels.resizeFailed);
                   return onSave(image, {
                     blob: result.artifact.blob, name: result.name, width: result.metadata.width,
