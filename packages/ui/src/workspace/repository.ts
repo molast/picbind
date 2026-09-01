@@ -361,6 +361,7 @@ export async function deleteWorkspaceImage(imageId: string) {
       .delete();
   });
 }
+
 export async function clearWorkspaceImageHistory(imageId: string) {
   const db = getWorkspaceDatabase();
   const image = await db.images.get(imageId);

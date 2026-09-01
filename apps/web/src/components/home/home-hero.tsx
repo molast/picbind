@@ -73,7 +73,7 @@ export default function HomeHero({
                   >
                     {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
                   </Link>
-                  <Link href="/workspace" className="rounded-full px-3 py-1 transition hover:bg-white/35">
+                  <Link href="/workspace" data-picbind-workspace-entry="true" className="rounded-full px-3 py-1 transition hover:bg-white/35">
                     {lang === "zh" ? "图片工作区" : "Image Workspace"}
                   </Link>
                 </nav>
@@ -94,7 +94,7 @@ export default function HomeHero({
             <Link href="/favicon-converter" className="rounded-full px-3 py-1">
               {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
             </Link>
-            <Link href="/workspace" className="rounded-full px-3 py-1">
+            <Link href="/workspace" data-picbind-workspace-entry="true" className="rounded-full px-3 py-1">
               {lang === "zh" ? "图片工作区" : "Image Workspace"}
             </Link>
           </div>

@@ -1,11 +1,16 @@
 "use client";
 
 import React from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { isTauri } from "@tauri-apps/api/core";
-import { defaultWorkspaceStyle, WorkspacePage, type WorkspaceIdentity } from "@picbind/ui/source";
+import {
+  defaultWorkspaceStyle,
+  WorkspacePage,
+  type WorkspaceIdentity,
+} from "@picbind/ui/source";
 import { useAuth } from "./auth/auth-provider";
 import { RealtimeProviderRoot } from "@/realtime/realtime-provider-root";
+import HomePageStack from "@/components/home/home-page-stack";
 import {
   resolveGuestShareToken,
   selectOwnerWorkspace,
@@ -18,14 +23,16 @@ const PUBLIC_WORKSPACE_SITE_URL = process.env.NODE_ENV === "production"
 
 export default function WorkspaceRoute() {
   const auth = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [desktop, setDesktop] = React.useState(false);
+
+  const shareToken = searchParams.get("share");
+  const workspaceMode = searchParams.get("mode");
 
   React.useEffect(() => {
     setDesktop(isTauri());
   }, []);
-  const shareToken = searchParams.get("share");
-  const workspaceMode = searchParams.get("mode");
   const initialWorkspace = React.useMemo<WorkspaceIdentity | undefined>(() => {
     const workspace = selectOwnerWorkspace(auth.state.workspaces, shareToken);
     if (!auth.state.authenticated || !workspace) return undefined;
@@ -61,6 +68,9 @@ export default function WorkspaceRoute() {
       userDisplayName={auth.state.user?.name || auth.state.user?.email}
       publicSiteUrl={PUBLIC_WORKSPACE_SITE_URL}
       desktop={desktop}
+      suspendedContent={<HomePageStack initialLang="en" />}
+      onSuspend={() => router.push("/")}
+      onExit={() => router.back()}
     />
   </RealtimeProviderRoot>;
 }

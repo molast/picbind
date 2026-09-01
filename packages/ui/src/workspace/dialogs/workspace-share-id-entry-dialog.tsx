@@ -54,14 +54,10 @@ export default function WorkspaceShareIdEntryDialog({
     const destination = new URL("/workspace", window.location.origin);
     destination.searchParams.set("share", value);
     destination.searchParams.set("mode", "collaborator");
-    if (desktop) {
-      onClose();
-      window.dispatchEvent(new CustomEvent("picbind:navigate", {
-        detail: { href: `${destination.pathname}${destination.search}` },
-      }));
-      return;
-    }
-    window.location.assign(destination.toString());
+    onClose();
+    window.dispatchEvent(new CustomEvent("picbind:navigate", {
+      detail: { href: `${destination.pathname}${destination.search}` },
+    }));
   };
 
   return (

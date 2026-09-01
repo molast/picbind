@@ -54,6 +54,7 @@ export default function DesktopHome({
           </Link>
           <Link
             href="/workspace"
+            data-picbind-workspace-entry="true"
             className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
           >
             <FiFolder className="h-4 w-4" aria-hidden="true" />

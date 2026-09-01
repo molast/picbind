@@ -1,9 +1,9 @@
 import React from "react";
 import {
-  FiHome,
-  FiLogIn,
+  FiLogOut,
   FiSettings,
   FiShare2,
+  FiUserPlus,
   FiUsers,
   FiX,
 } from "react-icons/fi";
@@ -110,7 +110,7 @@ export function WorkspaceHeader({
         onClick={onEnterWorkspace}
         title={text("enterWorkspace")}
       >
-        <FiLogIn className="h-[17px] w-[17px]" />
+        <FiUserPlus className="h-[17px] w-[17px]" />
         <span className="hidden lg:inline">{text("join")}</span>
       </button> : null}
       <WorkspaceLanguageSwitcher lang={lang} onChange={onLanguageChange} />
@@ -136,11 +136,13 @@ export function WorkspaceHeader({
         onClick={onSettings}
         title={text("workspaceSettings")}
       ><FiSettings /></button>
-      {isOwner ? <a
-        href="/"
+      {isOwner ? <button
+        type="button"
+        onClick={onLeave}
         className="hidden h-9 w-9 items-center justify-center rounded-md hover:bg-black/5 sm:flex"
-        title={text("home")}
-      ><FiHome /></a> : <button
+        title={text("leaveWorkspace")}
+        aria-label={text("leaveWorkspace")}
+      ><FiLogOut /></button> : <button
         type="button"
         onClick={onLeave}
         className="hidden h-9 w-9 items-center justify-center rounded-md text-red-600 hover:bg-red-50 sm:flex"

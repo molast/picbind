@@ -20,6 +20,7 @@ export async function rotateWorkspaceShare(workspace: WorkspaceIdentity) {
     method: "POST", headers: { "x-picbind-owner-capability": workspace.ownerCapability },
   });
 }
+
 export async function joinWorkspace(shareToken: string) {
   return request<{ workspace: RemoteWorkspace }>(`/api/workspace-links/${encodeURIComponent(shareToken)}/join`, { method: "POST" });
 }

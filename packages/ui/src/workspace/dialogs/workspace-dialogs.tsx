@@ -24,6 +24,7 @@ import { WorkspaceRemoveCollaboratorDialog } from "./workspace-remove-collaborat
 import { WorkspaceProcessedResultDialog } from "./workspace-result-dialog";
 import { WorkspaceSettingsDialog } from "./workspace-settings-dialog";
 import { WorkspaceSourceRejectedDialog, WorkspaceSourceRequestDialog } from "./workspace-source-request-dialog";
+import type { WorkspaceLeaveAction } from "../preferences";
 
 type WorkspaceDialogsProps = {
   workspace: WorkspaceIdentity;
@@ -51,6 +52,8 @@ type WorkspaceDialogsProps = {
   resultSaving: boolean;
   settingsOpen: boolean;
   styleDraft: WorkspaceStyle;
+  leavePreference: WorkspaceLeaveAction | null;
+  rememberLeaveChoice: boolean;
   desktop: boolean;
   messagingService?: MessagingService;
   messagingProviders: MessagingProviderSnapshot[];
@@ -63,7 +66,11 @@ type WorkspaceDialogsProps = {
   onCompressionCancel(): void;
   onRemovedReturnHome(): void;
   onCloseLeave(): void;
-  onConfirmLeave(): void;
+  onConfirmLeave(remember?: boolean): void;
+  onTemporaryLeave(remember?: boolean): void;
+  onRememberLeaveChoice(remember: boolean): void;
+  onLeavePreferenceChange(action: WorkspaceLeaveAction | null): void;
+  leavingWorkspace?: boolean;
   onCloseRemoveCollaborator(): void;
   onConfirmRemoveCollaborator(): void;
   onCloseDelete(): void;
@@ -101,19 +108,19 @@ export function WorkspaceDialogs({
   desktop, messagingService, messagingProviders, messagingLabels,
   compressionSuggestionOpen, compressionSuggestionWeakNetwork, compressionLabels,
   onCompressionContinue, onCompression, onCompressionCancel, onRemovedReturnHome,
-  onCloseLeave, onConfirmLeave, onCloseRemoveCollaborator, onConfirmRemoveCollaborator,
+  onCloseLeave, onConfirmLeave, onTemporaryLeave, onRememberLeaveChoice, onLeavePreferenceChange, leavingWorkspace = false, onCloseRemoveCollaborator, onConfirmRemoveCollaborator,
   onCloseDelete, onDeleteChoice, onConfirmDelete, onCloseProposalPreview, onRejectProposalPreview,
   onApproveProposalPreview, onCloseActivityPreview, onRollbackActivity, onCloseRollback,
   onConfirmRollback, onSourceReasonChange,
   onRejectSource, onAcceptSource, onCloseSourceRejected = () => undefined,
   onCloseRejectProposal, onProposalReasonChange, onRejectProposal, onCloseOperationLog,
-  onClearOperationLog, onCancelResult, onSaveResult, onCloseSettings, onStyleChange, onSaveStyle,
+  onClearOperationLog, onCancelResult, onSaveResult, onCloseSettings, onStyleChange, onSaveStyle, leavePreference, rememberLeaveChoice,
 }: WorkspaceDialogsProps) {
   return <>
     {previewRendering ? <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label={getWorkspaceLabels(getLang()).preparingPreview}><div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-xl" role="status" aria-live="polite"><FiLoader className="h-4 w-4 animate-spin text-[#2f65cf]" aria-hidden="true"/><span>{getWorkspaceLabels(getLang()).preparingPreview}</span></div></div> : null}
     <CompressionSuggestionDialog open={compressionSuggestionOpen} weakNetwork={compressionSuggestionWeakNetwork} labels={compressionLabels} onContinue={onCompressionContinue} onCompress={onCompression} onCancel={onCompressionCancel} />
     <WorkspaceProcessedResultDialog result={pendingResult} saving={resultSaving} bytes={(size) => size < 1024 ? `${size} B` : size < 1024 ** 2 ? `${(size / 1024).toFixed(1)} KB` : `${(size / 1024 ** 2).toFixed(1)} MB`} onCancel={onCancelResult} onSave={onSaveResult} />
-    <WorkspaceLeaveDialog open={leaveOpen} onClose={onCloseLeave} onLeave={onConfirmLeave} />
+    <WorkspaceLeaveDialog open={leaveOpen} owner={workspace.role === "owner"} pending={leavingWorkspace} rememberChoice={rememberLeaveChoice} onClose={onCloseLeave} onLeave={onConfirmLeave} onTemporaryLeave={onTemporaryLeave} onRememberChoiceChange={onRememberLeaveChoice} />
     <WorkspaceRemovedDialog open={removed} onReturnHome={onRemovedReturnHome} />
     <WorkspaceRemoveCollaboratorDialog collaborator={removingCollaborator} onClose={onCloseRemoveCollaborator} onConfirm={onConfirmRemoveCollaborator} />
     {!activityPreview ? <WorkspaceProposalPreviewDialog proposal={proposalPreview} role={workspace.role} onClose={onCloseProposalPreview} onReject={onRejectProposalPreview} onApprove={onApproveProposalPreview} /> : null}
@@ -124,6 +131,6 @@ export function WorkspaceDialogs({
     <WorkspaceSourceRejectedDialog notice={sourceRejectedNotice} imageName={sourceRejectedNotice?.imageId ? sourceRequestImageName : undefined} onClose={onCloseSourceRejected} />
     <WorkspaceProposalRejectDialog proposal={rejectingProposal} reason={proposalRejectReason} onReasonChange={onProposalReasonChange} onClose={onCloseRejectProposal} onReject={onRejectProposal} />
     <WorkspaceOperationLogDialog open={operationLogOpen} logs={operationLogs} onClose={onCloseOperationLog} onClear={onClearOperationLog} />
-    <WorkspaceSettingsDialog open={settingsOpen} workspace={workspace} runtime={runtime} styleDraft={styleDraft} desktop={desktop} messagingService={messagingService} messagingProviders={messagingProviders} messagingLabels={messagingLabels} onStyleChange={onStyleChange} onClose={onCloseSettings} onSave={onSaveStyle} />
+    <WorkspaceSettingsDialog open={settingsOpen} workspace={workspace} runtime={runtime} styleDraft={styleDraft} leavePreference={leavePreference} desktop={desktop} messagingService={messagingService} messagingProviders={messagingProviders} messagingLabels={messagingLabels} onStyleChange={onStyleChange} onLeavePreferenceChange={onLeavePreferenceChange} onClose={onCloseSettings} onSave={onSaveStyle} />
   </>;
 }

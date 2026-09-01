@@ -8,7 +8,8 @@ export function useWorkspaceSelection({ images, workspace, selectedId, pendingWo
   const selected = deduplicatedImages.find((image) => image.imageId === selectedId) || null;
   const selectedIsLibrary = workspace?.role === "owner" && selected?.workspaceLocation === "library";
   const realtimeConnected = runtime === "connected" || runtime === "available" || runtime === "syncing";
-  const onlineCollaborators = realtimeConnected ? collaborators.filter((value) => value.online) : [];
+  const deduplicatedCollaborators = React.useMemo(() => [...new Map(collaborators.map((person) => [person.clientId, person])).values()], [collaborators]);
+  const onlineCollaborators = realtimeConnected ? deduplicatedCollaborators.filter((value) => value.online) : [];
   const onlinePeers = onlineCollaborators.length;
   const libraryImages = deduplicatedImages.filter((image) => workspace?.role === "owner" && image.workspaceLocation === "library");
   const workingImages = deduplicatedImages.filter((image) => workspace?.role === "collaborator" || image.workspaceLocation === "working");

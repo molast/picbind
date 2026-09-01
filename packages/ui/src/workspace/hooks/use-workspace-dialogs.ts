@@ -6,6 +6,7 @@ import type { Collaborator, WorkspaceActivity, WorkspaceCommit, WorkspaceImage, 
 export function useWorkspaceDialogs() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = React.useState(false);
+  const [leavingWorkspace, setLeavingWorkspace] = React.useState(false);
   const [removingCollaborator, setRemovingCollaborator] = React.useState<Collaborator | null>(null);
   const [operationLogOpen, setOperationLogOpen] = React.useState(false);
   const [proposalPreview, setProposalPreview] = React.useState<{ proposalId: string; imageId: string; original: Blob; resultUrl: string } | null>(null);
@@ -25,5 +26,5 @@ export function useWorkspaceDialogs() {
   const [stoppingCollaboration, setStoppingCollaboration] = React.useState(false);
   const [pendingProcessedResult, setPendingProcessedResult] = React.useState<{ source: WorkspaceImage; result: ProcessedImageResult } | null>(null);
   const [processedResultSaving, setProcessedResultSaving] = React.useState(false);
-  return { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, previewRendering, setPreviewRendering, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving };
+  return { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, leavingWorkspace, setLeavingWorkspace, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, previewRendering, setPreviewRendering, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving };
 }

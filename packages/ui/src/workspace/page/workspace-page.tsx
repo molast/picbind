@@ -35,6 +35,13 @@ import { collaborationPreviewCacheArtifacts, disposeCollaborationImageContainer,
 import { WorkspaceGallery } from "../components/workspace-gallery";
 import { WorkspaceProcessingCanvas } from "../components/workspace-processing-canvas";
 import { WorkspaceHeader } from "../components/workspace-header";
+import {
+  WORKSPACE_EXIT_EVENT,
+  WORKSPACE_SUSPENSION_EVENT,
+  WorkspaceSuspendedDock,
+  type WorkspaceExitEventDetail,
+  type WorkspaceSuspensionEventDetail,
+} from "../components/workspace-suspended-dock";
 import { WorkspaceEditorDialogs } from "../components/workspace-editor-dialogs";
 import { blobFromBytes, collaborationCardPreviewFor, collaborationPreviewFor, placeholderFrom } from "../utils/workspace-image-display";
 import { protocolOperationType } from "../utils/workspace-operation-mapping";
@@ -62,6 +69,7 @@ import { useWorkspaceProcessedResultCommand } from "../hooks/use-workspace-proce
 import { useWorkspaceReactions } from "../hooks/use-workspace-reactions";
 import { useWorkspaceToast } from "../hooks/use-workspace-toast";
 import { useWorkspaceMessaging } from "../hooks/use-workspace-messaging";
+import { readWorkspaceLeaveAction, writeWorkspaceLeaveAction, type WorkspaceLeaveAction } from "../preferences";
 import { WorkspaceSidebar } from "../components/workspace-sidebar";
 import { WorkspaceCollaborationPanel } from "../components/workspace-collaboration-panel";
 import { WorkspaceImageSidebar } from "../components/workspace-image-sidebar";
@@ -84,12 +92,15 @@ import { createPrefixedId, initialWorkspaceCommitId } from "../../utils/id";
 const workspaceText = (key: string) => getWorkspaceLabels(getLang())[key] || key;
 
 
-export default function WorkspacePage({ shareToken, initialWorkspace, userDisplayName, publicSiteUrl, desktop = false }: {
+export default function WorkspacePage({ shareToken, initialWorkspace, userDisplayName, publicSiteUrl, desktop = false, suspendedContent, onSuspend, onExit }: {
   shareToken?: string;
   initialWorkspace?: WorkspaceIdentity;
   userDisplayName?: string | null;
   publicSiteUrl?: string;
   desktop?: boolean;
+  suspendedContent?: React.ReactNode;
+  onSuspend?(): void;
+  onExit?(): void;
 }) {
   const imageProcessing = useImageProcessing();
   const realtimeService = useRealtimeService();
@@ -105,6 +116,9 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const realtimeRef = React.useRef<RealtimeSession | null>(null);
   const realtimeEventRef = React.useRef<(value: WorkspaceEvent | Record<string, unknown>) => void>(() => undefined);
   const [workspace, setWorkspace] = React.useState<WorkspaceIdentity | null>(null);
+  const [workspaceSuspended, setWorkspaceSuspended] = React.useState(false);
+  const [leavePreference, setLeavePreference] = React.useState<WorkspaceLeaveAction | null>(null);
+  const [rememberLeaveChoice, setRememberLeaveChoice] = React.useState(false);
   const [images, setImages] = React.useState<WorkspaceImage[]>([]);
   const [, refreshCollaborationRender] = React.useReducer((version: number) => version + 1, 0);
   const imagesRef = React.useRef<WorkspaceImage[]>([]);
@@ -118,7 +132,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const commits = React.useMemo(() => Array.from(new Map(commitEntries.map((commit) => [commit.commitId, commit])).values()), [commitEntries]);
   const { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, movingToWorkingImageIds, setMovingToWorkingImageIds, compressingToWorkingImageId, setCompressingToWorkingImageId, compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, notice, setNotice, requestingSourceIds, setRequestingSourceIds, setNewVersions } = useWorkspacePageState();
   const { editing, setEditing, reviewOpen, setReviewOpen, reviewFullscreen, setReviewFullscreen, processingSource, setProcessingSource, editorPreparing, setEditorPreparing, maximizedImageId, setMaximizedImageId } = useWorkspacePreview();
-  const { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, previewRendering, setPreviewRendering, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving } = useWorkspaceDialogs();
+  const { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, leavingWorkspace, setLeavingWorkspace, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, previewRendering, setPreviewRendering, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving } = useWorkspaceDialogs();
   const previewRenderSequence = React.useRef(0);
   const renderPreviewWithLoading = React.useCallback(async (render: () => Promise<void>) => {
     const sequence = ++previewRenderSequence.current;
@@ -147,13 +161,79 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     setNotice(null);
     setStyleDraft(defaultWorkspaceStyle());
   }, [initialWorkspace?.workspaceId, setMessages, setNotice, setReactionCounts, setSelectedId, setStyleDraft, shareToken]);
-  const confirmLeaveWorkspace = React.useCallback(() => {
+  const updateLeavePreference = React.useCallback((action: WorkspaceLeaveAction, remember: boolean) => {
+    const next = remember ? action : null;
+    setLeavePreference(next);
+    writeWorkspaceLeaveAction(next);
+  }, []);
+  const suspendWorkspace = React.useCallback((remember = false) => {
+    updateLeavePreference("suspend", remember);
     setLeaveConfirmOpen(false);
-    const realtime = realtimeRef.current;
-    realtimeRef.current = null;
-    void realtime?.close("page-left").catch(() => undefined);
-    transitionRuntime({ type: "transition", next: "unavailable" });
-  }, [setLeaveConfirmOpen]);
+    setWorkspaceSuspended(true);
+    if (typeof window !== "undefined" && workspace) {
+      window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
+        detail: { suspended: true, workspace, runtime },
+      }));
+    }
+    if (!desktop) onSuspend?.();
+  }, [desktop, onSuspend, runtime, setLeaveConfirmOpen, updateLeavePreference, workspace]);
+  const restoreWorkspace = React.useCallback(() => {
+    setWorkspaceSuspended(false);
+    if (typeof window !== "undefined" && workspace) {
+      window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
+        detail: { suspended: false, workspace },
+      }));
+    }
+  }, [workspace]);
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleSuspension = (event: Event) => {
+      const detail = (event as CustomEvent<WorkspaceSuspensionEventDetail>).detail;
+      if (!detail || detail.suspended || (detail.workspace?.workspaceId && detail.workspace.workspaceId !== workspace?.workspaceId)) return;
+      setWorkspaceSuspended(false);
+    };
+    window.addEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
+    return () => window.removeEventListener(WORKSPACE_SUSPENSION_EVENT, handleSuspension);
+  }, [workspace?.workspaceId]);
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !workspaceSuspended || !workspace) return;
+    window.dispatchEvent(new CustomEvent<WorkspaceSuspensionEventDetail>(WORKSPACE_SUSPENSION_EVENT, {
+      detail: {
+        suspended: true,
+        workspace,
+        runtime,
+      },
+    }));
+  }, [runtime, workspace, workspaceSuspended]);
+  const confirmLeaveWorkspace = React.useCallback((remember = false) => {
+    if (leavingWorkspace) return;
+    updateLeavePreference("exit", remember);
+    setWorkspaceSuspended(false);
+    setLeaveConfirmOpen(false);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent<WorkspaceExitEventDetail>(WORKSPACE_EXIT_EVENT, {
+        detail: { workspace: workspace || undefined },
+      }));
+    }
+    onExit?.();
+  }, [leavingWorkspace, onExit, setLeaveConfirmOpen, updateLeavePreference, workspace]);
+  const requestLeave = React.useCallback(() => {
+    if (workspace?.role !== "owner") {
+      setLeaveConfirmOpen(true);
+      return;
+    }
+    const preference = leavePreference ?? readWorkspaceLeaveAction();
+    if (preference === "suspend") {
+      suspendWorkspace(true);
+      return;
+    }
+    if (preference === "exit") {
+      confirmLeaveWorkspace(true);
+      return;
+    }
+    setRememberLeaveChoice(false);
+    setLeaveConfirmOpen(true);
+  }, [confirmLeaveWorkspace, leavePreference, setLeaveConfirmOpen, suspendWorkspace, workspace?.role]);
   const reviewListeners = React.useRef(new Set<(event:{sequence:number;message:ReviewCollaborationMessage})=>void>());
   const pendingProposalEvents = React.useRef(new Map<string, string>());
   const handledProposalFailures = React.useRef(new Set<string>());
@@ -173,6 +253,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
 
   React.useEffect(() => {
     setLanguage(getLang());
+    setLeavePreference(readWorkspaceLeaveAction());
   }, []);
 
   React.useEffect(() => {
@@ -989,9 +1070,13 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const { saveProcessedResult } = useWorkspaceProcessedResultCommand({ workspace, selected, setEditing, createOperation, queueProcessedResult, releaseProcessingSource });
   if(!workspace&&runtime==="unavailable")return <WorkspaceUnavailable notice={notice}/>;
   if(!workspace)return <WorkspaceLoading/>;
+  if(workspaceSuspended && !desktop) return <main className="relative min-h-screen overflow-hidden bg-slate-50">
+    {suspendedContent || <div className="min-h-screen bg-slate-50" />}
+    <WorkspaceSuspendedDock workspace={workspace} runtime={runtime} onRestore={restoreWorkspace} />
+  </main>;
   if(reviewOpen&&editorImage)return <main className="flex h-screen min-h-0 min-w-0 overflow-hidden"><ReviewWorkspace workspaceId={workspace.workspaceId} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} actorId={workspace.role} role={workspace.role==="owner"?"owner":"guest"} fullscreen={reviewFullscreen} collaborationEnabled={Boolean(selected?.shared)} showCommentAnchors={false} parameterAction={selected?.workspaceLocation==="working"?(workspace.role==="owner"?"apply":"proposal"):undefined} initialAnnotations={initialReviewAnnotations} onApplyParameters={async(parameters)=>{await createOperation("other",{review:true,...parameters});setReviewOpen(false);releaseProcessingSource();}} shareRecipients={[]} subscribeMessages={subscribeReviewMessages} onSendMessage={sendReviewMessage} onReviewStatusChange={handleReviewStatusChange} onReviewEditingChange={handleReviewEditingChange} onFullscreenChange={setReviewFullscreen} onGenerateImage={async(_source,result)=>{queueProcessedResult(selected!,{...result,operation:"adjust",parameters:{review:true}} as ProcessedImageResult);setReviewOpen(false);return{status:"saved",imageId:selected!.imageId};}} onResolveRejectedImage={async()=>undefined} onBack={()=>{setReviewOpen(false);releaseProcessingSource();}}/>{editorLoadingOverlay}</main>;
   return <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f5f8] text-[#172033]">
-    <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} desktop={desktop} lang={lang} onLanguageChange={(nextLang)=>{persistLang(nextLang);setLanguage(nextLang);}} onEnterWorkspace={()=>setShareIdEntryOpen(true)} onLeave={()=>setLeaveConfirmOpen(true)} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>setShareDialogOpen(true)} onSettings={()=>setSettingsOpen(true)} />
+    <WorkspaceHeader workspace={workspace} runtime={runtime} onlinePeers={onlinePeers} collaborationOpen={collaborationOpen} desktop={desktop} lang={lang} onLanguageChange={(nextLang)=>{persistLang(nextLang);setLanguage(nextLang);}} onEnterWorkspace={()=>setShareIdEntryOpen(true)} onLeave={requestLeave} onToggleCollaboration={()=>setCollaborationOpen((value)=>!value)} onShare={()=>setShareDialogOpen(true)} onSettings={()=>setSettingsOpen(true)} />
     <WorkspaceStatusBands workspace={workspace} runtime={runtime} notice={notice} imageCount={images.length} onDismissNotice={()=>setNotice(null)}/>
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:overflow-hidden">
       <section className={`flex min-w-0 flex-col lg:min-h-0 ${maximizedWorkspaceImage?"overflow-hidden":"p-4 sm:p-6 lg:overflow-auto"}`}>
@@ -1004,13 +1089,13 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
         </>}
       </section>
       <WorkspaceSidebar>
-        {collaborationOpen ? <WorkspaceCollaborationPanel onlineCollaborators={onlineCollaborators} proposals={proposals} role={workspace.role} runtime={runtime} onlinePeers={onlinePeers} reactionCounts={reactionCounts} messages={messages} message={message} selectedCollaborationActivities={selectedCollaborationActivities} selectedOriginalCommit={selectedOriginalCommit} selected={selected} onClose={()=>setCollaborationOpen(false)} onRemoveCollaborator={setRemovingCollaborator} onPreviewProposal={(proposal)=>void renderPreviewWithLoading(()=>previewProposal(proposal))} onDecideProposal={(proposal,state)=>void decideProposal(proposal,state)} onRejectProposal={(proposal)=>{setRejectingProposal(proposal);setProposalRejectReason("");}} onRetryProposal={(proposal)=>void submitProposal(proposal)} onReact={react} onPreviewActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOpenOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onMessageChange={setMessage} onSendMessage={sendMessage} /> : <WorkspaceImageSidebar selected={selected} selectedIsLibrary={selectedIsLibrary} shareId={workspace.shareToken} role={workspace.role} runtime={runtime} imagesCount={images.length} workingCount={workingImages.length} collaborators={collaborators} commits={commits} activities={selectedCollaborationActivities} proposals={proposals} selectedOriginalCommit={selectedOriginalCommit} requestingSource={selected ? requestingSourceIds.has(selected.imageId) : false} previewBlob={selected ? collaborationPreviewFor(selected, workspace, collaborationContainers.current) : undefined} collaborationSaving={collaborationSaving} onPublish={(image)=>void publishImage(image)} onDelete={requestDeleteImage} onRequestSource={requestSource} onOperation={(image,operation)=>void openImageOperation(image,operation)} onSave={(choice)=>saveCollaborativeImage(choice)} onRestore={restoreCurrentImage} onActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onRollback={(commit)=>void renderPreviewWithLoading(()=>openRollbackTarget(commit))} onCreateShare={()=>void createShare()} onRotateShare={()=>void rotateShare()} onCopySuccess={()=>showToast(workspaceText("workspaceIdCopied"))} hasShareToken={Boolean(workspace.shareToken)} />}
+        {collaborationOpen ? <WorkspaceCollaborationPanel onlineCollaborators={onlineCollaborators} proposals={proposals} role={workspace.role} runtime={runtime} onlinePeers={onlinePeers} reactionCounts={reactionCounts} messages={messages} message={message} selectedCollaborationActivities={selectedCollaborationActivities} selectedOriginalCommit={selectedOriginalCommit} selected={selected} onClose={()=>setCollaborationOpen(false)} onRemoveCollaborator={setRemovingCollaborator} onPreviewProposal={(proposal)=>void renderPreviewWithLoading(()=>previewProposal(proposal))} onDecideProposal={(proposal,state)=>void decideProposal(proposal,state)} onRejectProposal={(proposal)=>{setRejectingProposal(proposal);setProposalRejectReason("");}} onRetryProposal={(proposal)=>void submitProposal(proposal)} onReact={react} onPreviewActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOpenOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onMessageChange={setMessage} onSendMessage={sendMessage} /> : <WorkspaceImageSidebar selected={selected} selectedIsLibrary={selectedIsLibrary} shareId={workspace.shareToken} role={workspace.role} runtime={runtime} imagesCount={images.length} workingCount={workingImages.length} collaborators={onlineCollaborators} commits={commits} activities={selectedCollaborationActivities} proposals={proposals} selectedOriginalCommit={selectedOriginalCommit} requestingSource={selected ? requestingSourceIds.has(selected.imageId) : false} previewBlob={selected ? collaborationPreviewFor(selected, workspace, collaborationContainers.current) : undefined} collaborationSaving={collaborationSaving} onPublish={(image)=>void publishImage(image)} onDelete={requestDeleteImage} onRequestSource={requestSource} onOperation={(image,operation)=>void openImageOperation(image,operation)} onSave={(choice)=>saveCollaborativeImage(choice)} onRestore={restoreCurrentImage} onActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onRollback={(commit)=>void renderPreviewWithLoading(()=>openRollbackTarget(commit))} onCreateShare={()=>void createShare()} onRotateShare={()=>void rotateShare()} onCopySuccess={()=>showToast(workspaceText("workspaceIdCopied"))} hasShareToken={Boolean(workspace.shareToken)} />}
       </WorkspaceSidebar>
     </div>
     {movingToWorkingImageIds.size > 0 ? <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label={workspaceText("processing")}><div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-xl" role="status" aria-live="polite"><FiLoader className="h-5 w-5 animate-spin text-[#2f65cf]" aria-hidden="true" /><span>{workspaceText("processing")}</span></div></div> : null}
     {workspaceMessaging.quickSendPreparingImageId ? <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label={messagingLabels.messagingCompressingPreview}><div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-xl" role="status" aria-live="polite"><FiLoader className="h-5 w-5 animate-spin text-[#2f65cf]" aria-hidden="true" /><span>{messagingLabels.messagingCompressingPreview}</span></div></div> : null}
     <WorkspaceEditorDialogs editing={editing} image={editorImage} posterUrl={editorPosterUrl} editorBaseReady={editorBaseReady} labels={labels} initialCrop={initialCrop} initialSize={initialResize} initialAdjustments={initialColorAdjustments} parameterAction={selected?.workspaceLocation === "working" ? (workspace.role === "owner" ? "apply" : "proposal") : undefined} loadingOverlay={editorLoadingOverlay} onClose={()=>{setEditing(null);setCompressingToWorkingImageId(null);releaseProcessingSource();}} onSave={(_source,result)=>saveProcessedResult(result)} onApplyCrop={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("crop",parameters);}} onApplyResize={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("resize",parameters);}} onApplyColor={async(parameters)=>{setEditing(null);releaseProcessingSource();await createOperation("brightness",parameters);}} onSaveCompression={async(_source,result)=>{if(compressingToWorkingImage){await saveProcessedCopy(compressingToWorkingImage,result);releaseProcessingSource();return;}await saveProcessedResult(result);}} onSaveConversion={(_source,result)=>saveProcessedResult(result)} />
-    <WorkspaceDialogs workspace={workspace} runtime={runtime} leaveOpen={leaveConfirmOpen} removed={removedFromWorkspace} removingCollaborator={removingCollaborator} deleteImage={deletingImage} deleteChoice={deleteChoice} proposalPreview={proposalPreview} activityPreview={activityPreview} activityPreviewIsCurrent={activityPreviewIsCurrent} previewRendering={previewRendering} rollbackTarget={rollbackTarget} rollbackPreview={rollbackPreview} sourceRequest={sourceRequestDialog} sourceRequestImageName={images.find((image)=>image.imageId===sourceRequestDialog?.imageId)?.name} sourceRejectReason={sourceRejectReason} rejectingProposal={rejectingProposal} proposalRejectReason={proposalRejectReason} operationLogOpen={operationLogOpen} operationLogs={completeOperationLog} pendingResult={pendingProcessedResult?.result || null} resultSaving={processedResultSaving} settingsOpen={settingsOpen} styleDraft={styleDraft} desktop={desktop} messagingService={workspaceMessaging.service} messagingProviders={workspaceMessaging.providers} messagingLabels={messagingLabels} compressionSuggestionOpen={Boolean(pendingWorkingImageId)} compressionSuggestionWeakNetwork={compressionSuggestionWeakNetwork} compressionLabels={labels as any} onCompressionContinue={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (image) void moveImageToWorking(image); }} onCompression={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (!image) return; setCompressingToWorkingImageId(image.imageId); void openImageOperation(image, "compress"); }} onCompressionCancel={() => setPendingWorkingImageId(null)} onRemovedReturnHome={()=>setRemovedFromWorkspace(false)} onCloseLeave={()=>setLeaveConfirmOpen(false)} onConfirmLeave={confirmLeaveWorkspace} onCloseRemoveCollaborator={()=>setRemovingCollaborator(null)} onConfirmRemoveCollaborator={()=>{const collaborator=removingCollaborator;setRemovingCollaborator(null);if(collaborator)removeCollaborator(collaborator);}} onCloseDelete={()=>setDeletingImage(null)} onDeleteChoice={setDeleteChoice} onConfirmDelete={()=>void confirmDeleteImage()} onCloseProposalPreview={()=>{if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);}} onRejectProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"rejected");}} onApproveProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"approved");}} onCloseActivityPreview={()=>void cancelActivityPreview()} onRollbackActivity={()=>void rollbackActivityParameterState()} onCloseRollback={()=>void cancelRollbackTarget()} onConfirmRollback={()=>rollbackTarget&&void rollbackCommit(rollbackTarget)} onSourceReasonChange={setSourceRejectReason} onRejectSource={()=>sourceRequestDialog&&rejectSourceRequest(sourceRequestDialog)} onAcceptSource={()=>sourceRequestDialog&&void acceptSourceRequest(sourceRequestDialog)} onCloseRejectProposal={()=>setRejectingProposal(null)} onProposalReasonChange={setProposalRejectReason} onRejectProposal={()=>{const proposal=rejectingProposal;setRejectingProposal(null);if(proposal)void decideProposal(proposal,"rejected",proposalRejectReason);}} onCloseOperationLog={()=>setOperationLogOpen(false)} onClearOperationLog={async()=>{await clearOperationLogs(workspace.workspaceId);setOperationLogs([]);setActivities([]);}} onCancelResult={()=>setPendingProcessedResult(null)} onSaveResult={(destination)=>void confirmProcessedResult(destination)} onCloseSettings={()=>setSettingsOpen(false)} onStyleChange={setStyleDraft} onSaveStyle={()=>void saveStyle()} />
+    <WorkspaceDialogs workspace={workspace} runtime={runtime} leaveOpen={leaveConfirmOpen} leavingWorkspace={leavingWorkspace} removed={removedFromWorkspace} removingCollaborator={removingCollaborator} deleteImage={deletingImage} deleteChoice={deleteChoice} proposalPreview={proposalPreview} activityPreview={activityPreview} activityPreviewIsCurrent={activityPreviewIsCurrent} previewRendering={previewRendering} rollbackTarget={rollbackTarget} rollbackPreview={rollbackPreview} sourceRequest={sourceRequestDialog} sourceRequestImageName={images.find((image)=>image.imageId===sourceRequestDialog?.imageId)?.name} sourceRejectReason={sourceRejectReason} rejectingProposal={rejectingProposal} proposalRejectReason={proposalRejectReason} operationLogOpen={operationLogOpen} operationLogs={completeOperationLog} pendingResult={pendingProcessedResult?.result || null} resultSaving={processedResultSaving} settingsOpen={settingsOpen} styleDraft={styleDraft} leavePreference={leavePreference} rememberLeaveChoice={rememberLeaveChoice} desktop={desktop} messagingService={workspaceMessaging.service} messagingProviders={workspaceMessaging.providers} messagingLabels={messagingLabels} compressionSuggestionOpen={Boolean(pendingWorkingImageId)} compressionSuggestionWeakNetwork={compressionSuggestionWeakNetwork} compressionLabels={labels as any} onCompressionContinue={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (image) void moveImageToWorking(image); }} onCompression={() => { const image = images.find((item) => item.imageId === pendingWorkingImageId); setPendingWorkingImageId(null); if (!image) return; setCompressingToWorkingImageId(image.imageId); void openImageOperation(image, "compress"); }} onCompressionCancel={() => setPendingWorkingImageId(null)} onRemovedReturnHome={()=>setRemovedFromWorkspace(false)} onCloseLeave={()=>{if(!leavingWorkspace)setLeaveConfirmOpen(false)}} onConfirmLeave={confirmLeaveWorkspace} onTemporaryLeave={suspendWorkspace} onRememberLeaveChoice={setRememberLeaveChoice} onLeavePreferenceChange={(action)=>{setLeavePreference(action);writeWorkspaceLeaveAction(action);}} onCloseRemoveCollaborator={()=>setRemovingCollaborator(null)} onConfirmRemoveCollaborator={()=>{const collaborator=removingCollaborator;setRemovingCollaborator(null);if(collaborator)removeCollaborator(collaborator);}} onCloseDelete={()=>setDeletingImage(null)} onDeleteChoice={setDeleteChoice} onConfirmDelete={()=>void confirmDeleteImage()} onCloseProposalPreview={()=>{if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);}} onRejectProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"rejected");}} onApproveProposalPreview={()=>{const proposal=proposals.find((item)=>item.proposalId===proposalPreview?.proposalId);if(proposalPreview?.imageId)clearCollaborationPreviewSnapshot(proposalPreview.imageId);setProposalPreview(null);if(proposal)void decideProposal(proposal,"approved");}} onCloseActivityPreview={()=>void cancelActivityPreview()} onRollbackActivity={()=>void rollbackActivityParameterState()} onCloseRollback={()=>void cancelRollbackTarget()} onConfirmRollback={()=>rollbackTarget&&void rollbackCommit(rollbackTarget)} onSourceReasonChange={setSourceRejectReason} onRejectSource={()=>sourceRequestDialog&&rejectSourceRequest(sourceRequestDialog)} onAcceptSource={()=>sourceRequestDialog&&void acceptSourceRequest(sourceRequestDialog)} onCloseRejectProposal={()=>setRejectingProposal(null)} onProposalReasonChange={setProposalRejectReason} onRejectProposal={()=>{const proposal=rejectingProposal;setRejectingProposal(null);if(proposal)void decideProposal(proposal,"rejected",proposalRejectReason);}} onCloseOperationLog={()=>setOperationLogOpen(false)} onClearOperationLog={async()=>{await clearOperationLogs(workspace.workspaceId);setOperationLogs([]);setActivities([]);}} onCancelResult={()=>setPendingProcessedResult(null)} onSaveResult={(destination)=>void confirmProcessedResult(destination)} onCloseSettings={()=>setSettingsOpen(false)} onStyleChange={setStyleDraft} onSaveStyle={()=>void saveStyle()} />
     <WorkspaceSourceRejectedDialog notice={sourceRejectedNotice} onClose={() => setSourceRejectedNotice(null)} />
     <WorkspaceStopCollaborationConfirmDialog image={stopCollaborationImage} stopping={stoppingCollaboration} onClose={() => { if (!stoppingCollaboration) setStopCollaborationImage(null); }} onConfirm={confirmStopCollaboration} onSaveAndConfirm={saveAndStopCollaboration} />
     <WorkspaceSaveRequiredDialog image={pendingImageSaveAction ? images.find((image) => image.imageId === pendingImageSaveAction.imageId) || null : null} action={pendingImageSaveAction?.action || "download"} saving={collaborationSaving} onClose={() => { if (!collaborationSaving) setPendingImageSaveAction(null); }} onSave={(choice) => void completePendingImageSave(choice)} />

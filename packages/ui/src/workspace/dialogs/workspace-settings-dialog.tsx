@@ -1,9 +1,10 @@
 import React from "react";
-import { FiRefreshCw, FiX } from "react-icons/fi";
+import { FiLogOut, FiMessageCircle, FiRefreshCw, FiSettings, FiSliders, FiX } from "react-icons/fi";
 import { getLang, getWorkspaceLabels, type WorkspaceEditorLabels } from "../../locales";
 import type { MessagingProviderSnapshot, MessagingService } from "../../messaging";
 import { ColorControl } from "../components/workspace-action";
 import { defaultWorkspaceStyle, type WorkspaceIdentity, type WorkspaceRuntimeState, type WorkspaceStyle } from "../types";
+import type { WorkspaceLeaveAction } from "../preferences";
 import { WorkspaceMessagingServiceSettings } from "./workspace-messaging-service-dialog";
 
 const text = (key: string) => getWorkspaceLabels(getLang())[key] || key;
@@ -16,16 +17,20 @@ function headerBackground(style: WorkspaceStyle): React.CSSProperties {
     : { backgroundImage: `linear-gradient(${background.direction === "down" ? "180deg" : background.direction === "downRight" ? "135deg" : "90deg"}, ${background.from}, ${background.to})`, color: style.header.text.color };
 }
 
+type SettingsSection = "style" | "behavior" | "messaging";
+
 export function WorkspaceSettingsDialog({
   open,
   workspace,
   runtime,
   styleDraft,
+  leavePreference,
   desktop,
   messagingService,
   messagingProviders,
   messagingLabels,
   onStyleChange,
+  onLeavePreferenceChange,
   onClose,
   onSave,
 }: {
@@ -33,40 +38,63 @@ export function WorkspaceSettingsDialog({
   workspace: WorkspaceIdentity;
   runtime: WorkspaceRuntimeState;
   styleDraft: WorkspaceStyle;
+  leavePreference: WorkspaceLeaveAction | null;
   desktop: boolean;
   messagingService?: MessagingService;
   messagingProviders: MessagingProviderSnapshot[];
   messagingLabels: WorkspaceEditorLabels;
   onStyleChange: React.Dispatch<React.SetStateAction<WorkspaceStyle>>;
+  onLeavePreferenceChange(action: WorkspaceLeaveAction | null): void;
   onClose(): void;
   onSave(): void;
 }) {
+  const [section, setSection] = React.useState<SettingsSection>("style");
   if (!open) return null;
   const owner = workspace.role === "owner";
   const update = (change: (style: WorkspaceStyle) => WorkspaceStyle) => onStyleChange(change);
   const background = styleDraft.header.background;
+  const sections: Array<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
+    { id: "style", label: text("workspaceSettingsStyle"), icon: <FiSliders aria-hidden="true" /> },
+    { id: "behavior", label: text("workspaceSettingsBehavior"), icon: <FiLogOut aria-hidden="true" /> },
+    ...(desktop && messagingService ? [{ id: "messaging" as const, label: text("workspaceSettingsMessaging"), icon: <FiMessageCircle aria-hidden="true" /> }] : []),
+  ];
+
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <div className="flex max-h-[calc(100vh-32px)] w-full max-w-[720px] flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-      <header className="flex items-center justify-between border-b px-5 py-3"><h2 className="text-base font-semibold">{text("workspaceSettings")}</h2><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={text("close")}><FiX /></button></header>
-      <div className="min-h-0 overflow-y-auto">
-        <section className="border-b border-slate-200">
-          <div className="flex min-h-12 items-center justify-between gap-3 px-[18px] py-2.5"><h3 className="text-sm font-semibold text-slate-800">{text("workspaceStyleEditor")}</h3>{owner ? <button type="button" onClick={() => onStyleChange(defaultWorkspaceStyle())} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#2f65cf]" title={text("resetStyle")}><FiRefreshCw className="h-3.5 w-3.5" />{text("resetStyle")}</button> : null}</div>
-          <div className="grid gap-3 px-[18px] pb-[18px] sm:grid-cols-[190px_minmax(0,1fr)]">
-            <div className="flex min-w-0 flex-col gap-1.5"><span className="text-[10px] font-semibold text-slate-500">{text("stylePreview")}</span><div className="flex min-h-[76px] min-w-0 flex-col justify-center gap-0.5 overflow-hidden rounded-md border border-black/10 px-3 py-2.5" style={headerBackground(styleDraft)}><strong className="truncate" style={{ fontFamily: styleDraft.header.text.fontFamily, fontSize: styleDraft.header.text.fontSize, fontWeight: styleDraft.header.text.fontWeight }}>{styleDraft.header.text.content || "Workspace"}</strong><span className="text-[10px] opacity-70">{text("imageWorkspace")}</span></div></div>
-        {owner ? <fieldset className="grid min-w-0 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-          <label className="grid gap-1.5 text-[11px] font-bold text-slate-500 sm:col-span-2">{text("headerText")}<input value={styleDraft.header.text.content} maxLength={80} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, content: event.target.value } } }))} className="h-9 rounded-md border bg-white px-3 text-sm font-normal text-slate-800" /></label>
-          <div className="grid gap-1.5"><span className="text-[11px] font-bold text-slate-500">{text("background")}</span><div className="grid h-9 grid-cols-2 rounded-md bg-slate-100 p-1 text-[11px]"><button type="button" onClick={() => update((value) => ({ ...value, header: { ...value.header, background: { type: "solid", color: "#ffffff" }, text: { ...value.header.text, color: "#273247" } } }))} className={`rounded ${background.type === "solid" ? "bg-white font-semibold shadow-sm" : "text-slate-500"}`}>{text("solid")}</button><button type="button" onClick={() => update((value) => ({ ...value, header: { ...value.header, background: { type: "gradient", from: "#17324d", to: "#2f7d66", direction: "right" }, text: { ...value.header.text, color: "#ffffff" } } }))} className={`rounded ${background.type === "gradient" ? "bg-white font-semibold shadow-sm" : "text-slate-500"}`}>{text("gradient")}</button></div></div>
-          {background.type === "solid" ? <ColorControl label={text("backgroundColor")} value={background.color} onChange={(color) => update((value) => ({ ...value, header: { ...value.header, background: { type: "solid", color } } }))} /> : <><ColorControl label={text("gradientFrom")} value={background.from} onChange={(from) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, from } } } : value)} /><ColorControl label={text("gradientTo")} value={background.to} onChange={(to) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, to } } } : value)} /><label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("gradientDirection")}<select value={background.direction} onChange={(event) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, direction: event.target.value as "right" | "down" | "downRight" } } } : value)} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option value="right">{text("right")}</option><option value="down">{text("down")}</option><option value="downRight">{text("downRight")}</option></select></label></>}
-          <ColorControl label={text("textColor")} value={styleDraft.header.text.color} onChange={(color) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, color } } }))} />
-          <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontFamily")}<select value={styleDraft.header.text.fontFamily} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontFamily: event.target.value as WorkspaceStyle["header"]["text"]["fontFamily"] } } }))} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option>Inter</option><option>System</option><option>Serif</option><option>Monospace</option></select></label>
-          <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontSize")}<div className="flex h-9 items-center gap-2"><input type="range" min={12} max={32} value={styleDraft.header.text.fontSize} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontSize: Number(event.target.value) } } }))} className="min-w-0 flex-1 accent-[#2f65cf]" /><output className="w-11 text-right text-[11px] font-normal text-slate-600">{styleDraft.header.text.fontSize} px</output></div></label>
-          <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontWeight")}<select value={styleDraft.header.text.fontWeight} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontWeight: Number(event.target.value) as 400 | 500 | 600 | 700 } } }))} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option value="400">400</option><option value="500">500</option><option value="600">600</option><option value="700">700</option></select></label>
-        </fieldset> : <dl className="grid content-start gap-2 text-xs"><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("workspaceName")}</dt><dd className="truncate">{workspace.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("status")}</dt><dd>{runtimeText(runtime)}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("workspaceId")}</dt><dd className="max-w-[220px] truncate">{workspace.workspaceId}</dd></div></dl>}
+    <div className="flex h-[640px] max-h-[calc(100vh-32px)] w-full max-w-[760px] flex-col overflow-hidden rounded-lg bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="workspace-settings-title">
+      <header className="flex shrink-0 items-center justify-between border-b px-5 py-3">
+        <div className="flex min-w-0 items-center gap-2"><FiSettings className="h-4 w-4 text-slate-500" aria-hidden="true" /><h2 id="workspace-settings-title" className="truncate text-base font-semibold">{text("workspaceSettings")}</h2></div>
+        <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" aria-label={text("close")}><FiX /></button>
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <nav className="w-[148px] shrink-0 border-r border-slate-200 bg-slate-50/70 p-2" aria-label={text("workspaceSettings")}>
+          <div className="grid gap-1">
+            {sections.map((item) => <button key={item.id} type="button" onClick={() => setSection(item.id)} className={`flex min-h-9 items-center gap-2 rounded-md px-2.5 text-left text-xs font-semibold transition ${section === item.id ? "bg-white text-[#2f65cf] shadow-sm" : "text-slate-500 hover:bg-white/80 hover:text-slate-800"}`} aria-current={section === item.id ? "page" : undefined}>{item.icon}<span className="min-w-0 truncate">{item.label}</span></button>)}
           </div>
-        </section>
-      {desktop && messagingService ? <WorkspaceMessagingServiceSettings service={messagingService} providers={messagingProviders} labels={messagingLabels} /> : null}
+        </nav>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {section === "style" ? <section className="p-[18px]" aria-labelledby="workspace-style-title">
+            <div className="mb-3 flex min-h-8 items-center justify-between gap-3"><h3 id="workspace-style-title" className="text-sm font-semibold text-slate-800">{text("workspaceStyleEditor")}</h3>{owner ? <button type="button" onClick={() => onStyleChange(defaultWorkspaceStyle())} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#2f65cf]" title={text("resetStyle")}><FiRefreshCw className="h-3.5 w-3.5" />{text("resetStyle")}</button> : null}</div>
+            <div className="grid gap-3 sm:grid-cols-[190px_minmax(0,1fr)]">
+              <div className="flex min-w-0 flex-col gap-1.5"><span className="text-[10px] font-semibold text-slate-500">{text("stylePreview")}</span><div className="flex min-h-[76px] min-w-0 flex-col justify-center gap-0.5 overflow-hidden rounded-md border border-black/10 px-3 py-2.5" style={headerBackground(styleDraft)}><strong className="truncate" style={{ fontFamily: styleDraft.header.text.fontFamily, fontSize: styleDraft.header.text.fontSize, fontWeight: styleDraft.header.text.fontWeight }}>{styleDraft.header.text.content || "Workspace"}</strong><span className="text-[10px] opacity-70">{text("imageWorkspace")}</span></div></div>
+              {owner ? <fieldset className="grid min-w-0 gap-x-3 gap-y-2.5 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-[11px] font-bold text-slate-500 sm:col-span-2">{text("headerText")}<input value={styleDraft.header.text.content} maxLength={80} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, content: event.target.value } } }))} className="h-9 rounded-md border bg-white px-3 text-sm font-normal text-slate-800" /></label>
+                <div className="grid gap-1.5"><span className="text-[11px] font-bold text-slate-500">{text("background")}</span><div className="grid h-9 grid-cols-2 rounded-md bg-slate-100 p-1 text-[11px]"><button type="button" onClick={() => update((value) => ({ ...value, header: { ...value.header, background: { type: "solid", color: "#ffffff" }, text: { ...value.header.text, color: "#273247" } } }))} className={`rounded ${background.type === "solid" ? "bg-white font-semibold shadow-sm" : "text-slate-500"}`}>{text("solid")}</button><button type="button" onClick={() => update((value) => ({ ...value, header: { ...value.header, background: { type: "gradient", from: "#17324d", to: "#2f7d66", direction: "right" }, text: { ...value.header.text, color: "#ffffff" } } }))} className={`rounded ${background.type === "gradient" ? "bg-white font-semibold shadow-sm" : "text-slate-500"}`}>{text("gradient")}</button></div></div>
+                {background.type === "solid" ? <ColorControl label={text("backgroundColor")} value={background.color} onChange={(color) => update((value) => ({ ...value, header: { ...value.header, background: { type: "solid", color } } }))} /> : <><ColorControl label={text("gradientFrom")} value={background.from} onChange={(from) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, from } } } : value)} /><ColorControl label={text("gradientTo")} value={background.to} onChange={(to) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, to } } } : value)} /><label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("gradientDirection")}<select value={background.direction} onChange={(event) => update((value) => value.header.background.type === "gradient" ? { ...value, header: { ...value.header, background: { ...value.header.background, direction: event.target.value as "right" | "down" | "downRight" } } } : value)} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option value="right">{text("right")}</option><option value="down">{text("down")}</option><option value="downRight">{text("downRight")}</option></select></label></>}
+                <ColorControl label={text("textColor")} value={styleDraft.header.text.color} onChange={(color) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, color } } }))} />
+                <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontFamily")}<select value={styleDraft.header.text.fontFamily} onChange={(event) => { const fontFamily = event.target.value as WorkspaceStyle["header"]["text"]["fontFamily"]; update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontFamily } } })); }} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option>Inter</option><option>System</option><option>Serif</option><option>Monospace</option></select></label>
+                <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontSize")}<div className="flex h-9 items-center gap-2"><input type="range" min={12} max={32} value={styleDraft.header.text.fontSize} onChange={(event) => update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontSize: Number(event.target.value) } } }))} className="min-w-0 flex-1 accent-[#2f65cf]" /><output className="w-11 text-right text-[11px] font-normal text-slate-600">{styleDraft.header.text.fontSize} px</output></div></label>
+                <label className="grid gap-1.5 text-[11px] font-bold text-slate-500">{text("fontWeight")}<select value={styleDraft.header.text.fontWeight} onChange={(event) => { const fontWeight = Number(event.target.value) as 400 | 500 | 600 | 700; update((value) => ({ ...value, header: { ...value.header, text: { ...value.header.text, fontWeight } } })); }} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option value="400">400</option><option value="500">500</option><option value="600">600</option><option value="700">700</option></select></label>
+              </fieldset> : <dl className="grid content-start gap-2 text-xs"><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("workspaceName")}</dt><dd className="truncate">{workspace.name}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("status")}</dt><dd>{runtimeText(runtime)}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-500">{text("workspaceId")}</dt><dd className="max-w-[220px] truncate">{workspace.workspaceId}</dd></div></dl>}
+            </div>
+          </section> : null}
+          {section === "behavior" ? <section className="p-[18px]" aria-labelledby="workspace-behavior-title">
+            <div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-[#2f65cf]"><FiLogOut className="h-[18px] w-[18px]" /></span><div className="min-w-0"><h3 id="workspace-behavior-title" className="text-sm font-semibold text-slate-900">{text("workspaceSettingsBehavior")}</h3><p className="mt-0.5 text-xs text-slate-500">{text("workspaceLeavePreference")}</p></div></div>
+            {owner ? <label className="mt-5 grid max-w-[420px] gap-1.5 text-[11px] font-bold text-slate-500">{text("workspaceLeavePreference")}<select value={leavePreference || "ask"} onChange={(event) => onLeavePreferenceChange(event.target.value === "ask" ? null : event.target.value as WorkspaceLeaveAction)} className="h-9 rounded-md border bg-white px-2 text-sm font-normal text-slate-800"><option value="ask">{text("workspaceLeavePreferenceAsk")}</option><option value="suspend">{text("workspaceLeavePreferenceSuspend")}</option><option value="exit">{text("workspaceLeavePreferenceExit")}</option></select></label> : <p className="mt-5 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">{text("leaveWorkspaceDescription")}</p>}
+          </section> : null}
+          {section === "messaging" && desktop && messagingService ? <WorkspaceMessagingServiceSettings service={messagingService} providers={messagingProviders} labels={messagingLabels} /> : null}
+        </div>
       </div>
-      <footer className="flex items-center justify-end gap-2 border-t px-5 py-3">{owner ? <><button type="button" onClick={onClose} className="h-9 rounded-md border px-4 text-xs">{text("cancel")}</button><button type="button" onClick={onSave} className="h-9 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white">{text("save")}</button></> : <button type="button" onClick={onClose} className="h-9 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white">{text("close")}</button>}</footer>
+      <footer className="flex shrink-0 items-center justify-end gap-2 border-t px-5 py-3">{owner && section === "style" ? <><button type="button" onClick={onClose} className="h-9 rounded-md border px-4 text-xs">{text("cancel")}</button><button type="button" onClick={onSave} className="h-9 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white">{text("save")}</button></> : <button type="button" onClick={onClose} className="h-9 rounded-md bg-[#2f65cf] px-4 text-xs font-semibold text-white">{text("close")}</button>}</footer>
     </div>
   </div>;
 }
