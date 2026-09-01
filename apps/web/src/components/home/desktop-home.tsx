@@ -1,17 +1,9 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
-import {
-  FiFolder,
-  FiGrid,
-  FiImage,
-  FiUploadCloud,
-} from "react-icons/fi";
-import { WorkspaceLanguageSwitcher } from "@picbind/ui/source";
-import AccountControl from "@/components/auth/account-control";
+import { FiUploadCloud } from "react-icons/fi";
 import type { useHomeCompression } from "./use-home-compression";
 import DesktopHomeResults from "./desktop-home-results";
+import DesktopAppHeader from "@/components/desktop/desktop-app-header";
 
 type DesktopHomeProps = {
   home: ReturnType<typeof useHomeCompression>;
@@ -25,51 +17,11 @@ export default function DesktopHome({
 
   return (
     <main className="flex h-[100dvh] min-h-[640px] w-full flex-col overflow-hidden bg-[#f5f7fa] bg-[linear-gradient(rgba(245,247,250,0.76),rgba(245,247,250,0.9)),url('/images/hero-background.avif')] bg-cover bg-center bg-no-repeat text-slate-800">
-      <header className="flex h-16 shrink-0 items-center border-b border-slate-200 bg-white px-6">
-        <Link href="/" className="inline-flex shrink-0 items-center" aria-label="PicBind">
-          <Image
-            src="/images/wordmark.png"
-            alt="PicBind"
-            width={142}
-            height={30}
-            className="h-8 w-auto object-contain"
-            priority
-          />
-        </Link>
-
-        <nav className="ml-8 flex items-center gap-1 text-sm font-medium text-slate-600">
-          <Link
-            href="/"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-50 px-3 text-[#2f65cf]"
-          >
-            <FiImage className="h-4 w-4" aria-hidden="true" />
-            {desktopCopy.compress}
-          </Link>
-          <Link
-            href="/favicon-converter"
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiGrid className="h-4 w-4" aria-hidden="true" />
-            {desktopCopy.favicon}
-          </Link>
-          <Link
-            href="/workspace"
-            data-picbind-workspace-entry="true"
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiFolder className="h-4 w-4" aria-hidden="true" />
-            {desktopCopy.workspace}
-          </Link>
-        </nav>
-
-        <div className="ml-auto flex items-center gap-3">
-          <AccountControl lang={home.lang} showWorkspaceEntry />
-          <WorkspaceLanguageSwitcher
-            lang={home.lang}
-            onChange={home.handleSwitchLang}
-          />
-        </div>
-      </header>
+      <DesktopAppHeader
+        lang={home.lang}
+        active="compress"
+        onLanguageChange={home.handleSwitchLang}
+      />
 
       <input
         ref={home.inputRef}

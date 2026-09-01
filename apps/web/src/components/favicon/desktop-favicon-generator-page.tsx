@@ -1,26 +1,17 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import React from "react";
 import {
   FiCheck,
   FiCode,
   FiCopy,
   FiDownload,
-  FiFolder,
-  FiGrid,
   FiImage,
-  FiPlus,
   FiType,
   FiUploadCloud,
 } from "react-icons/fi";
-import {
-  WorkspaceLanguageSwitcher,
-  WorkspaceShareIdEntryDialog,
-} from "@picbind/ui/source";
-import AccountControl from "@/components/auth/account-control";
-import { getHomeCompressLandingCopy } from "@/locales";
+import DesktopAppHeader from "@/components/desktop/desktop-app-header";
 import {
   ColorPalette,
   contrastTextColor,
@@ -32,75 +23,6 @@ import {
 import type { useFaviconGenerator } from "./use-favicon-generator";
 
 type FaviconGenerator = ReturnType<typeof useFaviconGenerator>;
-
-function DesktopHeader({ generator }: { generator: FaviconGenerator }) {
-  const [workspaceEntryOpen, setWorkspaceEntryOpen] = React.useState(false);
-  const nav = getHomeCompressLandingCopy(generator.lang).desktop;
-
-  return (
-    <>
-      <header className="flex h-16 shrink-0 items-center border-b border-slate-200 bg-white px-6">
-        <Link href="/" className="inline-flex shrink-0 items-center" aria-label="PicBind">
-          <Image
-            src="/images/wordmark.png"
-            alt="PicBind"
-            width={142}
-            height={30}
-            className="h-8 w-auto object-contain"
-            priority
-          />
-        </Link>
-
-        <nav className="ml-8 flex items-center gap-1 text-sm font-medium text-slate-600">
-          <Link
-            href="/"
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiImage className="h-4 w-4" aria-hidden="true" />
-            {nav.compress}
-          </Link>
-          <Link
-            href="/favicon-converter"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-50 px-3 text-[#2f65cf]"
-          >
-            <FiGrid className="h-4 w-4" aria-hidden="true" />
-            {nav.favicon}
-          </Link>
-          <Link
-            href="/workspace"
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiFolder className="h-4 w-4" aria-hidden="true" />
-            {nav.workspace}
-          </Link>
-          <button
-            type="button"
-            onClick={() => setWorkspaceEntryOpen(true)}
-            className="inline-flex h-9 items-center gap-2 rounded-md px-3 transition hover:bg-slate-100"
-          >
-            <FiPlus className="h-4 w-4" aria-hidden="true" />
-            {nav.enterWorkspace}
-          </button>
-        </nav>
-
-        <div className="ml-auto flex items-center gap-3">
-          <AccountControl lang={generator.lang} />
-          <WorkspaceLanguageSwitcher
-            lang={generator.lang}
-            onChange={generator.handleSwitchLang}
-          />
-        </div>
-      </header>
-
-      <WorkspaceShareIdEntryDialog
-        open={workspaceEntryOpen}
-        lang={generator.lang}
-        desktop
-        onClose={() => setWorkspaceEntryOpen(false)}
-      />
-    </>
-  );
-}
 
 function ModeControl({
   mode,
@@ -403,7 +325,11 @@ export default function DesktopFaviconGeneratorPage({
 }) {
   return (
     <main className="flex h-[100dvh] min-h-[640px] w-full flex-col overflow-hidden bg-[#f5f7fa] text-slate-800">
-      <DesktopHeader generator={generator} />
+      <DesktopAppHeader
+        lang={generator.lang}
+        active="favicon"
+        onLanguageChange={generator.handleSwitchLang}
+      />
 
       <input
         ref={generator.inputRef}
