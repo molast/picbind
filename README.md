@@ -257,3 +257,7 @@ site.webmanifest
 ## 高清图片下载
 https://www.pexels.com/
 选好图图片以后，在图片上右键 Copy Image link，拿到连接以后再地址栏中拷贝链接，然后在末尾加上?auto=compress&fm=webp&w=1920
+
+## 开源协议
+
+本项目基于 [Apache License 2.0](LICENSE) 开源。
