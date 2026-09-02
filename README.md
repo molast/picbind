@@ -34,10 +34,6 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 │   └── picbind-storage/           # 本地、缓存和数据库抽象
 ├── services/
 │   └── cloudflare-worker/         # API、OAuth、信令和实时 Worker
-├── docs/
-│   ├── architecture/
-│   ├── protocol/
-│   └── product/
 ├── Cargo.toml
 └── pnpm-workspace.yaml
 ```
@@ -75,8 +71,7 @@ pnpm dev:desktop
 ```
 
 该命令会复用 3000 端口已有的 Web 开发服务，或在端口空闲时启动服务，然后打开 PicBind
-桌面窗口。详细环境和检查命令见
-`docs/architecture/desktop/development.md`。
+桌面窗口。
 
 ## 本地 Desktop 开发
 

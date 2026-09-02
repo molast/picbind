@@ -10,8 +10,7 @@
 `0.1.0` 开始独立管理版本。第一阶段直接复用现有 Web 前端；图片存储通过统一接口和
 运行时 selector 选择独立实现，Web 使用 Dexie + OPFS，Tauri 使用 SQLite + 应用数据目录。
 
-Tauri 工程位于 `apps/desktop/`，本地开发和验证方式见 `docs/architecture/desktop/development.md`，图片
-存储的当前实现和后续边界见 `docs/architecture/desktop/tauri-storage-architecture-v2.md`。
+Tauri 工程位于 `apps/desktop/`。详细开发资料保存在本地 `.docs/` 目录，不随 Git 跟踪。
 
 ## 2. 版本边界
 
@@ -102,8 +101,7 @@ Tauri 只提供桌面窗口和运行容器，不创建另一套前端实现。
 - 第一阶段不添加 Web 与 Tauri 的条件分支；后续已确认的图片存储差异只位于
   Repository 适配层。
 - 接入 Tauri 时不得改变现有 Web 构建结果和线上部署流程。
-- 如果实施过程中必须修改图片压缩行为，则该改动超出本阶段范围，需要单独确认，
-  并同步更新 `docs/product/collaboration/COMPRESSION_ALGORITHM.md`。
+- 如果实施过程中必须修改图片压缩行为，则该改动超出本阶段范围，需要单独确认。
 
 ## 7. `0.1.0` 第一阶段完成标准
 
@@ -117,21 +115,10 @@ Tauri 只提供桌面窗口和运行容器，不创建另一套前端实现。
 - 页面组件和业务 Store 不包含针对 Web 或 Tauri 的差异化处理。
 - Tauri 专用代码不会改变 Web 版构建结果及其 `1.0.8` 版本。
 
-## 8. 后续文档
+## 8. 文档范围
 
-当前 Tauri 文档包括：
-
-```text
-docs/architecture/desktop/
-├── README.md                 # 版本入口与阶段边界
-├── AI_CODING_GUIDELINES.md   # 后续 AI Coding 实施规范
-├── PICBIND_IMAGE_PROCESSING_API_V1.md # Web/Desktop 图片处理统一接口
-├── PICBIND_REALTIME_TRANSPORT_API_V1.md # Workspace 实时传输迁移计划
-├── development.md            # 已验证的本地开发和构建说明
-└── tauri-storage-architecture-v2.md # 图片存储 V2 当前实现与后续路线
-```
-
-桌面专属功能只有在确定进入后续阶段时，才增加对应产品和架构文档。
+开源分支仅保留本 README 作为桌面版的公开说明。完整开发资料保存在本地 `.docs/` 目录，
+不随 Git 跟踪。桌面专属功能只有在确定进入后续阶段时，才增加对应公开文档。
 
 ## 9. 下一步
 
