@@ -1,19 +1,104 @@
-# PicBind
+<div align="center">
 
-PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前重点功能是浏览器端图片压缩和 favicon 生成，图片处理尽量在本地完成，减少服务端依赖，方便部署到 Cloudflare Pages。
+# 🖼️ PicBind
 
-## 当前功能
+**本地优先的图片处理与实时协作工作台**
 
-- 图片压缩：支持 PNG、JPEG、WebP、AVIF，支持批量上传、自动压缩、单文件下载和 ZIP 打包下载。
-- 压缩质量分析：在浏览器 Worker 中分析压缩前后的质量指标，用于辅助判断输出效果。
-- Favicon Converter：上传图片生成 favicon 图标包。
-- Favicon Generator：通过文字、Google Fonts 字体、字重、颜色和背景形状生成 favicon 图标包。
-- Favicon 打包：生成 `favicon.ico`、16/32 PNG、Apple touch icon、Android chrome icon 和 `site.webmanifest`。
-- 中英文切换：首页和 favicon 工具页均支持中文/英文文案。
-- 静态部署：Web 项目使用 Next.js 静态导出，适合部署到 Cloudflare Pages。
-- Worker 服务：集中承载 API、OAuth、D1、WebSocket 信令、Durable Object 和对象存储协调。
+在浏览器或桌面端处理图片、生成 Favicon，并与协作者共享工作区。
 
-## 项目结构
+<p>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2024-000000?logo=rust&logoColor=white" alt="Rust 2024"></a>
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white" alt="Next.js 14"></a>
+  <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=000000" alt="Tauri 2"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-D22128" alt="Apache 2.0 license"></a>
+</p>
+
+<p>
+  <a href="https://picbind.com">在线体验</a>
+  ·
+  <a href="#快速开始">快速开始</a>
+  ·
+  <a href="#项目结构">项目结构</a>
+  ·
+  <a href="#文档">文档</a>
+</p>
+
+</div>
+
+## ✨ 项目简介
+
+PicBind 将图片处理、质量分析、Favicon 工具和 Workspace 实时协作整合到一个 monorepo 中。
+图片优先在用户设备上完成处理：Web 使用 Rust/WASM，Desktop 使用 Native Rust；Cloudflare
+Worker 只负责 API、认证、信令和实时消息转发。
+
+核心原则：
+
+- 🔒 **本地优先**：图片原始数据和预览默认留在当前设备，不上传到 Worker 的 D1、R2、KV 或 Durable Object。
+- ⚡ **按平台选择引擎**：Web 使用 WASM，Tauri Desktop 使用 Native Rust，并通过统一的 Image Processing API 接入。
+- 🤝 **实时协作**：Workspace 元数据通过 WebSocket Relay 传递，图片预览和原始数据优先走 WebRTC DataChannel，必要时回退到 WebSocket。
+- 🧩 **可扩展架构**：共享协议、存储、网络、UI 和图片编解码分别位于独立 package/crate 中。
+
+## 🚀 功能亮点
+
+| 模块 | 能力 |
+| --- | --- |
+| 🗜️ 图片压缩 | PNG、JPEG、WebP、AVIF；支持批量处理、自动压缩、质量分析、单文件下载和 ZIP 下载。 |
+| 🎨 Favicon 工具 | 图片转换或文字生成 Favicon，支持 Google Fonts、字重、颜色、背景形状和标准图标包输出。 |
+| 🤝 Workspace | Library / Working 图片流转、裁剪、缩放、颜色、涂鸦、压缩、转换、操作历史和协作提案。 |
+| 📡 实时连接 | WebSocket 信令与 Relay、WebRTC 直连、连接状态和传输回退。 |
+| 🖥️ Desktop | Tauri 2 客户端、Native Rust 图片管线、SQLite 本地存储、原生下载和微信 iLink 集成。 |
+| 🌏 多语言 | Web、Desktop 和 Workspace 界面支持中文 / English。 |
+
+> JPEG XL（JXL）已接入 Desktop Native 编解码矩阵；浏览器端当前以 WebAssembly 支持的格式为准。
+
+## 🧱 架构概览
+
+```text
+                         ┌──────────────────────────┐
+                         │   Cloudflare Worker      │
+                         │ API · OAuth · D1 · DO    │
+                         │ WebSocket Relay · TURN   │
+                         └────────────┬─────────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    │                                   │
+          ┌─────────▼─────────┐               ┌─────────▼─────────┐
+          │ Web · Next.js      │               │ Desktop · Tauri 2  │
+          │ React + WASM       │               │ WebView + Native  │
+          └─────────┬─────────┘               └─────────┬─────────┘
+                    │                                   │
+          ┌─────────▼─────────┐               ┌─────────▼─────────┐
+          │ OPFS + Dexie       │               │ SQLite + App Data  │
+          │ Browser storage    │               │ Native Rust codecs │
+          └────────────────────┘               └────────────────────┘
+
+       Image Processing API
+       ├── Web: Rust/WASM codecs and perceptual analysis
+       └── Desktop: picbind-image-native via Tauri bridge
+
+       Workspace media path
+       ├── WebSocket: signaling, reliable metadata, fallback relay
+       └── WebRTC: preferred peer-to-peer preview/source transfer
+```
+
+## 🔧 图片编解码器
+
+以下矩阵描述 `crates/picbind-image-native` 当前实际使用的 Desktop Native 编解码器：
+
+| 格式 | Decoder | Encoder | 备注 |
+| --- | --- | --- | --- |
+| JPEG | `zune-jpeg` | `mozjpeg-rs` | Progressive、Huffman 优化和 Alpha 保护 |
+| PNG | `zune-png` | `imagequant` + `lodepng` + `oxipng` | 支持量化与无损优化路径 |
+| WebP | `image-webp` | `webp` / libwebp | 支持有损、无损和透明度 |
+| AVIF | `zenavif` | `ravif` / rav1e | 默认 8-bit，支持透明度 |
+| JPEG XL | `jxl-oxide` | `zune-jpegxl` | 当前为单帧 Native 编解码路径 |
+
+统一 Native 引擎提供 `inspect`、`encode`、`materialize`、`renderPreview`、质量比较、缩略图和消息发送压缩入口。
+同格式结果不小于原图时会保留原文件；除非明确允许，否则不会静默丢失 Alpha。
+
+详细 Options、默认值和边界条件见 [`Native Image Codecs`](crates/picbind-image-native/src/codecs/README.md)。
+
+## 📁 项目结构
 
 ```text
 .
@@ -22,130 +107,115 @@ PicBind 是一个基于 Rust WASM 和 Next.js 的在线图片工具站。当前�
 │   └── desktop/                   # Tauri Desktop 应用
 ├── packages/
 │   ├── ui/                        # Workspace、协作和共享 UI
-│   ├── shared/                    # 共享类型、工具和协议
-│   └── wasm/                      # WASM Web 包与浏览器编码器
+│   ├── shared/                    # TypeScript 类型、协议和运行时契约
+│   └── wasm/                      # 浏览器 WASM 包与构建脚本
 ├── crates/
 │   ├── picbind-core/              # 跨平台领域逻辑
-│   ├── picbind-image/             # Rust WASM 图片处理库
-│   ├── picbind-image-native/      # Desktop Native 图片编解码库
+│   ├── picbind-image/             # 图片处理 WASM crate
+│   ├── picbind-image-native/      # Desktop Native 图片编解码与处理
 │   ├── picbind-network/           # WebSocket、WebRTC、信令和传输
-│   ├── picbind-perceptual/        # 感知质量 Rust WASM 库
+│   ├── picbind-perceptual/        # 感知质量 Rust/WASM 库
 │   ├── picbind-protocol/          # 跨端稳定协议类型
-│   └── picbind-storage/           # 本地、缓存和数据库抽象
+│   └── picbind-storage/           # 存储和缓存抽象
 ├── services/
-│   └── cloudflare-worker/         # API、OAuth、信令和实时 Worker
-├── Cargo.toml
-└── pnpm-workspace.yaml
+│   └── cloudflare-worker/         # API、OAuth、实时 Worker
+├── docs/                          # 架构与公开说明
+├── Cargo.toml                     # Rust workspace
+└── pnpm-workspace.yaml            # pnpm workspace
 ```
 
-Web 端持久化文件统一写入 OPFS，SQLite 仅保存业务元数据和评审历史，页面通过
-Repository 访问数据。语言、工作区会话和页面恢复等短期状态仍使用
-`localStorage/sessionStorage`。
+## ⚙️ 快速开始
 
-## Web 应用
+### 环境要求
 
-Web 应用位于 `apps/web/`，主要页面包括：
+- Node.js 22+
+- pnpm 11.10+
+- Rust stable toolchain
+- `wasm-pack`（构建 WASM 时需要）
+- Desktop 开发还需要 Tauri 对应平台的系统依赖；macOS 至少需要 Xcode Command Line Tools
 
-- `/`：图片压缩首页。
-- `/favicon-converter`：从图片生成 favicon。
-- `/favicon-generator`：从文字生成 favicon。
-- `/admin`：读取和维护 Worker 中的统计与站点配置。
-
-常用命令：
+安装依赖：
 
 ```bash
 pnpm install
+```
+
+### Web 开发
+
+```bash
 pnpm dev:web
-pnpm build:web
 ```
 
-构建输出会生成到 `apps/web/out/`，可作为 Cloudflare Pages 的静态产物目录。
-
-## Tauri 桌面客户端
-
-Tauri 客户端位于 `apps/desktop/`，当前版本为 `0.1.0`。界面复用现有 Web 前端，
-微信 iLink Bot 的凭据、长轮询和媒体处理仅在 Desktop 本地运行。从仓库根目录运行：
+常用 Web 命令：
 
 ```bash
-pnpm dev:desktop
+pnpm build:web                  # 构建静态产物到 apps/web/out
+pnpm --dir apps/web check       # TypeScript 检查
+pnpm --dir apps/web test:image-processing
+pnpm --dir apps/web test:realtime
 ```
 
-该命令会复用 3000 端口已有的 Web 开发服务，或在端口空闲时启动服务，然后打开 PicBind
-桌面窗口。
+主要页面：
 
-## 本地 Desktop 开发
+- `/`：图片压缩
+- `/favicon-converter`：图片转 Favicon
+- `/favicon-generator`：文字生成 Favicon
+- `/workspace`：Workspace 和实时协作
+- `/admin`：站点配置与统计管理
 
-macOS、Linux、Git Bash 和 WSL 下的脚本会显示阻塞式菜单，可以选择启动 Tauri
-Desktop 开发环境、仅启动 Desktop app、构建 Desktop 生产版本，或者仅启动 Web 开发服务。Desktop 开发
-模式下由根目录进程管理器复用 3000 端口已有的 Web 服务，或启动并跟踪唯一的 Web 服务；
-确认开发启动页可访问后才启动 Tauri。任何受管理进程停止时，其余受管理进程及子进程会被
-回收，复用的外部 Web 服务不会被停止。Workspace、Durable Object、R2、KV 和其他 Worker API 统一
-请求已部署的 `https://api.picbind.com`。从仓库根目录运行：
+### Desktop 开发
 
 ```bash
-# macOS / Linux / Git Bash / WSL
-./dev-local.sh
-
-# Windows CMD
-dev-local.cmd
-
-# Windows PowerShell
-.\dev-local.cmd
+pnpm dev:desktop                 # 启动 Web + Tauri Desktop
+pnpm dev:desktop-only            # 仅启动 Desktop，需要 localhost:3000 已有 Web 服务
+pnpm build:desktop               # 构建 Tauri 安装包
 ```
 
-选择 Desktop development 后，Desktop 会加载
-`http://localhost:3000/tauri-dev.html`。所选任务会一直占用当前终端；按 `Ctrl+C` 会
-停止 Tauri 和本次命令启动的 Web 进程，不会停止复用的已有服务。修改 Worker 后必须部署到
-Cloudflare，应用才会使用到新实现。
+Desktop 复用 Web 前端，通过运行时 selector 选择 Web 或 Native 图片处理实现。Native 数据存储位于应用数据目录，图片处理任务通过 Tauri command 调用 Rust。
 
-选择 `Desktop app only (requires Web on :3000)` 或运行 `pnpm dev:desktop-only` 时，只会
-启动 Tauri Desktop app，不会启动、重启或替换 Web 服务。该模式要求 3000 端口已有本仓库的
-Web app，若服务不存在或 `/tauri-dev.html` 不可访问则直接退出。
+### WASM 构建
 
-## WASM 构建
-
-Rust WASM 代码位于 `crates/picbind-image/`。修改 Rust 图片处理逻辑后，需要重新构建 WASM：
+修改 `crates/picbind-image` 或 `crates/picbind-perceptual` 后执行：
 
 ```bash
-cd packages/wasm
-npm run build
+pnpm build:wasm
 ```
 
-也可以单独执行 `npm run build:image` 或 `npm run build:perceptual`。
-
-生成文件会输出到：
+生成包位于：
 
 ```text
 packages/wasm/image-wasm/
 packages/wasm/perceptual-wasm/
 ```
 
-## Rustup 国内镜像
+### Worker 本地开发
 
-如需使用国内镜像，请在本机 shell 配置中设置全局环境变量。例如 Bash 或 Zsh：
-
-```bash
-export RUSTUP_DIST_SERVER="https://rsproxy.cn"
-export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
-```
-
-重新打开终端后即可直接使用 `rustup`：
+Worker 的本地 Wrangler 环境包含 API、D1、KV、Durable Object 和 WebSocket 信令：
 
 ```bash
-rustup show
+pnpm --dir services/cloudflare-worker run d1:migrate:local
+pnpm --dir services/cloudflare-worker run dev
 ```
 
-PowerShell 可以使用等价配置：
+默认监听 `http://localhost:8787`。Worker 路由、绑定、OAuth 配置和生产部署说明见 [`services/cloudflare-worker/README.md`](services/cloudflare-worker/README.md)。
 
-```powershell
-$env:RUSTUP_DIST_SERVER = "https://rsproxy.cn"
-$env:RUSTUP_UPDATE_ROOT = "https://rsproxy.cn/rustup"
-rustup show
+## ✅ 检查与测试
+
+提交前建议运行：
+
+```bash
+pnpm check:ui
+pnpm check:worker
+pnpm test:worker
+cargo check --workspace
+cargo test --workspace
 ```
 
-## Cloudflare Pages 部署
+图片处理行为改变时，还需要重新构建 WASM，并检查对应的 Native codec 文档和 Web/Desktop 适配层。
 
-当前 Web 侧已移除 Next 内置 API 路由和 Docker 部署配置，适合按静态站点部署到 Cloudflare Pages。
+## ☁️ 部署
+
+### Cloudflare Pages（Web）
 
 推荐配置：
 
@@ -154,110 +224,43 @@ Build command: pnpm install --frozen-lockfile && pnpm build:web
 Build output directory: apps/web/out
 ```
 
-如果 Cloudflare Pages 的项目根目录直接设置为 `apps/web/`，则可以使用：
+如果 Pages 项目根目录设置为 `apps/web/`：
 
 ```text
 Build command: pnpm install --frozen-lockfile && pnpm build
 Build output directory: out
 ```
 
-## Cloudflare Worker API
+### Cloudflare Worker（API）
 
-Worker 服务位于 `services/cloudflare-worker/`，用于替代旧的 Next API 路由。
+Cloudflare Git 部署项目根目录应设置为 `services/cloudflare-worker/`，部署命令使用：
 
-Cloudflare Git 部署必须使用以下设置：
-
-```text
-Root directory: services/cloudflare-worker
-Deploy command: npx wrangler deploy
-Configuration file: wrangler.toml
+```bash
+pnpm run deploy
 ```
 
-不要在仓库根目录生成 `wrangler.jsonc`。从仓库根目录执行自动配置会把
-整个项目误部署为静态 Assets Worker，并覆盖同名的 API Worker。
+Worker 需要配置 D1、KV、Durable Object、R2、Rate Limiting 和 OAuth 等绑定。生产密钥通过 Wrangler Secret 管理，不要提交到仓库。完整接口、绑定和环境变量清单见 [`Worker README`](services/cloudflare-worker/README.md)。
 
-当前 Worker 兼容这些接口：
+## 📚 文档
 
-```text
-GET  /api/metrics
-POST /api/metrics
-POST /api/site/view
-GET  /api/admin/state?key=...
-POST /api/admin/state?key=...
-POST /api/seo/baidu/push?key=...
-POST /api/workspaces
-POST /api/workspace-links/:shareId/realtime-ticket
-POST /api/workspaces/:workspaceId/realtime-ticket
-GET  /api/workspaces/:workspaceId/realtime-v2
-```
+- [`apps/web/README.md`](apps/web/README.md)：Web 应用说明
+- [`packages/ui/README.md`](packages/ui/README.md)：共享 UI、Workspace 和协作包
+- [`packages/shared/README.md`](packages/shared/README.md)：共享类型与协议
+- [`crates/picbind-image-native/src/codecs/README.md`](crates/picbind-image-native/src/codecs/README.md)：Native 编解码器与 Options
+- [`docs/architecture/desktop/README.md`](docs/architecture/desktop/README.md)：Desktop 架构和阶段说明
+- [`services/cloudflare-worker/README.md`](services/cloudflare-worker/README.md)：Worker API、Realtime 和部署
 
-Worker 使用 Cloudflare KV 保存统计和页面配置。需要绑定：
+## 🔐 数据与隐私
 
-```text
-METRICS_KV
-```
+- Web 原图和本地缩略图写入 OPFS，业务元数据和历史记录写入浏览器数据库。
+- Desktop 原图、缩略图、临时文件和缓存位于应用数据目录；图片处理在 Native Rust 中执行。
+- Worker 不持久化 Workspace 图片字节；Realtime 消息只在在线协作者之间转发。
+- OAuth 使用一次性状态、PKCE 和 Handoff Code，Session Token 不放入回调 URL。
 
-可选环境变量：
+## 🤝 参与贡献
 
-```text
-ADMIN_KEY
-SITE_URL
-ALLOWED_ORIGINS
-BAIDU_PUSH_SITE
-BAIDU_PUSH_TOKEN
-```
+提交改动前请保持变更范围聚焦，并至少运行与改动模块对应的检查。新增或替换图片编解码器、压缩策略、质量护栏或 WASM API 时，请同步更新相关实现文档和生成文件。
 
-前端当前默认不请求统计 API。Worker 部署完成后，可在 Pages 环境变量中开启：
+## 📄 License
 
-```text
-NEXT_PUBLIC_METRICS_ENABLED=true
-NEXT_PUBLIC_METRICS_API_PATH=https://api.picbind.com/api/metrics
-NEXT_PUBLIC_PAGE_VIEW_ENABLED=true
-NEXT_PUBLIC_PAGE_VIEW_API_PATH=https://api.picbind.com/api/site/view
-NEXT_PUBLIC_ADMIN_STATE_API_PATH=https://api.picbind.com/api/admin/state
-```
-
-推荐的 Worker 环境变量：
-
-```text
-SITE_URL=https://picbind.com
-ALLOWED_ORIGINS=https://picbind.com,https://www.picbind.com
-BAIDU_PUSH_SITE=https://picbind.com
-ADMIN_KEY=<your-admin-key>
-BAIDU_PUSH_TOKEN=<your-baidu-token>
-```
-
-## Favicon 资源
-
-网站自己的 favicon 资源统一放在：
-
-```text
-apps/web/public/images/favicon/
-```
-
-包括：
-
-```text
-favicon.ico
-favicon-16x16.png
-favicon-32x32.png
-apple-touch-icon.png
-android-chrome-192x192.png
-android-chrome-512x512.png
-site.webmanifest
-```
-
-## 设计原则
-
-- 图片处理优先在浏览器本地完成。
-- WASM 承担重计算和图像编码逻辑。
-- 前端页面保持可静态导出，减少部署复杂度。
-- 动态统计和管理能力迁移到 Cloudflare Worker。
-
-## 高清图片下载
-https://www.pexels.com/
-选好图图片以后，在图片上右键 Copy Image link，拿到连接以后再地址栏中拷贝链接，然后在末尾加上?auto=compress&fm=webp&w=1920
-
-## 开源协议
-
-本项目基于 [Apache License 2.0](LICENSE) 开源。
+PicBind 使用 [Apache License 2.0](LICENSE) 发布。
