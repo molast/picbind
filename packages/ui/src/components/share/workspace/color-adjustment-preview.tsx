@@ -15,6 +15,9 @@ export type ColorComparisonMode = "stacked" | "in-place" | "split";
 
 type ColorAdjustmentPreviewProps = {
   imageUrl: string;
+  imageSource?: HTMLCanvasElement;
+  sourceWidth?: number;
+  sourceHeight?: number;
   adjustments: WorkspaceColorAdjustments;
   labels: WorkspaceEditorLabels;
   mode: ColorComparisonMode;
@@ -55,7 +58,7 @@ function fitBounds(
   };
 }
 
-export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, mode, posterUrl, editorBaseReady = true, interacting = false, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
+export default function ColorAdjustmentPreview({ imageUrl, imageSource, sourceWidth, sourceHeight, adjustments, labels, mode, posterUrl, editorBaseReady = true, interacting = false, samplingEnabled, onSample }: ColorAdjustmentPreviewProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const stageRef = React.useRef<Konva.Stage | null>(null);
   const layerRef = React.useRef<Konva.Layer | null>(null);
@@ -95,17 +98,19 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
     if (!container) return;
     let disposed = false;
     let resizeObserver: ResizeObserver | null = null;
-    const image = new Image();
+    const image = imageSource || new Image();
 
-    image.onload = () => {
-      if (disposed || !image.naturalWidth || !image.naturalHeight) return;
+    const mount = () => {
+      const imageWidth = sourceWidth || (image instanceof HTMLImageElement ? image.naturalWidth : image.width);
+      const imageHeight = sourceHeight || (image instanceof HTMLImageElement ? image.naturalHeight : image.height);
+      if (disposed || !imageWidth || !imageHeight) return;
       const scale = Math.min(
         1,
-        PREVIEW_MAX_WIDTH / image.naturalWidth,
-        PREVIEW_MAX_HEIGHT / image.naturalHeight,
+        PREVIEW_MAX_WIDTH / imageWidth,
+        PREVIEW_MAX_HEIGHT / imageHeight,
       );
-      const width = Math.max(1, Math.round(image.naturalWidth * scale));
-      const height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const width = Math.max(1, Math.round(imageWidth * scale));
+      const height = Math.max(1, Math.round(imageHeight * scale));
       const originalSurface = document.createElement("canvas");
       originalSurface.width = width;
       originalSurface.height = height;
@@ -243,7 +248,11 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
       setReady(true);
       setRenderedImageUrl(imageUrl);
     };
-    image.src = imageUrl;
+    if (imageSource) mount();
+    else {
+      image.onload = mount;
+      (image as HTMLImageElement).src = imageUrl;
+    }
     return () => {
       disposed = true;
       resizeObserver?.disconnect();
@@ -261,7 +270,7 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
       renderPreviewRef.current = () => undefined;
       setReady(false);
     };
-  }, [imageUrl]);
+  }, [imageSource, imageUrl, sourceHeight, sourceWidth]);
 
   React.useLayoutEffect(() => {
     presentationRef.current();
@@ -330,7 +339,7 @@ export default function ColorAdjustmentPreview({ imageUrl, adjustments, labels, 
           <span className="absolute left-1/2 top-1/2 flex h-9 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/80 bg-slate-900/75 shadow"><span className="h-4 border-l border-r border-white/90 px-0.5" /></span>
         </button>
       ) : null}
-      {posterUrl && (!editorBaseReady || !ready || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 z-20 h-full w-full select-none object-contain p-3" aria-hidden="true" /> : null}
+      {!imageSource && posterUrl && (!editorBaseReady || !ready || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 z-20 h-full w-full select-none object-contain p-3" aria-hidden="true" /> : null}
     </div>
   );
 }

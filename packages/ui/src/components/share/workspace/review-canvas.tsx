@@ -157,6 +157,12 @@ export default function ReviewCanvas({
   const imageSize = loadedImage.url === image.url
     ? loadedImage
     : { width: 0, height: 0 };
+  React.useEffect(() => {
+    if (!image.decodedSource) return;
+    const dimensions = { width: image.width, height: image.height };
+    setLoadedImage({ url: image.url, ...dimensions });
+    onDimensionsChange(dimensions);
+  }, [image.decodedSource, image.height, image.url, image.width, onDimensionsChange]);
   const [annotationSnapshot, setAnnotationSnapshot] = React.useState<string | null>(
     null,
   );
@@ -565,7 +571,7 @@ export default function ReviewCanvas({
         >
           {/* Blob URLs are local browser assets and cannot use the Next image optimizer. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          {image.decodedSource ? <SharedReviewSurface surface={image.decodedSource} /> : <img
             key={image.url}
             src={image.url}
             alt={image.name}
@@ -580,7 +586,7 @@ export default function ReviewCanvas({
               onDimensionsChange(dimensions);
             }}
             className="block h-full w-full select-none object-contain"
-          />
+          />}
           {fitRatio ? (
             <div
               className={`absolute inset-0 ${interactionDisabled ? "pointer-events-none" : ""}`}
@@ -679,6 +685,7 @@ export default function ReviewCanvas({
           ) : null}
           <ReviewRippleLayer
             imageUrl={image.url}
+            imageSource={image.decodedSource}
             annotationSnapshot={annotationSnapshot}
             controllerRef={rippleLayerRef}
           />
@@ -701,11 +708,12 @@ export default function ReviewCanvas({
           <div className="pointer-events-none absolute inset-0" data-layer="pointers" />
         </div>
       </div>
-      {posterUrl && (!editorBaseReady || loadedImage.url !== image.url) ? <div className="absolute inset-0 z-30 flex cursor-wait items-center justify-center" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}><img src={posterUrl} alt="" draggable={false} className="h-full w-full select-none object-contain p-4" aria-hidden="true" /></div> : null}
+      {!image.decodedSource && posterUrl && (!editorBaseReady || loadedImage.url !== image.url) ? <div className="absolute inset-0 z-30 flex cursor-wait items-center justify-center" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}><img src={posterUrl} alt="" draggable={false} className="h-full w-full select-none object-contain p-4" aria-hidden="true" /></div> : null}
       <ReviewLaserLayer controllerRef={laserLayerRef} />
       {magnifierPosition || remoteMagnifierPosition ? (
         <ReviewMagnifierLens
           imageUrl={image.url}
+          imageSource={image.decodedSource}
           annotationSnapshot={annotationSnapshot}
           position={(magnifierPosition || remoteMagnifierPosition)!}
           containerWidth={containerSize.width}
@@ -719,4 +727,19 @@ export default function ReviewCanvas({
       ) : null}
     </div>
   );
+}
+
+function SharedReviewSurface({ surface }: { surface: HTMLCanvasElement }) {
+  const hostRef = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = surface.width;
+    canvas.height = surface.height;
+    canvas.className = "block h-full w-full select-none object-contain";
+    canvas.getContext("2d")?.drawImage(surface, 0, 0);
+    host.replaceChildren(canvas);
+  }, [surface]);
+  return <div ref={hostRef} className="h-full w-full" />;
 }

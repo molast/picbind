@@ -10,10 +10,12 @@ import type { WorkspaceImage } from "../types";
 import type { WorkspaceCardOperation } from "../components/workspace-gallery-card";
 import { adoptCollaborationEditorPreview, clearCollaborationEditorPreview, type CollaborationImageContainer } from "../collaboration-image-container";
 import type { WorkspaceProcessingSource } from "./use-workspace-preview";
+import type { WorkspacePreviewMemory } from "../workspace-preview-memory";
 
-export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers, loadSource, setSelectedId, setProcessingSource, setEditing, setReviewOpen, setEditorPreparing, setNotice, }: {
+export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers, previewMemoryRef, loadSource, setSelectedId, setProcessingSource, setEditing, setReviewOpen, setEditorPreparing, setNotice, }: {
   imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   collaborationContainers: React.MutableRefObject<Map<string, CollaborationImageContainer>>;
+  previewMemoryRef: React.MutableRefObject<WorkspacePreviewMemory | null>;
   loadSource: (image: WorkspaceImage, materialize?: boolean) => Promise<Blob | null>;
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
   setProcessingSource: React.Dispatch<React.SetStateAction<WorkspaceProcessingSource | null>>;
@@ -51,6 +53,37 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
     }
 
     let container = collaborationContainers.current.get(image.imageId);
+    const parameterDocument = container?.parameterDocument || image.parameterDocument || emptyImageParameterDocument();
+    const baseDocument = {
+      ...parameterDocument,
+      operations: parameterDocument.operations.filter((candidate) => candidate.type !== editableParameterType),
+    };
+    const previewMemory = previewMemoryRef.current;
+    if (previewMemory?.imageId === image.imageId && container?.sourceKind === "source") {
+      try {
+        const decodedSource = await previewMemory.surfaceFor(baseDocument);
+        if (openSequence.current !== requestSequence) return;
+        const blob = container.originalBlob;
+        setSelectedId(image.imageId);
+        setProcessingSource({
+          imageId: image.imageId,
+          blob,
+          posterBlob: blob,
+          decodedSource,
+          editorBaseReady: true,
+          width: decodedSource.width,
+          height: decodedSource.height,
+        });
+        setEditorPreparing(false);
+        if (operation === "review") setReviewOpen(true); else setEditing(operation);
+      } catch (error) {
+        if (openSequence.current !== requestSequence) return;
+        activeImageId.current = null;
+        setEditorPreparing(false);
+        setNotice(error instanceof Error ? error.message : "Editor preview is unavailable");
+      }
+      return;
+    }
     let loadedSource: Blob | null = null;
     let immediatePreview = container?.workingBlob || null;
     if (!immediatePreview) {
@@ -61,11 +94,6 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
     if (openSequence.current !== requestSequence) return;
     if (!immediatePreview) { setEditorPreparing(false); setNotice("Source data is unavailable"); return; }
 
-    const parameterDocument = container?.parameterDocument || image.parameterDocument || emptyImageParameterDocument();
-    const baseDocument = {
-      ...parameterDocument,
-      operations: parameterDocument.operations.filter((candidate) => candidate.type !== editableParameterType),
-    };
     const previewMatchesBase = container
       ? imageParameterDocumentsEqual(container.parameterDocument, baseDocument)
       : parameterDocument.operations.length === 0;
@@ -149,7 +177,7 @@ export function useWorkspaceOperationEditor({ imagesRef, collaborationContainers
       setEditorPreparing(false);
       setNotice(error instanceof Error ? error.message : "Editor preview is unavailable");
     });
-  }, [collaborationContainers, imageProcessing, loadSource, setEditing, setEditorPreparing, setNotice, setProcessingSource, setReviewOpen, setSelectedId]);
+  }, [collaborationContainers, imageProcessing, loadSource, previewMemoryRef, setEditing, setEditorPreparing, setNotice, setProcessingSource, setReviewOpen, setSelectedId]);
   const releaseProcessingSource = React.useCallback(() => {
     openSequence.current += 1;
     const imageId = activeImageId.current;

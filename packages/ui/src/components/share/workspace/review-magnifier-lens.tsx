@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 type MagnifierPosition = {
   pointerX: number;
   pointerY: number;
@@ -11,6 +13,7 @@ type MagnifierPosition = {
 
 type ReviewMagnifierLensProps = {
   imageUrl: string;
+  imageSource?: HTMLCanvasElement;
   annotationSnapshot: string | null;
   position: MagnifierPosition;
   containerWidth: number;
@@ -24,6 +27,7 @@ const GAP = 22;
 
 export default function ReviewMagnifierLens({
   imageUrl,
+  imageSource,
   annotationSnapshot,
   position,
   containerWidth,
@@ -73,7 +77,7 @@ export default function ReviewMagnifierLens({
           top,
           width: LENS_SIZE,
           height: LENS_SIZE,
-          backgroundImage: backgroundImages,
+          backgroundImage: imageSource ? undefined : backgroundImages,
           backgroundRepeat: "no-repeat",
           backgroundSize: annotationSnapshot
             ? `${backgroundSize}, ${backgroundSize}`
@@ -83,7 +87,58 @@ export default function ReviewMagnifierLens({
             : backgroundPosition,
         }}
         aria-hidden="true"
-      />
+      >{imageSource ? <MagnifiedCanvas source={imageSource} annotationSnapshot={annotationSnapshot} position={position} /> : null}</div>
     </>
   );
+}
+
+function MagnifiedCanvas({ source, annotationSnapshot, position }: {
+  source: HTMLCanvasElement;
+  annotationSnapshot: string | null;
+  position: MagnifierPosition;
+}) {
+  const ref = React.useRef<HTMLCanvasElement>(null);
+  React.useLayoutEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    const sourceX = position.sourceX / Math.max(1, position.sourceWidth) * source.width;
+    const sourceY = position.sourceY / Math.max(1, position.sourceHeight) * source.height;
+    const sampleWidth = LENS_SIZE / MAGNIFICATION / Math.max(1, position.sourceWidth) * source.width;
+    const sampleHeight = LENS_SIZE / MAGNIFICATION / Math.max(1, position.sourceHeight) * source.height;
+    const draw = (annotations?: HTMLImageElement) => {
+      context.clearRect(0, 0, LENS_SIZE, LENS_SIZE);
+      context.drawImage(
+        source,
+        sourceX - sampleWidth / 2,
+        sourceY - sampleHeight / 2,
+        sampleWidth,
+        sampleHeight,
+        0,
+        0,
+        LENS_SIZE,
+        LENS_SIZE,
+      );
+      if (annotations) context.drawImage(
+        annotations,
+        (sourceX - sampleWidth / 2) / source.width * annotations.naturalWidth,
+        (sourceY - sampleHeight / 2) / source.height * annotations.naturalHeight,
+        sampleWidth / source.width * annotations.naturalWidth,
+        sampleHeight / source.height * annotations.naturalHeight,
+        0,
+        0,
+        LENS_SIZE,
+        LENS_SIZE,
+      );
+    };
+    draw();
+    if (!annotationSnapshot) {
+      return;
+    }
+    const annotations = new Image();
+    annotations.onload = () => draw(annotations);
+    annotations.src = annotationSnapshot;
+    return () => { annotations.src = ""; };
+  }, [annotationSnapshot, position, source]);
+  return <canvas ref={ref} width={LENS_SIZE} height={LENS_SIZE} className="block h-full w-full" />;
 }

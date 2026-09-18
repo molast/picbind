@@ -194,7 +194,7 @@ export default function ImageColorAdjustmentDialog({ image, posterUrl, editorBas
                 })}
               </div>
               <div className="min-h-0 flex-1 p-2">
-                <ColorAdjustmentPreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} adjustments={adjustments} labels={labels} mode={comparisonMode} interacting={previewInteracting} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => updateAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
+                <ColorAdjustmentPreview imageUrl={image.url} imageSource={image.decodedSource} sourceWidth={image.width} sourceHeight={image.height} posterUrl={posterUrl} editorBaseReady={editorBaseReady} adjustments={adjustments} labels={labels} mode={comparisonMode} interacting={previewInteracting} samplingEnabled={submenu === "replace" && adjustments.replaceEnabled} onSample={(color) => updateAdjustments((current) => ({ ...current, replaceSource: color, replaceEnabled: true }))} />
               </div>
             </div>
           </div>

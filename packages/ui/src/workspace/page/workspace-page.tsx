@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FiLoader, FiMinimize2, FiTerminal, FiUploadCloud } from "react-icons/fi";
+import { FiCornerUpLeft, FiCornerUpRight, FiLoader, FiMinimize2, FiTerminal, FiUploadCloud } from "react-icons/fi";
 import type { RealtimeSession, RealtimeSessionState } from "@picbind/shared";
 import { joinWorkspace, shareUrl } from "../api";
 import {
@@ -27,6 +27,7 @@ import type { ReviewCollaborationMessage } from "../../utils/review-collaboratio
 import { hasPendingWorkspaceImageChanges, reconcileCollaboratorSnapshot, sharedWorkingImages } from "../image-flow";
 import {
   emptyImageParameterDocument,
+  imageParameterDocumentsEqual,
   isValidImageParameterDocument,
   setImageOperation,
   type ImageParameterDocument,
@@ -34,6 +35,8 @@ import {
 import { collaborationPreviewCacheArtifacts, disposeCollaborationImageContainer, type CollaborationImageContainer } from "../collaboration-image-container";
 import { WorkspaceGallery } from "../components/workspace-gallery";
 import { WorkspaceProcessingCanvas } from "../components/workspace-processing-canvas";
+import { WorkspaceImageActionToolbar, type WorkspacePreviewSelectionMode, type WorkspacePreviewTool } from "../components/workspace-image-action-menu";
+import { selectionPathPoints, type WorkspacePreviewSelection } from "../workspace-preview-selection";
 import { WorkspaceHeader } from "../components/workspace-header";
 import {
   WORKSPACE_EXIT_EVENT,
@@ -65,6 +68,8 @@ import { useWorkspaceCollaborationCommands } from "../hooks/use-workspace-collab
 import { useWorkspaceSaveCollaboration } from "../hooks/use-workspace-save-collaboration";
 import { useWorkspaceStyleCommands } from "../hooks/use-workspace-style-commands";
 import { useWorkspaceProcessedResultCommand } from "../hooks/use-workspace-processed-result-command";
+import { createWorkspacePreviewMemory, type WorkspacePreviewDirectOperation } from "../workspace-preview-memory";
+import type { WorkspacePreviewColor } from "../workspace-preview-color";
 import { useWorkspaceReactions } from "../hooks/use-workspace-reactions";
 import { useWorkspaceToast } from "../hooks/use-workspace-toast";
 import { useWorkspaceMessaging } from "../hooks/use-workspace-messaging";
@@ -72,6 +77,7 @@ import { readWorkspaceLeaveAction, writeWorkspaceLeaveAction, type WorkspaceLeav
 import { WorkspaceSidebar } from "../components/workspace-sidebar";
 import { WorkspaceCollaborationPanel } from "../components/workspace-collaboration-panel";
 import { WorkspaceImageSidebar } from "../components/workspace-image-sidebar";
+import { WorkspacePreviewSidebar, type WorkspacePreviewCursor } from "../components/workspace-preview-sidebar";
 import { WorkspaceToast } from "../components/workspace-toast";
 import { WorkspaceDialogs } from "../dialogs/workspace-dialogs";
 import { WorkspaceSourceRejectedDialog } from "../dialogs/workspace-source-request-dialog";
@@ -82,6 +88,10 @@ import { WorkspaceWeixinChatDialog } from "../dialogs/workspace-weixin-chat-dial
 import { WorkspaceMessagingImagePickerDialog } from "../dialogs/workspace-messaging-image-picker-dialog";
 import { WorkspaceMessagingQuickSendDialog } from "../dialogs/workspace-messaging-quick-send-dialog";
 import { WorkspaceSaveRequiredDialog, type WorkspaceSaveRequiredAction } from "../dialogs/workspace-save-required-dialog";
+import { WorkspacePreviewCloseDialog } from "../dialogs/workspace-preview-close-dialog";
+import { WorkspacePreviewPngDialog } from "../dialogs/workspace-preview-png-dialog";
+import { WorkspacePreviewFreeRotateDialog } from "../dialogs/workspace-preview-free-rotate-dialog";
+import { WorkspacePreviewResizeDialog } from "../dialogs/workspace-preview-resize-dialog";
 import {
   updateCollaboratorPacketLoss,
   updateCollaboratorTransport,
@@ -89,6 +99,31 @@ import {
 import { createPrefixedId, initialWorkspaceCommitId } from "../../utils/id";
 
 const workspaceText = (key: string) => getWorkspaceLabels(getLang())[key] || key;
+
+function canvasToBlob(surface: HTMLCanvasElement, mimeType: string) {
+  return new Promise<Blob>((resolve, reject) => {
+    surface.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Image encoding is unavailable")), mimeType);
+  });
+}
+
+function canvasHasTransparency(surface: HTMLCanvasElement) {
+  const context = surface.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  const alpha = context.getImageData(0, 0, surface.width, surface.height).data;
+  for (let index = 3; index < alpha.length; index += 4) {
+    if (alpha[index] < 255) return true;
+  }
+  return false;
+}
+
+function isJpegMimeType(mimeType: string) {
+  return mimeType.toLowerCase() === "image/jpeg" || mimeType.toLowerCase() === "image/jpg";
+}
+
+function normalizeRotationDegrees(value: number) {
+  const normalized = ((value + 180) % 360 + 360) % 360 - 180;
+  return normalized === -180 ? 180 : normalized;
+}
 
 
 export default function WorkspacePage({ shareToken, initialWorkspace, userDisplayName, publicSiteUrl, desktop = false, onSuspend, onExit }: {
@@ -107,6 +142,19 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const [shareIdEntryOpen, setShareIdEntryOpen] = React.useState(false);
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
   const [messagingImagePickerOpen, setMessagingImagePickerOpen] = React.useState(false);
+  const [previewCursor, setPreviewCursor] = React.useState<WorkspacePreviewCursor | null>(null);
+  const [previewCloseDialogOpen, setPreviewCloseDialogOpen] = React.useState(false);
+  const [previewPngConfirmOpen, setPreviewPngConfirmOpen] = React.useState(false);
+  const [previewDirectEditing, setPreviewDirectEditing] = React.useState<"crop" | "resize" | null>(null);
+  const [previewFreeRotateOpen, setPreviewFreeRotateOpen] = React.useState(false);
+  const [previewFreeRotateAngle, setPreviewFreeRotateAngle] = React.useState(0);
+  const [previewFreeRotatePending, setPreviewFreeRotatePending] = React.useState(0);
+  const [previewTool, setPreviewTool] = React.useState<WorkspacePreviewTool>("pan");
+  const [previewBackgroundColor, setPreviewBackgroundColor] = React.useState<WorkspacePreviewColor>({ r: 255, g: 255, b: 255, a: 255 });
+  const [previewSelectionMode, setPreviewSelectionMode] = React.useState<WorkspacePreviewSelectionMode>("rectangle");
+  const [previewSelection, setPreviewSelection] = React.useState<WorkspacePreviewSelection | null>(null);
+  const [previewMemoryRevision, setPreviewMemoryRevision] = React.useState(0);
+  const previewBaselineRef = React.useRef<{ imageId: string; document: ImageParameterDocument; width: number; height: number } | null>(null);
   const [pendingImageSaveAction, setPendingImageSaveAction] = React.useState<{
     imageId: string;
     action: WorkspaceSaveRequiredAction;
@@ -129,7 +177,9 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   const [commitEntries, setCommits] = React.useState<WorkspaceCommit[]>([]);
   const commits = React.useMemo(() => Array.from(new Map(commitEntries.map((commit) => [commit.commitId, commit])).values()), [commitEntries]);
   const { selectedId, setSelectedId, messages, setMessages, reactionCounts, setReactionCounts, message, setMessage, pendingWorkingImageId, setPendingWorkingImageId, movingToWorkingImageIds, setMovingToWorkingImageIds, compressingToWorkingImageId, setCompressingToWorkingImageId, compressionSuggestionWeakNetwork, setCompressionSuggestionWeakNetwork, collaborationOpen, setCollaborationOpen, libraryCollapsed, setLibraryCollapsed, dragging, setDragging, styleDraft, setStyleDraft, notice, setNotice, requestingSourceIds, setRequestingSourceIds, setNewVersions } = useWorkspacePageState();
-  const { editing, setEditing, reviewOpen, setReviewOpen, reviewFullscreen, setReviewFullscreen, processingSource, setProcessingSource, editorPreparing, setEditorPreparing, maximizedImageId, setMaximizedImageId } = useWorkspacePreview();
+  const { editing, setEditing, reviewOpen, setReviewOpen, reviewFullscreen, setReviewFullscreen, processingSource, setProcessingSource, editorPreparing, setEditorPreparing, maximizedImageId, setMaximizedImageId, previewMemoryRef } = useWorkspacePreview();
+  const maximizedPreviewSequence = React.useRef(0);
+  const previewTransitionPending = React.useRef(false);
   const { settingsOpen, setSettingsOpen, leaveConfirmOpen, setLeaveConfirmOpen, leavingWorkspace, setLeavingWorkspace, removingCollaborator, setRemovingCollaborator, operationLogOpen, setOperationLogOpen, proposalPreview, setProposalPreview, sourceRequestDialog, setSourceRequestDialog, sourceRejectReason, setSourceRejectReason, sourceRejectedNotice, setSourceRejectedNotice, rejectingProposal, setRejectingProposal, proposalRejectReason, setProposalRejectReason, activityPreview, setActivityPreview, previewRendering, setPreviewRendering, deletingImage, setDeletingImage, deleteChoice, setDeleteChoice, rollbackTarget, setRollbackTarget, rollbackPreview, setRollbackPreview, collaborationSaving, setCollaborationSaving, stopCollaborationImage, setStopCollaborationImage, stoppingCollaboration, setStoppingCollaboration, pendingProcessedResult, setPendingProcessedResult, processedResultSaving, setProcessedResultSaving } = useWorkspaceDialogs();
   const previewRenderSequence = React.useRef(0);
   const renderPreviewWithLoading = React.useCallback(async (render: () => Promise<void>) => {
@@ -214,7 +264,10 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     if (onlinePeers === 0 && collaborationOpen) setCollaborationOpen(false);
   }, [collaborationOpen, onlinePeers, setCollaborationOpen]);
   const maximizedWorkspaceImage = images.find((image) => image.imageId === maximizedImageId && image.workspaceLocation === "working") || null;
-  const maximizedPreviewBlob = maximizedWorkspaceImage
+  const maximizedPreviewMemory = maximizedWorkspaceImage && previewMemoryRef.current?.imageId === maximizedWorkspaceImage.imageId
+    ? previewMemoryRef.current
+    : null;
+  const maximizedPreviewBlob = maximizedPreviewMemory ? undefined : maximizedWorkspaceImage
     ? collaborationPreviewFor(maximizedWorkspaceImage, workspace, collaborationContainers.current)
     : undefined;
   imagesRef.current = deduplicatedImages;
@@ -320,8 +373,8 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
 
   const handleReviewEditingChange = React.useCallback(() => undefined, []);
 
-  const { loadSource, syncCollaborationPreview, renderCollaborationPreviewSnapshot, clearCollaborationPreviewSnapshot, syncCollaborationContainer, releaseCollaborationContainer, processingImageIds } = useWorkspaceCollaborationPreview({
-    imagesRef, collaborationContainers, refresh: refreshCollaborationRender, processingSource,
+  const { loadSource, syncCollaborationPreview, renderCollaborationPreviewSnapshot, clearCollaborationPreviewSnapshot, syncCollaborationContainer, releaseCollaborationContainer, processingImageIds, prepareCollaborationContainer } = useWorkspaceCollaborationPreview({
+    imagesRef, collaborationContainers, previewMemoryRef, refresh: refreshCollaborationRender, processingSource,
     updateImageDimensions,
   });
 
@@ -333,7 +386,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   }, [activityPreview, clearCollaborationPreviewSnapshot, selectedId, setActivityPreview]);
 
   const { openImageOperation, releaseProcessingSource } = useWorkspaceOperationEditor({
-    imagesRef, collaborationContainers, loadSource, setSelectedId, setProcessingSource, setEditing,
+    imagesRef, collaborationContainers, previewMemoryRef, loadSource, setSelectedId, setProcessingSource, setEditing,
     setReviewOpen, setEditorPreparing, setNotice,
   });
 
@@ -350,10 +403,300 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     onError: setNotice,
   });
 
-  function maximizeWorkspaceImage(image: WorkspaceImage) {
-    setSelectedId(image.imageId);
-    setMaximizedImageId(image.imageId);
+  async function maximizeWorkspaceImage(image: WorkspaceImage) {
+    if (previewTransitionPending.current || editing || reviewOpen || editorPreparing) return;
+    if (previewMemoryRef.current?.imageId === image.imageId) {
+      setSelectedId(image.imageId);
+      setMaximizedImageId(image.imageId);
+      return;
+    }
+    const sequence = ++maximizedPreviewSequence.current;
+    setPreviewCursor(null);
+    setPreviewTool("pan");
+    setPreviewSelection(null);
+    setPreviewSelectionMode("rectangle");
+    setPreviewDirectEditing(null);
+    setPreviewFreeRotateOpen(false);
+    setPreviewFreeRotateAngle(0);
+    setPreviewFreeRotatePending(0);
+    setPreviewCloseDialogOpen(false);
+    setPreviewPngConfirmOpen(false);
+    previewBaselineRef.current = {
+      imageId: image.imageId,
+      document: JSON.parse(JSON.stringify(image.parameterDocument || emptyImageParameterDocument())) as ImageParameterDocument,
+      width: image.width,
+      height: image.height,
+    };
+    previewTransitionPending.current = true;
+    setEditorPreparing(true);
+    let memory: Awaited<ReturnType<typeof createWorkspacePreviewMemory>> | null = null;
+    try {
+      const container = await prepareCollaborationContainer(image);
+      if (sequence !== maximizedPreviewSequence.current) return;
+      const source = container?.originalBlob || await readWorkspaceImageSource(image);
+      if (!source) throw new Error("Source data is unavailable");
+      const parameterDocument = image.parameterDocument || container?.parameterDocument || emptyImageParameterDocument();
+      previewMemoryRef.current?.dispose();
+      previewMemoryRef.current = null;
+      memory = await createWorkspacePreviewMemory(
+        image.imageId,
+        source,
+        parameterDocument,
+      );
+      if (sequence !== maximizedPreviewSequence.current) {
+        memory.dispose();
+        return;
+      }
+      previewMemoryRef.current = memory;
+      setPreviewMemoryRevision((value) => value + 1);
+      await syncCollaborationPreview(image, parameterDocument);
+      if (sequence !== maximizedPreviewSequence.current) return;
+      setSelectedId(image.imageId);
+      setMaximizedImageId(image.imageId);
+    } catch (error) {
+      memory?.dispose();
+      if (previewMemoryRef.current === memory) previewMemoryRef.current = null;
+      if (sequence !== maximizedPreviewSequence.current) return;
+      setNotice(error instanceof Error ? error.message : "The image could not be decoded");
+    } finally {
+      if (sequence === maximizedPreviewSequence.current) {
+        previewTransitionPending.current = false;
+        setEditorPreparing(false);
+      }
+    }
   }
+
+  const applyPreviewDirectOperation = React.useCallback(async (operation: WorkspacePreviewDirectOperation) => {
+    const memory = previewMemoryRef.current;
+    if (!memory) return;
+    try {
+      await memory.applyDirect(operation);
+      setPreviewMemoryRevision((value) => value + 1);
+      setPreviewSelection(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The image operation could not be applied");
+    }
+  }, [previewMemoryRef, setNotice]);
+
+  const handlePreviewTool = React.useCallback((tool: WorkspacePreviewTool) => {
+    if (tool === "pan") {
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      setPreviewTool("pan");
+      return;
+    }
+    if (tool === "select") {
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      setPreviewTool("select");
+      return;
+    }
+    const memory = previewMemoryRef.current;
+    if (!memory) return;
+    if (tool === "fillBackground") {
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      setPreviewTool("pan");
+      void applyPreviewDirectOperation({ type: "fillBackground", params: { color: previewBackgroundColor } });
+      return;
+    }
+    if (tool === "crop") {
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      const selection = previewSelection;
+      if (!selection) return;
+      void applyPreviewDirectOperation({
+        type: "crop",
+        params: {
+          x: selection.x,
+          y: selection.y,
+          width: selection.width,
+          height: selection.height,
+          shape: selection.shape,
+          points: selection.points,
+          path: selectionPathPoints(selection),
+          mask: selection.mask,
+          masked: selection.shape !== "rectangle" || Boolean(selection.rotation || selection.skewX || selection.skewY),
+        },
+      });
+      return;
+    }
+    if (tool === "resize") {
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      setPreviewDirectEditing("resize");
+      return;
+    }
+    if (tool === "rotateRight" || tool === "rotateLeft") {
+      const degrees = tool === "rotateRight" ? 90 : -90;
+      setPreviewTool("freeRotate");
+      setPreviewFreeRotateOpen(true);
+      setPreviewFreeRotatePending(0);
+      setPreviewFreeRotateAngle((current) => normalizeRotationDegrees(current + degrees));
+      void applyPreviewDirectOperation({ type: "rotate", params: { degrees } });
+      return;
+    }
+    if (tool === "flipHorizontal" || tool === "flipVertical") {
+      setPreviewTool(tool);
+      void applyPreviewDirectOperation({ type: "flip", params: tool === "flipHorizontal" ? { horizontal: true } : { horizontal: false, vertical: true } });
+      return;
+    }
+    if (tool === "freeRotate") {
+      setPreviewTool("freeRotate");
+      setPreviewSelection(null);
+      if (previewTool !== "freeRotate" || !previewFreeRotateOpen) {
+        setPreviewFreeRotateAngle(0);
+        setPreviewFreeRotatePending(0);
+      }
+      setPreviewFreeRotateOpen(true);
+    }
+  }, [applyPreviewDirectOperation, previewBackgroundColor, previewFreeRotateOpen, previewMemoryRef, previewSelection, previewTool]);
+
+  const undoPreviewOperation = React.useCallback(() => {
+    const memory = previewMemoryRef.current;
+    if (!memory || !memory.canUndo) return;
+    memory.undo();
+    setPreviewMemoryRevision((value) => value + 1);
+    setPreviewSelection(null);
+    setPreviewTool("pan");
+    setPreviewFreeRotateOpen(false);
+    setPreviewFreeRotateAngle(0);
+    setPreviewFreeRotatePending(0);
+  }, [previewMemoryRef]);
+
+  const redoPreviewOperation = React.useCallback(() => {
+    const memory = previewMemoryRef.current;
+    if (!memory || !memory.canRedo) return;
+    memory.redo();
+    setPreviewMemoryRevision((value) => value + 1);
+    setPreviewSelection(null);
+    setPreviewTool("pan");
+    setPreviewFreeRotateOpen(false);
+    setPreviewFreeRotateAngle(0);
+    setPreviewFreeRotatePending(0);
+  }, [previewMemoryRef]);
+
+  const savePreviewMemory = React.useCallback(async (image: WorkspaceImage, memory: NonNullable<typeof previewMemoryRef.current>, allowPngForTransparency = false) => {
+    if (!memory.hasDirectChanges) {
+      await syncCollaborationContainer({ ...image, parameterDocument: memory.document }, memory.document);
+      return;
+    }
+    const hasTransparency = canvasHasTransparency(memory.surface);
+    const sourceMimeType = isJpegMimeType(image.mimeType) ? "image/jpeg" : image.mimeType.toLowerCase();
+    const mimeType = hasTransparency && isJpegMimeType(image.mimeType) && allowPngForTransparency ? "image/png" : /^image\/(png|jpeg|webp)$/i.test(sourceMimeType)
+      ? sourceMimeType
+      : "image/png";
+    const source = await canvasToBlob(memory.surface, mimeType);
+    const previewResult = await imageProcessing.renderPreview({
+      source: { kind: "blob", blob: source, name: image.name, mimeType: source.type || mimeType },
+      document: emptyImageParameterDocument(),
+      maxWidth: 960,
+      maxHeight: 720,
+      mimeType: "image/webp",
+      quality: 0.86,
+      destination: "memory",
+    }, { requestId: `workspace-preview-save:${image.imageId}:${Date.now()}` });
+    const preview = previewResult.artifact.kind === "blob" ? previewResult.artifact.blob : source;
+    const parameterDocument = emptyImageParameterDocument();
+    await updateImage(image.imageId, {
+      source,
+      preview,
+      sourceCached: true,
+      previewCached: true,
+      width: memory.width,
+      height: memory.height,
+      size: source.size,
+      mimeType: source.type || mimeType,
+      parameterDocument,
+      previewRevision: image.previewRevision + 1,
+      placeholder: undefined,
+    });
+    releaseCollaborationContainer(image.imageId);
+  }, [imageProcessing, releaseCollaborationContainer, syncCollaborationContainer, updateImage]);
+
+  const closeMaximizedPreview = React.useCallback(async (decision?: "save" | "discard", allowPngForTransparency = false) => {
+    if (previewTransitionPending.current || editing || reviewOpen || editorPreparing) return;
+    const memory = previewMemoryRef.current;
+    const imageId = maximizedImageId;
+    if (!memory || !imageId || memory.imageId !== imageId) {
+      setMaximizedImageId(null);
+      return;
+    }
+    const baseline = previewBaselineRef.current;
+    const changed = Boolean(baseline && baseline.imageId === imageId && (
+      !imageParameterDocumentsEqual(memory.document, baseline.document)
+      || memory.width !== baseline.width
+      || memory.height !== baseline.height
+      || memory.hasDirectChanges
+    ));
+    if (changed && !decision) {
+      setPreviewCloseDialogOpen(true);
+      return;
+    }
+    setPreviewCloseDialogOpen(false);
+    const sequence = ++maximizedPreviewSequence.current;
+    previewTransitionPending.current = true;
+    setEditorPreparing(true);
+    try {
+      const image = imagesRef.current.find((candidate) => candidate.imageId === imageId);
+      // A clean preview already has the persisted working representation. Only
+      // the explicit save choice needs to materialize the shared pixels.
+      if (image && decision === "save") {
+        await savePreviewMemory(image, memory, allowPngForTransparency);
+      } else if (image && baseline && baseline.imageId === imageId && (
+        !imageParameterDocumentsEqual(memory.document, baseline.document)
+        || memory.width !== baseline.width
+        || memory.height !== baseline.height
+      )) {
+        await updateImage(image.imageId, { parameterDocument: baseline.document, width: baseline.width, height: baseline.height });
+        await syncCollaborationPreview({ ...image, parameterDocument: baseline.document, width: baseline.width, height: baseline.height }, baseline.document);
+      }
+      if (sequence !== maximizedPreviewSequence.current) return;
+      if (previewMemoryRef.current === memory) {
+        memory.dispose();
+        previewMemoryRef.current = null;
+      }
+      setMaximizedImageId(null);
+      setPreviewCursor(null);
+      setPreviewSelection(null);
+      setPreviewTool("pan");
+      setPreviewDirectEditing(null);
+      setPreviewFreeRotateOpen(false);
+      setPreviewFreeRotateAngle(0);
+      setPreviewFreeRotatePending(0);
+      setPreviewPngConfirmOpen(false);
+      previewBaselineRef.current = null;
+    } catch (error) {
+      if (sequence !== maximizedPreviewSequence.current) return;
+      setNotice(error instanceof Error ? error.message : "The image could not be saved");
+    } finally {
+      if (sequence === maximizedPreviewSequence.current) {
+        previewTransitionPending.current = false;
+        setEditorPreparing(false);
+      }
+    }
+  }, [editing, editorPreparing, imagesRef, maximizedImageId, previewMemoryRef, reviewOpen, savePreviewMemory, setEditorPreparing, setMaximizedImageId, setNotice, syncCollaborationPreview, updateImage]);
+
+  const requestPreviewSave = React.useCallback(() => {
+    const memory = previewMemoryRef.current;
+    const image = maximizedImageId ? imagesRef.current.find((candidate) => candidate.imageId === maximizedImageId) : undefined;
+    if (memory && image && isJpegMimeType(image.mimeType) && canvasHasTransparency(memory.surface)) {
+      setPreviewCloseDialogOpen(false);
+      setPreviewPngConfirmOpen(true);
+      return;
+    }
+    void closeMaximizedPreview("save");
+  }, [closeMaximizedPreview, imagesRef, maximizedImageId, previewMemoryRef]);
+
+  const confirmPreviewPngSave = React.useCallback(() => {
+    setPreviewPngConfirmOpen(false);
+    void closeMaximizedPreview("save", true);
+  }, [closeMaximizedPreview]);
 
   const sendWorkspaceSnapshot = React.useCallback(async (targetUserId?: string) => {
     if (!workspace || workspace.role !== "owner") return;
@@ -697,7 +1040,58 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
   React.useEffect(() => { let active=true; void (async()=>{ let current:WorkspaceIdentity; if(shareToken){const joined=await joinWorkspace(shareToken);current={workspaceId:joined.workspace.id,name:joined.workspace.name,role:"collaborator",shareToken,ownerCapability:null,createdAt:Date.parse(joined.workspace.createdAt),updatedAt:Date.parse(joined.workspace.updatedAt),style:defaultWorkspaceStyle()};await saveWorkspace(current);}else current=initialWorkspace?await restoreProvisionedWorkspace(initialWorkspace):await restoreLocalWorkspace();await purgeExpiredCache(); if(!active)return; setWorkspace(current);setStyleDraft(current.style);const [storedImages,storedActivities,storedLogs,storedProposals]=await Promise.all([listWorkspaceImages(current.workspaceId),listActivities(current.workspaceId),listOperationLogs(current.workspaceId),listProposals(current.workspaceId)]);if(!active)return;setImages(storedImages);setActivities(storedActivities);setOperationLogs(storedLogs);setProposals(storedProposals);if(current.role==="collaborator"||current.shareToken){const realtime=await realtimeService.connect({workspaceId:current.workspaceId,role:current.role,shareToken:current.shareToken,ownerCapability:current.ownerCapability,displayName:userDisplayName,clientId:getRealtimeClientId()});if(!active){await realtime.close("stale-workspace");return;}realtimeRef.current=realtime;realtime.subscribe((value)=>realtimeEventRef.current(value));transitionRuntime({type:"transition",next:"connecting"});}})().catch((error)=>{setNotice(error instanceof Error?error.message:"Workspace unavailable");transitionRuntime({type:"transition",next:"unavailable"});});return()=>{active=false;sourceTransfers.current.clear();pendingProposalEvents.current.clear();handledProposalFailures.current.clear();pendingSourceRequests.current.forEach((request)=>window.clearTimeout(request.timer));pendingSourceRequests.current.clear();collaborationContainers.current.forEach((container)=>{collaborationPreviewCacheArtifacts(container).forEach((artifact)=>void imageProcessing.releasePreviewCache(artifact).catch(()=>undefined));disposeCollaborationImageContainer(container);void imageProcessing.releaseMemorySource(container.cacheKey).catch(()=>undefined);});collaborationContainers.current.clear();reactionTimers.current.forEach((timer)=>window.clearTimeout(timer));reactionTimers.current.clear();reactionNodes.current.forEach((node)=>node.remove());reactionNodes.current.clear();void realtimeRef.current?.close("page-left");realtimeRef.current=null;};},[imageProcessing,initialWorkspace?.workspaceId,realtimeService,shareToken,userDisplayName]);
 
   React.useEffect(() => { if (!selectedId && images[0]) setSelectedId(images[0].imageId); if (selectedId && !images.some((image) => image.imageId === selectedId)) setSelectedId(images[0]?.imageId || null); }, [images, selectedId]);
-  React.useEffect(()=>{if(!maximizedImageId)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMaximizedImageId(null);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[maximizedImageId]);
+  React.useEffect(() => {
+    if (!maximizedImageId || editing || reviewOpen || editorPreparing) return;
+    const cancelSelection = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      setPreviewSelection(null);
+      setPreviewTool("select");
+    };
+    window.addEventListener("keydown", cancelSelection);
+    return () => window.removeEventListener("keydown", cancelSelection);
+  }, [editing, editorPreparing, maximizedImageId, reviewOpen]);
+  React.useEffect(() => {
+    if (!maximizedImageId || editing || reviewOpen || editorPreparing || previewDirectEditing || previewFreeRotateOpen || previewTool !== "select" || !previewSelection || !maximizedPreviewMemory) return;
+    const moveSelectionByPixel = (event: KeyboardEvent) => {
+      if (!(event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") || event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      const dx = event.key === "ArrowLeft" ? -1 / maximizedPreviewMemory.width : event.key === "ArrowRight" ? 1 / maximizedPreviewMemory.width : 0;
+      const dy = event.key === "ArrowUp" ? -1 / maximizedPreviewMemory.height : event.key === "ArrowDown" ? 1 / maximizedPreviewMemory.height : 0;
+      const nextX = Math.max(0, Math.min(1 - previewSelection.width, previewSelection.x + dx));
+      const nextY = Math.max(0, Math.min(1 - previewSelection.height, previewSelection.y + dy));
+      const appliedDx = nextX - previewSelection.x;
+      const appliedDy = nextY - previewSelection.y;
+      event.preventDefault();
+      setPreviewSelection({
+        ...previewSelection,
+        x: nextX,
+        y: nextY,
+        points: previewSelection.points?.map((point) => ({ x: point.x + appliedDx, y: point.y + appliedDy })),
+      });
+    };
+    window.addEventListener("keydown", moveSelectionByPixel);
+    return () => window.removeEventListener("keydown", moveSelectionByPixel);
+  }, [editing, editorPreparing, maximizedImageId, maximizedPreviewMemory, previewDirectEditing, previewFreeRotateOpen, previewSelection, previewTool, reviewOpen]);
+  React.useEffect(() => {
+    if (maximizedImageId || !previewMemoryRef.current) return;
+    previewMemoryRef.current.dispose();
+    previewMemoryRef.current = null;
+  }, [maximizedImageId, previewMemoryRef]);
+  React.useEffect(() => {
+    setMaximizedImageId(null);
+    setEditorPreparing(false);
+    setEditing(null);
+    setReviewOpen(false);
+    setProcessingSource(null);
+    return () => {
+      maximizedPreviewSequence.current += 1;
+      previewTransitionPending.current = false;
+      previewMemoryRef.current?.dispose();
+      previewMemoryRef.current = null;
+    };
+  }, [initialWorkspace?.workspaceId, previewMemoryRef, setEditing, setEditorPreparing, setMaximizedImageId, setProcessingSource, setReviewOpen, shareToken]);
   React.useEffect(()=>{images.filter((image)=>(image.shared||Boolean(image.parameterDocument?.operations.length))&&image.workspaceLocation==="working"&&(image.sourceCached||image.previewCached)&&!collaborationContainers.current.has(image.imageId)).forEach((image)=>{void syncCollaborationPreview(image,image.parameterDocument||emptyImageParameterDocument()).catch((error)=>setNotice(error instanceof Error?error.message:"The image could not be decoded"));});},[images]);
   React.useEffect(()=>{if(realtimeRef.current&&runtime==="available")realtimeRef.current.send("presence",{action:selectedId?"viewing":"idle",imageId:selectedId},{delivery:"ephemeral",dataClass:"presence"});},[runtime,selectedId]);
   React.useEffect(() => {
@@ -1044,7 +1438,7 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     <WorkspaceStatusBands workspace={workspace} runtime={runtime} notice={notice} imageCount={images.length} onDismissNotice={()=>setNotice(null)}/>
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_clamp(320px,24vw,420px)] lg:overflow-hidden">
       <section className={`flex min-w-0 flex-col lg:min-h-0 ${maximizedWorkspaceImage?"overflow-hidden":"p-4 sm:p-6 lg:overflow-auto"}`}>
-        {maximizedWorkspaceImage?<div className="flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden bg-white"><header className="flex h-[58px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 text-slate-800"><div className="min-w-0"><span className="block text-[10px] font-semibold uppercase text-slate-400">{workspaceText("imageProcessing")}</span><strong className="block truncate text-sm">{maximizedWorkspaceImage.name}</strong></div><button type="button" onClick={()=>setMaximizedImageId(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf]" title={workspaceText("returnToGallery")} aria-label={workspaceText("returnToGallery")}><FiMinimize2/></button></header><div className="min-h-0 flex-1"><WorkspaceProcessingCanvas image={maximizedWorkspaceImage} role={workspace.role} renderedBlob={maximizedPreviewBlob}/></div></div>:<>
+        {maximizedWorkspaceImage?<div className="flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden bg-white"><header className="flex h-[58px] shrink-0 items-center border-b border-slate-200 bg-white px-4 text-slate-800"><div className="min-w-0 flex-1"><span className="block text-[10px] font-semibold uppercase text-slate-400">{workspaceText("imageProcessing")}</span><strong className="block truncate text-sm">{maximizedWorkspaceImage.name}</strong></div><div className="ml-3 min-w-0 max-w-[50%]"><WorkspaceImageActionToolbar key={maximizedWorkspaceImage.imageId} activeTool={previewTool} disabled={!maximizedPreviewMemory || editorPreparing} hasSelection={Boolean(previewSelection)} selectionMode={previewSelectionMode} onSelectionMode={setPreviewSelectionMode} color={previewBackgroundColor} onColorChange={setPreviewBackgroundColor} onTool={handlePreviewTool}/></div><div className="ml-2 flex shrink-0 items-center gap-0.5 border-l border-slate-200 pl-2"><button type="button" onClick={undoPreviewOperation} disabled={editorPreparing || !maximizedPreviewMemory?.canUndo} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf] disabled:cursor-not-allowed disabled:opacity-35" title={workspaceText("undo")} aria-label={workspaceText("undo")}><FiCornerUpLeft/></button><button type="button" onClick={redoPreviewOperation} disabled={editorPreparing || !maximizedPreviewMemory?.canRedo} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf] disabled:cursor-not-allowed disabled:opacity-35" title={workspaceText("redo")} aria-label={workspaceText("redo")}><FiCornerUpRight/></button></div><span className="mx-2 h-5 w-px shrink-0 bg-slate-200" aria-hidden="true"/><button type="button" onClick={()=>void closeMaximizedPreview()} disabled={editorPreparing} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf] disabled:opacity-40" title={workspaceText("returnToGallery")} aria-label={workspaceText("returnToGallery")}><FiMinimize2/></button></header><div className="relative min-h-0 flex-1"><WorkspaceProcessingCanvas image={maximizedWorkspaceImage} role={workspace.role} renderedBlob={maximizedPreviewBlob} decodedSource={maximizedPreviewMemory?.surface} decodedRevision={(maximizedPreviewMemory?.revision || 0) + previewMemoryRevision} previewRotation={previewFreeRotateOpen ? previewFreeRotatePending : 0} activeTool={previewTool === "select" ? "select" : "pan"} selectionMode={previewSelectionMode} selection={previewSelection} onSelectionChange={setPreviewSelection} onCursorChange={setPreviewCursor}/><WorkspacePreviewFreeRotateDialog open={previewFreeRotateOpen} degrees={normalizeRotationDegrees(previewFreeRotateAngle + previewFreeRotatePending)} onDegreesChange={(degrees) => setPreviewFreeRotatePending(normalizeRotationDegrees(degrees - previewFreeRotateAngle))} onDegreesCommit={(degrees) => { const delta = normalizeRotationDegrees(degrees - previewFreeRotateAngle); setPreviewFreeRotateAngle((current) => normalizeRotationDegrees(current + delta)); setPreviewFreeRotatePending(0); if (delta) void applyPreviewDirectOperation({ type: "rotate", params: { degrees: delta } }); }} onRotateLeft={() => { setPreviewFreeRotateAngle((current) => normalizeRotationDegrees(current - 90)); setPreviewFreeRotatePending(0); void applyPreviewDirectOperation({ type: "rotate", params: { degrees: -90 } }); }} onRotateRight={() => { setPreviewFreeRotateAngle((current) => normalizeRotationDegrees(current + 90)); setPreviewFreeRotatePending(0); void applyPreviewDirectOperation({ type: "rotate", params: { degrees: 90 } }); }} onFlipHorizontal={() => { setPreviewFreeRotatePending(0); void applyPreviewDirectOperation({ type: "flip", params: { horizontal: true } }); }} onFlipVertical={() => { setPreviewFreeRotatePending(0); void applyPreviewDirectOperation({ type: "flip", params: { horizontal: false, vertical: true } }); }} onCancel={() => { setPreviewFreeRotateOpen(false); setPreviewFreeRotatePending(0); }} /></div></div>:<>
         <div className="mb-[18px] flex items-center justify-between gap-5">
           <div><div className="flex items-center gap-2"><h1 className="text-[21px] font-bold leading-tight text-[#192337]">{workspaceText("gallery")}</h1><button type="button" onClick={()=>setOperationLogOpen(true)} className="relative flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-[#2f65cf]" title={workspaceText("operationLog")}><FiTerminal/>{completeOperationLog.length?<span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-emerald-500"/>:null}</button></div><p className="mt-1 text-[13px] text-[#7b8494]">{workspaceText("imagesStayLocal")}</p></div>
           {workspace.role==="owner"?<><button type="button" onClick={()=>void chooseFiles()} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md bg-[#2f65cf] px-4 text-[13px] font-bold text-white hover:bg-[#2457bd]"><FiUploadCloud/>{workspaceText("chooseImages")}</button><input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(event)=>event.target.files&&void addFiles(event.target.files)}/></>:null}
@@ -1052,9 +1446,9 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
         <WorkspaceGallery libraryCollapsed={libraryCollapsed} libraryImages={libraryImages} workingImages={workingImages} workingImagesSorted={workingImagesSorted} selectedId={selectedId} role={workspace.role} dragging={dragging} onlinePeers={onlinePeers} requestingSourceIds={requestingSourceIds} movingToWorkingImageIds={movingToWorkingImageIds} processingImageIds={processingImageIds} collaborationCardPreviewFor={(image)=>collaborationCardPreviewFor(image, workspace, collaborationContainers.current)} messagingVisible={desktop && workspaceMessaging.providers.some((provider)=>provider.id==="weixin-ilink")} messagingConnected={Boolean(workspaceMessaging.connectedProvider)} messagingUnreadCount={workspaceMessaging.unreadCount} messagingBusy={workspaceMessaging.sendingImage || Boolean(workspaceMessaging.quickSendPreparingImageId)} messagingLabels={messagingLabels} onToggleLibrary={()=>setLibraryCollapsed((value)=>!value)} onUpload={()=>void chooseFiles()} onImageDimensions={(image,width,height)=>{if(image.width!==width||image.height!==height)void updateImage(image.imageId,{width,height});}} onDragEnter={(event)=>{if(workspace.role!=="owner")return;event.preventDefault();setDragging(true);}} onDragOver={(event)=>{if(workspace.role==="owner")event.preventDefault();}} onDragLeave={(event)=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setDragging(false);}} onDrop={(event)=>{if(workspace.role!=="owner")return;event.preventDefault();setDragging(false);void addFiles(event.dataTransfer.files);}} onSelect={setSelectedId} onAddToWorking={(image)=>requestMoveImageToWorking(image)} onDeleteLibrary={(image)=>requestDeleteImage(image)} onPin={(image)=>void updateImage(image.imageId,{pinnedAt:image.pinnedAt?undefined:Date.now()})} onMoveToLibrary={(image)=>requestDeleteImage(image)} onRequestSource={(image)=>{setSelectedId(image.imageId);requestSource(image);}} onDownload={requestImageDownload} onSend={(image)=>void workspaceMessaging.prepareQuickSend(image)} onOpenMessagingChat={()=>workspaceMessaging.connectedProvider&&workspaceMessaging.openChat(workspaceMessaging.connectedProvider.id)} onMaximize={(image)=>void maximizeWorkspaceImage(image)} onOperation={(image,operation)=>void openImageOperation(image,operation)} />
         </>}
       </section>
-      <WorkspaceSidebar>
+      {maximizedWorkspaceImage ? <WorkspacePreviewSidebar image={maximizedWorkspaceImage} source={maximizedPreviewMemory?.surface} width={maximizedPreviewMemory?.width || maximizedWorkspaceImage.width} height={maximizedPreviewMemory?.height || maximizedWorkspaceImage.height} selection={previewSelection} cursor={previewCursor} /> : <WorkspaceSidebar>
         {collaborationOpen ? <WorkspaceCollaborationPanel onlineCollaborators={onlineCollaborators} proposals={proposals} role={workspace.role} runtime={runtime} onlinePeers={onlinePeers} reactionCounts={reactionCounts} messages={messages} message={message} selectedCollaborationActivities={selectedCollaborationActivities} selectedOriginalCommit={selectedOriginalCommit} selected={selected} onClose={()=>setCollaborationOpen(false)} onRemoveCollaborator={setRemovingCollaborator} onPreviewProposal={(proposal)=>void renderPreviewWithLoading(()=>previewProposal(proposal))} onDecideProposal={(proposal,state)=>void decideProposal(proposal,state)} onRejectProposal={(proposal)=>{setRejectingProposal(proposal);setProposalRejectReason("");}} onRetryProposal={(proposal)=>void submitProposal(proposal)} onReact={react} onPreviewActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOpenOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onMessageChange={setMessage} onSendMessage={sendMessage} /> : <WorkspaceImageSidebar selected={selected} selectedIsLibrary={selectedIsLibrary} shareId={workspace.shareToken} role={workspace.role} runtime={runtime} imagesCount={images.length} workingCount={workingImages.length} collaborators={onlineCollaborators} commits={commits} activities={selectedCollaborationActivities} proposals={proposals} selectedOriginalCommit={selectedOriginalCommit} requestingSource={selected ? requestingSourceIds.has(selected.imageId) : false} previewBlob={selected ? collaborationPreviewFor(selected, workspace, collaborationContainers.current) : undefined} collaborationSaving={collaborationSaving} onPublish={(image)=>void publishImage(image)} onDelete={requestDeleteImage} onRequestSource={requestSource} onOperation={(image,operation)=>void openImageOperation(image,operation)} onSave={(choice)=>saveCollaborativeImage(choice)} onRestore={restoreCurrentImage} onActivity={(activity)=>void renderPreviewWithLoading(()=>previewCollaborationActivity(activity))} onOriginal={()=>selectedOriginalCommit&&void renderPreviewWithLoading(()=>openRollbackTarget(selectedOriginalCommit))} onRollback={(commit)=>void renderPreviewWithLoading(()=>openRollbackTarget(commit))} onCreateShare={()=>void createShare()} onRotateShare={()=>void rotateShare()} onCopySuccess={()=>showToast(workspaceText("workspaceIdCopied"))} hasShareToken={Boolean(workspace.shareToken)} />}
-      </WorkspaceSidebar>
+      </WorkspaceSidebar>}
     </div>
     {movingToWorkingImageIds.size > 0 ? <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label={workspaceText("processing")}><div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-xl" role="status" aria-live="polite"><FiLoader className="h-5 w-5 animate-spin text-[#2f65cf]" aria-hidden="true" /><span>{workspaceText("processing")}</span></div></div> : null}
     {workspaceMessaging.quickSendPreparingImageId ? <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/30 p-4" role="dialog" aria-modal="true" aria-label={messagingLabels.messagingCompressingPreview}><div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-xl" role="status" aria-live="polite"><FiLoader className="h-5 w-5 animate-spin text-[#2f65cf]" aria-hidden="true" /><span>{messagingLabels.messagingCompressingPreview}</span></div></div> : null}
@@ -1069,5 +1463,8 @@ export default function WorkspacePage({ shareToken, initialWorkspace, userDispla
     <WorkspaceMessagingImagePickerDialog open={messagingImagePickerOpen} workingImages={workingImages} libraryImages={libraryImages} role={workspace.role} labels={messagingLabels} sending={workspaceMessaging.sendingImage} error={workspaceMessaging.imageError} onMoveToWorking={moveImageToWorking} onSend={workspaceMessaging.sendImage} onClose={()=>{if(!workspaceMessaging.sendingImage)setMessagingImagePickerOpen(false);}} onClearError={workspaceMessaging.clearImageError} />
     <WorkspaceMessagingQuickSendDialog prepared={workspaceMessaging.quickSendPreview} labels={messagingLabels} sending={workspaceMessaging.sendingImage} error={workspaceMessaging.imageError} onConfirm={workspaceMessaging.confirmQuickSend} onClose={workspaceMessaging.cancelQuickSend} />
     <WorkspaceToast message={toastMessage} />
+    {previewDirectEditing === "resize" && maximizedPreviewMemory ? <WorkspacePreviewResizeDialog width={maximizedPreviewMemory.width} height={maximizedPreviewMemory.height} originalSize={maximizedWorkspaceImage?.size} onApply={async (width, height) => { await applyPreviewDirectOperation({ type: "resize", params: { width, height } }); setPreviewDirectEditing(null); }} onClose={() => setPreviewDirectEditing(null)} /> : null}
+    <WorkspacePreviewCloseDialog open={previewCloseDialogOpen} saving={editorPreparing} onSave={requestPreviewSave} onDiscard={() => void closeMaximizedPreview("discard")} onCancel={() => setPreviewCloseDialogOpen(false)} />
+    <WorkspacePreviewPngDialog open={previewPngConfirmOpen} saving={editorPreparing} onConfirm={confirmPreviewPngSave} onCancel={() => { setPreviewPngConfirmOpen(false); setPreviewCloseDialogOpen(true); }} />
   </main>;
 }

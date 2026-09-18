@@ -6,6 +6,7 @@ import {
   activateCollaborationCardPreview,
   activateCollaborationPreviewCacheEntry,
   activateUncachedCollaborationPreview,
+  adoptCollaborationMemoryRender,
   adoptCollaborationRender,
   clearActiveCollaborationPreview,
   COLLABORATION_PREVIEW_MAX_HEIGHT,
@@ -21,6 +22,7 @@ import {
 import { dimensions } from "../utils/workspace-image-display";
 import { workspaceMaterializeQuality } from "../utils/workspace-image-output";
 import type { WorkspaceImage } from "../types";
+import type { WorkspacePreviewMemory } from "../workspace-preview-memory";
 
 function memorySource(container: CollaborationImageContainer) {
   return {
@@ -32,9 +34,10 @@ function memorySource(container: CollaborationImageContainer) {
   };
 }
 
-export function useWorkspaceCollaborationPreview({ imagesRef, collaborationContainers, refresh, processingSource, updateImageDimensions, }: {
+export function useWorkspaceCollaborationPreview({ imagesRef, collaborationContainers, previewMemoryRef, refresh, processingSource, updateImageDimensions, }: {
   imagesRef: React.MutableRefObject<WorkspaceImage[]>;
   collaborationContainers: React.MutableRefObject<Map<string, CollaborationImageContainer>>;
+  previewMemoryRef: React.MutableRefObject<WorkspacePreviewMemory | null>;
   refresh: () => void;
   processingSource: { imageId: string; blob: Blob } | null;
   updateImageDimensions: (imageId: string, width: number, height: number) => Promise<void>;
@@ -43,7 +46,11 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
   const renderSequence = React.useRef(0);
   const latestRenders = React.useRef(new Map<string, number>());
   const latestTemporaryRenders = React.useRef(new Map<string, number>());
-  const previewCacheRenders = React.useRef(new Map<string, Promise<CollaborationPreviewCacheEntry | null>>());
+  const previewCacheRenders = React.useRef(new Map<string, {
+    document: ImageParameterDocument;
+    sequence: number;
+    promise: Promise<CollaborationPreviewCacheEntry | null>;
+  }>());
   const [processingImageIds, setProcessingImageIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
   const setWorkingCardProcessing = React.useCallback((imageId: string, processing: boolean) => {
@@ -79,15 +86,23 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     latestRenders.current.delete(imageId);
     latestTemporaryRenders.current.delete(imageId);
     setWorkingCardProcessing(imageId, false);
+    if (previewMemoryRef.current?.imageId === imageId) {
+      previewMemoryRef.current.dispose();
+      previewMemoryRef.current = null;
+    }
     if (!container) return;
     releasePreviewArtifacts(collaborationPreviewCacheArtifacts(container));
     collaborationContainers.current.set(imageId, disposeCollaborationImageContainer(container));
     collaborationContainers.current.delete(imageId);
     void imageProcessing.releaseMemorySource(container.cacheKey).catch(() => undefined);
     refresh();
-  }, [collaborationContainers, imageProcessing, refresh, releasePreviewArtifacts, setWorkingCardProcessing]);
+  }, [collaborationContainers, imageProcessing, previewMemoryRef, refresh, releasePreviewArtifacts, setWorkingCardProcessing]);
 
   const createContainer = React.useCallback((image: WorkspaceImage, source: Blob, sourceKind: "source" | "preview", width: number, height: number) => {
+    if (previewMemoryRef.current?.imageId === image.imageId) {
+      previewMemoryRef.current.dispose();
+      previewMemoryRef.current = null;
+    }
     const previous = collaborationContainers.current.get(image.imageId);
     if (previous) {
       releasePreviewArtifacts(collaborationPreviewCacheArtifacts(previous));
@@ -108,7 +123,40 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     collaborationContainers.current.set(image.imageId, container);
     refresh();
     return container;
-  }, [collaborationContainers, imageProcessing, refresh, releasePreviewArtifacts]);
+  }, [collaborationContainers, imageProcessing, previewMemoryRef, refresh, releasePreviewArtifacts]);
+
+  const prepareCollaborationContainer = React.useCallback(async (image: WorkspaceImage) => {
+    const existing = collaborationContainers.current.get(image.imageId);
+    if (existing && !existing.disposed) return existing;
+    const original = image.sourceCached ? await readWorkspaceImageSource(image) : null;
+    const source = original || await readWorkspaceImagePreview(image);
+    if (!source) return null;
+    const fallbackWidth = Math.max(1, image.width || 1);
+    const fallbackHeight = Math.max(1, image.height || 1);
+    const container = createContainer(
+      image,
+      source,
+      original ? "source" : "preview",
+      fallbackWidth,
+      fallbackHeight,
+    );
+    if (imageProcessing.engine === "desktop-native") {
+      const metadata = await imageProcessing.inspect(memorySource(container), {
+        requestId: `workspace-memory:${image.imageId}:maximize`,
+      });
+      const updated = {
+        ...container,
+        originalWidth: metadata.width,
+        originalHeight: metadata.height,
+        width: metadata.width,
+        height: metadata.height,
+      };
+      collaborationContainers.current.set(image.imageId, updated);
+      refresh();
+      return updated;
+    }
+    return container;
+  }, [collaborationContainers, createContainer, imageProcessing, refresh]);
 
   const cachePreviewForContainer = React.useCallback((
     image: WorkspaceImage,
@@ -119,11 +167,11 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     const container = collaborationContainers.current.get(image.imageId);
     if (!container || container.disposed) return Promise.resolve(null);
     const cached = container.previewCache.get(commitId);
-    if (cached) {
+    if (cached && imageParameterDocumentsEqual(cached.parameterDocument, parameterDocument)) {
       const currentImage = imagesRef.current.find((candidate) => candidate.imageId === image.imageId);
       if (currentImage?.currentCommitId === commitId
         && imageParameterDocumentsEqual(container.parameterDocument, parameterDocument)) {
-        const activated = activateCollaborationCardPreview(container, commitId);
+        const activated = activateCollaborationCardPreview(container, commitId, parameterDocument);
         if (activated) {
           collaborationContainers.current.set(image.imageId, activated);
           refresh();
@@ -133,7 +181,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     }
     const taskKey = `${container.cacheKey}:${commitId}`;
     const pending = previewCacheRenders.current.get(taskKey);
-    if (pending) return pending;
+    if (pending && imageParameterDocumentsEqual(pending.document, parameterDocument)) return pending.promise;
     const sequence = ++renderSequence.current;
     const expectedCacheKey = container.cacheKey;
     const task = (async () => {
@@ -155,13 +203,15 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       }, { requestId: `workspace-preview-cache:${image.imageId}:${commitId}:${sequence}` });
       if (result.artifact.kind !== "cache") throw new Error("Preview cache did not return a file address");
       const current = collaborationContainers.current.get(image.imageId);
-      if (!current || current.disposed || current.cacheKey !== expectedCacheKey
+      if (previewCacheRenders.current.get(taskKey)?.sequence !== sequence
+        || !current || current.disposed || current.cacheKey !== expectedCacheKey
         || !imagesRef.current.some((candidate) => candidate.imageId === image.imageId && candidate.workspaceLocation === "working")) {
         releasePreviewArtifacts([result.artifact]);
         return null;
       }
       const entry = {
         commitId,
+        parameterDocument,
         artifact: result.artifact,
         width: result.width,
         height: result.height,
@@ -170,16 +220,16 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       const currentImage = imagesRef.current.find((candidate) => candidate.imageId === image.imageId);
       const nextContainer = currentImage?.currentCommitId === commitId
         && imageParameterDocumentsEqual(updated.container.parameterDocument, parameterDocument)
-        ? activateCollaborationCardPreview(updated.container, commitId) || updated.container
+        ? activateCollaborationCardPreview(updated.container, commitId, parameterDocument) || updated.container
         : updated.container;
       collaborationContainers.current.set(image.imageId, nextContainer);
       releaseOrphanedPreviewArtifacts(nextContainer, updated.evicted);
       refresh();
       return entry;
     })().finally(() => {
-      previewCacheRenders.current.delete(taskKey);
+      if (previewCacheRenders.current.get(taskKey)?.sequence === sequence) previewCacheRenders.current.delete(taskKey);
     });
-    previewCacheRenders.current.set(taskKey, task);
+    previewCacheRenders.current.set(taskKey, { document: parameterDocument, sequence, promise: task });
     return task;
   }, [collaborationContainers, imageProcessing, imagesRef, refresh, releaseOrphanedPreviewArtifacts, releasePreviewArtifacts]);
 
@@ -187,6 +237,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     image: WorkspaceImage,
     parameterDocument = image.parameterDocument || emptyImageParameterDocument(),
     sourceOverride?: Blob,
+    forceMaterialize = false,
   ) => {
     const requestSequence = ++renderSequence.current;
     latestRenders.current.set(image.imageId, requestSequence);
@@ -234,9 +285,35 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
           await updateImageDimensions(image.imageId, sourceMetadata.width, sourceMetadata.height);
         }
       }
-      if (imageParameterDocumentsEqual(container.parameterDocument, parameterDocument)) {
+      const previewMemory = previewMemoryRef.current;
+      if (!sourceOverride && !forceMaterialize && previewMemory?.imageId === image.imageId && container.sourceKind === "source") {
+        await previewMemory.apply(parameterDocument);
+        if (latestRenders.current.get(image.imageId) !== requestSequence) {
+          return collaborationContainers.current.get(image.imageId) || null;
+        }
+        const current = collaborationContainers.current.get(image.imageId);
+        if (!current || current.disposed || current.cacheKey !== container.cacheKey) return null;
+        const rendered = adoptCollaborationMemoryRender({
+          ...current,
+          originalWidth: previewMemory.originalSurface.width,
+          originalHeight: previewMemory.originalSurface.height,
+        }, parameterDocument, {
+          width: previewMemory.width,
+          height: previewMemory.height,
+        });
+        collaborationContainers.current.set(image.imageId, rendered);
+        if (rendered.sourceKind === "source"
+          && (image.width !== rendered.width || image.height !== rendered.height)) {
+          await updateImageDimensions(image.imageId, rendered.width, rendered.height);
+        }
         refresh();
-        if (image.currentCommitId) {
+        return rendered;
+      }
+      const documentMatches = imageParameterDocumentsEqual(container.parameterDocument, parameterDocument);
+      const materializedDocumentMatches = imageParameterDocumentsEqual(container.materializedDocument, parameterDocument);
+      if (documentMatches && materializedDocumentMatches) {
+        refresh();
+        if (image.currentCommitId && materializedDocumentMatches) {
           const renderedWorkingBlob = parameterDocument.operations.length ? container.workingBlob : undefined;
           const cacheTask = cachePreviewForContainer(image, parameterDocument, image.currentCommitId, renderedWorkingBlob);
           previewOwnsLoading = true;
@@ -281,7 +358,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     } finally {
       if (!previewOwnsLoading) finishWorkingCardProcessing(image.imageId, requestSequence);
     }
-  }, [cachePreviewForContainer, collaborationContainers, createContainer, finishWorkingCardProcessing, imageProcessing, imagesRef, refresh, releaseCollaborationContainer, setWorkingCardProcessing]);
+  }, [cachePreviewForContainer, collaborationContainers, createContainer, finishWorkingCardProcessing, imageProcessing, imagesRef, previewMemoryRef, refresh, releaseCollaborationContainer, setWorkingCardProcessing, updateImageDimensions]);
 
   const renderCollaborationPreviewSnapshot = React.useCallback(async (image: WorkspaceImage, parameterDocument: ImageParameterDocument, commitId?: string) => {
     let container = collaborationContainers.current.get(image.imageId);
@@ -293,7 +370,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     latestTemporaryRenders.current.set(image.imageId, sequence);
     let entry: CollaborationPreviewCacheEntry | null = null;
     if (commitId) {
-      const cached = activateCollaborationPreviewCacheEntry(container, commitId);
+      const cached = activateCollaborationPreviewCacheEntry(container, commitId, parameterDocument);
       if (cached) {
         collaborationContainers.current.set(image.imageId, cached.container);
         if (cached.released) releasePreviewArtifacts([cached.released]);
@@ -312,7 +389,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
         destination: "cache",
       }, { requestId: `workspace-snapshot:${image.imageId}:${sequence}` });
       if (result.artifact.kind !== "cache") throw new Error("Preview did not return a file address");
-      entry = { commitId: "", artifact: result.artifact, width: result.width, height: result.height };
+      entry = { commitId: "", parameterDocument, artifact: result.artifact, width: result.width, height: result.height };
     }
     if (latestTemporaryRenders.current.get(image.imageId) !== sequence) {
       if (entry && !commitId) releasePreviewArtifacts([entry.artifact]);
@@ -324,7 +401,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
       return null;
     }
     const activated = commitId
-      ? activateCollaborationPreviewCacheEntry(current, commitId)
+      ? activateCollaborationPreviewCacheEntry(current, commitId, parameterDocument)
       : activateUncachedCollaborationPreview(current, entry);
     if (!activated) return null;
     collaborationContainers.current.set(image.imageId, activated.container);
@@ -348,18 +425,23 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
     if (!container || container.disposed || container.sourceKind !== "source") {
       const source = await readWorkspaceImageSource(image);
       if (!source) return null;
-      return syncCollaborationPreview(image, parameterDocument, source);
+      return syncCollaborationPreview(image, parameterDocument, source, true);
     }
-    return syncCollaborationPreview(image, parameterDocument);
+    return syncCollaborationPreview(image, parameterDocument, undefined, true);
   }, [collaborationContainers, syncCollaborationPreview]);
 
   const loadSource = React.useCallback(async (image: WorkspaceImage, materialize = false) => {
-    if (processingSource?.imageId === image.imageId) return processingSource.blob;
     const container = collaborationContainers.current.get(image.imageId);
     if (image.workspaceLocation === "working" && materialize) {
       return (await syncCollaborationContainer(image, image.parameterDocument || emptyImageParameterDocument()))?.workingBlob || null;
     }
-    if (image.shared && container && !container.disposed) return container.workingBlob;
+    if (processingSource?.imageId === image.imageId) return processingSource.blob;
+    if (image.shared && container && !container.disposed) {
+      if (imageParameterDocumentsEqual(container.materializedDocument, image.parameterDocument || emptyImageParameterDocument())) {
+        return container.workingBlob;
+      }
+      return (await syncCollaborationContainer(image, image.parameterDocument || emptyImageParameterDocument()))?.workingBlob || null;
+    }
     if (image.shared) {
       return (await syncCollaborationPreview(image, image.parameterDocument || emptyImageParameterDocument()))?.workingBlob || null;
     }
@@ -369,6 +451,7 @@ export function useWorkspaceCollaborationPreview({ imagesRef, collaborationConta
   return {
     loadSource,
     syncCollaborationPreview,
+    prepareCollaborationContainer,
     renderCollaborationPreviewSnapshot,
     clearCollaborationPreviewSnapshot,
     syncCollaborationContainer,

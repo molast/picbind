@@ -9,6 +9,7 @@ export type ReviewRippleLayerController = {
 
 type ReviewRippleLayerProps = {
   imageUrl: string;
+  imageSource?: HTMLCanvasElement;
   annotationSnapshot: string | null;
   controllerRef: React.MutableRefObject<ReviewRippleLayerController | null>;
 };
@@ -122,17 +123,18 @@ function loadImage(url: string) {
 
 export default function ReviewRippleLayer({
   imageUrl,
+  imageSource,
   annotationSnapshot,
   controllerRef,
 }: ReviewRippleLayerProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
-  const sourceRef = React.useRef({ imageUrl, annotationSnapshot });
+  const sourceRef = React.useRef({ imageUrl, imageSource, annotationSnapshot });
   const refreshRef = React.useRef<(() => void) | null>(null);
-  sourceRef.current = { imageUrl, annotationSnapshot };
+  sourceRef.current = { imageUrl, imageSource, annotationSnapshot };
 
   React.useEffect(() => {
     refreshRef.current?.();
-  }, [imageUrl, annotationSnapshot]);
+  }, [imageSource, imageUrl, annotationSnapshot]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -176,7 +178,7 @@ export default function ReviewRippleLayer({
         const source = sourceRef.current;
         try {
           const [image, annotations] = await Promise.all([
-            loadImage(source.imageUrl),
+            source.imageSource ? Promise.resolve(source.imageSource) : loadImage(source.imageUrl),
             source.annotationSnapshot
               ? loadImage(source.annotationSnapshot)
               : Promise.resolve(null),

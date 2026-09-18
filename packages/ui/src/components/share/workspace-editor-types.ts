@@ -14,4 +14,5 @@ export type WorkspaceMemberPresence = {
 export type WorkspaceEditorImage = CachedWorkspaceImage & {
   url: string;
   thumbnailUrl?: string;
+  decodedSource?: HTMLCanvasElement;
 };
