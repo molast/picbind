@@ -67,12 +67,6 @@ export default function HomeHero({
                   >
                     {lang === "zh" ? "图片压缩" : "Image Compress"}
                   </button>
-                  <Link
-                    href="/favicon-converter"
-                    className="rounded-full px-3 py-1 transition hover:bg-white/35"
-                  >
-                    {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
-                  </Link>
                   <Link href="/workspace" data-picbind-workspace-entry="true" className="rounded-full px-3 py-1 transition hover:bg-white/35">
                     {lang === "zh" ? "图片工作区" : "Image Workspace"}
                   </Link>
@@ -91,9 +85,6 @@ export default function HomeHero({
             >
               {lang === "zh" ? "图片压缩" : "Image Compress"}
             </button>
-            <Link href="/favicon-converter" className="rounded-full px-3 py-1">
-              {lang === "zh" ? "Favicon 工具" : "Favicon Tools"}
-            </Link>
             <Link href="/workspace" data-picbind-workspace-entry="true" className="rounded-full px-3 py-1">
               {lang === "zh" ? "图片工作区" : "Image Workspace"}
             </Link>

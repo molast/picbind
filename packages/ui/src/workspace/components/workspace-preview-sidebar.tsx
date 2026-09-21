@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { FiCrosshair, FiImage } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiCrosshair, FiImage } from "react-icons/fi";
 import { getLang, getWorkspaceLabels } from "../../locales";
 import type { WorkspaceImage } from "../types";
 import type { WorkspacePreviewSelection } from "../workspace-preview-selection";
@@ -74,13 +74,15 @@ function PreviewThumbnail({ source }: { source?: HTMLCanvasElement }) {
   return <canvas ref={ref} className="block h-full w-full object-contain" aria-label="" />;
 }
 
-export function WorkspacePreviewSidebar({ image, source, width, height, selection, cursor }: {
+export function WorkspacePreviewSidebar({ image, source, width, height, selection, cursor, collapsed = false, onToggle }: {
   image: WorkspaceImage;
   source?: HTMLCanvasElement;
   width: number;
   height: number;
   selection?: WorkspacePreviewSelection | null;
   cursor: WorkspacePreviewCursor | null;
+  collapsed?: boolean;
+  onToggle?(): void;
 }) {
   const labels = getWorkspaceLabels(getLang());
   const mime = image.mimeType.replace("image/", "").toUpperCase();
@@ -89,9 +91,15 @@ export function WorkspacePreviewSidebar({ image, source, width, height, selectio
   const value = (formatted: string) => cursor ? formatted : "-";
   const selectionWidth = selection ? Math.max(1, Math.round(selection.width * width)) : width;
   const selectionHeight = selection ? Math.max(1, Math.round(selection.height * height)) : height;
+  const toggleLabel = collapsed ? labels.expandPanel : labels.collapsePanel;
+  if (collapsed) return <aside className="flex min-h-10 items-center justify-center border-t border-[#dfe3e8] bg-white text-[#172033] lg:min-h-0 lg:overflow-hidden lg:border-l lg:border-t-0" aria-label={labels.imageInformation}>
+    <button type="button" onClick={onToggle} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf]" title={toggleLabel} aria-label={toggleLabel} aria-expanded={false}>
+      <FiChevronLeft aria-hidden="true" />
+    </button>
+  </aside>;
   return <aside className="border-t border-[#dfe3e8] bg-white text-[#172033] lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0" aria-label={labels.imageInformation}>
     <section className="border-b border-[#e4e7eb] px-3 py-3">
-      <div className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-[#26344c]"><FiImage aria-hidden="true" /><span>{labels.imageInformation}</span></div>
+      <div className="flex items-center justify-between gap-2 text-[11px] font-semibold tracking-wide text-[#26344c]"><div className="flex min-w-0 items-center gap-2"><FiImage aria-hidden="true" /><span className="truncate">{labels.imageInformation}</span></div><button type="button" onClick={onToggle} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-[#2f65cf]" title={toggleLabel} aria-label={toggleLabel} aria-expanded={true}><FiChevronRight aria-hidden="true" /></button></div>
       <div className="mt-3 grid grid-cols-[62px_minmax(0,1fr)] items-center gap-3">
         <div className="h-[62px] w-[62px] overflow-hidden rounded-sm border border-slate-200 bg-slate-50"><PreviewThumbnail source={source} /></div>
         <div className="min-w-0">
