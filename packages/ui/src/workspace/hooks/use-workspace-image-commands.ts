@@ -92,26 +92,32 @@ export function useWorkspaceImageCommands(options: ImageCommandsOptions) {
     movingToWorkingImageIdsRef.current.add(image.imageId);
     setMovingToWorkingImageIds((current) => new Set(current).add(image.imageId));
     try {
-      const source = image.sourceCached ? await getWorkspaceImageProcessingSource(image) : null;
+      const needsPreview = !image.previewCached;
+      const needsMetadata = image.width < 1 || image.height < 1;
+      const source = image.sourceCached && (needsPreview || needsMetadata)
+        ? await getWorkspaceImageProcessingSource(image)
+        : null;
       let preview: Blob | undefined;
       let sourceSize: { width: number; height: number } | undefined;
       if (source) {
-        if (image.width < 1 || image.height < 1) {
+        if (needsMetadata) {
           const metadata = await imageProcessing.inspect(source, {
             requestId: `workspace-working-source-metadata:${image.imageId}`,
           });
           sourceSize = { width: metadata.width, height: metadata.height };
         }
-        const result = await imageProcessing.renderPreview({
-          source,
-          document: emptyImageParameterDocument(),
-          maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
-          maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
-          mimeType: "image/webp",
-          quality: COLLABORATION_PREVIEW_QUALITY,
-        }, { requestId: `workspace-working-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
-        if (result.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
-        preview = result.artifact.blob;
+        if (needsPreview) {
+          const result = await imageProcessing.renderPreview({
+            source,
+            document: emptyImageParameterDocument(),
+            maxWidth: COLLABORATION_PREVIEW_MAX_WIDTH,
+            maxHeight: COLLABORATION_PREVIEW_MAX_HEIGHT,
+            mimeType: "image/webp",
+            quality: COLLABORATION_PREVIEW_QUALITY,
+          }, { requestId: `workspace-working-thumbnail:${image.imageId}:${image.previewRevision + 1}` });
+          if (result.artifact.kind !== "blob") throw new Error("Working thumbnail did not return cache file bytes");
+          preview = result.artifact.blob;
+        }
       }
       await updateImage(image.imageId, {
         workspaceLocation: "working",

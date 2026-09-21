@@ -320,8 +320,6 @@ const zh = {
           title: "工具",
           links: [
             { label: "图片压缩", href: "/" },
-            { label: "Favicon 转换器", href: "/favicon-converter" },
-            { label: "Favicon 生成器", href: "/favicon-generator" },
           ],
         },
         {

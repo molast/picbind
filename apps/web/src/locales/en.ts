@@ -185,8 +185,6 @@ const en: LocaleType = {
           title: "Tools",
           links: [
             { label: "Image Compress", href: "/" },
-            { label: "Favicon Converter", href: "/favicon-converter" },
-            { label: "Favicon Generator", href: "/favicon-generator" },
           ],
         },
         {
