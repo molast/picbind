@@ -264,6 +264,8 @@ const en: typeof zh = {
   resizeScaleProportionally: "Scale proportionally",
   resizeResampleImage: "Resample image",
   resizeResultSize: "Result size",
+  resizeUnknownResult: "Result unavailable",
+  resizePhysicalSize: (width: string, height: string, unit: string) => `${width} × ${height} ${unit}`,
   resizePercent: (percent: number) => `${percent}%`,
   resizeFileSize: (size: string, original: string) => `${size} (originally ${original})`,
   resizeCalculating: (original: string) => `Calculating size... (originally ${original})`,

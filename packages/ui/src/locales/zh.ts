@@ -262,6 +262,8 @@ const zh = {
   resizeScaleProportionally: "比例缩放",
   resizeResampleImage: "重新采样图像",
   resizeResultSize: "结果大小",
+  resizeUnknownResult: "结果不详",
+  resizePhysicalSize: (width: string, height: string, unit: string) => `${width} × ${height}${unit}`,
   resizePercent: (percent: number) => `${percent}%`,
   resizeFileSize: (size: string, original: string) => `${size}（原为 ${original}）`,
   resizeCalculating: (original: string) => `正在计算大小...（原为 ${original}）`,

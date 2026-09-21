@@ -3,6 +3,7 @@ import { FiChevronDown, FiLock, FiUnlock, FiX } from "react-icons/fi";
 import { getLang, getWorkspaceEditorLabels } from "../../locales";
 
 const MAX_DIMENSION = 16384;
+const INITIAL_RESOLUTION_PPI = 72;
 const SQUARE_PRESETS = [320, 640, 800, 1024, 1280];
 const LARGE_SQUARE_PRESETS = [1280, 1920];
 type DimensionUnit = "px" | "percent" | "inch" | "cm" | "mm" | "pt";
@@ -32,11 +33,6 @@ function dimensionToPixels(value: number, unit: DimensionUnit, sourcePixels: num
   return value;
 }
 
-function formatDimensionValue(pixels: number, unit: DimensionUnit, sourcePixels: number, resolution: number) {
-  const value = pixelsToDimension(pixels, unit, sourcePixels, resolution);
-  return unit === "px" ? String(Math.round(value)) : String(Number(value.toFixed(2)));
-}
-
 export function WorkspacePreviewResizeDialog({
   width: initialWidth,
   height: initialHeight,
@@ -55,37 +51,136 @@ export function WorkspacePreviewResizeDialog({
   const sourceHeight = Math.max(1, Math.round(initialHeight));
   const [width, setWidth] = React.useState(sourceWidth);
   const [height, setHeight] = React.useState(sourceHeight);
+  const [widthDraft, setWidthDraft] = React.useState<string | null>(null);
+  const [heightDraft, setHeightDraft] = React.useState<string | null>(null);
   const [preset, setPreset] = React.useState("custom");
   const [locked, setLocked] = React.useState(true);
   const [dimensionUnit, setDimensionUnit] = React.useState<DimensionUnit>("px");
-  const [resolution, setResolution] = React.useState(72);
+  const [resolution, setResolution] = React.useState(INITIAL_RESOLUTION_PPI);
+  const [resolutionDraft, setResolutionDraft] = React.useState<string | null>(null);
   const [resolutionUnit, setResolutionUnit] = React.useState("ppi");
   const [resample, setResample] = React.useState(true);
+  const [resultUnit, setResultUnit] = React.useState<DimensionUnit>("percent");
   const ratioRef = React.useRef(sourceWidth / sourceHeight);
   const [working, setWorking] = React.useState(false);
   const [calculating, setCalculating] = React.useState(false);
   const calculationTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const valid = Number.isFinite(width) && Number.isFinite(height)
-    && width >= 1 && height >= 1 && width <= MAX_DIMENSION && height <= MAX_DIMENSION;
-  const percentage = Math.max(1, Math.round((width / sourceWidth) * 100));
-  const estimatedSize = originalSize > 0
+  const calculationKeyRef = React.useRef<string | null>(null);
+  const valid = Number.isFinite(width) && Number.isFinite(height) && Number.isFinite(resolution)
+    && width >= 1 && height >= 1 && width <= MAX_DIMENSION && height <= MAX_DIMENSION && resolution > 0;
+  const canEstimateSize = valid && Number.isFinite(originalSize) && originalSize > 0;
+  const estimatedSize = canEstimateSize
     ? Math.max(1, Math.round(originalSize * (width * height) / (sourceWidth * sourceHeight)))
     : 0;
+  const resolutionPpi = resolutionUnit === "ppcm" ? resolution * 2.54 : resolution;
+  const dimensionValue = (pixels: number, sourcePixels: number) => {
+    if (!resample && dimensionUnit === "percent") {
+      const currentInches = pixels / Math.max(resolutionPpi, Number.EPSILON);
+      const originalInches = sourcePixels / INITIAL_RESOLUTION_PPI;
+      return currentInches / Math.max(originalInches, Number.EPSILON) * 100;
+    }
+    return pixelsToDimension(pixels, dimensionUnit, sourcePixels, resolutionPpi);
+  };
+  const formatDimensionValue = (pixels: number, sourcePixels: number) => {
+    const value = dimensionValue(pixels, sourcePixels);
+    return dimensionUnit === "px" ? String(Math.round(value)) : String(Number(value.toFixed(2)));
+  };
+  const resultUnits: DimensionUnit[] = ["percent", "px", "inch", "cm", "mm", "pt"];
+  const resultUnitIndex = resultUnits.indexOf(resultUnit);
+  const nextResultUnit = () => setResultUnit(resultUnits[(resultUnitIndex + 1) % resultUnits.length]);
+  const resultText = (() => {
+    if (!valid) return labels.resizeUnknownResult;
+    if (resultUnit === "percent") {
+      const percent = !resample
+        ? width / Math.max(resolutionPpi, Number.EPSILON) / (sourceWidth / INITIAL_RESOLUTION_PPI) * 100
+        : width / sourceWidth * 100;
+      return labels.resizePercent(Number(percent.toFixed(1)));
+    }
+    if (resultUnit === "px") return labels.resizePhysicalSize(String(Math.round(width)), String(Math.round(height)), labels.resizePixels);
+    const centimetersPerPixel = 2.54 / Math.max(resolutionPpi, 1);
+    const widthInCentimeters = width * centimetersPerPixel;
+    const heightInCentimeters = height * centimetersPerPixel;
+    const factors: Record<Exclude<DimensionUnit, "percent" | "px">, { width: number; height: number; label: string }> = {
+      inch: { width: widthInCentimeters / 2.54, height: heightInCentimeters / 2.54, label: labels.resizeUnitInch },
+      cm: { width: widthInCentimeters, height: heightInCentimeters, label: labels.resizeUnitCentimeter },
+      mm: { width: widthInCentimeters * 10, height: heightInCentimeters * 10, label: labels.resizeUnitMillimeter },
+      pt: { width: widthInCentimeters / 2.54 * 72, height: heightInCentimeters / 2.54 * 72, label: labels.resizeUnitPoint },
+    };
+    const result = factors[resultUnit];
+    const formatResultDimension = resultUnit === "pt"
+      ? (value: number) => String(Math.round(value))
+      : (value: number) => value.toFixed(2);
+    return labels.resizePhysicalSize(formatResultDimension(result.width), formatResultDimension(result.height), result.label);
+  })();
 
   const selectClass = "h-8 w-full appearance-none rounded-md border border-slate-200 bg-white px-2 pr-7 text-xs text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400";
   const inputClass = "h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-800 outline-none focus:border-[#2f65cf] focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400";
 
   const setWidthValue = (displayValue: number) => {
-    const next = dimensionToPixels(displayValue, dimensionUnit, sourceWidth, resolution);
+    if (!resample && dimensionUnit !== "px") {
+      const targetInches = dimensionUnit === "percent"
+        ? sourceWidth / INITIAL_RESOLUTION_PPI * displayValue / 100
+        : dimensionUnit === "inch"
+          ? displayValue
+          : dimensionUnit === "cm"
+            ? displayValue / 2.54
+            : dimensionUnit === "mm"
+              ? displayValue / 25.4
+              : displayValue / 72;
+      if (Number.isFinite(targetInches) && targetInches > 0) {
+        const nextPpi = width / targetInches;
+        setResolution(resolutionUnit === "ppcm" ? nextPpi / 2.54 : nextPpi);
+      }
+      setPreset("custom");
+      return;
+    }
+    const next = dimensionToPixels(displayValue, dimensionUnit, sourceWidth, resolutionPpi);
     setPreset("custom");
     setWidth(Math.round(next));
-    if (locked && Number.isFinite(next) && next > 0) setHeight(Math.max(1, Math.round(next / ratioRef.current)));
+    if (locked && Number.isFinite(next) && next > 0) {
+      setHeight(Math.max(1, Math.round(next / ratioRef.current)));
+      setHeightDraft(null);
+    }
   };
   const setHeightValue = (displayValue: number) => {
-    const next = dimensionToPixels(displayValue, dimensionUnit, sourceHeight, resolution);
+    if (!resample && dimensionUnit !== "px") {
+      const targetInches = dimensionUnit === "percent"
+        ? sourceHeight / INITIAL_RESOLUTION_PPI * displayValue / 100
+        : dimensionUnit === "inch"
+          ? displayValue
+          : dimensionUnit === "cm"
+            ? displayValue / 2.54
+            : dimensionUnit === "mm"
+              ? displayValue / 25.4
+              : displayValue / 72;
+      if (Number.isFinite(targetInches) && targetInches > 0) {
+        const nextPpi = height / targetInches;
+        setResolution(resolutionUnit === "ppcm" ? nextPpi / 2.54 : nextPpi);
+      }
+      setPreset("custom");
+      return;
+    }
+    const next = dimensionToPixels(displayValue, dimensionUnit, sourceHeight, resolutionPpi);
     setPreset("custom");
     setHeight(Math.round(next));
-    if (locked && Number.isFinite(next) && next > 0) setWidth(Math.max(1, Math.round(next * ratioRef.current)));
+    if (locked && Number.isFinite(next) && next > 0) {
+      setWidth(Math.max(1, Math.round(next * ratioRef.current)));
+      setWidthDraft(null);
+    }
+  };
+  const setResolutionValue = (nextValue: number) => {
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      setResolution(nextValue);
+      return;
+    }
+    setResolution(nextValue);
+  };
+  const setResolutionUnitValue = (nextUnit: string) => {
+    if ((nextUnit !== "ppi" && nextUnit !== "ppcm") || nextUnit === resolutionUnit) return;
+    const currentPpi = resolutionUnit === "ppcm" ? resolution * 2.54 : resolution;
+    setResolutionUnit(nextUnit);
+    setResolution(nextUnit === "ppcm" ? currentPpi / 2.54 : currentPpi);
+    setResolutionDraft(null);
   };
   const changePreset = (value: string) => {
     if (!resample) return;
@@ -107,10 +202,19 @@ export function WorkspacePreviewResizeDialog({
       setLocked(true);
       if (dimensionUnit === "px") setDimensionUnit("inch");
     }
+  };
+  const calculationKey = `${width}:${height}:${resolution}:${dimensionUnit}:${resolutionUnit}:${resample}`;
+  React.useEffect(() => {
+    if (calculationKeyRef.current === null) {
+      calculationKeyRef.current = calculationKey;
+      return;
+    }
+    if (calculationKeyRef.current === calculationKey) return;
+    calculationKeyRef.current = calculationKey;
     if (calculationTimerRef.current) clearTimeout(calculationTimerRef.current);
     setCalculating(true);
     calculationTimerRef.current = setTimeout(() => setCalculating(false), 420);
-  };
+  }, [calculationKey]);
   React.useEffect(() => () => {
     if (calculationTimerRef.current) clearTimeout(calculationTimerRef.current);
   }, []);
@@ -154,7 +258,7 @@ export function WorkspacePreviewResizeDialog({
 
             <div className="grid grid-rows-[2rem_2rem_2rem] grid-cols-[4rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-2">
               <label className="col-start-1 row-start-1 text-xs font-semibold text-slate-700">{labels.widthPx.replace(" (px)", "").replace("（px）", "")}:</label>
-              <input type="number" name="workspace-resize-width" autoComplete="off" min={0.01} max={MAX_DIMENSION} value={formatDimensionValue(width, dimensionUnit, sourceWidth, resolution)} onChange={(event) => setWidthValue(Number(event.target.value))} className={`${inputClass} col-start-2 row-start-1`} />
+              <input type="number" name="workspace-resize-width" autoComplete="off" min={0.01} max={MAX_DIMENSION} value={widthDraft ?? formatDimensionValue(width, sourceWidth)} onChange={(event) => { const raw = event.target.value; setWidthDraft(raw); if (raw !== "") setWidthValue(Number(raw)); }} onBlur={() => setWidthDraft(null)} className={`${inputClass} col-start-2 row-start-1`} />
               <div className={`relative col-start-3 row-start-1 ${bracketRowSpan} flex h-full w-8 items-center justify-center`}>
                 <svg className="pointer-events-none absolute -left-2 top-0 h-full w-10 overflow-visible" viewBox="0 0 40 100" preserveAspectRatio="none" aria-hidden="true">
                   <path d={bracketPath} fill="none" stroke="#334155" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
@@ -170,11 +274,11 @@ export function WorkspacePreviewResizeDialog({
                 <FiChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" aria-hidden="true" />
               </div>
               <label className="col-start-1 row-start-2 text-xs font-semibold text-slate-700">{labels.heightPx.replace(" (px)", "").replace("（px）", "")}:</label>
-              <input type="number" name="workspace-resize-height" autoComplete="off" min={0.01} max={MAX_DIMENSION} value={formatDimensionValue(height, dimensionUnit, sourceHeight, resolution)} onChange={(event) => setHeightValue(Number(event.target.value))} className={`${inputClass} col-start-2 row-start-2`} />
+              <input type="number" name="workspace-resize-height" autoComplete="off" min={0.01} max={MAX_DIMENSION} value={heightDraft ?? formatDimensionValue(height, sourceHeight)} onChange={(event) => { const raw = event.target.value; setHeightDraft(raw); if (raw !== "") setHeightValue(Number(raw)); }} onBlur={() => setHeightDraft(null)} className={`${inputClass} col-start-2 row-start-2`} />
               <span className="col-start-1 row-start-3 text-xs font-semibold text-slate-700">{labels.resizeResolution}:</span>
-              <input type="number" name="workspace-resize-resolution" autoComplete="off" min={1} max={2400} value={resolution} onChange={(event) => setResolution(Math.max(1, Number(event.target.value)))} className={`${inputClass} col-start-2 row-start-3`} />
+              <input type="number" name="workspace-resize-resolution" autoComplete="off" min={1} max={2400} value={resolutionDraft ?? resolution} onChange={(event) => { const raw = event.target.value; setResolutionDraft(raw); if (raw !== "") setResolutionValue(Number(raw)); }} onBlur={() => setResolutionDraft(null)} className={`${inputClass} col-start-2 row-start-3`} />
               <div className="relative col-start-4 row-start-3">
-                <select value={resolutionUnit} onChange={(event) => setResolutionUnit(event.target.value)} className={selectClass} aria-label={labels.resizeResolution}>
+                <select value={resolutionUnit} onChange={(event) => setResolutionUnitValue(event.target.value)} className={selectClass} aria-label={labels.resizeResolution}>
                   <option value="ppi">{labels.resizePixelsPerInch}</option>
                   <option value="ppcm">Pixels/cm</option>
                 </select>
@@ -195,8 +299,8 @@ export function WorkspacePreviewResizeDialog({
         <section>
           <h3 className="mb-1 text-xs font-semibold text-slate-800">{labels.resizeResultSize}</h3>
           <div className="space-y-2 rounded-lg bg-slate-50 px-3 py-2.5">
-            <div className="h-5 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tabular-nums text-slate-800">{labels.resizePercent(percentage)}</div>
-            <div className="h-5 overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold tabular-nums text-slate-800">{calculating ? labels.resizeCalculating(formatFileSize(originalSize)) : labels.resizeFileSize(formatFileSize(estimatedSize), formatFileSize(originalSize))}</div>
+            <button type="button" onClick={nextResultUnit} className="block h-5 w-full overflow-hidden text-ellipsis whitespace-nowrap text-left text-[13px] font-medium tabular-nums text-slate-800 hover:text-[#2f65cf]" title={labels.resizeResultSize}>{resultText}</button>
+            <div className="h-5 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium tabular-nums text-slate-800">{calculating ? labels.resizeCalculating(formatFileSize(originalSize)) : canEstimateSize ? labels.resizeFileSize(formatFileSize(estimatedSize), formatFileSize(originalSize)) : labels.resizeUnknownResult}</div>
           </div>
         </section>
       </div>
