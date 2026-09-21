@@ -6,6 +6,9 @@ import type { NormalizedCrop } from "../../../utils/workspace-image-editing";
 
 type KonvaCropEditorProps = {
   imageUrl: string;
+  imageSource?: HTMLCanvasElement;
+  sourceWidth?: number;
+  sourceHeight?: number;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
   aspect: number | null;
@@ -17,6 +20,9 @@ const PADDING = 18;
 
 export default function KonvaCropEditor({
   imageUrl,
+  imageSource,
+  sourceWidth,
+  sourceHeight,
   posterUrl,
   editorBaseReady = true,
   aspect,
@@ -34,14 +40,16 @@ export default function KonvaCropEditor({
     let disposed = false;
     let stage: Konva.Stage | null = null;
     let resizeObserver: ResizeObserver | null = null;
-    const image = new Image();
+    const image = imageSource || new Image();
 
     const mount = () => {
-      if (disposed || !image.naturalWidth || !image.naturalHeight) return;
+      const imageWidth = sourceWidth || (image instanceof HTMLImageElement ? image.naturalWidth : image.width);
+      const imageHeight = sourceHeight || (image instanceof HTMLImageElement ? image.naturalHeight : image.height);
+      if (disposed || !imageWidth || !imageHeight) return;
       const rect = container.getBoundingClientRect();
       const stageWidth = Math.max(280, rect.width);
       const stageHeight = Math.max(280, rect.height);
-      const sourceRatio = image.naturalWidth / image.naturalHeight;
+      const sourceRatio = imageWidth / imageHeight;
       const availableWidth = stageWidth - PADDING * 2;
       const availableHeight = stageHeight - PADDING * 2;
       let displayWidth = availableWidth;
@@ -138,8 +146,11 @@ export default function KonvaCropEditor({
       setRenderedImageUrl(imageUrl);
     };
 
-    image.onload = mount;
-    image.src = imageUrl;
+    if (imageSource) mount();
+    else {
+      image.onload = mount;
+      (image as HTMLImageElement).src = imageUrl;
+    }
     resizeObserver = new ResizeObserver(mount);
     resizeObserver.observe(container);
     return () => {
@@ -147,7 +158,7 @@ export default function KonvaCropEditor({
       resizeObserver?.disconnect();
       stage?.destroy();
     };
-  }, [aspect, imageUrl, initialCrop]);
+  }, [aspect, imageSource, imageUrl, initialCrop, sourceHeight, sourceWidth]);
 
-  return <div className="relative h-[min(52vh,430px)] min-h-72 w-full overflow-hidden rounded-md bg-slate-900"><div ref={containerRef} className="h-full w-full" />{posterUrl && (!editorBaseReady || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="absolute inset-0 z-20 h-full w-full cursor-wait select-none object-contain" aria-hidden="true" /> : null}</div>;
+  return <div className="relative h-[min(52vh,430px)] min-h-72 w-full overflow-hidden rounded-md bg-slate-900"><div ref={containerRef} className="h-full w-full" />{!imageSource && posterUrl && (!editorBaseReady || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="absolute inset-0 z-20 h-full w-full cursor-wait select-none object-contain" aria-hidden="true" /> : null}</div>;
 }

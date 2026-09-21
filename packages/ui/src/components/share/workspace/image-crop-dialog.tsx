@@ -92,6 +92,9 @@ function ImageCropDialogContent({ image, posterUrl, editorBaseReady = true, labe
 
           <KonvaCropEditor
             imageUrl={image.url}
+            imageSource={image.decodedSource}
+            sourceWidth={image.width}
+            sourceHeight={image.height}
             posterUrl={posterUrl}
             editorBaseReady={editorBaseReady}
             aspect={aspect}

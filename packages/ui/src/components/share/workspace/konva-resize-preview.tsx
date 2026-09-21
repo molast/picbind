@@ -5,6 +5,9 @@ import Konva from "konva";
 
 type KonvaResizePreviewProps = {
   imageUrl: string;
+  imageSource?: HTMLCanvasElement;
+  sourceWidth?: number;
+  sourceHeight?: number;
   posterUrl?: string | null;
   editorBaseReady?: boolean;
   targetWidth: number;
@@ -13,7 +16,7 @@ type KonvaResizePreviewProps = {
 
 const PADDING = 10;
 
-export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseReady = true, targetWidth, targetHeight }: KonvaResizePreviewProps) {
+export default function KonvaResizePreview({ imageUrl, imageSource, sourceWidth, sourceHeight, posterUrl, editorBaseReady = true, targetWidth, targetHeight }: KonvaResizePreviewProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const imageNodeRef = React.useRef<Konva.Image | null>(null);
   const layerRef = React.useRef<Konva.Layer | null>(null);
@@ -27,10 +30,12 @@ export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseRead
     if (!container) return;
     let disposed = false;
     let observer: ResizeObserver | null = null;
-    const image = new Image();
+    const image = imageSource || new Image();
 
-    image.onload = () => {
-      if (disposed || !image.naturalWidth || !image.naturalHeight) return;
+    const mount = () => {
+      const imageWidth = sourceWidth || (image instanceof HTMLImageElement ? image.naturalWidth : image.width);
+      const imageHeight = sourceHeight || (image instanceof HTMLImageElement ? image.naturalHeight : image.height);
+      if (disposed || !imageWidth || !imageHeight) return;
       container.replaceChildren();
       const stage = new Konva.Stage({ container, width: 1, height: 1 });
       const layer = new Konva.Layer();
@@ -50,7 +55,7 @@ export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseRead
         const ratio = Number.isFinite(target.width) && Number.isFinite(target.height)
           && target.width > 0 && target.height > 0
           ? target.width / target.height
-          : image.naturalWidth / image.naturalHeight;
+          : imageWidth / imageHeight;
         const availableWidth = width - PADDING * 2;
         const availableHeight = height - PADDING * 2;
         let displayWidth = availableWidth;
@@ -73,7 +78,11 @@ export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseRead
       observer.observe(container);
       setRenderedImageUrl(imageUrl);
     };
-    image.src = imageUrl;
+    if (imageSource) mount();
+    else {
+      image.onload = mount;
+      (image as HTMLImageElement).src = imageUrl;
+    }
     return () => {
       disposed = true;
       observer?.disconnect();
@@ -82,7 +91,7 @@ export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseRead
       layerRef.current = null;
       layoutRef.current = () => undefined;
     };
-  }, [imageUrl]);
+  }, [imageSource, imageUrl, sourceHeight, sourceWidth]);
 
   React.useEffect(() => {
     layoutRef.current();
@@ -91,7 +100,7 @@ export default function KonvaResizePreview({ imageUrl, posterUrl, editorBaseRead
   return (
     <div className="relative h-36 overflow-hidden rounded-md bg-slate-100">
       <div ref={containerRef} className="h-full w-full" />
-      {posterUrl && (!editorBaseReady || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" aria-hidden="true" /> : null}
+      {!imageSource && posterUrl && (!editorBaseReady || renderedImageUrl !== imageUrl) ? <img src={posterUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-contain" aria-hidden="true" /> : null}
     </div>
   );
 }

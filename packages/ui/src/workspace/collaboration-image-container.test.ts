@@ -6,6 +6,7 @@ import {
   activateCollaborationCardPreview,
   activateUncachedCollaborationPreview,
   adoptCollaborationRender,
+  adoptCollaborationMemoryRender,
   adoptCollaborationEditorPreview,
   clearActiveCollaborationPreview,
   clearCollaborationEditorPreview,
@@ -34,6 +35,7 @@ function container(): CollaborationImageContainer {
 function previewEntry(commitId: string, sizeBytes = 1) {
   return {
     commitId,
+    parameterDocument: emptyImageParameterDocument(),
     artifact: {
       kind: "cache" as const,
       id: `cache-${commitId}`,
@@ -66,6 +68,39 @@ test("keeps the original source isolated while adopting a rendered operation", a
   assert.equal(await original.originalBlob.text(), "original");
   assert.equal(await updated.originalBlob.text(), "original");
   assert.equal(await updated.workingBlob.text(), "rendered");
+  assert.deepEqual(updated.parameterDocument, document);
+  assert.deepEqual(updated.materializedDocument, document);
+});
+
+test("live pixel updates defer Blob materialization while preserving the immutable source", () => {
+  const original = container();
+  const document = { version: 1 as const, operations: [{ id: "resize", userId: "owner", time: 1, type: "resize" as const, params: { width: 5, height: 10 } }] };
+  const updated = adoptCollaborationMemoryRender(original, document, { width: 5, height: 10 });
+  assert.equal(updated.originalBlob, original.originalBlob);
+  assert.equal(updated.workingBlob, original.workingBlob);
+  assert.equal(updated.materializedDocument, original.materializedDocument);
+  assert.equal(updated.parameterDocument, document);
+  assert.deepEqual([updated.width, updated.height], [5, 10]);
+  const materialized = adoptCollaborationRender(updated, document, {
+    blob: new Blob(["resized"]), name: "image.png", mimeType: "image/png", width: 5, height: 10,
+  });
+  assert.equal(materialized.materializedDocument, document);
+  assert.equal(materialized.originalBlob, original.originalBlob);
+});
+
+test("rejects stale previews when local parameters change without a new commit ID", () => {
+  const document = { version: 1 as const, operations: [{ id: "resize", userId: "owner", time: 1, type: "resize" as const, params: { width: 5, height: 10 } }] };
+  let current = putCollaborationPreviewCache(container(), previewEntry("initial")).container;
+  assert.equal(activateCollaborationCardPreview(current, "initial", document), null);
+  assert.equal(activateCollaborationPreviewCacheEntry(current, "initial", document), null);
+  const updated = putCollaborationPreviewCache(current, {
+    ...previewEntry("initial"), parameterDocument: document,
+    artifact: { ...previewEntry("initial").artifact, id: "resized-preview" },
+  });
+  assert.deepEqual(updated.evicted.map((artifact) => artifact.id), ["cache-initial"]);
+  current = updated.container;
+  assert.ok(activateCollaborationCardPreview(current, "initial", document));
+  assert.ok(activateCollaborationPreviewCacheEntry(current, "initial", document));
 });
 
 test("editor previews never replace A, B, or the C file cache", async () => {

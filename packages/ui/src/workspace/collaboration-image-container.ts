@@ -1,5 +1,5 @@
 import type { ImagePreviewCacheArtifact } from "@picbind/shared";
-import type { ImageParameterDocument } from "./image-protocol";
+import { imageParameterDocumentsEqual, type ImageParameterDocument } from "./image-protocol";
 import type { WorkspaceOperation } from "./types";
 
 export type CollaborationRenderResult = {
@@ -12,6 +12,7 @@ export type CollaborationRenderResult = {
 
 export type CollaborationPreviewCacheEntry = {
   commitId: string;
+  parameterDocument: ImageParameterDocument;
   artifact: ImagePreviewCacheArtifact;
   width: number;
   height: number;
@@ -40,6 +41,7 @@ export type CollaborationImageContainer = {
   width: number;
   height: number;
   parameterDocument: ImageParameterDocument;
+  materializedDocument: ImageParameterDocument;
   disposed: boolean;
 };
 
@@ -76,6 +78,7 @@ export function createCollaborationImageContainer(input: {
     width: input.width,
     height: input.height,
     parameterDocument: input.parameterDocument,
+    materializedDocument: input.parameterDocument,
     disposed: false,
   } satisfies CollaborationImageContainer;
 }
@@ -90,12 +93,29 @@ export function adoptCollaborationRender(
   return {
     ...container,
     parameterDocument,
+    materializedDocument: parameterDocument,
     workingBlob: result.blob,
     editorPreviewBlob: null,
     name: result.name,
     mimeType: result.mimeType,
     width: result.width,
     height: result.height,
+  };
+}
+
+// A preview-memory update changes the live pixels without producing an encoded file.
+export function adoptCollaborationMemoryRender(
+  container: CollaborationImageContainer,
+  parameterDocument: ImageParameterDocument,
+  dimensions: { width: number; height: number },
+) {
+  assertActive(container);
+  return {
+    ...container,
+    parameterDocument,
+    editorPreviewBlob: null,
+    width: dimensions.width,
+    height: dimensions.height,
   };
 }
 
@@ -145,10 +165,11 @@ export function putCollaborationPreviewCache(
 export function activateCollaborationCardPreview(
   container: CollaborationImageContainer,
   commitId: string,
+  parameterDocument?: ImageParameterDocument,
 ) {
   assertActive(container);
   const entry = container.previewCache.get(commitId);
-  if (!entry) return null;
+  if (!entry || (parameterDocument && !imageParameterDocumentsEqual(entry.parameterDocument, parameterDocument))) return null;
   const previewCache = new Map(container.previewCache);
   previewCache.delete(commitId);
   previewCache.set(commitId, entry);
@@ -158,10 +179,11 @@ export function activateCollaborationCardPreview(
 export function activateCollaborationPreviewCacheEntry(
   container: CollaborationImageContainer,
   commitId: string,
+  parameterDocument?: ImageParameterDocument,
 ) {
   assertActive(container);
   const entry = container.previewCache.get(commitId);
-  if (!entry) return null;
+  if (!entry || (parameterDocument && !imageParameterDocumentsEqual(entry.parameterDocument, parameterDocument))) return null;
   const previewCache = new Map(container.previewCache);
   previewCache.delete(commitId);
   previewCache.set(commitId, entry);
@@ -212,6 +234,7 @@ export async function replaceCollaborationDocument(
     return {
       ...container,
       parameterDocument,
+      materializedDocument: parameterDocument,
       workingBlob: container.originalBlob,
       editorPreviewBlob: null,
       width: container.originalWidth,

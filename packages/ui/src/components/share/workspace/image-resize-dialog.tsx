@@ -74,7 +74,7 @@ export default function ImageResizeDialog({ image, posterUrl, editorBaseReady = 
         </header>
 
         <div className="space-y-4 p-5">
-          <KonvaResizePreview imageUrl={image.url} posterUrl={posterUrl} editorBaseReady={editorBaseReady} targetWidth={width} targetHeight={height} />
+          <KonvaResizePreview imageUrl={image.url} imageSource={image.decodedSource} sourceWidth={image.width} sourceHeight={image.height} posterUrl={posterUrl} editorBaseReady={editorBaseReady} targetWidth={width} targetHeight={height} />
           <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
             <label className="space-y-1.5 text-xs font-medium text-slate-600">
               <span>{labels.widthPx}</span>
